@@ -64,6 +64,9 @@ struct MacSessionActions: View {
           Button("Excluir sessão…", systemImage: "trash", role: .destructive) { runtime.deleteRequest = row.session }
           Divider()
         }
+        Button("Buscar na conversa", systemImage: "magnifyingglass") {
+          NotificationCenter.default.post(name: .macSearchConversation, object: nil)
+        }
         Button("Arquivos", systemImage: "folder") { runtime.showFiles() }
         Button(runtime.contextVisible ? "Ocultar contexto" : "Mostrar contexto", systemImage: "sidebar.right") {
           runtime.contextVisible.toggle()

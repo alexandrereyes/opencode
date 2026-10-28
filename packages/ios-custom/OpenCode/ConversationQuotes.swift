@@ -49,6 +49,7 @@ extension EnvironmentValues {
   @Entry var responseQuotes = ResponseQuoteContext()
 }
 
+#if os(iOS)
 struct QuoteDetailsSheet: View {
   @Environment(\.appTheme) private var theme
   let mark: ChatQuoteMark
@@ -87,3 +88,4 @@ struct QuoteDetailsSheet: View {
     }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible).tint(theme.color(.textAccent))
   }
 }
+#endif

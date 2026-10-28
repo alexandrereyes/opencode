@@ -89,10 +89,11 @@ final class SessionStore {
     }
   }
   var selectedTab = 3
-  #if os(iOS)
   /// Recently opened conversations and those on the stack, so screens pushed above one share its store
   /// and returning to one finds it as it was left.
   @ObservationIgnored let conversations = ConversationRegistry()
+  /// Conversations a Mac window shows (a root and the subagent opened over it), kept like the iPhone's stack.
+  @ObservationIgnored var shownConversations: [String] = []
   @ObservationIgnored private var memoryWarning: NSObjectProtocol?
   /// Called while SwiftUI builds a destination view: it creates a missing store but never mutates an observed one.
   func conversation(_ id: String, master: Bool = false) -> ConversationStore {
@@ -106,7 +107,6 @@ final class SessionStore {
     }
   }
   func liveConversation(_ id: String) -> ConversationStore? { conversations.existing(id) }
-  #endif
   var conversationOpen: Bool { !conversationPath.isEmpty }
   var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
   let toast = ToastCenter()
@@ -116,12 +116,9 @@ final class SessionStore {
   @ObservationIgnored let client: OpenCodeClient
   let voiceMemory: VoiceMemoryStore
   @ObservationIgnored let hub: EventHub
-  #if os(iOS)
-  // The Mac app has no composer or full transcript yet, so it keeps no drafts, quote modes or reverts.
   @ObservationIgnored let drafts: ConversationDrafts
   @ObservationIgnored let quoteModes = QuoteModes()
   @ObservationIgnored let reversions = ConversationReverts()
-  #endif
   @ObservationIgnored let reading: ReadingPositionStore
   @ObservationIgnored let quoteDismissals: ChatQuoteDismissals
   @ObservationIgnored let expansions = ConversationExpansionMemory()
@@ -175,19 +172,17 @@ final class SessionStore {
     quota = SubscriptionStore(server: configuration.url.absoluteString,
                               client: subscriptionClient(configuration: configuration, client: client))
     catalog = ModelCatalogCache(server: configuration.url.absoluteString)
-    #if os(iOS)
     drafts = ConversationDrafts(server: configuration.url.absoluteString)
-    #endif
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     quoteDismissals = ChatQuoteDismissals(server: configuration.url.absoluteString)
     hub = EventHub(client: client)
     alerts = SessionAlertCenter(server: configuration.url.absoluteString)
-    #if os(iOS)
     conversations.stack = { [weak self] in
       guard let self else { return [] }
-      let ids = conversationPath.map(\.id)
+      let ids = conversationPath.map(\.id) + shownConversations
       return Set(ids + (conversationPath.contains(where: \.master) ? [masterID].compactMap { $0 } : []))
     }
+    #if os(iOS)
     memoryWarning = NotificationCenter.default.addObserver(
       forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
     ) { [weak self] _ in
@@ -300,9 +295,7 @@ final class SessionStore {
     await quota.stop()
     pruning?.cancel()
     await pruning?.value
-    #if os(iOS)
     await drafts.flush()
-    #endif
     try? reading.flush()
     conversationPath = []
   }
@@ -611,18 +604,14 @@ final class SessionStore {
     permissions.removeAll { plan.ids.contains($0.sessionID) }
     forms.removeAll { plan.ids.contains($0.sessionID) }
     expansions.remove(plan.ids)
-    #if os(iOS)
     conversations.remove(plan.ids)
-    #endif
     order.snapshot(entries, active: active)
     alerts.remove(plan.ids)
     if !quiet { Haptics.play(.success) }
     var cleanupFailed = false
     do { try reading.remove(plan.ids) } catch { cleanupFailed = true }
     do { try quoteDismissals.remove(plan.ids) } catch { cleanupFailed = true }
-    #if os(iOS)
     do { try await drafts.remove(plan.ids) } catch { cleanupFailed = true }
-    #endif
     do {
       let current = try await client.preferences()
       preferences = current

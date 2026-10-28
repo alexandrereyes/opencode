@@ -48,7 +48,7 @@ import SwiftUI
   /// Launched from a shell while the screen is locked, SwiftUI opens no window until the app is activated;
   /// the stress run opens one through File ▸ New Window.
   static func openWindowIfNeeded() {
-    guard enabled else { return }
+    guard enabled || MacCapture.folder != nil || ScrollFixtures.mode != nil else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
       guard !NSApp.windows.contains(where: \.isVisible) else { return }
       func items(_ menu: NSMenu?) -> [NSMenuItem] { (menu?.items ?? []).flatMap { [$0] + items($0.submenu) } }

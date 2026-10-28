@@ -1,7 +1,11 @@
 import Foundation
 import Observation
 import OpenCodeKit
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+#endif
 
 extension NSAttributedString.Key {
   static let composerToken = NSAttributedString.Key("OpenCodeComposerToken")

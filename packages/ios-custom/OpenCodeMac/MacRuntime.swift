@@ -37,6 +37,17 @@ import SwiftUI
     await store?.stop()
     do {
       #if DEBUG
+      if ScrollFixtures.mode == "conversation" {
+        // The iPhone's offline scroll fixture: no server, the shared store loads the bundled conversation.
+        let next = SessionStore(configuration: MacFixture.configuration, acceptsLaunchSession: false,
+          client: .inMemory(configuration: MacFixture.configuration, answer: { _ in nil }))
+        ScrollFixtures.prepare(next)
+        store = next
+        selection = MacSelection(sessionID: ScrollFixtures.sessionID)
+        appliedRevision = servers.revision
+        identity = UUID()
+        return
+      }
       if let fixture = MacFixture.current {
         store = SessionStore(configuration: MacFixture.configuration, acceptsLaunchSession: false,
           client: fixture.client())

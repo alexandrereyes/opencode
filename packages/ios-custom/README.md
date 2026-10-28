@@ -439,11 +439,8 @@ from the animated agents grid. The Mac title bar (avatar, title, `<worktree> · 
 `ConversationTitleBar`, rendered by the DEBUG `-OpenCodeConversationTitleFixture` (`ScreenCatalogTests
 /testConversationTitleBar`).
 
-Still iOS-only, for the Mac to replace: the response text (`MarkdownProse`/`ResponseText`, `UITextView` → an
-`NSTextView`-based equivalent), the composer editor (`ComposerTextView`, `UITextView`), the scroll owner and
-transcript list (`ConversationScroll`, `ConversationViewport`), `UIPasteboard` in the tool output's Copiar,
-`ConversationActivityItemView`'s read-overflow measurement (`UIFont`), and the glass header buttons (macOS 26).
-`AppTypography.swift` and `Theme.swift` still need `#if os(iOS)` around their UIKit parts.
+The Mac replaced the iOS-only parts (response text, composer editor, scroll owner and transcript list) with AppKit
+counterparts on the same models; see [Chat (polish 1)](#chat-polish-1--27-october).
 
 Verification: `swift test`; `ScreenCatalogTests/testActivity` (offline `-OpenCodeCatalogActivity`, both themes;
 `OPENCODE_CATALOG_ACCESSIBILITY=1` adds a capture for accessibility sizes) and `testConversationTitleBar`; and, on an
@@ -2490,11 +2487,14 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
   hardened runtime, no App Sandbox (it reads checkouts, runs `git` and `opendiff`). No App Store or TestFlight.
 - `OpenCodeMac/` is a synchronized folder with the Mac-only code: `OpenCodeMacApp.swift` (scenes: main window,
   one window per resource, the LLM proxy window, `Settings`), `MacRuntime.swift`, `MacWindow.swift`,
-  `MacToolbar.swift`, `MacSessionColumn.swift`, `MacChatColumn.swift` + `MacTranscriptView.swift` +
-  `MacComposer.swift`, `MacNewSession.swift`,
+  `MacToolbar.swift`, `MacSessionColumn.swift`, `MacChatColumn.swift` (column and conversation),
+  the transcript (`MacTranscriptController.swift`, `MacTranscriptCells.swift`, `MacTranscriptItemViews.swift`,
+  `MacTranscriptText.swift`, `MacTranscriptContext.swift`, `MacTranscriptHost.swift`), the composer
+  (`MacComposer.swift`, `MacComposerText.swift`), `MacConversationSupport.swift`, `MacNewSession.swift`,
   `ContextColumnStore.swift`, `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` +
   `MacCodeView.swift`, `MacResourceWindow.swift`, `MacProxyWindow.swift`, `MacSettingsView.swift`, and the
-  DEBUG-only `MacFixture.swift`, `MacFixtureProxy.swift` and `MacCapture.swift`.
+  DEBUG-only `MacFixture.swift`, `MacFixtureProxy.swift`, `MacCapture.swift`, `MacScrollFixture.swift` and
+  `MacScrollDriver.swift`.
 - iPhone files enter the Mac target through the `OpenCode` folder's membership exceptions for `OpenCodeMac`
   (`PBXFileSystemSynchronizedBuildFileExceptionSet` `D…024`), never by copying. To share another file, add it to that
   list. The themes (`Resources/Themes/*.json`), `Resources/Markdown/dist/markdown-engines.js` and `Assets.xcassets`
@@ -2551,32 +2551,110 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
   sections and rows are unchanged. Selecting a row selects the session; the iPhone's swipe and long-press actions are
   one right-click menu (open, rename, pin, mute, mark read, archive, delete). A quota ring opens the LLM proxy window
   on its provider.
-- **Chat**: the iPhone's shared pieces with Mac hosts (`MacTranscriptView.swift`, `MacComposer.swift`), over
-  `ConversationActivity.project` like the iPhone transcript:
-  - user bubble on the right with Desfazer (confirmation, then `SessionRevert.perform`, the prompt back in the
-    composer and a "Mensagens seguintes ocultas · Refazer" bar; the next prompt commits it through
-    `PromptSubmission(commitsRevert:)`), Copiar and the time;
-  - the assistant's Markdown at full width (`MacMarkdownText`: headings, paragraphs, bullet and numbered lists,
-    quotes, fenced code and rules as SwiftUI blocks; inline styles and links from `AttributedString(markdown:)`;
-    selectable per block; tables and formulas stay plain text);
-  - activity groups as `ConversationActivityCard` + `ConversationTimeline`, closed by default; open, the first four
-    items and `Mais N ferramentas…` (Mac-only fold). Items use `ConversationTimelineLabel`: reads, files with
-    `+N −M`, searches, skills, notices, reasoning, subagents (agent chip and the pixel button that opens the
-    child), other calls with their target; a call with output or an error opens it below;
-  - the footer (`Opus 5.5 · xhigh · 27/10 07:18`, Copiar, Ouvir with the system pt-BR voice) on `TranscriptMarks`
-    footers;
-  - `ConversationRunTray` (`trabalhando · <elapsed>` from `executionStarted`, Parar) and the queue
-    (`/api/session/:id/inbox` `delivery: queue`: Editar, Enviar agora, ×);
-  - the composer: `Pergunte qualquer coisa…`, `+` (puts a file's path in the prompt), the model capsule and the MCP
-    capsule (`composerCapsule()`, menus over `/api/model` variants and `/api/mcp` with connect/disconnect), the
-    microphone (the system dictation, `startDictation:`) that becomes Enviar with text, and below
-    `● build ⌄ · Contexto N% · used / limit · ⚡ Cache N%`. The chosen agent and model go with the next prompt
-    through `PromptSubmission`, like the iPhone.
-  File names in the answers open Arquivos at their folder. A short conversation sits at the bottom by the composer;
-  its content fills the viewport, or AppKit draws the document's top edge as a line across the column.
+- **Chat**: the iPhone's conversation (`ConversationStore`, `ConversationDraft`) on an AppKit transcript and a native
+  composer; see [Chat (polish 1)](#chat-polish-1--27-october).
 - **Settings**: server address and password (Keychain through `ServerStore`, default `http://127.0.0.1:4096`, a
   "Testar conexão" button) and the iPhone themes. `-OpenCodeServerURL`/`OPENCODE_SERVER_URL` and
   `-OpenCodeServerPassword`/`OPENCODE_SERVER_PASSWORD` override it for a launch, as on the iPhone.
+
+### Chat (polish 1) — 27 October
+
+Briefing: `.agent-artifacts/mac-app/POLIMENTO-CHAT.md` of the `mac-polish-chat` worktree. The chat column is the
+iPhone's conversation, with the platform parts parametrized.
+
+**One conversation model.** The Mac uses the iPhone's `ConversationStore` (shared file): the event loop applies
+deltas through `ConversationReducer` every 32 ms (120 ms while the reader scrolls) and reads the tail only for
+structural events; it pages history with the cursor, keeps the inbox (steer and queue, optimistic bubbles), the
+family's permissions and questions, the execution state, reverts, context and cache. `SessionStore` now keeps the
+conversation registry, drafts, quote modes and reversions on macOS too; `shownConversations` (the root and the
+subagent over it) plays the iPhone stack's part. A conversation's event loop runs while its view is shown
+(`.task { await conversation.run() }`), and the shared event stream (`SessionStore.run`) now runs whenever the
+window is not hidden, the app frontmost or not.
+
+**Why a subagent "barely opened and did not update" (before).** The stage-3 `MacTranscriptStore` reread the
+latest page (`custom.transcript/list`) 250–600 ms after any event and ignored the deltas. That page carries a
+streaming part only when it ends, so a subagent writing its answer showed nothing until the step finished: in the
+owned sandbox (`script/test-mac-live.py --long-answer`), the old build's trace stayed at `text=0` for the whole
+stream while the new one showed 372 → 910 → 4,233 characters as they arrived. It also opened only that last page
+(no paging), showed the raw `You are a subagent…` preamble, and drew every message as SwiftUI blocks reparsed on
+each reload, in one `ScrollView` reused from the previous session.
+
+**Subagents.** The activity card's agent chip (and its pixel button), Contexto's rows and the session alerts open the
+child in the middle column over its root (`MacSelection.childID`). The child is a full conversation (its own live
+store from the registry); a header with `‹ <root title> › <child title>`, the agent and `trabalhando…` leads back,
+and ⌘[ goes back too. Returning shows the root exactly where it was left (the retained transcript view).
+
+**Transcript.** `MacTranscriptController` is an `NSScrollView` with a flipped document of its own, on the iPhone
+rewrite's model: `TranscriptProjection.items` (the shared `Transcript/TranscriptItems.swift`, unchanged), the Kit's
+`TranscriptGeometry` (positions, the pinned prompt, the reading anchor, the trailing space under a sent prompt),
+`ReadingPositionStore`, the conversation's `TranscriptMemory` (`ConversationRegistry.swift`, unchanged; the Mac
+supplies `TranscriptState`, `TranscriptHeights` and its controller as `TranscriptViewController`) and the shared
+reading rules in OpenCodeKit's `TranscriptNavigation` (`latestOffset`, `stableAnchor`, `continued`, `owners`,
+`TranscriptFollow`, `TranscriptScrollKey`). Only the items within a viewport of the visible area have views; each is
+measured at the column's width when it appears (prose with TextKit 2, hosted SwiftUI through
+`NSHostingController.sizeThatFits`), heights are cached per item, content and width, and a height that changes
+above the reader's place moves the offset in the same pass. Hosted items report later size changes themselves
+(an expansion, an image that loaded). It opens hidden until laid out at its place (at most 400 ms), restores the
+saved passage per session, pages older history from the top without moving what is on screen, keeps the
+current prompt pinned (a click on it brings its turn's first row under it), raises a sent prompt to the top,
+shows ↓ **Ir para a mais recente** and **Continuar de onde parou**, and keeps the end through window resizes.
+
+Platform parameters: the wheel and trackpad (no pull to refresh; a gesture owns the offset until it settles);
+the keyboard (Page Up/Down, space and Shift-space, ⌘↑/⌘↓, Home/End, the arrows) in the transcript or in a text
+inside it; the 760-point centered column; and **following the end** while an answer arrives: the end stays in view
+while the reader is there, scrolling up stops it at once and scrolling (or ↓) back resumes it. The iPhone rewrite
+never scrolls on growth; the briefing asked the Mac to follow.
+
+**Response text.** Prose runs (paragraphs, headings, lists, quotes, rules) are one `NSTextView` per run on TextKit 2,
+with native selection across them, ⌘C as Markdown (one list item per line) and a context menu with **Comentar…**
+(a quote with its comment attached to the next prompt, `Citações · N` above the composer). Its attributes follow the
+iPhone's `ResponseTextStyle` at desktop sizes (`MacResponseTextStyle`); quote borders and rules are drawn by the
+view; a streamed answer replaces only its last paragraph. Code blocks use the highlight.js colors with Copiar;
+tables are grids; formulas use the shared SwaTeX rasters (`ResponseFormula.swift`, SwaTexRender now linked to the
+Mac); Mermaid diagrams use the shared JS engine's SVG; images load through `FeedImageLoader` and open at full size.
+File names open Arquivos at their folder. Search (⌘F, or the conversation's `…`) is the shared
+`ConversationSearchState`, with highlights in the text, ↑/↓, Return/Shift-Return and older pages.
+
+**Composer.** `ConversationDraft` (persistent draft, attachments, quotes, the queued prompt being edited) on
+`ComposerInputView`, an `NSTextView` with the iPhone's atomic tokens (`ComposerTokenAttachment` drawn with AppKit).
+`@` (sessions, apps, agents, references), `!` (files), `/` (commands), `$` (skills) and `#` (snippets) open the shared
+`ComposerSuggestions` panel; Return picks its first item, Esc closes it. **Return sends and Shift+Return (or
+⌥Return) breaks the line**, the Mac chat convention, unlike the iPhone's software keyboard. Attachments come from
+`+` (Arquivos…, Imagens…), a drop on the conversation or a pasted image, through `ConversationStore.importAttachment`.
+The model capsule and `/model` open the model and effort picker, the agent below the card (and `/agent`) its
+picker, the MCP capsule a popover with each server's switch; `/btw` asks a side question in a sheet. Sending is
+`ConversationStore.send`, so the delivery follows the server's preference while the agent works (steer or queue)
+and right-clicking Enviar offers the other one (Enviar agora / Adicionar à fila); the tray (`ConversationTray`)
+lists the queue with Editar, Enviar agora and ×. The microphone starts the system dictation: the iPhone's
+on-device recorder needs UIKit and the audio session (`VoiceRecordingComposer` is a stub on the Mac).
+
+**Requests in the chat.** The iPhone's permission and question cards (`ConversationRequests.swift`, shared) are
+transcript items.
+
+**Shared with the iPhone in this stage** (membership exceptions, no copies): `ConversationStore`,
+`ConversationActivityStore`, `ConversationUsage`, `ConversationRegistry`, `ConversationDraft`, `QuoteSync`,
+`ConversationMCPStore`, `ConversationRevert`, `ConversationReadingRequest`, `ConversationQuotes`,
+`ConversationSearchState`, `ConversationRequests`, `ComposerSuggestions`, `ComposerAppMentions`, `ResponseFormula`,
+`ResponseMarkdownCache`, `SideQuestionFixture`, `Transcript/TranscriptItems.swift` and `Fixtures/scroll-fixture.json`
+(excluded from Release). Edits in iPhone files, all no-ops there: `SessionStore` (the registry, drafts, quote modes
+and reversions leave `#if os(iOS)`; `shownConversations`), `ConversationStore` (`#if os(iOS)` around the screen
+catalog fixture), `ConversationDraft` (imports AppKit on macOS), `ComposerSuggestions` (its DEBUG fixtures are
+iOS-only), `ConversationQuotes` (`QuoteDetailsSheet` is iOS-only), `ConversationRequests` (the permission card's
+`…` menu calls `plainMenuOnMac()`, new in `PlatformGlass.swift`, a no-op on iOS) and `MCPUIError` moved from
+`NewSessionStore` to `ConversationMCPStore`. The Mac supplies its own `ConversationReadAloud` (the system pt-BR voice),
+`VoiceRecordingComposer`, `SideQuestionLaunch`, `ScrollFixtures` and `ConversationOpeningMetrics` (DEBUG).
+
+**Checks.** `swift test` (`TranscriptNavigationTests` for the reading rules); the macOS Debug build without warnings;
+the iOS Debug build with the same 13 warnings as before; `script/test-mac-window.sh`;
+`script/measure-mac-scroll.py --app <OpenCodeMac.app> --output <jsonl>` runs the iPhone's fixture scenarios
+(`read`, `history-up`, `stream-reading`, `stream-still`, `stream-follow`, `paged-up`) on the 300-message
+`-OpenCodeScrollFixture conversation` through `MacScrollDriver` (frame intervals, main-thread CPU, unrequested
+movement, replaced frames; while the screen is locked a 60 Hz timer that draws the window replaces the display
+link); `script/test-mac-live.py --app … --home <sandbox> --server-url http://127.0.0.1:4199 --evidence <dir>
+[--long-answer] [--child-after 5] [--history 40]` imports a parent, makes it call a Luna 6 / low subagent, opens the
+child and traces once a second what it shows (`-OpenCodeMacLiveTrace`). Capture sequences:
+`-OpenCodeMacCaptureEvery <s> -OpenCodeMacCaptureCount <n> [-OpenCodeMacCaptureDelay <s>]`; DEBUG launch options
+`-OpenCodeMacChild <id> [-OpenCodeMacChildAfter <s>]`, `-OpenCodeMacDraft <text> [-OpenCodeMacPickSuggestion <s>]`.
 
 ### Coluna 3 — Contexto ("Máximo")
 
@@ -2750,9 +2828,8 @@ activated, so `MacStress` opens one through File ▸ New Window.
 
 ### Next stages
 
-- The chat's remaining iPhone features: history paging and jump to latest, the composer's mentions, attachments,
-  quotes and Background, inline file diffs, questions and permissions in the transcript, rich Markdown (tables,
-  formulas, Mermaid) and search.
+- The chat's remaining iPhone details: on-device dictation, read-aloud with server voices, the quote marks' numbered
+  badges and details sheet, the prompt bubble's internal scroll beyond 40% and the tool output's shell polling.
 - GPT Live voice calls on the Mac (the composer's microphone already starts the system dictation).
 - The interactive resource viewer (stream, taking control, input) in its window.
 - Nova sessão with worktrees, chats, MCPs and the model picker; menu bar, notifications and widgets stay out.

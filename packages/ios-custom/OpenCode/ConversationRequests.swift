@@ -21,6 +21,7 @@ struct ConversationPermissionCard: View {
         } label: {
           Image(systemName: "ellipsis").frame(width: 28, height: 28)
         }
+        .plainMenuOnMac()
         .foregroundStyle(theme.color(.textSecondary)).accessibilityLabel("Mais opções de permissão")
       }
       HStack(spacing: 10) {

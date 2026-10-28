@@ -91,6 +91,10 @@ private struct MacCommands: Commands {
       Button("Arquivos") { runtime.showFiles() }
         .keyboardShortcut("f", modifiers: [.command, .shift])
     }
+    CommandGroup(after: .textEditing) {
+      Button("Buscar na conversa") { NotificationCenter.default.post(name: .macSearchConversation, object: nil) }
+        .keyboardShortcut("f", modifiers: .command)
+    }
     CommandGroup(after: .newItem) {
       Button("Atualizar sessões") { Task { await runtime.store?.reload() } }
         .keyboardShortcut("r", modifiers: .command)

@@ -39,7 +39,14 @@ struct MacWindow: View {
       select(id)
     }))
     .sessionRowTimeline()
-    .task(id: scenePhase == .active) { if scenePhase == .active { await store.run() } }
+    // The event stream stays open while the window is visible, the app frontmost or not: on the Mac the chat is
+    // read beside other apps. Only a hidden or minimized window (`background`) stops it.
+    .task(id: scenePhase == .background) { if scenePhase != .background { await store.run() } }
+    #if DEBUG
+    .onChange(of: scenePhase, initial: true) { _, phase in
+      if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacLiveTrace") { macTrace("scenePhase \(phase)") }
+    }
+    #endif
     .task(id: runtime.selection.sessionID) {
       guard let id = runtime.selection.sessionID else {
         context = nil
@@ -60,6 +67,17 @@ struct MacWindow: View {
       #if DEBUG
       if let id = MacFixture.value("-OpenCodeMacSession") {
         runtime.selection.sessionID = id
+        // `-OpenCodeMacChildAfter <s>` opens the child that long after the root, as a click on its chip would.
+        if let child = MacFixture.value("-OpenCodeMacChild") {
+          if let delay = MacFixture.value("-OpenCodeMacChildAfter").flatMap(Double.init) {
+            Task { @MainActor in
+              try? await Task.sleep(for: .seconds(delay))
+              runtime.selection.childID = child
+            }
+          } else {
+            runtime.selection.childID = child
+          }
+        }
         if let folder = MacFixture.value("-OpenCodeMacFiles") { runtime.showFiles(at: folder) }
         return
       }

@@ -76,6 +76,8 @@ private struct MacFixtureServer: Sendable {
     case "/api/shell":
       return #"{"data":[{"id":"shl_dev","status":"running","command":"bun run dev --port 4177","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 12 * minute)}},{"id":"shl_test","status":"running","command":"xcodebuild test -scheme OpenCode","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 3 * minute)}}]}"#
     case "/api/vcs/diff": return "{\"data\":\(changes)}"
+    case "/api/model/default": return #"{"data":{"id":"opus-5.5","providerID":"llm-proxy","name":"Opus 5.5","variants":[{"id":"high"},{"id":"xhigh"}],"limit":{"context":1000000}}}"#
+    case "/api/provider": return #"{"data":[{"id":"llm-proxy","name":"LLM proxy"}]}"#
     case "/api/mcp":
       return #"{"data":[{"name":"chrome-devtools","status":{"status":"connected"}},{"name":"github","status":{"status":"disabled"}},{"name":"linear","status":{"status":"disabled"}},{"name":"sentry","status":{"status":"needs_auth"}}]}"#
     case "/api/session/\(MacFixture.rootID)/inbox":
@@ -84,6 +86,7 @@ private struct MacFixtureServer: Sendable {
       return list(query.first { $0.name == "path" }?.value ?? query.first { $0.name == "location[directory]" }?.value ?? root)
     case "/api/fs/find": return find(query.first { $0.name == "query" }?.value ?? "")
     default:
+      if path.hasPrefix("/api/session/"), path.hasSuffix("/inbox") { return #"{"data":[]}"# }
       if path.hasPrefix("/api/session/") {
         let id = String(path.dropFirst("/api/session/".count))
         return sessions[id].map { "{\"data\":\($0)}" }
@@ -97,6 +100,7 @@ private struct MacFixtureServer: Sendable {
     case "custom.navigation/list": #"{"data":[\#(navigation)],"next":null}"#
     case "custom.preferences/get": preferences
     case "custom.requests/permissions": "[]"
+    case "custom.worktrees/available": "true"
     case "custom.chats/info": #"{"root":"\#(home)/Chats"}"#
     case "custom.master/info": #"{"version":1,"agent":"build","model":{"id":"opus-5.5","providerID":"llm-proxy"}}"#
     case "custom.directories/home": #"{"path":"\#(home)"}"#

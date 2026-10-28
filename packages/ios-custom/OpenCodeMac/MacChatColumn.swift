@@ -1,15 +1,15 @@
 import Observation
 import OpenCodeKit
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// The middle column for this first Mac version: a read-only transcript (user bubbles and the assistant's
-/// text) and a plain composer. The full iPhone conversation is the next step.
+/// The middle column: the selected session's conversation (or the subagent opened over it) on the iPhone's
+/// `ConversationStore`, so it updates live from the event stream exactly like the iPhone.
 struct MacChatColumn: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: SessionStore
   @Bindable var runtime: MacRuntime
   let context: ContextColumnStore?
-  @State private var transcript: MacTranscriptStore?
   @State private var renaming = false
   @State private var renameText = ""
   @State private var deleteCandidate: Session?
@@ -19,9 +19,9 @@ struct MacChatColumn: View {
 
   var body: some View {
     Group {
-      if let transcript, shownID != nil {
-        MacTranscriptView(store: transcript, runtime: runtime, parentTitle: runtime.selection.childID == nil
-          ? nil : row?.session.displayTitle)
+      if let id = shownID {
+        MacConversationView(conversation: store.conversation(id), sessions: store, runtime: runtime)
+          .id(id)
       } else {
         ContentUnavailableView("Nenhuma sessão selecionada", systemImage: "bubble.left.and.bubble.right",
           description: Text("Escolha uma sessão na coluna Sessões."))
@@ -30,22 +30,19 @@ struct MacChatColumn: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(theme.color(.background))
-    .task(id: shownID) {
-      guard let id = shownID else {
-        transcript = nil
-        return
-      }
-      let next = MacTranscriptStore(id: id, sessions: store)
-      transcript = next
-      await next.run()
+    .onChange(of: runtime.selection, initial: true) { _, selection in
+      // The root and the subagent over it stay in the registry like the iPhone's navigation stack.
+      store.shownConversations = [selection.sessionID, selection.childID].compactMap { $0 }
+      if let id = shownID { store.conversations.touch(id) }
     }
     .toolbar {
       MacPlainToolbarItem(placement: .navigation) {
+        let conversation = shownID.flatMap { store.liveConversation($0) }
         MacChatTitle(
           store: store, runtime: runtime,
-          title: transcript?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode",
-          usage: transcript?.usage,
-          running: row?.state == .running || shownID.map(store.active.contains) == true)
+          title: conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode",
+          usage: conversation?.sessionUsage,
+          running: conversation?.working ?? (row?.state == .running || shownID.map(store.active.contains) == true))
         .padding(.leading, 6)
       }
       MacToolbarFlexibleSpace()
@@ -76,192 +73,440 @@ struct MacChatColumn: View {
 extension Notification.Name {
   /// The chat toolbar's `+` opens the Nova sessão sheet owned by the Sessões column.
   static let macNewSession = Notification.Name("OpenCodeMacNewSession")
+  /// ⌘F in the menu bar opens the open conversation's search.
+  static let macSearchConversation = Notification.Name("OpenCodeMacSearchConversation")
 }
 
-/// One conversation's latest page (`custom.transcript/list`), its queue and the composer's choices, refreshed by
-/// the shared event stream. The views are the iPhone's shared chat pieces (`OpenCode/ConversationColumn/`).
-@MainActor @Observable final class MacTranscriptStore {
-  let id: String
+/// One conversation: the subagent's way back, notices, the transcript with ↓ and the resume notice, the search
+/// bar, the revert bar, the tray and the composer. Its event loop runs while it is shown.
+struct MacConversationView: View {
+  @Environment(\.appTheme) private var theme
+  @Bindable var conversation: ConversationStore
   let sessions: SessionStore
-  private(set) var session: Session?
-  private(set) var messages: [ConversationMessage] = []
-  /// Display groups (text, activity cards, dividers) of the visible messages, like the iPhone transcript.
-  private(set) var activity = ConversationActivity.empty
-  /// The page reaches the start of the conversation, so its first step dates the running execution.
-  private(set) var complete = false
-  private(set) var inbox: [InboxItem] = []
-  private(set) var models: [ModelInfo] = []
-  private(set) var agents: [AgentInfo] = []
-  private(set) var mcp: [MCPServer] = []
-  private(set) var loaded = false
-  private(set) var error: String?
-  private(set) var sending = false
-  private(set) var acting: Set<String> = []
-  var draft = ""
-  /// The composer's model and agent for the next prompt; nil keeps the session's own.
-  var model: ModelReference?
-  var agent: String?
-  /// Activity cards and tool details opened by Alexandre; everything starts closed.
-  var expanded: [String: Bool] = [:]
-  @ObservationIgnored private var scheduled: Task<Void, Never>?
+  @Bindable var runtime: MacRuntime
+  @State private var search = ConversationSearchState()
+  @State private var revertCandidate: ConversationMessage?
+  @State private var commenting: ChatQuote?
+  @State private var viewing: MacViewedImage?
+  @State private var dropping = false
 
-  init(id: String, sessions: SessionStore) {
-    self.id = id
-    self.sessions = sessions
+  private var draft: ConversationDraft { sessions.drafts.draft(conversation.id) }
+  private var transcript: MacTranscriptController? { conversation.memory.active }
+  private var parentID: String? {
+    conversation.session?.parentID ?? (runtime.selection.childID == conversation.id ? runtime.selection.sessionID : nil)
   }
 
-  var usage: ContextUsage? {
-    if let context = session?.context {
-      return ContextUsage(tokens: context.tokens, limit: ContextUsage.limit(context.model, models: models))
+  var body: some View {
+    VStack(spacing: 0) {
+      if let parentID { childHeader(parentID) }
+      if let notice = conversation.notice {
+        ConversationNoticeLine(notice: notice) { Task { await conversation.refresh() } }
+      }
+      if let error = conversation.error {
+        Button {
+          Task { await conversation.refresh() }
+        } label: {
+          Label(error, systemImage: "arrow.clockwise").appFont(.caption).foregroundStyle(theme.color(.error))
+        }
+        .buttonStyle(.plain).padding(8)
+      }
+      if search.open { MacSearchBar(search: search, store: conversation) }
+      timeline
+      bottom
     }
-    guard let step = ConversationProjection.latestMeasurement(messages) else { return nil }
-    return ContextUsage(tokens: step.tokens, limit: ContextUsage.limit(step.model, models: models))
-  }
-  /// The whole session's cache hit, like the iPhone's usage line.
-  var cacheHit: Double? { ContextUsage.cacheHit(session?.tokens ?? session?.context?.tokens) }
-  var running: Bool { sessions.active.contains(id) }
-  var queue: [InboxItem] { inbox.filter(\.queuedUser) }
-  var marks: TranscriptMarks { TranscriptMarks(messages, working: running) }
-  var selectedModel: ModelReference? { model ?? session?.model }
-  var selectedAgent: String { agent ?? session?.agent ?? "build" }
-  var primaryAgents: [AgentInfo] { agents.filter { $0.mode != "subagent" && $0.hidden != true } }
-
-  /// `Opus 5.5 · xhigh`, like the iPhone composer's capsule.
-  func modelLabel(_ reference: ModelReference?) -> String {
-    [
-      models.first { $0.id == reference?.id && $0.providerID == reference?.providerID }?.name ?? reference?.id,
-      reference?.variant == "default" ? nil : reference?.variant,
-    ].compactMap { $0 }.joined(separator: " · ")
-  }
-
-  func run() async {
-    await load()
-    for await frame in sessions.hub.events() {
-      if Task.isCancelled { break }
-      switch frame.event {
-      case .connected: schedule()
-      case .disconnected: break
-      case .update(let event):
-        guard event.data.owner == id else { continue }
-        schedule(delay: event.type.hasSuffix(".delta") ? 600 : 250)
+    .background(theme.color(.background))
+    .overlay {
+      if dropping {
+        RoundedRectangle(cornerRadius: 14).strokeBorder(theme.color(.primary), style: StrokeStyle(lineWidth: 2, dash: [6]))
+          .background(theme.color(.primary).opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+          .overlay { Label("Solte para anexar", systemImage: "paperclip").appFont(.secondary, weight: .medium) }
+          .padding(10).allowsHitTesting(false)
       }
     }
-    scheduled?.cancel()
-  }
-
-  func load() async {
-    do {
-      async let session = sessions.client.session(id)
-      async let page = sessions.client.conversation(id)
-      async let queued = try? sessions.client.inbox(id)
-      let (value, current) = try await (session, page)
-      let directory = value.location.directory
-      self.session = value
-      let ordered = Array(current.data.reversed())
-      messages = SessionRevert.visible(ordered, boundary: value.revert?.messageID)
-      complete = current.cursor?.next == nil
-      activity = ConversationActivity.project(messages, previous: activity, executing: running)
-      #if DEBUG
+    .onDrop(of: [.fileURL, .image], isTargeted: $dropping) { providers in
+      MacAttachments.receive(providers, store: conversation, draft: draft)
+      return true
+    }
+    .alert("Redefinir para este ponto?", isPresented: Binding(
+      get: { revertCandidate != nil }, set: { if !$0 { revertCandidate = nil } }), presenting: revertCandidate
+    ) { message in
+      Button("Cancelar", role: .cancel) { revertCandidate = nil }
+      Button("Redefinir", role: .destructive) {
+        revertCandidate = nil
+        Task { await conversation.reversion.perform(target: message, store: conversation, draft: draft) }
+      }
+    } message: { _ in
+      Text("A mensagem volta para o campo de texto e as seguintes ficam ocultas até Refazer. Enviar uma nova mensagem apaga as ocultas de vez.")
+    }
+    .sheet(item: $commenting) { quote in MacQuoteCommentSheet(quote: quote, draft: draft) }
+    .sheet(item: $viewing) { image in MacImageSheet(image: image) }
+    .sheet(item: $conversation.sideQuestion) { launch in MacSideQuestionSheet(store: conversation, launch: launch) }
+    .onChange(of: conversation.reversion.boundary(conversation.session)) { _, _ in conversation.updateActivity() }
+    .onChange(of: search.query) { _, _ in
+      search.cancelPaging()
+      search.update(conversation, reset: true)
+    }
+    .onChange(of: conversation.revision) { _, _ in if search.open { search.update(conversation) } }
+    .onReceive(NotificationCenter.default.publisher(for: .macSearchConversation)) { _ in openSearch() }
+    .task { await conversation.run() }
+    .task(id: conversation.session) { await conversation.presented() }
+    .task(id: conversation.session?.location.directory) {
+      await conversation.mcps.load(directory: conversation.session?.location.directory)
+    }
+    .task { await draft.load() }
+    #if DEBUG
+    .onChange(of: conversation.hasTranscript, initial: true) { _, loaded in
       // Captures can show the first activity card open (`-OpenCodeMacOpenActivity`), like the approved mock.
-      if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacOpenActivity"), expanded.isEmpty,
-        let first = activity.messages.flatMap(\.rows).first(where: { $0.kind == .group }) {
-        expanded[first.id] = true
+      guard loaded, ProcessInfo.processInfo.arguments.contains("-OpenCodeMacOpenActivity"),
+        let first = conversation.activity.messages.flatMap(\.rows).first(where: { $0.kind == .group }),
+        conversation.expansionValues[first.id] == nil else { return }
+      conversation.expansionValues[first.id] = true
+    }
+    .task {
+      // `-OpenCodeMacLiveTrace`: once a second, what this conversation shows, to verify it updates live.
+      guard ProcessInfo.processInfo.arguments.contains("-OpenCodeMacLiveTrace") else { return }
+      while !Task.isCancelled {
+        let last = conversation.messages.last
+        macTrace("live \(conversation.id) revision=\(conversation.revision) messages=\(conversation.messages.count) "
+          + "last=\(last?.id ?? "-") text=\(last?.responseText.count ?? 0) tools=\(last?.tools.count ?? 0) "
+          + "executing=\(conversation.executing) items=\(transcript?.items.count ?? 0)")
+        try? await Task.sleep(for: .seconds(1))
       }
-      #endif
-      inbox = await queued ?? inbox
-      if models.isEmpty { models = (try? await sessions.client.models(directory: directory)) ?? [] }
-      if agents.isEmpty { agents = (try? await sessions.client.agents(directory: directory)) ?? [] }
-      if mcp.isEmpty { mcp = (try? await sessions.client.mcpServers(directory: directory)) ?? [] }
-      error = nil
-    } catch {
-      if !Task.isCancelled { self.error = "Não foi possível carregar a conversa. \(error.localizedDescription)" }
     }
-    loaded = true
-  }
-
-  private func schedule(delay: Int = 250) {
-    guard scheduled == nil else { return }
-    scheduled = Task {
-      try? await Task.sleep(for: .milliseconds(delay))
-      scheduled = nil
-      guard !Task.isCancelled else { return }
-      await load()
+    #endif
+    .onDisappear {
+      conversation.readAloud.stop()
+      search.cancelPaging()
+      transcript?.capture()
+      Task { await draft.persist() }
     }
   }
 
-  /// The iPhone's admission path (`PromptSubmission`) with the composer's agent and model; a staged
-  /// reversion is committed first, like the iPhone.
-  func send() async {
-    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty, !sending, let session, let model = selectedModel else { return }
-    sending = true
-    defer { sending = false }
-    let agent = selectedAgent
-    let delivery = PromptDelivery.choose(
-      busy: running, preference: sessions.preferences?.data.settings.followUpBehavior ?? .steer)
-    do {
-      try await PromptSubmission(
-        request: PromptRequest(text: text, delivery: delivery, agent: agent, model: model),
-        sessionID: id, agent: agent, model: model, keepsAgent: agent == session.agent,
-        commitsRevert: session.revert != nil
-      ).send(using: sessions.client)
-      draft = ""
-      await load()
-    } catch {
-      sessions.toast.show("Não foi possível enviar. \(error.localizedDescription)", kind: .error)
+  /// A subagent shows where it came from and goes back with ‹ or ⌘[, like the iPhone's back button.
+  private func childHeader(_ parent: String) -> some View {
+    let parentTitle = sessions.liveConversation(parent)?.session?.displayTitle
+      ?? sessions.rows.first { $0.id == parent }?.session.displayTitle ?? "Sessão principal"
+    return VStack(spacing: 0) {
+      HStack(spacing: 10) {
+        Button {
+          back(to: parent)
+        } label: {
+          Label(parentTitle, systemImage: "chevron.left").lineLimit(1)
+        }
+        .buttonStyle(.plain).foregroundStyle(theme.color(.text))
+        .keyboardShortcut("[", modifiers: .command)
+        .help("Voltar à sessão principal (⌘[)")
+        .accessibilityIdentifier("subagent-back")
+        Text("›").foregroundStyle(theme.color(.textWeak))
+        Text(conversation.session?.displayTitle ?? "Subagente").lineLimit(1).foregroundStyle(theme.color(.textSecondary))
+        Spacer()
+        Text(conversation.childAgentName).appFont(.caption, weight: .medium)
+          .foregroundStyle(theme.agentColor(conversation.agents.first { $0.id == conversation.session?.agent },
+            id: conversation.session?.agent ?? ""))
+        if conversation.executing {
+          Text("trabalhando…").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+        }
+      }
+      .appFont(.secondary)
+      .padding(.horizontal, 24).padding(.vertical, 8)
+      ContextHairline()
     }
   }
 
-  func stop() async {
-    await act("stop", success: "Execução interrompida") { try await self.sessions.client.interrupt(self.id, resume: true) }
-  }
-  func promote(_ item: InboxItem) async {
-    await act(item.id, success: "Mensagem marcada para enviar agora") {
-      try await self.sessions.client.promoteInbox(item.id, sessionID: item.sessionID)
-    }
-  }
-  func cancel(_ item: InboxItem) async {
-    await act(item.id, success: "Mensagem removida da fila") {
-      try await self.sessions.client.cancelInbox(item.id, sessionID: item.sessionID)
-    }
-  }
-  func edit(_ item: InboxItem) async {
-    draft = item.payload.displayText
-    await cancel(item)
-  }
-  func toggle(_ server: MCPServer) async {
-    guard let directory = session?.location.directory else { return }
-    let enabled = server.status.status != .connected
-    await act("mcp:" + server.name, success: enabled ? "\(server.name) ativado" : "\(server.name) desativado") {
-      try await self.sessions.client.toggleMCP(server.name, enabled: enabled, directory: directory)
-      self.mcp = (try? await self.sessions.client.mcpServers(directory: directory)) ?? self.mcp
+  private func back(to parent: String) {
+    transcript?.capture()
+    if runtime.selection.sessionID == parent {
+      runtime.selection.childID = nil
+    } else if sessions.rows.contains(where: { $0.id == parent }) {
+      runtime.selection = MacSelection(sessionID: parent)
+    } else {
+      runtime.selection.childID = parent
     }
   }
 
-  /// Desfazer: hides this prompt and everything after it (subagents included) and puts its text back in the
-  /// composer; `target: nil` restores them (Refazer).
-  func revert(to target: ConversationMessage?) async {
-    guard let session, acting.insert("revert").inserted else { return }
-    defer { acting.remove("revert") }
-    let result = await SessionRevert.perform(
-      sessionID: id, target: target, directory: session.location.directory, active: sessions.active,
-      pending: inbox, using: sessions.client)
-    if result.succeeded, let target { draft = target.displayText }
-    if !result.failures.isEmpty {
-      sessions.toast.show(result.failures.joined(separator: "\n"), kind: .error)
+  private var timeline: some View {
+    MacTranscriptHost(
+      store: conversation, sessions: sessions,
+      quotes: ConversationQuoteContext(index: conversation.quoteIndex, pending: draft.quotes,
+        dismissed: conversation.dismissedQuotes),
+      search: ConversationSearchHighlight(matches: search.matches, current: search.current?.id),
+      bottomPadding: 16
+    ) { context in
+      context.openChild = { id in open(child: id) }
+      context.openPath = { path in openFile(path) }
+      context.revert = { message in revertCandidate = message }
+      context.comment = { quote in commenting = quote }
+      context.openImage = { image, name in viewing = MacViewedImage(image: image, name: name) }
     }
-    await load()
+    .overlay(alignment: .bottomTrailing) {
+      if conversation.memory.state.jumpToLatest {
+        Button { transcript?.scrollToLatest(animated: true) } label: {
+          Image(systemName: "arrow.down").font(.system(size: 13, weight: .semibold)).frame(width: 34, height: 34)
+            .adaptiveGlass(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Ir para a mais recente (⌘↓)")
+        .accessibilityLabel("Ir para a mais recente")
+        .accessibilityIdentifier("jump-to-latest")
+        .padding(16)
+      }
+    }
+    .overlay(alignment: .top) {
+      if conversation.memory.state.resumeOffered {
+        Button("Continuar de onde parou") { transcript?.resume() }
+          .buttonStyle(.plain).appFont(.caption, weight: .medium)
+          .padding(.horizontal, 12).padding(.vertical, 6)
+          .adaptiveGlass(Capsule())
+          .padding(.top, CGFloat(conversation.memory.state.stickyHeight) + 8)
+      }
+    }
+    .overlay {
+      if !conversation.hasTranscript && conversation.error == nil {
+        ProgressView("Carregando conversa…").appFont(.caption)
+      }
+    }
   }
 
-  private func act(_ key: String, success: String, _ action: @escaping () async throws -> Void) async {
-    guard acting.insert(key).inserted else { return }
-    defer { acting.remove(key) }
-    do {
-      try await action()
-      sessions.toast.show(success)
-      await load()
-    } catch {
-      sessions.toast.show("Não foi possível concluir a ação. \(error.localizedDescription)", kind: .error)
+  private var bottom: some View {
+    VStack(spacing: 8) {
+      if conversation.session?.revert != nil, !conversation.isChild { revertBar }
+      ConversationTray(store: conversation, draft: draft)
+      MacComposer(store: conversation, draft: draft)
+        .disabled(!conversation.ready || conversation.notice != nil)
+    }
+    .frame(maxWidth: 760)
+    .padding(.horizontal, 24).padding(.bottom, 10).padding(.top, 6)
+    .frame(maxWidth: .infinity)
+  }
+
+  private var revertBar: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "arrow.uturn.backward").foregroundStyle(theme.color(.icon))
+      Text("Mensagens seguintes ocultas").foregroundStyle(theme.color(.textSecondary))
+      Spacer()
+      Button("Refazer") { Task { await conversation.reversion.perform(target: nil, store: conversation, draft: draft) } }
+        .buttonStyle(.plain).foregroundStyle(theme.color(.primary))
+        .disabled(conversation.reversion.pending)
+    }
+    .appFont(.footnote)
+    .padding(.horizontal, 14).padding(.vertical, 8)
+    .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 12))
+    .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(theme.color(.border), lineWidth: 0.7) }
+  }
+
+  private func openSearch() {
+    transcript?.capture()
+    search.open = true
+  }
+
+  /// A subagent opens in the middle column over its root, which Sessões keeps selected.
+  private func open(child id: String) {
+    transcript?.capture()
+    runtime.selection.childID = id
+  }
+
+  /// A file named in an answer opens Arquivos at its folder, with the file selected.
+  private func openFile(_ source: String) {
+    guard let directory = conversation.session?.location.directory else { return }
+    Task {
+      let path = try? await sessions.client.fileLinkMatches(source, directory: directory).first
+      guard let path else {
+        conversation.toast.show("Arquivo não encontrado: \(source)", kind: .error)
+        return
+      }
+      runtime.showFiles(at: URL(fileURLWithPath: path).deletingLastPathComponent().path, file: path)
+    }
+  }
+}
+
+/// A notice above the transcript (a vanished directory, an older server), with a retry.
+private struct ConversationNoticeLine: View {
+  @Environment(\.appTheme) private var theme
+  let notice: ConversationNotice
+  let retry: () -> Void
+  private var message: String {
+    switch notice {
+    case .incompatible: "Este servidor é antigo demais para esta conversa. Atualize o OpenCode no servidor."
+    case .missingDirectory(let path): "O diretório da sessão não existe mais: \(path). Envio indisponível."
+    }
+  }
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "exclamationmark.triangle").foregroundStyle(theme.color(.warning))
+      Text(message).foregroundStyle(theme.color(.text))
+      Spacer()
+      Button("Tentar novamente", action: retry).buttonStyle(.plain).foregroundStyle(theme.color(.primary))
+    }
+    .appFont(.caption).padding(.horizontal, 24).padding(.vertical, 8)
+    .background(theme.color(.surface))
+  }
+}
+
+/// ⌘F: the conversation's search with its counter, ↑/↓ (or Return / Shift-Return) and older pages.
+private struct MacSearchBar: View {
+  @Environment(\.appTheme) private var theme
+  @Bindable var search: ConversationSearchState
+  let store: ConversationStore
+  @FocusState private var focused: Bool
+  var body: some View {
+    VStack(spacing: 4) {
+      HStack(spacing: 8) {
+        Image(systemName: "magnifyingglass").foregroundStyle(theme.color(.textSecondary))
+        TextField("Buscar na conversa", text: $search.query)
+          .textFieldStyle(.plain).focused($focused)
+          .onSubmit { search.move(NSEvent.modifierFlags.contains(.shift) ? -1 : 1, store: store) }
+          .accessibilityIdentifier("conversation-search")
+        Text(ConversationSearch.counter(index: search.index, count: search.matches.count))
+          .monospacedDigit().foregroundStyle(theme.color(.textSecondary))
+        Button { search.move(-1, store: store) } label: { Image(systemName: "chevron.up") }
+          .buttonStyle(.plain).disabled(search.matches.isEmpty).help("Resultado anterior")
+        Button { search.move(1, store: store) } label: { Image(systemName: "chevron.down") }
+          .buttonStyle(.plain).disabled(search.matches.isEmpty).help("Próximo resultado")
+        Button("Concluído") { search.close() }.buttonStyle(.plain).foregroundStyle(theme.color(.primary))
+          .keyboardShortcut(.cancelAction)
+      }
+      if store.hasOlder && (search.index == nil || search.index == 0 || search.paging) {
+        HStack(spacing: 8) {
+          if search.paging {
+            ProgressView().controlSize(.small)
+            Text("Buscando mensagens anteriores…")
+            Button("Cancelar") { search.cancelPaging() }.buttonStyle(.plain)
+          } else {
+            Button("Buscar em mensagens mais antigas") { search.older(store) }.buttonStyle(.plain)
+              .disabled(search.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          }
+        }
+        .appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+      }
+    }
+    .appFont(.secondary)
+    .padding(.horizontal, 24).padding(.vertical, 8)
+    .background(theme.color(.surface))
+    .overlay(alignment: .bottom) { ContextHairline() }
+    .onAppear { focused = true }
+  }
+}
+
+struct MacViewedImage: Identifiable {
+  let id = UUID()
+  let image: CGImage
+  let name: String
+}
+
+/// An image from the conversation at full size.
+private struct MacImageSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  let image: MacViewedImage
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack {
+        Text(image.name).lineLimit(1)
+        Spacer()
+        Button("Fechar") { dismiss() }.keyboardShortcut(.cancelAction)
+      }
+      .padding(12)
+      ScrollView([.horizontal, .vertical]) {
+        Image(decorative: image.image, scale: 2)
+      }
+    }
+    .frame(minWidth: 520, idealWidth: min(CGFloat(image.image.width) / 2 + 40, 1100), minHeight: 400,
+      idealHeight: min(CGFloat(image.image.height) / 2 + 80, 800))
+  }
+}
+
+/// Comentar: a quote of the selected passage with its comment, attached to the next prompt (`Citações · N`).
+private struct MacQuoteCommentSheet: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.dismiss) private var dismiss
+  let quote: ChatQuote
+  let draft: ConversationDraft
+  @State private var comment = ""
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Text("Comentar trecho").appFont(.heading, weight: .semibold)
+      Text(quote.text).appFont(.secondary).lineLimit(6).foregroundStyle(theme.color(.textSecondary))
+        .padding(.leading, 12)
+        .overlay(alignment: .leading) { Rectangle().fill(theme.color(.primary)).frame(width: 2) }
+      TextField("Comentário (opcional)", text: $comment, axis: .vertical).lineLimit(3...8)
+        .textFieldStyle(.roundedBorder)
+      HStack {
+        Spacer()
+        Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
+        Button("Adicionar citação") {
+          let editor = draft.commentEditor(quote)
+          editor.text = NSAttributedString(string: comment)
+          Task {
+            await draft.commit(quote, from: editor)
+            draft.focused = true
+          }
+          dismiss()
+        }
+        .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(20).frame(width: 480)
+  }
+}
+
+/// `/btw`: a side question about the conversation, answered without saving it there.
+private struct MacSideQuestionSheet: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.dismiss) private var dismiss
+  let store: ConversationStore
+  let launch: SideQuestionLaunch
+  @State private var question = ""
+  @State private var entries: [SideQuestionEntry] = []
+  @State private var asking = false
+  @State private var error: String?
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Text("Pergunta paralela").appFont(.heading, weight: .semibold)
+        Spacer()
+        Button("Fechar") { dismiss() }.keyboardShortcut(.cancelAction)
+      }
+      Text("Não fica salva na conversa.").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+      ScrollView {
+        VStack(alignment: .leading, spacing: 14) {
+          ForEach(entries) { entry in
+            Text(entry.question).appFont(.secondary, weight: .medium)
+            Text((try? AttributedString(markdown: entry.answer,
+              options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(entry.answer))
+              .textSelection(.enabled)
+          }
+          if asking { ProgressView().controlSize(.small) }
+          if let error { Text(error).foregroundStyle(theme.color(.error)).appFont(.caption) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      HStack {
+        TextField("Pergunte algo sem interromper a conversa…", text: $question).textFieldStyle(.roundedBorder)
+          .onSubmit(ask)
+        Button("Perguntar", action: ask).disabled(asking || question.trimmingCharacters(in: .whitespaces).isEmpty)
+      }
+    }
+    .padding(20).frame(width: 560, height: 480)
+    .onAppear {
+      question = launch.text
+      if launch.submit { ask() }
+    }
+  }
+
+  private func ask() {
+    let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty, !asking else { return }
+    asking = true
+    error = nil
+    question = ""
+    Task {
+      defer { asking = false }
+      do {
+        let answer = try await store.askSideQuestion(SideQuestionRequest(question: text, history: entries))
+        entries.append(SideQuestionEntry(question: text, answer: answer))
+      } catch {
+        self.error = "Não foi possível responder. \(error.localizedDescription)"
+        question = text
+      }
     }
   }
 }

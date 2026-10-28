@@ -57,3 +57,14 @@ extension View {
     #endif
   }
 }
+
+extension View {
+  /// A borderless menu on macOS (AppKit draws a pop-up button otherwise); unchanged on iOS.
+  @ViewBuilder func plainMenuOnMac() -> some View {
+    #if os(macOS)
+    menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+    #else
+    self
+    #endif
+  }
+}

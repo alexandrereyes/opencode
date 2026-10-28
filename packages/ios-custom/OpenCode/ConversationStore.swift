@@ -744,6 +744,7 @@ import OpenCodeKit
     }
     ScrollFixtures.conversation = self
     models = fixture.models
+    #if os(iOS)
     if ScrollFixtures.mode == "catalog" {
       resources = ScreenCatalogFixture.resources
       children = ScreenCatalogFixture.children
@@ -757,6 +758,7 @@ import OpenCodeKit
       await mcps.refresh()
       inbox = ScreenCatalogFixture.inbox
     }
+    #endif
     branch = "exemplo-sintetico"
     hasOlder = !fixtureHistory.isEmpty
     hasTranscript = true

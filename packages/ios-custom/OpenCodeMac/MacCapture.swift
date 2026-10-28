@@ -31,12 +31,21 @@ import SwiftUI
     // are a 1269×794-pt window drawn at 1.25×: `-OpenCodeMacCaptureSize 1269x794` matches them.
     let size = MacFixture.value("-OpenCodeMacCaptureSize")?.split(separator: "x").compactMap { Double($0) }
     window.setFrame(NSRect(x: -4000, y: 40, width: size?.first ?? 1600, height: size?.last ?? 1000), display: true)
-    try? await Task.sleep(for: .seconds(MacFixture.current == nil ? 8 : 5))
-    let path = folder + "/" + name + ".png"
-    if screenLocked || !windowServerImage(window, to: path), let view = window.contentView?.superview ?? window.contentView {
-      if screenLocked { unglaze(view, background: theme.nsColor(.background)) }
-      cached(view, to: path)
+    let delay = MacFixture.value("-OpenCodeMacCaptureDelay").flatMap(Double.init)
+    try? await Task.sleep(for: .seconds(delay ?? (MacFixture.current == nil ? 8 : 5)))
+    // `-OpenCodeMacCaptureEvery <s> -OpenCodeMacCaptureCount <n>`: a sequence (`<name>-01.png`…), a short video of
+    // a live conversation, a stream or paging.
+    if let every = MacFixture.value("-OpenCodeMacCaptureEvery").flatMap(Double.init),
+      let count = MacFixture.value("-OpenCodeMacCaptureCount").flatMap(Int.init), count > 0
+    {
+      for index in 1...count {
+        shot(window, theme: theme, to: folder + "/" + name + String(format: "-%02d.png", index))
+        if index < count { try? await Task.sleep(for: .seconds(every)) }
+      }
+      if quits { NSApp.terminate(nil) }
+      return
     }
+    shot(window, theme: theme, to: folder + "/" + name + ".png")
     if let context = context(), runtime.selection.files == nil {
       column(context, runtime: runtime, theme: theme, to: folder + "/" + name + "-coluna.png")
     }
@@ -80,6 +89,13 @@ import SwiftUI
       try? png.write(to: URL(fileURLWithPath: folder + "/" + name + ".png"))
     }
     if quits { NSApp.terminate(nil) }
+  }
+
+  private static func shot(_ window: NSWindow, theme: AppTheme, to path: String) {
+    if screenLocked || !windowServerImage(window, to: path), let view = window.contentView?.superview ?? window.contentView {
+      if screenLocked { unglaze(view, background: theme.nsColor(.background)) }
+      cached(view, to: path)
+    }
   }
 
   /// The window with an attached sheet (a dialog) drawn over it. While the screen is locked the window server

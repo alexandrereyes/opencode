@@ -91,3 +91,9 @@ import OpenCodeKit
     }
   }
 }
+
+struct MCPUIError: LocalizedError {
+  var errorDescription: String? {
+    "O MCP não confirmou a alteração. Se precisar de login, entre pelo app web."
+  }
+}
