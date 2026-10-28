@@ -140,4 +140,77 @@ import XCTest
     XCTAssertEqual(title.label, "Agentes e tarefas")
     screenshot("back-to-conversation")
   }
+
+  /// `script/test-agents-screen.py --scenario model`: `OPENCODE_MODEL_CHILD` ran once with Luna 6 / low; with the
+  /// screen open, the parent continues it (same `sessionID`) with Luna 6 - fast / low and the row follows.
+  func testContinuedSubagentShowsItsLatestModelLive() async throws {
+    let parent = try XCTUnwrap(environment["OPENCODE_MODEL_PARENT"])
+    let child = try XCTUnwrap(environment["OPENCODE_MODEL_CHILD"])
+    let password = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    let app = XCUIApplication()
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme, "-OpenCodeOpenSession", parent]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = password
+    app.launch()
+    defer { app.terminate() }
+    // The owned session's unique title proves the app is connected to this sandbox before acting.
+    let title = app.staticTexts["conversation-header-title"]
+    XCTAssertTrue(title.waitForExistence(timeout: 25))
+    let owned = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "label == %@", try XCTUnwrap(environment["OPENCODE_MODEL_TITLE"])), object: title)
+    XCTAssertEqual(XCTWaiter.wait(for: [owned], timeout: 20), .completed, title.label)
+    let agents = app.buttons["conversation-agents"]
+    XCTAssertTrue(agents.waitForExistence(timeout: 20))
+    agents.tap()
+    XCTAssertTrue(app.navigationBars["Agentes e tarefas"].waitForExistence(timeout: 10))
+    let label = app.staticTexts["agent-model-" + child]
+    XCTAssertTrue(label.waitForExistence(timeout: 20))
+    XCTAssertEqual(label.label, "Luna 6 · low")
+    screenshot("model-first")
+
+    func api(_ path: String, _ body: [String: Any]? = nil) async throws -> [String: Any] {
+      var request = URLRequest(url: URL(string: TestSandbox.url + path)!)
+      request.setValue("Basic " + Data(("opencode:" + password).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
+      if let body {
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+      }
+      let (data, response) = try await URLSession.shared.data(for: request)
+      XCTAssertTrue((200..<300).contains(try XCTUnwrap(response as? HTTPURLResponse).statusCode), path)
+      return data.isEmpty ? [:] : (try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:])
+    }
+    _ = try await api("/api/session/" + parent + "/prompt", [
+      "id": "msg_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased(), "delivery": "steer",
+      "text": "Chame a ferramenta subagent uma única vez com sessionID=\"\(child)\", agent=\"general\", "
+        + "description=\"Worker de teste\", model=\"llm-proxy/gpt-6-luna-fast#low\", background=false, "
+        + "prompt=\"Responda apenas: OK de novo.\" Depois responda apenas: OK.",
+    ])
+
+    // Live, without reopening: the continuation's model as soon as the server switches the child.
+    let switched = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Luna 6 - fast · low'"), object: label)
+    let switchedResult = await XCTWaiter().fulfillment(of: [switched], timeout: 180)
+    XCTAssertEqual(switchedResult, .completed, label.label)
+    screenshot("model-continued")
+
+    // Once the child has really answered with that model, the row keeps it.
+    let deadline = ContinuousClock.now.advanced(by: .seconds(180))
+    var ran = false
+    while !ran, ContinuousClock.now < deadline {
+      let family = try await api("/api/rpc/custom.session-family/page", ["input": ["sessionID": parent, "limit": 100]])
+      let members = ((family["output"] as? [String: Any])?["data"] as? [[String: Any]]) ?? []
+      let member = members.first { $0["id"] as? String == child }
+      let model = ((member?["context"] as? [String: Any])?["model"] as? [String: Any])?["id"] as? String
+      let active = (try await api("/api/session/active")["data"] as? [String: Any]) ?? [:]
+      ran = model == "gpt-6-luna-fast" && active[child] == nil
+      if !ran { try await Task.sleep(for: .seconds(1)) }
+    }
+    XCTAssertTrue(ran, "the continued child did not answer with Luna 6 - fast")
+    let row = app.buttons["agent-work-" + child]
+    let answered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'Concluído'"), object: row)
+    let answeredResult = await XCTWaiter().fulfillment(of: [answered], timeout: 30)
+    XCTAssertEqual(answeredResult, .completed, row.value as? String ?? "")
+    XCTAssertEqual(label.label, "Luna 6 - fast · low")
+    XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agent-work-'")).count, 1)
+    screenshot("model-answered")
+  }
 }

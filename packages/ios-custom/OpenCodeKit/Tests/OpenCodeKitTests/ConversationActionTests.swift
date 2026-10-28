@@ -650,3 +650,55 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
     ownerID: "ses_root", viewedID: "ses_root", messages: [message], children: ended,
     active: ["ses_back"], shells: []).map(\.id) == ["ses_back", "ses_old", "ses_long", "ses_new"])
 }
+
+/// A subagent continued with another agent or model (same `sessionID`) shows the latest one: the server switches
+/// the child's selection before prompting it, so the row follows the child, not the first call.
+@Test func continuedSubagentShowsItsLatestAgentAndModel() throws {
+  func call(_ id: String, ran: Double, agent: String, model: String?, continued: Bool) -> String {
+    let fields = (model.map { #","model":"\#($0)""# } ?? "") + (continued ? #","sessionID":"ses_worker""# : "")
+    return """
+      {"type":"tool","id":"\(id)","name":"subagent","time":{"created":\(ran - 5),"ran":\(ran),"completed":\(ran + 100)},
+       "state":{"status":"completed","input":{"agent":"\(agent)","description":"Worker"\(fields)},
+       "content":[{"type":"text","text":"ok"}],"metadata":{"sessionID":"ses_worker"}}}
+      """
+  }
+  func message(_ parts: [String]) throws -> ConversationMessage {
+    try JSONDecoder().decode(ConversationMessage.self, from: Data("""
+      {"id":"msg_model","type":"assistant","agent":"build","time":{"created":1},"content":[\(parts.joined(separator: ","))]}
+      """.utf8))
+  }
+  func worker(agent: String, model: String, variant: String, ran: (String, String)?) throws -> Session {
+    let context = ran.map {
+      #","context":{"id":"msg_step","tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},"model":{"id":"\#($0.0)","providerID":"p","variant":"\#($0.1)"}}"#
+    } ?? ""
+    return try JSONDecoder().decode(Session.self, from: Data("""
+      {"id":"ses_worker","parentID":"ses_root","projectID":"p","title":"Worker","agent":"\(agent)",
+       "model":{"id":"\(model)","providerID":"p","variant":"\(variant)"},"location":{"directory":"/repo"},
+       "time":{"created":1003,"updated":3000,"idle":3000}\(context)}
+      """.utf8))
+  }
+  func row(_ messages: [ConversationMessage], _ child: Session) -> SessionWork? {
+    ConversationProjection.work(ownerID: "ses_root", viewedID: "ses_root", messages: messages, children: [child],
+      active: [], shells: []).first
+  }
+  let first = try message([call("call_1", ran: 1_000, agent: "worker", model: "p/opus#low", continued: false)])
+  // First call: the child runs what it asked for.
+  let launched = try #require(row([first], try worker(agent: "worker", model: "opus", variant: "low", ran: ("opus", "low"))))
+  #expect(launched.agent == "worker" && launched.model == ModelReference(id: "opus", providerID: "p", variant: "low"))
+
+  let continued = try message([
+    call("call_1", ran: 1_000, agent: "worker", model: "p/opus#low", continued: false),
+    call("call_2", ran: 2_000, agent: "reviewer", model: "p/terra#low", continued: true),
+  ])
+  // Continued with another agent and model, before its answer: the switched selection, not the old step.
+  let pending = try #require(row([continued], try worker(agent: "reviewer", model: "terra", variant: "low", ran: ("opus", "low"))))
+  #expect(pending.agent == "reviewer" && pending.model == ModelReference(id: "terra", providerID: "p", variant: "low"))
+  #expect(pending.title == "Worker")
+  // After the answer, the step that really ran agrees.
+  let answered = try #require(row([continued], try worker(agent: "reviewer", model: "terra", variant: "low", ran: ("terra", "low"))))
+  #expect(answered.model == ModelReference(id: "terra", providerID: "p", variant: "low"))
+
+  #expect(ModelReference(selector: "llm-proxy/gpt-6-luna#low") == ModelReference(id: "gpt-6-luna", providerID: "llm-proxy", variant: "low"))
+  #expect(ModelReference(selector: "openrouter/anthropic/claude") == ModelReference(id: "anthropic/claude", providerID: "openrouter"))
+  #expect(ModelReference(selector: "nonsense") == nil && ModelReference(selector: "p/") == nil)
+}

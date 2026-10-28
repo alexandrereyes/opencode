@@ -32,6 +32,8 @@ public struct SessionWork: Identifiable, Sendable, Equatable {
   public let started: Double
   /// Total duration of finished work, when known.
   public let duration: Double?
+  /// The model and effort a subagent runs with now (see `ConversationProjection.work`).
+  public var model: ModelReference? = nil
   public var running: Bool { state == .running }
   /// Running or about to run: listed before finished work.
   public var live: Bool { state == .running || state == .starting }
@@ -99,11 +101,13 @@ extension ConversationProjection {
       let ended = child.time.idle ?? child.time.updated
       return SessionWork(
         id: child.id, kind: .agent, sessionID: child.id, shellID: nil, toolID: tool?.id,
-        agent: tool?.input["agent"]?.string ?? child.agent,
+        // A continuation may switch agent and model: the child session carries the current ones.
+        agent: child.agent ?? linked.last?.input["agent"]?.string ?? tool?.input["agent"]?.string,
         title: tool?.input["description"]?.string ?? child.displayTitle, state: state,
         activity: state == .running ? max(latest ?? child.time.created, child.time.created) : ended,
         started: latest ?? workStarted(child: child, shells: shells),
-        duration: state == .running ? nil : ended - child.time.created)
+        duration: state == .running ? nil : ended - child.time.created,
+        model: effectiveModel(child, call: linked.last))
     }
     // A call whose child does not exist yet is only shown while the owner is still running it; it has
     // nothing to open. Stale running parts and failures without a child stay in the transcript only.
@@ -117,9 +121,19 @@ extension ConversationProjection {
           id: id, kind: .agent, sessionID: nil, shellID: nil, toolID: nil,
           agent: tool.input["agent"]?.string ?? tool.partialInput("agent"),
           title: tool.input["description"]?.string ?? tool.partialInput("description") ?? "Preparando subagente…",
-          state: .starting, activity: created, started: created, duration: nil))
+          state: .starting, activity: created, started: created, duration: nil,
+          model: (tool.input["model"]?.string ?? tool.partialInput("model")).flatMap(ModelReference.init(selector:))))
     }
     return work
+  }
+
+  /// What a subagent runs with now. Its last measured step (`context.model`) is what really ran. A continuation
+  /// that changes agent or model switches the child's selection (`Session.model`) before prompting it, so the
+  /// selection only differs from that step until the first answer of the continuation, and is then what this
+  /// answer uses: showing the selection whenever there is one gives the step's model once it ran and the requested
+  /// one in between. The call's own `model` input fills in for a child without a selection.
+  static func effectiveModel(_ child: Session, call: ConversationPart?) -> ModelReference? {
+    child.model ?? call?.input["model"]?.string.flatMap(ModelReference.init(selector:)) ?? child.context?.model
   }
 
   /// Background shells: those a completed `shell` call moved to the background (its result says `running`),
