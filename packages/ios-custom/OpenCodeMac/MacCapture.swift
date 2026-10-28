@@ -94,6 +94,10 @@ import SwiftUI
     }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacDetails") { context()?.detailsOpen = true }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSwitcher") { runtime.switcherVisible = true }
+    if let query = MacFixture.value("-OpenCodeMacSearch") {
+      runtime.search.query = query == "empty" ? "" : query
+      runtime.search.open()
+    }
     switch MacFixture.value("-OpenCodeMacNewSession") {
     case "sessoes": runtime.newSession()
     case "origem": runtime.newSession(from: MacFixture.rootID)
@@ -134,10 +138,15 @@ import SwiftUI
     guard var base = draw(window) else { return nil }
     let overlays = NSApp.windows.filter { other in
       other !== window && other.isVisible
-        && (other.sheetParent === window || String(describing: type(of: other)).contains("Popover"))
+        && (other.sheetParent === window || String(describing: type(of: other)).contains("Popover")
+          || (other.parent === window && other.identifier?.rawValue == "mac-search-suggestions"))
     }
     for other in overlays {
       guard let picture = draw(other) else { continue }
+      if other.identifier?.rawValue == "mac-search-suggestions" {
+        base = compose(base, window, picture, other) ?? base
+        continue
+      }
       // AppKit keeps a popover on a screen while the window sits off-screen: draw it under the title instead.
       let popover = other.sheetParent == nil
       base = (popover ? place(base, window, picture, at: CGPoint(x: 420, y: 46), width: other.frame.width)

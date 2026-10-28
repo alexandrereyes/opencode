@@ -60,6 +60,7 @@ private struct MacFixtureServer: Sendable {
   /// `-OpenCodeMacFixtureAttention`: one root asking permission, one asking a question and one failed, for the
   /// "Precisa de você" section, the Dock badge and the alerts.
   private let attention = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFixtureAttention")
+  private let searchFixture = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSearchFixture")
 
   func respond(_ request: URLRequest) -> String? {
     guard let url = request.url else { return nil }
@@ -74,7 +75,7 @@ private struct MacFixtureServer: Sendable {
       return #"{"data":{"#
         + (["ses_mac_root", "ses_mac_live"] + Self.live.map(\.id)).map { #""\#($0)":{"type":"running"}"# }
           .joined(separator: ",") + "}}"
-    case "/api/session": return #"{"data":[],"cursor":{}}"#
+    case "/api/session": return #"{"data":[\#(searchFixture ? archivedSession : "")],"cursor":{}}"#
     case "/api/model": return #"{"data":[{"id":"opus-5.5","providerID":"llm-proxy","name":"Opus 5.5","variants":[{"id":"high"},{"id":"xhigh"}],"limit":{"context":1000000}},{"id":"gpt-6-luna","providerID":"llm-proxy","name":"Luna 6","variants":[{"id":"low"},{"id":"medium"}],"limit":{"context":400000}},{"id":"sol-6.1","providerID":"llm-proxy","name":"Sol 6.1","limit":{"context":400000}}]}"#
     case "/api/agent":
       return #"{"data":["# + ["build", "explore", "opushigh", "terraxhigh", "terrahigh"].map {
@@ -277,7 +278,12 @@ private struct MacFixtureServer: Sendable {
   }
 
   private var sessions: [String: String] {
-    Dictionary(uniqueKeysWithValues: roots.map { ($0.id, rootSession($0)) } + Self.children.map { ($0.id, session($0)) })
+    Dictionary(uniqueKeysWithValues: roots.map { ($0.id, rootSession($0)) } + Self.children.map { ($0.id, session($0)) }
+      + (searchFixture ? [("ses_mac_archived", archivedSession)] : []))
+  }
+
+  private var archivedSession: String {
+    #"{"id":"ses_mac_archived","projectID":"prj_opencode2","title":"Live Activity · protótipo arquivado","location":{"directory":"\#(root)"},"time":{"created":\#(now - 5000 * minute),"updated":\#(now - 3000 * minute),"archived":\#(now - 3000 * minute)}}"#
   }
 
   private var projects: String {
@@ -285,7 +291,8 @@ private struct MacFixtureServer: Sendable {
   }
 
   private var preferences: String {
-    #"{"version":1,"revision":1,"data":{"projects":{"local":{"projects":[{"worktree":"\#(home)/Dev/abacato-v2","expanded":true},{"worktree":"\#(home)/Dev/opencode2","expanded":true}],"chatsIndex":2}},"pinnedSessions":[],"mutedSessions":[],"settings":{"autoApprove":false},"models":{"user":[{"providerID":"llm-proxy","modelID":"opus-5.5","visibility":"show"}],"variant":{},"default":{"providerID":"llm-proxy","modelID":"opus-5.5","variant":"xhigh"}}}}"#
+    let extra = searchFixture ? #",{"worktree":"\#(home)/Dev/ios-live-activity","expanded":true}"# : ""
+    return #"{"version":1,"revision":1,"data":{"projects":{"local":{"projects":[{"worktree":"\#(home)/Dev/abacato-v2","expanded":true},{"worktree":"\#(home)/Dev/opencode2","expanded":true}\#(extra)],"chatsIndex":2}},"pinnedSessions":[],"mutedSessions":[],"settings":{"autoApprove":false},"models":{"user":[{"providerID":"llm-proxy","modelID":"opus-5.5","visibility":"show"}],"variant":{},"default":{"providerID":"llm-proxy","modelID":"opus-5.5","variant":"xhigh"}}}}"#
   }
 
   private var childPermission: String {

@@ -41,11 +41,13 @@ for run in $(seq 1 "$runs"); do
   fi
   set +e
   timeout $((idle + 240)) "$app" -OpenCodeMacFixture contexto -OpenCodeMacFixtureRoot "$root" \
+    -OpenCodeServerURL http://127.0.0.1:4207 -OpenCodeMacSearchFixture \
     -OpenCodeTheme openchamber-dark -OpenCodeMacStress "$idle" \
     "${captures[@]}" >"$log" 2>&1
   code=$?
   set -e
-  if [[ $code -eq 0 ]] && grep -q '^MacStress ok' "$log" && grep -q '^MacStress duas janelas independentes ok' "$log"; then
+  if [[ $code -eq 0 ]] && grep -q '^MacStress ok' "$log" && grep -q '^MacStress duas janelas independentes ok' "$log" \
+    && grep -q '^MacStress busca:.* ok' "$log"; then
     echo "run $run: ok"
   else
     failed=1

@@ -2546,6 +2546,8 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
 
 - **Columns**: `NavigationSplitView` (Sessões | detail). The detail is an `HStack` of the chat and Contexto with a
   draggable hairline between them (`MacColumnDivider`, 400–760 pt, restored per window);
+  `MacSidebarDivider` draws the same 1-pt theme `border` between Sessões and the chat, including the unified
+  title bar. It follows the real sidebar geometry and hides with it, without changing native divider hit testing.
   Contexto is offered the room first (`layoutPriority(1)`, `minWidth: 400`), so a narrower window shrinks it before
   the chat goes below 460 pt and the window's minimum is the sum of the minimums (1191 pt with Sessões at its 330-pt
   ideal). Contexto is no longer an `.inspector`: an inspector gets its own, empty part of the title bar, so `…` and
@@ -2557,7 +2559,7 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
   hover highlight (`MacToolbarIcon`). Left, over Sessões: voice (GPT Live; see below),
   Configurações and Nova sessão. Over the chat: `MacChatTitle`, the shared `ConversationAvatar` (now with a `size`,
   30 pt here) and `ConversationTitle` (`App Mac ⌄`, `<worktree> · trabalhando…`), which opens the quick switcher
-  (stage 4). Right, after a `ToolbarSpacer(.flexible)`: `…` (rename, pin, mute, delete, Arquivos,
+  (stage 4). Right, after a `ToolbarSpacer(.flexible)`: the native **Buscar · ⌘K** field over Contexto, then `…` (rename, pin, mute, delete, Arquivos,
   Mostrar/Ocultar contexto) and Nova sessão (`MacSessionActions`). The system sidebar button is removed
   (`.toolbar(removing: .sidebarToggle)`; ⌃⌘S and Visualizar still collapse Sessões), and so is the old
   `sidebar.right` button. The same holds for the LLM proxy window.
@@ -2782,8 +2784,10 @@ separate track.
   **Sessão mestra** accessory sits at the column's foot (`N precisam de você` / `Tudo em dia`, ⇧⌘M): it opens the
   current master in the middle column or, without one, Nova sessão in its master mode, whose first message calls
   `custom.master/ensure`.
-- **Troca rápida** (a click on the title or ⌘K): the iPhone's `SessionSwitcherSheet` in a popover, with a search
+- **Troca rápida** (a click on the title): the iPhone's `SessionSwitcherSheet` in a popover, with a search
   field (Return opens the first match), the current session checked, the working/unread marks and Nova sessão.
+- **Busca da janela (⌘K)**: see [Window search](#window-search--28-october). The shortcut focuses the title-bar
+  field; the title's quick switcher remains available by click.
 - **Nova sessão** (⌘N, the toolbar, the switcher; ⇧⌘N from a session): a sheet with the iPhone's decisions
   (`NewSessionProjection.start/model/agent/remembered`, `NewSessionSubmission`): Chats or a project (or
   Adicionar projeto…), the main checkout, an existing worktree or **Nova worktree** with its base branch (a
@@ -2817,7 +2821,7 @@ separate track.
 - **Menus and shortcuts**: Arquivo (Nova sessão ⌘N, Nova janela ⌥⌘N, Atualizar ⌘R), Visualizar (Contexto ⌥⌘I,
   Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
   Marcar como lida, Arquivar ⇧⌘A, Excluir ⌥⌘⌫, the selection's actions), Editar (Buscar na conversa ⌘F), Ir
-  (Trocar de sessão ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓, Sessão mestra ⇧⌘M) and
+  (Buscar projetos e sessões ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓, Sessão mestra ⇧⌘M) and
   Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
   to ⌥⌘↑/⌥⌘↓, up and down Sessões. The title bar's `…` shows the same session actions and Buscar na conversa.
   Shortcuts avoid the text editing keys (⌘A, ⌘⌫, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓).
@@ -2827,6 +2831,40 @@ separate track.
   open an independent window, as does Arquivo ▸ Nova janela (⌥⌘N).
 - **Voice**: GPT Live, the floating bar, Parakeet dictation and server read-aloud now share the iPhone implementation;
   see [Voice on Mac](#voice-on-mac--28-october).
+
+### Window search — 28 October
+
+The provisional **A** presentation is `OpenCodeMac/MacSearchPresentation.swift`: an `NSSearchField` in the title
+bar, to the left of `…` and Nova sessão, with a nonactivating suggestions panel below it. Typing keeps focus in
+the field. ↑/↓ traverse results across groups (including **Mostrar mais**), Return chooses, Esc closes and
+returns focus to the composer; clicking a result chooses it, and clicking outside dismisses. Each result's
+VoiceOver label includes its group. Matched title spans are bold, preserving the original accents.
+
+- **Order:** Projetos, Sessões, Sessões arquivadas. Project candidates are only the saved chips, plus **Todas**
+  and **Chats**. Choosing one repeats the chip's exact `selectedProject`/`filter` semantics: Todas clears both;
+  a repository or Chats toggles its selection while preserving the state filter. No shared preference is mutated.
+- **Sessions:** root sessions and chats, excluding archived roots, then archived roots in their own group.
+  Selecting a session opens it in that window; if the current filter hides its row, it resets to Todas.
+  Archived results open through the same conversation path as Arquivadas, without unarchiving them.
+- **Matching:** case/diacritic insensitive; title prefix, word start, then substring, ties by recent activity.
+  Sessions also match project name, branch and full path; projects match only their name. Default limits are
+  5/8/5, with a per-group Mostrar mais. An empty query starts with Todas, Chats, saved projects and recent sessions.
+- **Data:** `SessionStore` already exhausts the cursors in `OpenCodeClient.navigation()` and `archivedSessions()`.
+  Its loaded history covers the search; the current iPhone title switcher is also local. No extra server search,
+  debounce or RPC is needed. If that loading contract later becomes partial, reuse `composerSessions(_:)` with
+  debounce rather than adding an RPC.
+- **Separation:** pure ranking, groups, limits, highlights and chip semantics are in OpenCodeKit's
+  `WindowSearch.swift`; `MacSearch.swift` owns query, keyboard selection and actions, one instance per
+  `MacWindowRuntime`. B or C replaces `MacSearchPresentation.swift` and its mount in `MacChatColumn.swift`
+  (C can mount the results in `MacWindow.swift`'s Contexto), keeping both logic files and the ⌘K menu action.
+
+Validation: `WindowSearchTests` covers groups, ranking, accents, metadata, limits, expansion, roots, empty query
+and Todas/Chats. `script/test-mac-window.sh` also exercises the native field, cross-group arrows, Return,
+hidden-session filters, archived navigation, Esc and isolation between two windows (`MacSearchChecks`).
+Search captures use `-OpenCodeMacSearchFixture -OpenCodeMacSearch empty|live` with the normal capture flags;
+the dedicated fixture adds a saved `ios-live-activity` chip and one archived Live Activity root. Captures for this
+change live at `$TMPDIR/opencode/mac-busca-prints/` (divider, empty search, and all three groups for `live`).
+The checks use a closed in-memory fixture and the explicit launch URL `http://127.0.0.1:4207`.
 
 #### Ajustes
 

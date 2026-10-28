@@ -53,6 +53,7 @@ struct MacChatColumn: View {
         .padding(.leading, 6)
       }
       MacToolbarFlexibleSpace()
+      MacPlainToolbarItem { MacSearchPresentation(runtime: runtime).frame(width: 240, height: 28) }
       MacPlainToolbarItem { MacSessionActions(store: store, runtime: runtime) }
     }
     .onChange(of: runtime.renameRequest?.id) { _, id in

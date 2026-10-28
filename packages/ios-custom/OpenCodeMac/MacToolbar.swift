@@ -143,6 +143,7 @@ struct MacChatTitle: View {
 
   var body: some View {
     Button {
+      runtime.search.close(runtime: runtime, focusComposer: false)
       runtime.switcherVisible.toggle()
     } label: {
       HStack(spacing: 9) {
@@ -159,7 +160,7 @@ struct MacChatTitle: View {
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain).fixedSize()
-    .help("Trocar de sessão (⌘K)")
+    .help("Trocar de sessão")
     .accessibilityLabel([title, subtitle, running ? "trabalhando" : nil].compactMap { $0 }.joined(separator: ", "))
     // The iPhone's switcher sheet as a popover: search, the current session marked, Nova sessão at the end.
     .popover(isPresented: $runtime.switcherVisible, arrowEdge: .bottom) {

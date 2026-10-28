@@ -186,7 +186,7 @@ private struct MacCommands: Commands {
     }
     CommandMenu("Ir") {
       if let runtime {
-        Button("Trocar de sessão…") { runtime.switcherVisible = true }
+        Button("Buscar projetos e sessões…") { runtime.switcherVisible = false; runtime.search.open() }
           .keyboardShortcut("k", modifiers: .command)
           .disabled(runtime.store == nil)
         Divider()

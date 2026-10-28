@@ -74,6 +74,7 @@ import SwiftUI
     await step("fechar Nova sessão") { runtime.newSessionRequest = nil }
     await step("Trocar de sessão") { runtime.switcherVisible = true }
     await step("fechar Trocar de sessão") { runtime.switcherVisible = false }
+    if let error = await MacSearchChecks.run(runtime, other: second) { return finish(error, status: 1) }
     await step("seleção") { if let id = runtime.selection.sessionID { runtime.sessionSelection.start(id) } }
     await step("fim da seleção") { runtime.sessionSelection.clear() }
     await step("recurso") { openWindow(id: "resource", value: "res_iphone") }

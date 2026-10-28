@@ -45,6 +45,7 @@ import SwiftUI
   var renameRequest: SessionRow?
   var deleteRequest: Session?
   var switcherVisible = false
+  let search = MacSearch()
   var archiveRequest: SessionRow?
   @ObservationIgnored private var memories: [String: TranscriptMemory] = [:]
   @ObservationIgnored private var recent: [String] = []
@@ -94,6 +95,7 @@ import SwiftUI
   }
 
   func close() {
+    search.visible = false
     inputs.values.forEach { $0.readAloud.stop() }
     let drafts = drafts
     Task { await drafts.flush() }
