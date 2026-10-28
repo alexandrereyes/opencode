@@ -138,7 +138,7 @@ struct MacFilePane: View {
     .buttonStyle(.plain)
     .foregroundStyle(theme.color(files.sibling(offset) == nil ? .textWeak : .text))
     .disabled(files.sibling(offset) == nil)
-    .keyboardShortcut(offset < 0 ? .leftArrow : .rightArrow, modifiers: [.command, .option])
+    .shortcut(offset < 0 ? MacShortcut.previousFile : MacShortcut.nextFile)
     .help(help)
   }
 

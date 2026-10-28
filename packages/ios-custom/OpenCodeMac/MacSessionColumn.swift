@@ -7,7 +7,6 @@ import SwiftUI
 /// its batch actions, and the Sessão mestra accessory at the bottom, like the iPhone's tab accessory.
 struct MacSessionColumn: View {
   @Environment(\.appTheme) private var theme
-  @Environment(\.openSettings) private var openSettings
   @Environment(\.openWindow) private var openWindow
   @Bindable var store: SessionStore
   @Bindable var runtime: MacWindowRuntime
@@ -31,7 +30,7 @@ struct MacSessionColumn: View {
     HStack(spacing: 0) {
       MacProjectRail(store: store) { name, intent in
         projectAction = ProjectAction(name: name, intent: intent)
-      } add: { showProjects = true }
+      } add: { showProjects = true } shortcuts: { runtime.shortcutsVisible = true }
       sessionList
     }
   }
@@ -39,10 +38,7 @@ struct MacSessionColumn: View {
   private var sessionList: some View {
     List {
       VStack(spacing: 14) {
-        SessionQuotaRings(quota: store.quota) { provider in
-          runtime.proxyPane = .provider(provider)
-          openWindow(id: MacProxyWindow.id)
-        }
+        SessionQuotaRings(quota: store.quota) { provider in runtime.showProxy(.provider(provider)) }
         if let selection = selectionActions { selectionBar(selection) }
       }
       .padding(.horizontal, AppLayout.margin)
@@ -96,8 +92,8 @@ struct MacSessionColumn: View {
     .safeAreaInset(edge: .bottom, spacing: 0) { MacMasterAccessory(store: store, runtime: runtime) }
     // The approved title bar has no sidebar button: Sessões collapses with ⌃⌘S and Visualizar.
     .toolbar(removing: .sidebarToggle)
-    // Voice, Ajustes and Nova sessão at the column's right edge, like Mail's and Notes' sidebar items; they hide
-    // with the column (⌘N and Nova sessão at the bar's end, ⌘, and the menus still reach them).
+    // Voice and Nova sessão at the column's right edge, like Mail's and Notes' sidebar items; they hide with the
+    // column (⌘N and Nova sessão at the bar's end and the menus still reach them). Ajustes is at the rail's foot.
     .toolbar {
       MacToolbarFlexibleSpace()
       MacPlainToolbarItem {
@@ -108,9 +104,6 @@ struct MacSessionColumn: View {
             .disabled(runtime.app.audio.voice.busy)
             .help(runtime.voicePresentation.visible(runtime.app.audio.voice) ? "Encerrar conversa por voz" : "Conversar por voz com a Sessão mestra")
             .accessibilityLabel("Conversar por voz")
-          Button { openSettings() } label: { MacToolbarIcon(symbol: "gearshape") }
-            .help("Configurações (⌘,)")
-            .accessibilityLabel("Configurações")
           Button { runtime.newSession() } label: { MacToolbarIcon(symbol: "square.and.pencil") }
             .disabled(store.preferences == nil)
             .help("Nova sessão (⌘N)")
@@ -175,9 +168,9 @@ struct MacSessionColumn: View {
     }
     #endif
     .sheet(isPresented: $showArchived) {
-      ArchivedSessionsView(store: store).frame(minWidth: 460, minHeight: 520)
+      ArchivedSessionsView(store: store).frame(minWidth: 460, minHeight: 520).macCancelable()
     }
-    .sheet(isPresented: $showProjects) { AddProjectPicker(store: store) }
+    .sheet(isPresented: $showProjects) { AddProjectPicker(store: store).macCancelable() }
     // Like the web and the iPhone, changing the view ends the selection; hidden or removed rows leave it.
     .onChange(of: store.filter) { runtime.sessionSelection.clear() }
     .onChange(of: store.selectedProject) { runtime.sessionSelection.clear() }

@@ -14,6 +14,7 @@ struct MacWindow: View {
   @State private var restored = false
   @State private var detailWidth: CGFloat = 860
   @State private var windowWidth: CGFloat = 1500
+  @State private var windowHeight: CGFloat = 940
 
   /// How wide Contexto may be now: up to 60% of the window, never squeezing the chat below its minimum.
   private var contextRange: ClosedRange<Double> {
@@ -54,17 +55,19 @@ struct MacWindow: View {
       .background(MacSearchPresentation(runtime: runtime))
     }
     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
+    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { windowHeight = $0 }
     .background(theme.color(.background))
     .toastOverlay(store.toast)
-    .sessionAlertOverlay(modal: false)
-    .environment(\.sessionAlerts, SessionAlertsContext(center: store.alerts, open: { id in
-      store.alerts.openingSession()
-      runtime.select(id)
-    }))
+    // No in-app banner on the Mac: the title bar's bell lists the alerts (`MacNotificationBell`), so no
+    // `sessionAlerts` context is set and shared screens' overlays stay empty.
     .sessionRowTimeline()
     // Nova sessão and the archive confirmation belong to the window, so they open with Sessões collapsed too.
     .sheet(item: $runtime.newSessionRequest) { request in
       MacNewSession(store: store, runtime: runtime, request: request)
+    }
+    .sheet(isPresented: $runtime.shortcutsVisible) { MacShortcutsSheet() }
+    .sheet(isPresented: $runtime.proxyVisible) {
+      MacProxySheet(runtime: runtime.app, window: CGSize(width: windowWidth, height: windowHeight))
     }
     .confirmationDialog(
       "Arquivar sessão?",
@@ -140,7 +143,7 @@ struct MacWindow: View {
     .onAppear { runtime.app.syncShown() }
     #if DEBUG
     .task {
-      if MacProxyLaunch.pane != nil, MacCapture.folder != nil { openWindow(id: MacProxyWindow.id) }
+      if MacProxyLaunch.pane != nil, MacCapture.folder != nil { runtime.showProxy() }
       await MacCapture.window(context: { context }, runtime: runtime, theme: theme, openWindow: openWindow,
         openSettings: openSettings)
     }

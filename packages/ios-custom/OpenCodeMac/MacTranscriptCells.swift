@@ -143,17 +143,30 @@ final class MacProseCell: MacTranscriptCell {
 }
 
 /// The OpenCode mascot (the app icon's artwork, still) in a circle at the top left of an answer.
+/// The image is set in `updateLayer`: contents set once on an AppKit-backed layer were replaced by an empty draw on
+/// the next display (a theme or scale change, a reused cell), leaving an empty circle.
 final class MacResponseIconView: NSView {
+  private static let mascot = NSImage(named: "OpenCodeMascot")
   override init(frame: NSRect) {
     super.init(frame: frame)
     wantsLayer = true
-    layer?.contents = NSImage(named: "OpenCodeMascot")
-    layer?.contentsGravity = .resizeAspectFill
-    layer?.masksToBounds = true
+    layerContentsRedrawPolicy = .onSetNeedsDisplay
     setAccessibilityElement(false)
   }
   required init?(coder: NSCoder) { nil }
   override var isFlipped: Bool { true }
+  override var wantsUpdateLayer: Bool { true }
+  override func updateLayer() {
+    guard let layer else { return }
+    layer.contents = Self.mascot?.layerContents(forContentsScale: window?.backingScaleFactor ?? 2)
+    layer.contentsGravity = .resizeAspectFill
+    layer.masksToBounds = true
+    layer.cornerRadius = bounds.width / 2
+  }
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    needsDisplay = true
+  }
   override func setFrameSize(_ newSize: NSSize) {
     super.setFrameSize(newSize)
     layer?.cornerRadius = newSize.width / 2

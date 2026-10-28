@@ -1,23 +1,26 @@
 import OpenCodeKit
 import SwiftUI
 
-/// The LLM proxy window (⌘⇧L, menu Janela, or a quota ring in Sessões): the iPhone's "LLM proxy" sheet laid
-/// out like System Settings, with Codex, Claude and Redefinições in a sidebar and the accounts in a table.
-struct MacProxyWindow: View {
-  static let id = "llm-proxy"
+/// The LLM proxy modal over the front window (⇧⌘L, Janela ▸ LLM proxy, or a quota ring in Sessões): the iPhone's
+/// "LLM proxy" sheet laid out like System Settings, with Codex, Claude and Redefinições in a sidebar and the
+/// accounts in a table. It takes up to 90% of the window; Esc, Fechar or a click outside closes it.
+struct MacProxySheet: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.dismiss) private var dismiss
   @Bindable var runtime: MacRuntime
+  /// The window it covers.
+  let window: CGSize
 
   var body: some View {
     Group {
       if let store = runtime.store, runtime.appliedRevision == runtime.servers.revision {
-        MacProxyContent(store: store.quota, runtime: runtime).id(runtime.identity)
+        MacProxyContent(store: store.quota, runtime: runtime) { dismiss() }.id(runtime.identity)
       } else {
         ProgressView("Conectando…").frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
+    .frame(width: min(1240, max(600, window.width * 0.9)), height: min(900, max(440, window.height * 0.9)))
     .background(theme.color(.background))
-    .task(id: runtime.servers.revision) { await runtime.prepare() }
     #if DEBUG
     .task { await MacCapture.proxy(runtime: runtime, theme: theme) }
     #endif
@@ -28,39 +31,56 @@ private struct MacProxyContent: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: SubscriptionStore
   @Bindable var runtime: MacRuntime
+  let close: () -> Void
   @State private var query = MacProxyLaunch.search ?? ""
 
   var body: some View {
-    NavigationSplitView {
-      List { MacProxySidebar(store: store, runtime: runtime) }
-        .listStyle(.sidebar)
-        // Like the main window, no sidebar button in the title bar (⌃⌘S and Visualizar still hide it).
-        .toolbar(removing: .sidebarToggle)
-      .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
-    } detail: {
-      Group {
-        switch store.pane(runtime.proxyPane ?? .provider(.codex)) {
-        case .provider(let provider):
-          MacProxyProvider(store: store, runtime: runtime, provider: provider, query: query).id(provider)
-        case .resets:
-          MacProxyResets(store: store)
-        }
+    HStack(spacing: 0) {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 14) { MacProxySidebar(store: store, runtime: runtime) }
+          .padding(.horizontal, 16).padding(.vertical, 18)
       }
-      .frame(minWidth: 600, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
+      .frame(width: 230)
+      .background(theme.color(.surface).opacity(0.5))
+      Rectangle().fill(theme.color(.border)).frame(width: 0.7)
+      VStack(spacing: 0) {
+        header
+        Rectangle().fill(theme.color(.border)).frame(height: 0.7)
+        Group {
+          switch store.pane(runtime.proxyPane ?? .provider(.codex)) {
+          case .provider(let provider):
+            MacProxyProvider(store: store, runtime: runtime, provider: provider, query: query).id(provider)
+          case .resets:
+            MacProxyResets(store: store)
+          }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
       .background(theme.color(.background))
-    }
-    .navigationTitle("LLM proxy")
-    .searchable(text: $query, placement: .toolbar, prompt: "Buscar conta")
-    .toolbar {
-      ToolbarItem(placement: .primaryAction) {
-        Button { Task { await store.refresh() } } label: {
-          if store.loading { ProgressView().controlSize(.small) } else { Label("Atualizar", systemImage: "arrow.clockwise") }
-        }
-        .disabled(store.loading).help("Atualizar LLM proxy").accessibilityIdentifier("proxy-refresh")
-      }
     }
     .proxyActions(store)
     .task { await store.refresh(ifDue: true) }
+  }
+
+  private var header: some View {
+    HStack(spacing: 10) {
+      Text("LLM proxy").font(.title3.bold()).foregroundStyle(theme.color(.textStrong))
+      Spacer(minLength: 12)
+      HStack(spacing: 6) {
+        Image(systemName: "magnifyingglass").foregroundStyle(theme.color(.textSecondary))
+        TextField("Buscar conta", text: $query).textFieldStyle(.plain)
+      }
+      .padding(.horizontal, 8).frame(width: 220, height: 28)
+      .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 8))
+      .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(theme.color(.border), lineWidth: 0.7) }
+      Button { Task { await store.refresh() } } label: {
+        if store.loading { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
+      }
+      .buttonStyle(.borderless).frame(width: 28, height: 28)
+      .disabled(store.loading).help("Atualizar LLM proxy").accessibilityIdentifier("proxy-refresh")
+      Button("Fechar", action: close).keyboardShortcut(.cancelAction)
+    }
+    .padding(.horizontal, 20).padding(.vertical, 12)
   }
 }
 

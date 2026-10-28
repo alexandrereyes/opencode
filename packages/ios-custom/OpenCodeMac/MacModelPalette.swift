@@ -64,8 +64,16 @@ import SwiftUI
         panel?.setFrame(window.convertToScreen(window.contentLayoutRect), display: true)
       }
     }
-    monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak panel] event in
-      guard let self, event.window === panel, let state = self.state else { return event }
+    monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) {
+      [weak self, weak panel] event in
+      guard let self, let state = self.state else { return event }
+      // A click anywhere outside the palette (the title bar, Sessões behind a sheet, another window) closes it.
+      if event.type != .keyDown {
+        guard event.window !== panel else { return event }
+        state.dismiss()
+        return nil
+      }
+      guard event.window === panel else { return event }
       return state.key(event) ? nil : event
     }
     #if DEBUG

@@ -309,6 +309,22 @@ final class ComposerTextNSView: NSTextView {
     if let text = board.string(forType: .string) { insertText(text, replacementRange: selectedRange()) }
   }
 
+  // Rich text without graphics cannot read an image-only pasteboard (a screenshot), so AppKit would disable Paste
+  // (⌘V) before `paste(_:)` gets the chance to turn it into an attachment.
+  private var pastesAttachment: Bool {
+    isEditable && attach != nil && NSPasteboard.general.pasteboardItems?.contains(where: Self.attachable) == true
+  }
+
+  override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if menuItem.action == #selector(paste(_:)), pastesAttachment { return true }
+    return super.validateMenuItem(menuItem)
+  }
+
+  override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+    if item.action == #selector(paste(_:)), pastesAttachment { return true }
+    return super.validateUserInterfaceItem(item)
+  }
+
   static func attachable(_ item: NSPasteboardItem) -> Bool {
     item.types.contains(.fileURL) || item.types.contains(.png) || item.types.contains(.tiff)
       || item.types.contains(NSPasteboard.PasteboardType(UTType.jpeg.identifier))

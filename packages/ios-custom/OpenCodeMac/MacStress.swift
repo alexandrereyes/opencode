@@ -99,8 +99,8 @@ import SwiftUI
     }
     await step("Arquivos") { runtime.showFiles() }
     await step("fechar Arquivos") { runtime.selection.files = nil }
-    await step("LLM proxy") { openWindow(id: MacProxyWindow.id) }
-    await step("fechar LLM proxy") { NSApp.windows.first { $0.title == "LLM proxy" }?.close() }
+    await step("LLM proxy") { runtime.showProxy() }
+    await step("fechar LLM proxy") { runtime.proxyVisible = false }
     await step("Nova sessão") { runtime.newSession() }
     await step("fechar Nova sessão") { runtime.newSessionRequest = nil }
     if let error = await MacSearchChecks.run(runtime, other: second) { return finish(error, status: 1) }

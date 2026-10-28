@@ -39,6 +39,10 @@ import SwiftUI
     get { app.proxyPane }
     set { app.proxyPane = newValue }
   }
+  /// The LLM proxy modal over this window (a quota ring, ⇧⌘L, Janela ▸ LLM proxy).
+  var proxyVisible = false
+  /// Atalhos do teclado (⌘/, the keyboard in the project rail).
+  var shortcutsVisible = false
   var sessionSelection = SessionSelection()
   var bulkRequest: MacBulkRequest?
   var newSessionRequest: MacNewSessionRequest?
@@ -130,6 +134,11 @@ import SwiftUI
     selection.files = MacSelection.Files(folder: path, file: file)
   }
 
+  func showProxy(_ pane: SubscriptionPane? = nil) {
+    if let pane { proxyPane = pane }
+    proxyVisible = true
+  }
+
   func newSession() {
     newSessionRequest = MacNewSessionRequest(origin: nil, startInChats: true)
   }
@@ -161,6 +170,22 @@ import SwiftUI
       if selection.master { selection = MacSelection() }
       openMaster()
     }
+  }
+
+  /// ⌘L: the shown conversation's composer takes the keyboard with the caret at the end of its text, from anywhere
+  /// in the window (the search, Sessões, Contexto).
+  func focusComposer() {
+    guard let id = selection.childID ?? selection.sessionID else { return }
+    if search.visible { search.close(runtime: self, focusComposer: false) }
+    let draft = drafts.draft(id)
+    draft.focusSuppressed = false
+    if let view = draft.input, let window = view.window {
+      window.makeFirstResponder(view.textView)
+      let end = NSRange(location: view.textStorage.length, length: 0)
+      view.textView.setSelectedRange(end)
+      view.textView.scrollRangeToVisible(end)
+    }
+    draft.focused = true
   }
 
   func backToParent() {

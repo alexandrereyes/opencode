@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// The chat's composer on the iPhone's model (`ConversationDraft`, `ConversationStore.send`, `ComposerSources`):
 /// `@` sessions, apps, agents and references, `!` files, `/` commands, `$` skills and `#` snippets open the
 /// shared suggestion panel and become atomic colored tokens; `+`, dragging onto the window and pasting add
-/// attachments; quotes wait in `Citações · N`. Then the model, agent and MCP capsules and the microphone, which
+/// attachments; quotes wait in `Citações · N`. Then the model and agent capsules and the microphone, which
 /// turns into Enviar once there is something to send. Context and cache live in Contexto and the title's ring.
 ///
 /// Return sends and Shift+Return breaks the line (the Mac chat convention). Sending while the agent works uses
@@ -28,7 +28,6 @@ struct MacComposer: View {
   @State private var owner = UUID()
   @State private var suggestionReturn = ComposerSuggestionReturn()
   @State private var picking: MacPicker?
-  @State private var mcpOpen = false
 
   private var hasContent: Bool { draft.hasText || !draft.attachments.isEmpty || !draft.quotes.isEmpty }
   private var canSubmit: Bool {
@@ -143,7 +142,6 @@ struct MacComposer: View {
             .help("Modelo e esforço (⌥⌘M)")
             .accessibilityIdentifier("model-picker")
           agent
-          if store.mcps.summary.visible { mcp }
         }
         Spacer(minLength: 4)
         action
@@ -171,26 +169,6 @@ struct MacComposer: View {
     .help("Adicionar arquivos ou imagens (ou arraste para a janela, ou cole)")
     .accessibilityLabel("Adicionar")
     .disabled(draft.sending || draft.importing)
-  }
-
-  /// `● MCP · 1/4 ⌄`: the panel of the Location's MCP servers, each switched on or off.
-  private var mcp: some View {
-    let summary = store.mcps.summary
-    return Button {
-      mcpOpen.toggle()
-    } label: {
-      HStack(spacing: 4) {
-        Circle().fill(theme.color(summary.connected > 0 ? .success : .textWeak)).frame(width: 5, height: 5)
-        Text(summary.label).monospacedDigit()
-        Image(systemName: mcpOpen ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .semibold))
-      }
-      .appFont(.mcp).foregroundStyle(theme.color(.textSecondary))
-      .composerCapsule()
-    }
-    .buttonStyle(.plain).fixedSize()
-    .accessibilityLabel(summary.accessibilityLabel)
-    .accessibilityIdentifier("conversation-mcp-pill")
-    .popover(isPresented: $mcpOpen, arrowEdge: .top) { MacMCPPanel(store: store.mcps) }
   }
 
   @ViewBuilder private var action: some View {
@@ -575,37 +553,6 @@ private struct MacPickerSheet: View {
   }
 }
 #endif
-
-/// The MCP servers of the conversation's Location, each switched on or off (the iPhone's MCP panel).
-private struct MacMCPPanel: View {
-  @Environment(\.appTheme) private var theme
-  let store: ConversationMCPStore
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("MCPs").appFont(.secondary, weight: .medium).foregroundStyle(theme.color(.textSecondary))
-      if store.loading { ProgressView().controlSize(.small) }
-      if store.failed && !store.loading {
-        Button("Não foi possível carregar · Tentar novamente") { Task { await store.refresh() } }.buttonStyle(.plain)
-          .appFont(.caption)
-      }
-      ForEach(store.chips, id: \.name) { server in
-        Toggle(isOn: Binding(get: { server.status.status == .connected },
-          set: { _ in Task { await store.toggle(server) } })) {
-          HStack(spacing: 6) {
-            Text(server.name)
-            if server.status.status != .connected {
-              Text(server.status.status.label).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-            }
-          }
-        }
-        .toggleStyle(.switch).controlSize(.small)
-        .disabled(server.status.status == .pending)
-      }
-    }
-    .padding(14).frame(minWidth: 260)
-    .task { await store.refresh() }
-  }
-}
 
 private struct MacAttachmentChip: View {
   @Environment(\.appTheme) private var theme

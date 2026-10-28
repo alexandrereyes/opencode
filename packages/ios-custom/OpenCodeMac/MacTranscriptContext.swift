@@ -3,16 +3,24 @@ import Observation
 import OpenCodeKit
 import SwiftUI
 
-/// The project avatar of Sessões, beside the user's prompts: its own icon, or the monogram on its color.
+/// The avatar Sessões shows for the session, beside the user's prompts (`SessionAvatar`'s choice): the shared chat
+/// avatar, the project's own icon or its monogram on its color; the Sessão mestra's symbol for the master; and the
+/// OpenCode glyph when there is nothing else.
 struct MacTranscriptAvatar: Equatable {
-  let icon: ProjectIcon?
+  enum Kind: Equatable { case chats, icon(ProjectIcon), monogram, master, opencode }
+  let kind: Kind
   let color: String
   let monogram: String
 
-  init(_ row: SessionRow) {
-    icon = row.chat ? nil : ProjectIcon.of(row.project)
-    color = SessionList.avatarColor(row.project, fallback: row.session.projectID)
-    monogram = SessionList.monogram(row.projectName)
+  init(_ row: SessionRow?, mixChats: Bool, master: Bool) {
+    let monogram = row.map { SessionList.monogram($0.projectName) } ?? ""
+    self.monogram = monogram
+    color = row.map { SessionList.avatarColor($0.project, fallback: $0.session.projectID) } ?? ""
+    kind = if master { .master }
+      else if let row, row.sharesChatAvatar(mixed: mixChats) { .chats }
+      else if let row, !row.chat, let icon = ProjectIcon.of(row.project) { .icon(icon) }
+      else if !monogram.isEmpty { .monogram }
+      else { .opencode }
   }
 }
 
@@ -29,10 +37,10 @@ struct MacTranscriptAvatar: Equatable {
   /// window still gives the chat far more than the old 760 pt.
   static let column: CGFloat = 960
   static let minimumInset: CGFloat = 28
-  /// The icons beside the messages (24 pt) and their 10-pt gap: the answer's text starts after it, the prompt's
-  /// bubble ends before it.
-  static let gutter: CGFloat = 34
-  static let icon: CGFloat = 24
+  /// The icons beside the messages (28 pt, as in the approved mock) and their 10-pt gap: the answer's text starts
+  /// after it, the prompt's bubble ends before it.
+  static let gutter: CGFloat = 38
+  static let icon: CGFloat = 28
   /// Space on each side of the content column.
   var inset: CGFloat = 28
   /// The transcript's width.

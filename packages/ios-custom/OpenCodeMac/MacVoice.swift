@@ -116,7 +116,7 @@ struct MacVoiceSettings: View {
       }
     }.formStyle(.grouped)
       .sheet(isPresented: $transcript) {
-        if let store = runtime.store { VoiceTranscriptView(memory: store.voiceMemory) }
+        if let store = runtime.store { VoiceTranscriptView(memory: store.voiceMemory).macCancelable() }
       }
   }
 }

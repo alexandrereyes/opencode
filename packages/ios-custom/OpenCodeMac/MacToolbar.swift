@@ -23,13 +23,6 @@ struct MacToolbarFlexibleSpace: ToolbarContent {
   }
 }
 
-extension View {
-  /// A keyboard shortcut only where `enabled` (the menu bar), so the same item elsewhere does not register it again.
-  @ViewBuilder func shortcut(_ enabled: Bool, _ key: KeyEquivalent, modifiers: EventModifiers = .command) -> some View {
-    if enabled { keyboardShortcut(key, modifiers: modifiers) } else { self }
-  }
-}
-
 /// A small borderless title-bar icon with a hover highlight.
 struct MacToolbarIcon: View {
   @Environment(\.appTheme) private var theme
@@ -50,13 +43,15 @@ struct MacToolbarIcon: View {
   }
 }
 
-/// `…` (the session's actions) and Nova sessão, over Contexto or, with Contexto hidden, at the chat's end.
+/// The notifications bell, `…` (the session's actions) and Nova sessão, over Contexto or, with Contexto hidden, at
+/// the chat's end.
 struct MacSessionActions: View {
   @Bindable var store: SessionStore
   @Bindable var runtime: MacWindowRuntime
 
   var body: some View {
     HStack(spacing: 2) {
+      MacNotificationBell(store: store, runtime: runtime)
       if runtime.selection.master && runtime.selection.childID == nil {
         // The iPhone's master conversation shows this trash instead of the session menu.
         Button { runtime.resetMaster() } label: { MacToolbarIcon(symbol: "trash") }
@@ -113,16 +108,16 @@ struct MacSessionMenuItems: View {
     Button("Nova sessão a partir desta", systemImage: "square.and.pencil") {
       if let id = row?.id { runtime.newSession(from: id) }
     }
-    .shortcut(shortcuts, "n", modifiers: [.command, .shift])
+    .shortcut(.fromThis, enabled: shortcuts)
     .disabled(row == nil || store.preferences == nil)
     Divider()
     Button("Renomear…", systemImage: "pencil") { runtime.renameRequest = row }
-      .shortcut(shortcuts, "r", modifiers: [.command, .shift])
+      .shortcut(.rename, enabled: shortcuts)
       .disabled(row == nil)
     Button(row?.pinned == true ? "Desafixar" : "Fixar", systemImage: row?.pinned == true ? "pin.slash" : "pin") {
       if let row { Task { await store.pin(row) } }
     }
-    .shortcut(shortcuts, "p", modifiers: [.command, .shift])
+    .shortcut(.pin, enabled: shortcuts)
     .disabled(row == nil)
     Button(row?.muted == true ? "Reativar" : "Silenciar", systemImage: row?.muted == true ? "bell" : "bell.slash") {
       if let row { Task { await store.mute(row) } }
@@ -134,10 +129,10 @@ struct MacSessionMenuItems: View {
     .disabled(row?.unread != true)
     Divider()
     Button("Arquivar…", systemImage: "archivebox") { runtime.archiveRequest = row }
-      .shortcut(shortcuts, "a", modifiers: [.command, .shift])
+      .shortcut(.archive, enabled: shortcuts)
       .disabled(row == nil)
     Button("Excluir sessão…", systemImage: "trash", role: .destructive) { runtime.deleteRequest = row?.session }
-      .shortcut(shortcuts, .delete, modifiers: [.command, .option])
+      .shortcut(.delete, enabled: shortcuts)
       .disabled(row == nil || runtime.sessionSelection.active)
   }
 }

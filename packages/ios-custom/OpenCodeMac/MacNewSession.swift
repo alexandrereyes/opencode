@@ -65,7 +65,7 @@ struct MacNewSession: View {
       dismiss()
     }
     .sheet(isPresented: $addingProject) {
-      AddProjectPicker(store: store.sessions) { project in await store.selectProject(project) }
+      AddProjectPicker(store: store.sessions) { project in await store.selectProject(project) }.macCancelable()
     }
   }
 
@@ -238,7 +238,7 @@ struct MacNewSession: View {
       }
       Button("Cancelar", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
       Button(store.sending ? "Enviando…" : "Enviar") { Task { await store.send() } }
-        .keyboardShortcut(.return, modifiers: .command)
+        .shortcut(.createSession)
         .buttonStyle(.borderedProminent)
         .disabled(!store.canSend)
         .help("Enviar (⌘Return)")

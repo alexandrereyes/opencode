@@ -5,9 +5,11 @@ import SwiftUI
 struct MacProjectRail: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.openSettings) private var openSettings
   let store: SessionStore
   let action: (String, PreferenceIntent) -> Void
   let add: () -> Void
+  let shortcuts: () -> Void
   @State private var shown: [String] = []
   @State private var scrolling = false
   @State private var dragging = false
@@ -28,6 +30,29 @@ struct MacProjectRail: View {
     let items = items
     let desired = items.map(\.id)
     let order = shown.filter(desired.contains) + desired.filter { !shown.contains($0) }
+    VStack(spacing: 0) {
+      projects(items: items, desired: desired, order: order)
+      footer
+    }
+    .frame(width: 52).frame(maxHeight: .infinity)
+    .background(theme.color(.surface).opacity(0.35))
+    .overlay(alignment: .trailing) { Rectangle().fill(theme.color(.border)).frame(width: 0.7) }
+    .buttonStyle(.plain).accessibilityIdentifier("project-rail")
+  }
+
+  /// Pinned to the rail's foot, outside the scrolling projects: Atalhos do teclado above Ajustes.
+  private var footer: some View {
+    VStack(spacing: 9) {
+      Button(action: shortcuts) { tile(name: "Atalhos do teclado", symbol: "keyboard", selected: false, count: 0) }
+        .help("Atalhos do teclado (⌘/)").accessibilityLabel("Atalhos do teclado")
+        .accessibilityIdentifier("rail-shortcuts")
+      Button { openSettings() } label: { tile(name: "Ajustes", symbol: "gearshape", selected: false, count: 0) }
+        .help("Ajustes (⌘,)").accessibilityLabel("Ajustes").accessibilityIdentifier("rail-settings")
+    }
+    .padding(.top, 6).padding(.bottom, 10)
+  }
+
+  private func projects(items: [ProjectRail.Item], desired: [String], order: [String]) -> some View {
     ScrollViewReader { proxy in
       ScrollView(.vertical) {
         VStack(spacing: 9) {
@@ -55,10 +80,7 @@ struct MacProjectRail: View {
       .onChange(of: store.selectedProject) { _, key in if let key { proxy.scrollTo(key) } }
       .onScrollPhaseChange { _, phase in scrolling = phase != .idle; if !scrolling { schedule(desired) } }
     }
-    .frame(width: 52).frame(maxHeight: .infinity)
-    .background(theme.color(.surface).opacity(0.35))
-    .overlay(alignment: .trailing) { Rectangle().fill(theme.color(.border)).frame(width: 0.7) }
-    .buttonStyle(.plain).accessibilityIdentifier("project-rail")
+    .frame(maxHeight: .infinity)
   }
 
   /// The exact chip semantics, also used by window search.
@@ -120,8 +142,9 @@ struct MacProjectRail: View {
     ZStack {
       RoundedRectangle(cornerRadius: 10).fill(theme.color(selected ? .primary : .surface).opacity(selected ? 0.10 : 1))
         .frame(width: 40, height: 42)
-      Group {
-        if let project, let icon = ProjectIcon.of(project) {
+      let icon = project.flatMap { ProjectIcon.of($0) }
+      ZStack {
+        if let icon {
           MacRailProjectIcon(icon: icon)
         } else if let symbol {
           Image(systemName: symbol).font(.system(size: 20, weight: .medium))
@@ -130,7 +153,8 @@ struct MacProjectRail: View {
         }
       }
       .foregroundStyle(theme.color(.text)).frame(width: 32, height: 32)
-      .background(theme.color(.highlight).opacity(symbol == nil ? 0.45 : 0), in: RoundedRectangle(cornerRadius: 8))
+      .background(theme.color(.highlight).opacity(symbol == nil && icon == nil ? 0.45 : 0),
+        in: RoundedRectangle(cornerRadius: 8))
       .clipShape(RoundedRectangle(cornerRadius: 8))
     }
     .frame(width: 52, height: 44)
@@ -154,13 +178,17 @@ struct MacProjectRail: View {
   }
 }
 
+/// A ZStack, not a Group: a Group hands `.task` to its children, so with no image yet there was none to run it and
+/// the icon never loaded, leaving the empty tile.
 private struct MacRailProjectIcon: View {
+  @Environment(\.appTheme) private var theme
   let icon: ProjectIcon
   @State private var image: CGImage?
   var body: some View {
-    Group {
+    ZStack {
+      theme.color(.surfaceRaised)
       if let image = ProjectIconCache.shared.cached(icon) ?? image {
-        Image(decorative: image, scale: 1).resizable().scaledToFit()
+        Image(decorative: image, scale: 1).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
       }
     }
     .task(id: icon.key) { image = await ProjectIconCache.shared.image(icon) { await ProjectIconRenderer.render($0, pixels: $1) } }

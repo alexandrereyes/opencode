@@ -103,7 +103,6 @@ struct MacConversationView: View {
   @State private var quoteEditing: ChatQuote?
   @State private var quoteRevealed: String?
   @State private var quoteTask: Task<Void, Never>?
-  @State private var viewing: MacViewedImage?
   @State private var dropping = false
   @State private var playerHeight: CGFloat = 0
   @State private var chatWidth: CGFloat = 800
@@ -190,9 +189,9 @@ struct MacConversationView: View {
             transcript?.reveal(messageID: id, animated: true)
           }
         }, close: { quoteDetail = nil })
+        .macCancelable()
       }
     }
-    .sheet(item: $viewing) { image in MacImageSheet(image: image) }
     .sheet(item: $conversation.sideQuestion) { launch in MacSideQuestionSheet(store: conversation, launch: launch) }
     .onChange(of: conversation.reversion.boundary(conversation.session)) { _, _ in conversation.updateActivity() }
     .onChange(of: search.query) { _, _ in
@@ -234,7 +233,7 @@ struct MacConversationView: View {
       // `-OpenCodeMacAjustes image`: the image viewer over the conversation, for its ⌘C check.
       guard MacAjustesChecks.mode == "image", !conversation.isChild, let image = MacAjustesChecks.sample else { return }
       try? await Task.sleep(for: .seconds(2))
-      viewing = MacViewedImage(image: image, name: "Personagens")
+      MacImageWindow.show(MacViewedImage(image: image, name: "Personagens"), theme: theme, over: runtime.window)
     }
     .onChange(of: conversation.hasTranscript, initial: true) { _, loaded in
       // Captures can show the first activity card open (`-OpenCodeMacOpenActivity`), like the approved mock.
@@ -283,8 +282,9 @@ struct MacConversationView: View {
       search: ConversationSearchHighlight(matches: search.matches, current: search.current?.id),
       bottomPadding: playerHeight > 0 ? playerHeight + 24 : 16
     ) { context in
-      let avatar = (sessions.rows.first { $0.id == conversation.id }
-        ?? sessions.rows.first { $0.memberIDs.contains(conversation.id) }).map(MacTranscriptAvatar.init)
+      let avatar = MacTranscriptAvatar(sessions.rows.first { $0.id == conversation.id }
+        ?? sessions.rows.first { $0.memberIDs.contains(conversation.id) },
+        mixChats: !sessions.chatsSelected, master: master || conversation.id == sessions.masterID)
       if context.avatar != avatar { context.avatar = avatar }
       context.openChild = { id in open(child: id) }
       context.openPath = { path in openFile(path) }
@@ -292,10 +292,10 @@ struct MacConversationView: View {
       context.comment = { quote in commenting = quote }
       context.openImage = { image, name, source in
         let directory = conversation.session?.location.directory
-        viewing = MacViewedImage(image: image, name: name, original: { [client = sessions.client] in
+        MacImageWindow.show(MacViewedImage(image: image, name: name, original: { [client = sessions.client] in
           guard let directory else { return nil }
           return try? await FeedImageLoader.shared.load(source, client: client, directory: directory)
-        })
+        }), theme: theme, over: runtime.window)
       }
       context.readAloud = { id in
         guard let response = ReadAloud.response(conversation.messages, endingAt: id, sessionID: conversation.id),
@@ -511,37 +511,6 @@ struct MacViewedImage: Identifiable {
   let name: String
   /// The original file, read on demand (the chat shows a downscaled copy).
   var original: (() async -> CGImage?)? = nil
-}
-
-/// An image from the conversation at full size: ⌘C (or the right-click menu) copies it, and it drags out to the
-/// Finder or another app as a PNG.
-private struct MacImageSheet: View {
-  @Environment(\.dismiss) private var dismiss
-  let image: MacViewedImage
-  @State private var original: CGImage?
-  private var shown: CGImage { original ?? image.image }
-  var body: some View {
-    VStack(spacing: 0) {
-      HStack {
-        Text(image.name).lineLimit(1)
-        Spacer()
-        Button("Copiar imagem", systemImage: "doc.on.doc") { MacImageTransfer.copy(shown) }
-          .keyboardShortcut("c", modifiers: .command)
-          .help("Copiar imagem (⌘C)")
-        Button("Fechar") { dismiss() }.keyboardShortcut(.cancelAction)
-      }
-      .padding(12)
-      ScrollView([.horizontal, .vertical]) {
-        Image(decorative: shown, scale: 2)
-          .onDrag { MacImageTransfer.provider(shown, name: image.name) }
-          .contextMenu { MacImageMenu(image: shown) }
-          .accessibilityLabel(image.name)
-      }
-    }
-    .frame(minWidth: 520, idealWidth: min(CGFloat(image.image.width) / 2 + 40, 1100), minHeight: 400,
-      idealHeight: min(CGFloat(image.image.height) / 2 + 80, 800))
-    .task { original = await image.original?() }
-  }
 }
 
 /// Copiar imagem, for an image in the chat and in its viewer.

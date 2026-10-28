@@ -190,7 +190,7 @@ import SwiftUI
         return item
       })
     }
-    let sheet = try await wait("visualizador") { window.attachedSheet }
+    let sheet = try await wait("visualizador") { NSApp.windows.first { $0.isVisible && $0.title == "Personagens" } }
     shot("visualizador")
     NSPasteboard.general.clearContents()
     let event = key("c", code: 8, flags: .command, window: sheet)

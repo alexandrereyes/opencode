@@ -82,28 +82,77 @@ struct MacResponseIcon: View {
   }
 }
 
-/// The session's project avatar beside a prompt, as in Sessões: its icon, or its monogram on its color.
+/// The session's avatar beside a prompt, as in Sessões (`MacTranscriptAvatar`). Never an empty disc: a project
+/// icon shows its monogram until it decodes, and keeps it if it never does.
 struct MacPromptAvatar: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.displayScale) private var displayScale
   let avatar: MacTranscriptAvatar?
+  var size: CGFloat = MacTranscriptContext.icon
+  @State private var image: CGImage?
+
   var body: some View {
-    let side = MacTranscriptContext.icon
-    Group {
-      if let icon = avatar?.icon {
-        ProjectIconAvatar(icon: icon, size: side)
-      } else if let avatar {
-        let colors = theme.avatar(avatar.color)
-        Circle().fill(colors.background)
-          .overlay {
-            Text(avatar.monogram).font(.system(size: 10, weight: .semibold)).foregroundStyle(colors.text)
-              .lineLimit(1).minimumScaleFactor(0.6)
-          }
-      } else {
+    let side = size
+    ZStack {
+      switch avatar?.kind ?? .opencode {
+      case .chats:
+        Circle().fill(theme.color(.chatAvatar))
+        Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: side * 0.38, weight: .semibold))
+          .foregroundStyle(theme.color(.chatAvatarSymbol))
+      case .icon(let icon):
+        if let image = ProjectIconCache.shared.cached(icon) ?? image {
+          Circle().fill(theme.color(.surfaceRaised))
+          Image(decorative: image, scale: 1).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+            .frame(width: side, height: side).clipShape(Circle())
+          Circle().strokeBorder(theme.color(.border), lineWidth: 1 / displayScale)
+        } else {
+          monogram
+        }
+      case .monogram:
+        monogram
+      case .master:
+        Circle().fill(theme.color(.surface))
+        Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: side * 0.46, weight: .medium))
+          .foregroundStyle(theme.color(.accent))
+        Circle().strokeBorder(theme.color(.border), lineWidth: 1 / displayScale)
+      case .opencode:
         Circle().fill(theme.color(.surfaceRaised))
+        MacOpenCodeGlyph().foregroundStyle(theme.color(.icon)).frame(width: side * 0.62, height: side * 0.4)
+        Circle().strokeBorder(theme.color(.border), lineWidth: 1 / displayScale)
       }
     }
     .frame(width: side, height: side)
+    .task(id: iconKey) {
+      guard case .icon(let icon) = avatar?.kind else { return }
+      image = await ProjectIconCache.shared.image(icon) { await ProjectIconRenderer.render($0, pixels: $1) }
+    }
     .accessibilityHidden(true)
+  }
+
+  private var iconKey: String? { if case .icon(let icon) = avatar?.kind { icon.key } else { nil } }
+
+  @ViewBuilder private var monogram: some View {
+    let colors = theme.avatar(avatar?.color ?? "")
+    Circle().fill(colors.background)
+    Text(avatar?.monogram ?? "").font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(colors.text)
+      .lineLimit(1).minimumScaleFactor(0.6)
+  }
+}
+
+/// The OpenCode mascot's face as a flat glyph in the current foreground style: the head with its ears, and the eyes.
+private struct MacOpenCodeGlyph: View {
+  var body: some View {
+    Canvas { context, size in
+      let w = size.width, h = size.height
+      var head = Path(roundedRect: CGRect(x: w * 0.1, y: 0, width: w * 0.8, height: h), cornerRadius: h * 0.5)
+      head.addRoundedRect(in: CGRect(x: 0, y: h * 0.28, width: w, height: h * 0.44), cornerSize: CGSize(width: h * 0.2, height: h * 0.2))
+      let visor = Path(roundedRect: CGRect(x: w * 0.24, y: h * 0.24, width: w * 0.52, height: h * 0.52), cornerRadius: h * 0.26)
+      context.fill(head.subtracting(visor), with: .foreground)
+      for x in [0.4, 0.6] {
+        context.fill(Path(roundedRect: CGRect(x: w * x - w * 0.035, y: h * 0.36, width: w * 0.07, height: h * 0.28),
+          cornerRadius: w * 0.035), with: .foreground)
+      }
+    }
   }
 }
 

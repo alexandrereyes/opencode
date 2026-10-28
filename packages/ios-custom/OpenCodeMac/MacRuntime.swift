@@ -15,6 +15,8 @@ import SwiftUI
   var error: String?
   var proxyPane: SubscriptionPane? = MacProxyLaunch.pane ?? .provider(.codex)
   var windows: [UUID: MacWindowRuntime] = [:]
+  /// The bell's list in every window (`MacNotificationBell`).
+  let alertInbox = MacAlertInbox()
   weak var front: MacWindowRuntime?
   var initialSelection: MacSelection?
   var pendingNotification: (id: String, server: String?)?
@@ -88,6 +90,7 @@ import SwiftUI
     withObservationTracking {
       if let message = store.alerts.message {
         MacNotifications.shared.post(message, server: store.client.configuration.url)
+        alertInbox.record(message)
       }
       MacNotifications.shared.badge(store.requestCount)
       if let id = store.conversationPath.last?.id {

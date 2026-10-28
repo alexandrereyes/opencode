@@ -375,7 +375,6 @@ private struct MacModelSettings: View {
 // MARK: - Subscriptions and about
 
 private struct MacSubscriptionSettings: View {
-  @Environment(\.openWindow) private var openWindow
   @Environment(\.appTheme) private var theme
   let runtime: MacRuntime
   var body: some View {
@@ -384,8 +383,10 @@ private struct MacSubscriptionSettings: View {
         Section {
           ForEach(store.quota.providers) { provider in
             Button {
-              runtime.proxyPane = .provider(provider)
-              openWindow(id: MacProxyWindow.id)
+              // Over the front main window, which comes forward with it.
+              guard let front = runtime.front ?? runtime.windows.values.first else { return }
+              front.window?.makeKeyAndOrderFront(nil)
+              front.showProxy(.provider(provider))
             } label: {
               SubscriptionCompactRow(store: store.quota, provider: provider)
             }
@@ -398,7 +399,7 @@ private struct MacSubscriptionSettings: View {
           Text("LLM proxy")
         } footer: {
           HStack {
-            Text("Contas, limites, renovações e redefinições na janela LLM proxy (⇧⌘L).")
+            Text("Contas, limites, renovações e redefinições no LLM proxy (⇧⌘L).")
             Spacer()
             Button("Atualizar") { Task { await store.quota.refresh() } }
           }

@@ -25,7 +25,7 @@ struct MacContextColumn: View {
   }
 }
 
-/// Contexto top to bottom: the summary line, the three large figures, the cost line, then Subagentes,
+/// Contexto top to bottom: the summary line, the three large figures, the cost line, then Subagentes, MCPs,
 /// Tarefas and Recursos.
 struct ContextColumnSections: View {
   @Environment(\.appTheme) private var theme
@@ -46,6 +46,11 @@ struct ContextColumnSections: View {
         .lineLimit(1).padding(.vertical, 10)
       ContextHairline()
       ContextSubagents(store: store, runtime: runtime).padding(.top, 14)
+      if let mcps = store.sessions.liveConversation(runtime.selection.childID ?? store.id)?.mcps,
+        mcps.summary.visible {
+        ContextHairline()
+        ContextMCPs(store: mcps).padding(.top, 14)
+      }
       if !store.tasks.isEmpty {
         ContextHairline()
         ContextTasks(store: store).padding(.top, 14)
@@ -399,6 +404,60 @@ private struct ContextSpinner: View {
       .rotationEffect(.degrees(turning ? 360 : 0))
       .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: turning)
       .onAppear { turning = true }
+  }
+}
+
+// MARK: - MCPs
+
+/// `MCPS  1/4`: the conversation's MCP servers with a switch each, on the composer panel's store, routes, order
+/// and rules (`ConversationMCPStore`): a server needing login sends to the web, a pending one waits.
+private struct ContextMCPs: View {
+  @Environment(\.appTheme) private var theme
+  let store: ConversationMCPStore
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      ContextSectionLabel(title: "MCPs", count: "\(store.summary.connected)/\(store.summary.total)").padding(.bottom, 4)
+      if store.failed && !store.loading {
+        Button("Não foi possível carregar · Tentar novamente") { Task { await store.refresh() } }
+          .buttonStyle(.plain).appFont(.caption).foregroundStyle(theme.color(.textSecondary)).padding(.vertical, 8)
+      }
+      ForEach(Array(store.chips.enumerated()), id: \.element.name) { index, server in
+        if index > 0 { ContextHairline() }
+        row(server)
+      }
+    }
+  }
+
+  private func row(_ server: MCPServer) -> some View {
+    let state = server.status.status
+    return HStack(spacing: 10) {
+      Image(systemName: "puzzlepiece.extension").font(.system(size: 13)).foregroundStyle(theme.color(.icon))
+        .frame(width: 18).accessibilityHidden(true)
+      Text(server.name).appFont(.caption).foregroundStyle(theme.color(.text)).lineLimit(1).truncationMode(.middle)
+      Spacer(minLength: 8)
+      if state == .pending {
+        ProgressView().controlSize(.mini)
+      } else if let label = label(server) {
+        Text(label).appFont(.caption).foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
+          .truncationMode(.tail).help(server.status.error ?? label)
+      }
+      Toggle(server.name, isOn: Binding(get: { state == .connected }, set: { _ in Task { await store.toggle(server) } }))
+        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+        .disabled(state == .pending || state == .unknown)
+    }
+    .padding(.vertical, 6)
+    .accessibilityElement(children: .combine)
+  }
+
+  private func label(_ server: MCPServer) -> String? {
+    switch server.status.status {
+    case .connected: "conectado"
+    case .needsAuth: "exige login no web"
+    case .failed: server.status.error ?? "falhou"
+    case .unknown: "indisponível"
+    case .disabled, .pending: nil
+    }
   }
 }
 

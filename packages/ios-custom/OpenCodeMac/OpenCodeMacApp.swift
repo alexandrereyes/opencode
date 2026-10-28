@@ -11,6 +11,7 @@ struct OpenCodeMacApp: App {
     FilePreviewStorage.clean()
     MacNotifications.shared.start()
     MacAudioDevices.shared.start()
+    MacOutsideClick.start()
     if !MacLaunch.fixture { TranscriptionController.shared.start() }
     #if DEBUG
     MacStress.openWindowIfNeeded()
@@ -40,14 +41,6 @@ struct OpenCodeMacApp: App {
       if let target { MacThemed(runtime: runtime) { MacShellOutputWindow(target: target, runtime: runtime) } }
     }
     .defaultSize(width: 760, height: 520)
-
-    // One LLM proxy window; it keeps its frame between openings and is listed in the Window menu.
-    Window("LLM proxy", id: MacProxyWindow.id) {
-      MacThemed(runtime: runtime) { MacProxyWindow(runtime: runtime) }
-    }
-    .defaultSize(width: 1000, height: 640)
-    .windowResizability(.contentMinSize)
-    .keyboardShortcut("l", modifiers: [.command, .shift])
 
     Settings {
       MacThemed(runtime: runtime) { MacSettingsView(runtime: runtime) }
@@ -133,7 +126,7 @@ private struct MacWindowScene: View {
 
 /// The menu bar: Arquivo (Nova sessão, Nova janela, Atualizar), Visualizar (Contexto, Arquivos, the state filters),
 /// Sessão (the selected session's actions and the selection mode), Ir (search, back, previous/next, Sessão mestra,
-/// voice, ⌘1…⌘9) and the LLM proxy window in Janela.
+/// voice, ⌘1…⌘9) and the LLM proxy modal in Janela.
 private struct MacCommands: Commands {
   @Environment(\.openWindow) private var openWindow
   @FocusedValue(\.macWindow) private var runtime
@@ -142,20 +135,20 @@ private struct MacCommands: Commands {
   var body: some Commands {
     CommandGroup(replacing: .newItem) {
       Button("Nova sessão") { runtime?.newSession() }
-        .keyboardShortcut("n", modifiers: .command)
+        .shortcut(.newSession)
         .disabled(runtime?.store?.preferences == nil)
       Button("Nova janela") { openWindow(id: "main", value: MacWindowTarget()) }
-        .keyboardShortcut("n", modifiers: [.command, .option])
+        .shortcut(.newWindow)
       Divider()
       Button("Atualizar sessões") { Task { await runtime?.store?.reload() } }
-        .keyboardShortcut("r", modifiers: .command)
+        .shortcut(.reload)
     }
     CommandGroup(after: .sidebar) {
       if let runtime {
         Button(runtime.contextVisible ? "Ocultar contexto" : "Mostrar contexto") { runtime.contextVisible.toggle() }
-          .keyboardShortcut("i", modifiers: [.command, .option])
+          .shortcut(.context)
         Button("Arquivos") { runtime.showFiles() }
-          .keyboardShortcut("f", modifiers: [.command, .shift])
+          .shortcut(.files)
         if let store = runtime.store {
           Picker("Filtrar sessões", selection: Binding(get: { store.filter }, set: { store.filter = $0 })) {
             ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
@@ -166,12 +159,23 @@ private struct MacCommands: Commands {
     }
     CommandGroup(after: .textEditing) {
       Button("Buscar na conversa") { NotificationCenter.default.post(name: .macSearchConversation, object: runtime?.id) }
-        .keyboardShortcut("f", modifiers: .command)
+        .shortcut(.find)
         .disabled(runtime == nil)
+    }
+    CommandGroup(before: .help) {
+      Button("Atalhos do teclado") { runtime?.shortcutsVisible = true }
+        .shortcut(.shortcuts)
+        .disabled(runtime == nil)
+    }
+    CommandGroup(after: .windowArrangement) {
+      Divider()
+      Button("LLM proxy") { runtime?.showProxy() }
+        .shortcut(.proxy)
+        .disabled(runtime?.store == nil)
     }
     CommandMenu("Sessão") {
       Button("Escolher modelo e esforço…") { runtime?.openModelPalette() }
-        .keyboardShortcut("m", modifiers: [.command, .option])
+        .shortcut(.model)
         .disabled(runtime == nil)
       if let runtime, let store = runtime.store {
         MacSessionMenuItems(store: store, runtime: runtime, shortcuts: true)
@@ -180,7 +184,7 @@ private struct MacCommands: Commands {
           if !runtime.sessionSelection.active, let id = runtime.selection.sessionID { runtime.sessionSelection.start(id) }
           runtime.bulkRequest = .selectAll
         }
-        .keyboardShortcut("a", modifiers: [.command, .option])
+        .shortcut(.selectAll)
         Button("Arquivar selecionadas") { runtime.bulkRequest = .archive }
           .disabled(!runtime.sessionSelection.active)
         Button("Excluir selecionadas…") { runtime.bulkRequest = .delete }
@@ -196,20 +200,23 @@ private struct MacCommands: Commands {
     CommandMenu("Ir") {
       if let runtime {
         Button("Buscar projetos e sessões…") { runtime.search.open() }
-          .keyboardShortcut("k", modifiers: .command)
+          .shortcut(.search)
           .disabled(runtime.store == nil)
+        Button("Escrever mensagem") { runtime.focusComposer() }
+          .shortcut(.compose)
+          .disabled(runtime.selection.sessionID == nil)
         Divider()
         // ⌘[ is the Mac's Back; the list's neighbors take ⌥⌘↑/⌥⌘↓.
         Button("Voltar à sessão principal") { runtime.backToParent() }
-          .keyboardShortcut("[", modifiers: .command)
+          .shortcut(.back)
           .disabled(runtime.selection.childID == nil)
         Button("Sessão anterior") { runtime.selectNeighbor(-1) }
-          .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+          .shortcut(.previous)
         Button("Próxima sessão") { runtime.selectNeighbor(1) }
-          .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+          .shortcut(.next)
         Divider()
         Button("Sessão mestra") { runtime.openMaster() }
-          .keyboardShortcut("m", modifiers: [.command, .shift])
+          .shortcut(.master)
           .disabled(runtime.store?.masterAvailability != .available)
         if let store = runtime.store {
           Button(runtime.voicePresentation.visible(runtime.app.audio.voice) ? "Encerrar conversa por voz"

@@ -173,14 +173,14 @@ import SwiftUI
     return base
   }
 
-  /// The LLM proxy window (`-OpenCodeMacProxy codex|anthropic|resets`), off-screen at
+  /// The LLM proxy modal over the window (`-OpenCodeMacProxy codex|anthropic|resets`), off-screen at
   /// `-OpenCodeMacCaptureSize WxH` (1200×800 by default). `-OpenCodeMacProxyAction confirm|applying` asks to use
   /// a reset of `-OpenCodeMacProxyAccount` first: `confirm` leaves the dialog open (drawn over the window),
   /// `applying` confirms it at once against the fixture.
   static func proxy(runtime: MacRuntime, theme: AppTheme) async {
     guard let folder, MacProxyLaunch.pane != nil else { return }
     try? await Task.sleep(for: .milliseconds(500))
-    guard let window = NSApp.windows.first(where: { $0.title == "LLM proxy" }) else { return }
+    guard let window = NSApp.windows.first(where: { $0.attachedSheet != nil && $0.canBecomeMain }) else { return }
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
     let size = MacFixture.value("-OpenCodeMacCaptureSize")?.split(separator: "x").compactMap { Double($0) }
@@ -199,16 +199,7 @@ import SwiftUI
       }
       try? await Task.sleep(for: .seconds(1.5))
     }
-    let sidebar = runtime.store.map { store in
-      VStack(alignment: .leading, spacing: 14) { MacProxySidebar(store: store.quota, runtime: runtime) }
-        .padding(.horizontal, 16).frame(width: 230, alignment: .topLeading)
-        .environment(\.appTheme, theme).environment(\.locale, Locale(identifier: "pt_BR"))
-        .environment(\.colorScheme, theme.dark ? .dark : .light)
-    }
-    if let picture = picture(window, sidebar: sidebar),
-      let png = NSBitmapImageRep(cgImage: picture).representation(using: .png, properties: [:]) {
-      try? png.write(to: URL(fileURLWithPath: folder + "/" + name + ".png"))
-    }
+    shot(window, theme: theme, to: folder + "/" + name + ".png")
     if quits { NSApp.terminate(nil) }
   }
 
@@ -222,52 +213,9 @@ import SwiftUI
     try? png.write(to: URL(fileURLWithPath: path))
   }
 
-  /// The window with an attached sheet (a dialog) drawn over it. While the screen is locked the window server
-  /// hands back blank pictures, so AppKit draws the views instead; it cannot draw the Liquid Glass sidebar, so
-  /// the sidebar's own rows are rendered over that column.
-  private static func picture(_ window: NSWindow, sidebar: (some View)?) -> CGImage? {
-    let locked = screenLocked
-    func draw(_ window: NSWindow) -> CGImage? { (locked ? nil : image(of: window)) ?? drawn(window) }
-    guard var base = draw(window) else { return nil }
-    if locked, let sidebar, let column = sidebarColumn(window) {
-      let renderer = ImageRenderer(content: sidebar)
-      renderer.scale = Double(base.width) / window.frame.width
-      if let rows = renderer.cgImage { base = overlay(base, window, rows, column) ?? base }
-    }
-    return window.attachedSheet.flatMap { sheet in draw(sheet).flatMap { compose(base, window, $0, sheet) } } ?? base
-  }
-
   /// While the screen is locked the window server returns blank pictures of every window.
   private static var screenLocked: Bool {
     (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool == true
-  }
-
-  /// The split view's first column, in window coordinates.
-  private static func sidebarColumn(_ window: NSWindow) -> NSRect? {
-    func find(_ view: NSView) -> NSSplitView? {
-      if let split = view as? NSSplitView { return split }
-      return view.subviews.lazy.compactMap(find).first
-    }
-    guard let root = window.contentView?.superview ?? window.contentView, let split = find(root),
-      let column = split.arrangedSubviews.first else { return nil }
-    return column.convert(column.bounds, to: nil)
-  }
-
-  /// Fills the blank column with the window background and draws the rows below the title bar.
-  private static func overlay(_ base: CGImage, _ window: NSWindow, _ rows: CGImage, _ column: NSRect) -> CGImage? {
-    let scale = Double(base.width) / window.frame.width
-    guard let context = CGContext(data: nil, width: base.width, height: base.height, bitsPerComponent: 8,
-      bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-    else { return nil }
-    context.draw(base, in: CGRect(x: 0, y: 0, width: base.width, height: base.height))
-    let titleBar = 52.0
-    let area = CGRect(x: column.minX * scale, y: column.minY * scale, width: column.width * scale,
-      height: (column.height - titleBar) * scale)
-    context.setFillColor(NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)?.cgColor ?? CGColor(gray: 0.12, alpha: 1))
-    context.fill(area)
-    context.draw(rows, in: CGRect(x: area.minX + (area.width - Double(rows.width)) / 2,
-      y: area.maxY - Double(rows.height) - 8 * scale, width: Double(rows.width), height: Double(rows.height)))
-    return context.makeImage()
   }
 
   private static func drawn(_ window: NSWindow) -> CGImage? {
