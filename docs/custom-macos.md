@@ -439,6 +439,20 @@ be installed. `up` builds the plugin and custom web assets with service-worker r
 disabled, starts `custom-server.ts`, and waits for authenticated `/api/info`. An already
 healthy owned sandbox is left untouched; use `down` then `up` to rebuild changed source.
 
+The sandbox loads the plugin's `tsc` output (`packages/plugin-app-custom/dist`), unlike the release,
+which bundles `src` with Bun through `custom-plugin.ts` and embeds text imports. The package `build`
+therefore copies every non-TypeScript file under `src` beside the compiled modules
+(`script/copy-assets.ts`): `voice/voice.md`, imported `with { type: "text" }`, is the only one today,
+and new ones are covered without listing them. The sandbox keeps loading `dist` rather than a bundle
+because the resources hub then runs `hub/bin.js` and resolves `@expo/serve-sim` from the plugin's own
+dependencies; a bundle outside the release layout would need a copied serve-sim.
+
+A server whose plugin fails to load stays healthy with no custom RPC, tool or route. `up` therefore
+also waits up to 60 s for `custom.preferences/get` to answer, also on an already healthy sandbox.
+When the plugin is listed as failed or never answers, it stops the sandbox and exits with an error
+pointing to `failed to load plugin` in the private `server.log`, so no test runs against a sandbox
+without the custom functions.
+
 The script discovers configuration/database paths through the installed `manual.json`,
 loads `environment.sh` privately, copies configuration without backups or service credentials,
 and redirects config, database, data, state and cache to the sandbox. Its first startup runs

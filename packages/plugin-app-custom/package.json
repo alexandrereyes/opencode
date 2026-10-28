@@ -41,7 +41,7 @@
     "./watch/rpc": "./src/watch/rpc.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && bun script/copy-assets.ts",
     "typecheck": "tsgo --noEmit -p tsconfig.test.json",
     "test": "bun test"
   },

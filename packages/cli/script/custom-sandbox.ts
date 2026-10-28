@@ -58,6 +58,7 @@ if (action === "up") await up()
 async function up() {
   if (await health()) {
     if (!owner || !(await owned(owner))) throw new Error("Port is healthy but is not owned by this sandbox")
+    await requirePlugin(owner)
     return report()
   }
   if (await listening()) throw new Error(`Port ${port} is occupied; refusing to touch its process`)
@@ -181,6 +182,7 @@ async function up() {
       )
       await start(identity)
     }
+    await requirePlugin(identity)
     report()
   } finally {
     await rm(path.join(home, ".up-lock"), { recursive: true, force: true })
@@ -268,6 +270,52 @@ async function health(): Promise<{ version: string } | undefined> {
     redirect: "error",
   })
     .then(async (response) => (response.ok ? await response.json() : undefined))
+    .catch(() => undefined)
+}
+
+/**
+ * A plugin that fails to load leaves the server healthy without any custom RPC, tool or route, and a sandbox in that
+ * state would let every custom test pass without testing anything. Wait for a custom RPC to answer; stop the sandbox
+ * and fail when the plugin reports a load failure or never answers.
+ */
+async function requirePlugin(identity: Owner) {
+  if (await pluginLoaded()) return
+  await stop(identity)
+  throw new Error(
+    "The custom plugin did not load, so the sandbox was stopped. Its private server.log names the cause " +
+      '(search "failed to load plugin"); a non-TypeScript file missing from packages/plugin-app-custom/dist is a usual one.',
+  )
+}
+
+async function pluginLoaded() {
+  const deadline = Date.now() + 60_000
+  const plugin = path.join(source, "packages/plugin-app-custom/dist")
+  while (Date.now() < deadline) {
+    const answer = await request<{ output?: unknown }>("/api/rpc/custom.preferences/get", { input: {} })
+    if (answer?.output !== undefined) return true
+    // A plugin still activating answers rpc.unavailable for a moment; one that failed to load is listed at once.
+    const plugins = await request<{ data?: { source?: { path?: string }; state?: { status?: string } }[] }>(
+      "/api/plugin",
+    )
+    if (plugins?.data?.some((item) => item.source?.path === plugin && item.state?.status === "failed")) return false
+    await Bun.sleep(500)
+  }
+  return false
+}
+
+async function request<T>(route: string, body?: unknown): Promise<T | undefined> {
+  const password = (await Bun.file(path.join(home, "password")).text()).trim()
+  return fetch(`${url}${route}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: {
+      authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
+      "content-type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
+    redirect: "error",
+  })
+    .then((response) => response.json() as Promise<T>)
     .catch(() => undefined)
 }
 
