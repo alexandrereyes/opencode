@@ -22,15 +22,15 @@ import XCTest
     view.isScrollEnabled = false
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
-    view.attributedText = NSAttributedString(
+    view.replaceText(NSAttributedString(
       string: String(repeating: "Texto sintético com código e ferramentas. ", count: 30),
-      attributes: [.font: UIFont.systemFont(ofSize: 16)])
+      attributes: [.font: UIFont.systemFont(ofSize: 16)]))
     let first = view.fittingSize(width: 300)
     XCTAssertEqual(view.fittingSize(width: 300), first)
     XCTAssertEqual(view.measuredSizes.count, 1)
     XCTAssertGreaterThan(view.fittingSize(width: 200).height, first.height)
     XCTAssertEqual(view.measuredSizes.count, 2)
-    view.attributedText = NSAttributedString(string: "Curto", attributes: [.font: UIFont.systemFont(ofSize: 16)])
+    view.replaceText(NSAttributedString(string: "Curto", attributes: [.font: UIFont.systemFont(ofSize: 16)]))
     XCTAssertTrue(view.measuredSizes.isEmpty)
     XCTAssertLessThan(view.fittingSize(width: 300).height, first.height)
   }

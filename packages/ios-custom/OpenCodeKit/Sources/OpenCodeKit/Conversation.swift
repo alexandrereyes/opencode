@@ -12,7 +12,7 @@ public struct ModelReference: Codable, Sendable, Hashable {
   }
   /// A tool `model` input: `providerID/modelID` or `providerID/modelID#variant`.
   public init?(selector: String) {
-    let parts = selector.split(separator: "#", maxSplits: 1).map(String.init)
+    let parts = selector.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
     guard let slash = parts[0].firstIndex(of: "/"), slash != parts[0].startIndex,
       parts[0].index(after: slash) != parts[0].endIndex
     else { return nil }
@@ -76,6 +76,26 @@ public struct MessageTime: Codable, Sendable, Equatable {
 }
 
 /// Unknown message and part types retain their tag rather than failing the whole page.
+/// A shell message's output: plain text from older servers, `{ output, cursor, size, truncated }` from current ones.
+public struct ShellMessageOutput: Codable, Sendable, Equatable {
+  public var text: String
+
+  public init(_ text: String) { self.text = text }
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    if let text = try? container.decode(String.self) {
+      self.text = text
+      return
+    }
+    struct Structured: Decodable { let output: String? }
+    text = try container.decode(Structured.self).output ?? ""
+  }
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(text)
+  }
+}
+
 public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
   public var id: String
   public var type: ConversationMessageKind
@@ -96,7 +116,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
   public var status: String?
   public var outcome: String?
   public var command: String?
-  public var output: String?
+  public var output: ShellMessageOutput?
   public var name: String?
   public var summary: String?
   public var shellID: String?
@@ -119,7 +139,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
           state: .object([
             "status": .string(status == "running" ? "running" : "completed"),
             "input": .object(["command": .string(command ?? "")]),
-            "content": .array([.object(["type": .string("text"), "text": .string(output ?? "")])]),
+            "content": .array([.object(["type": .string("text"), "text": .string(output?.text ?? "")])]),
             "metadata": .object(exit.map { ["exit": .number(Double($0))] } ?? [:]),
           ]), time: time)
       ]
@@ -143,7 +163,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
         ? "Resumindo contexto…"
         : status == "failed" ? "Falha ao resumir contexto" : "Contexto resumido"
     case "skill": "Skill · \(name ?? "")"
-    case "shell": "$ \(command ?? "")\n\(output ?? "")"
+    case "shell": "$ \(command ?? "")\n\(output?.text ?? "")"
     case "idle": outcome == "interrupted" ? "Execução interrompida" : "Execução concluída"
     default: text ?? description ?? "Aviso · \(type)"
     }
@@ -418,7 +438,34 @@ public enum ConversationProjection {
     let replacements = Dictionary(page.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     let ids = Set(existing.map(\.id))
     let additions = page.filter { !ids.contains($0.id) }
-    let updated = existing.map { replacements[$0.id] ?? $0 }
+    let updated = existing.map { local in
+      guard let read = replacements[local.id] else { return local }
+      return read.time.completed == nil ? read.keepingStreamedText(of: local) : read
+    }
     return older ? additions + updated : updated + additions
+  }
+}
+
+extension ConversationMessage {
+  /// A read of a running message can lag the deltas already shown (the server keeps the streamed text only
+  /// once the step ends): each text part keeps the longer streamed text that begins with what was read, so a
+  /// refresh mid-stream never takes text back.
+  func keepingStreamedText(of streamed: ConversationMessage) -> ConversationMessage {
+    guard let local = streamed.content, !local.isEmpty else { return self }
+    guard var content, !content.isEmpty else {
+      var copy = self
+      copy.content = local
+      return copy
+    }
+    for index in content.indices where content[index].type == "text" {
+      let match = content[index].id.flatMap { id in local.first { $0.id == id } }
+        ?? (local.indices.contains(index) && local[index].type == "text" ? local[index] : nil)
+      let read = content[index].text ?? ""
+      guard let text = match?.text, text.count > read.count, text.hasPrefix(read) else { continue }
+      content[index].text = text
+    }
+    var copy = self
+    copy.content = content
+    return copy
   }
 }

@@ -13,9 +13,10 @@ struct NewSessionView: View {
     case project, directory, base, add
     var id: String { rawValue }
   }
-  init(sessions: SessionStore, origin: NewSessionOrigin? = nil, startInChats: Bool = false) {
+  init(sessions: SessionStore, origin: NewSessionOrigin? = nil, startInChats: Bool = false,
+    filter: SessionListFilter? = nil) {
     _store = State(
-      initialValue: NewSessionStore(sessions: sessions, origin: origin, startInChats: startInChats))
+      initialValue: NewSessionStore(sessions: sessions, origin: origin, startInChats: startInChats, filter: filter))
   }
   var body: some View {
     VStack(spacing: 0) {

@@ -5,6 +5,7 @@ import SwiftUI
 struct SessionChips: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let store: SessionStore
+  @Binding var selection: SessionListFilter
   /// A confirmed preference change for a chip: removal or a move in the saved manual order.
   let action: (_ name: String, _ intent: PreferenceIntent) -> Void
   let add: () -> Void
@@ -16,6 +17,19 @@ struct SessionChips: View {
   /// Running/unread chip keys of the shown order; a saved-order edit alone (Mover) applies without the delay.
   @State private var states: [Set<String>] = []
   private let settle = Duration.milliseconds(1500)
+
+  init(store: SessionStore, selection: Binding<SessionListFilter>? = nil,
+    action: @escaping (String, PreferenceIntent) -> Void, add: @escaping () -> Void) {
+    self.store = store
+    self.action = action
+    self.add = add
+    _selection = selection ?? Binding(
+      get: { SessionListFilter(project: store.selectedProject, state: store.filter) },
+      set: {
+        store.selectedProject = $0.project
+        store.filter = $0.state
+      })
+  }
 
   private var manual: ChipManualOrder {
     ChipManualOrder(
@@ -38,19 +52,19 @@ struct SessionChips: View {
         HStack(spacing: 8) {
           Menu {
             ForEach(SessionFilter.allCases.filter { $0 != .all }) { filter in
-              Button(filter.rawValue) { store.filter = filter }
+              Button(filter.rawValue) { selection.state = filter }
             }
           } label: {
             // "Todas" is an icon (a stack of every session); a state filter adds its name.
             Chip(
-              title: store.filter == .all ? nil : store.filter.rawValue,
-              selected: store.selectedProject == nil || store.filter != .all, symbol: "square.stack")
+              title: selection.state == .all ? nil : selection.state.rawValue,
+              selected: selection.project == nil || selection.state != .all, symbol: "square.stack")
           } primaryAction: {
-            store.filter = .all
-            store.selectedProject = nil
+            selection.state = .all
+            selection.project = nil
           }
-          .accessibilityLabel(store.filter.rawValue)
-          .accessibilityAddTraits(store.selectedProject == nil || store.filter != .all ? .isSelected : [])
+          .accessibilityLabel(selection.state.rawValue)
+          .accessibilityAddTraits(selection.project == nil || selection.state != .all ? .isSelected : [])
           .accessibilityHint("Mantenha pressionado para filtrar por estado")
           .accessibilityIdentifier("filter-all")
           ForEach(order, id: \.self) { key in
@@ -77,6 +91,7 @@ struct SessionChips: View {
       .onDisappear { pending?.cancel() }
       // `desired` changes only when some chip's running/unread state or the saved order changes.
       .onChange(of: desired) { _, value in schedule(value, current, proxy) }
+      .onChange(of: selection.project) { _, _ in reveal(proxy) }
     }
   }
   private func schedule(_ desired: [String], _ current: [Set<String>], _ proxy: ScrollViewProxy) {
@@ -98,7 +113,7 @@ struct SessionChips: View {
   private func reveal(_ proxy: ScrollViewProxy) {
     Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(300))
-      guard !scrolling, let selected = store.selectedProject, shown.contains(selected) else { return }
+      guard !scrolling, let selected = selection.project, shown.contains(selected) else { return }
       withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { proxy.scrollTo(selected) }
     }
   }
@@ -118,10 +133,10 @@ struct SessionChips: View {
         moves(group.key, "Chats", manual)
       } label: {
         Chip(
-          title: "Chats", selected: store.chatsSelected, running: group.running,
+          title: "Chats", selected: selection.chats, running: group.running,
           count: group.requests, unread: group.unread, symbol: "bubble.left")
       } primaryAction: {
-        store.selectedProject = store.chatsSelected ? nil : SessionStore.chatsSelection
+        selection.project = selection.chats ? nil : SessionStore.chatsSelection
       }
       .accessibilityLabel(group.unread ? "Chats, com não lidas" : "Chats")
       .accessibilityIdentifier("filter-chats")
@@ -134,10 +149,10 @@ struct SessionChips: View {
         moves(group.key, name, manual)
       } label: {
         Chip(
-          title: name, selected: store.selectedProject == group.key, running: group.running,
+          title: name, selected: selection.project == group.key, running: group.running,
           count: group.requests, unread: group.unread, icon: .of(selected.project))
       } primaryAction: {
-        store.selectedProject = store.selectedProject == group.key ? nil : group.key
+        selection.project = selection.project == group.key ? nil : group.key
       }
       .accessibilityLabel(group.unread ? name + ", com não lidas" : name)
       .accessibilityIdentifier("filter-project-" + name)

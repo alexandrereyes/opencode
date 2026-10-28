@@ -85,6 +85,22 @@ final class UserPromptScrollView: UIScrollView {
   }
   required init?(coder: NSCoder) { nil }
 
+  /// Whether `text` needs more than two lines at `width`, as `measure` decides it, without a view: the
+  /// transcript knows it before the bubble renders, so the bubble never changes height afterwards.
+  static func truncates(_ text: String, width: CGFloat, traits: UITraitCollection) -> Bool {
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.minimumLineHeight = AppTypography.lineHeight(.message, compatibleWith: traits)
+    paragraph.lineBreakMode = .byTruncatingTail
+    sizing.attributedText = NSAttributedString(string: text, attributes: [
+      .font: AppTypography.font(.message, compatibleWith: traits), .paragraphStyle: paragraph,
+    ])
+    sizing.numberOfLines = 0
+    let full = sizing.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+    sizing.numberOfLines = 2
+    return full > sizing.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+  }
+  private static let sizing = UILabel()
+
   func measure(width: CGFloat, maximumHeight: CGFloat) -> CGSize {
     let measured: (full: CGSize, clamped: CGSize)
     if let cached = measurements[width] {

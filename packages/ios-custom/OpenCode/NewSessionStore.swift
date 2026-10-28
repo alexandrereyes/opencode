@@ -29,16 +29,18 @@ import OpenCodeKit
   /// The originating conversation's model, applied to the draft; sending it unchanged is not a choice.
   private var inheritedModel: ModelReference?
   private let startInChats: Bool
+  private let startingFilter: SessionListFilter?
   /// The repository-chip project, remembered as the last project only once a session is sent.
   @ObservationIgnored private var pendingTouch: String?
 
   init(
     sessions: SessionStore, origin: NewSessionOrigin? = nil, startInChats: Bool = false,
-    defaults: UserDefaults = .standard
+    defaults: UserDefaults = .standard, filter: SessionListFilter? = nil
   ) {
     self.sessions = sessions
     self.origin = origin
     self.startInChats = startInChats
+    startingFilter = filter
     self.defaults = defaults
     let server = sessions.client.configuration.url.absoluteString
     draft = sessions.drafts.draft("new-session")
@@ -108,9 +110,10 @@ import OpenCodeKit
     await draft.load()
     if sessions.preferences == nil { await sessions.reload() }
     // A restored draft with text or attachments is work in progress, not a default to replace.
+    let filter = startingFilter ?? SessionListFilter(project: sessions.selectedProject, state: sessions.filter)
     let start = NewSessionProjection.start(
       projects: projects, origin: origin, chatsAvailable: chatsAvailable,
-      chatsFilter: sessions.chatsSelected, filterProjectID: sessions.selectedProject,
+      chatsFilter: filter.chats, filterProjectID: filter.project,
       startInChats: startInChats, restoredChat: chat, restoredProjectID: draft.newSession?.projectID,
       restoredWork: !chat && draft.newSession != nil && (!draft.isEmpty || !draft.attachments.isEmpty),
       lastProject: sessions.preferences?.data.projects["local"]?.lastProject, categories: categories)

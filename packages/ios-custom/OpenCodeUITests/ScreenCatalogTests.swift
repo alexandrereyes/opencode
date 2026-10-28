@@ -212,10 +212,8 @@ import XCTest
     let current = app.buttons["switcher-row-ses_scroll_0000"]
     XCTAssertTrue(current.waitForExistence(timeout: 10))
     XCTAssertTrue(current.isSelected)
-    app.navigationBars["Sessões"].swipeUp()
-    XCTAssertTrue(app.buttons["switcher-row-ses_scroll_0001"].waitForExistence(timeout: 10))
     shot("session-switcher-open")
-    let search = app.searchFields["Buscar sessão"]
+    let search = app.textFields["switcher-search"]
     XCTAssertTrue(search.waitForExistence(timeout: 5))
     search.tap()
     search.typeText("contraste")

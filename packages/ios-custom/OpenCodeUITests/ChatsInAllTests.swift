@@ -80,7 +80,9 @@ import XCTest
     let trigger = app.buttons["conversation-switcher"]
     XCTAssertTrue(trigger.waitForExistence(timeout: 30))
     trigger.tap()
-    let search = app.searchFields.firstMatch
+    // A chat opens its local Chats filter; Todas uses the shared avatar just like the main tab.
+    app.buttons.matching(identifier: "filter-all").allElementsBoundByIndex.last!.tap()
+    let search = app.textFields["switcher-search"]
     XCTAssertTrue(search.waitForExistence(timeout: 10))
     search.tap()
     search.typeText(title)

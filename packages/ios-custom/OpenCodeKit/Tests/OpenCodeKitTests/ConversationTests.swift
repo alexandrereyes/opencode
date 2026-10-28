@@ -257,6 +257,14 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   #expect(ConversationActivityHeader(parts: shell.tools, now: 5000).label == "Atividade · Shell · 1 ferramenta · 2s")
   #expect(shell.tools.first?.summary(now: 5000) == "Rodou printf OK · 2s")
   #expect(shell.tools.first?.output == "OK")
+  // Current servers send the output as an object; one shell message must never fail the whole page.
+  let structured = try JSONDecoder().decode(
+    ConversationMessage.self,
+    from: Data(
+      #"{"id":"s2","type":"shell","time":{"created":0,"completed":10},"shellID":"sh","command":"echo oi","status":"exited","exit":0,"output":{"output":"oi\n","cursor":3,"size":3,"truncated":false}}"#
+        .utf8))
+  #expect(structured.tools.first?.output == "oi\n")
+  #expect(structured.tools.first?.status == "completed")
 }
 
 @Test func themeAgentCSSBoundary() throws {
@@ -352,4 +360,21 @@ private func page(_ name: String) throws -> [ConversationMessage] {
   )!
   #expect(AttachmentImage.thumbnail(bad, maxPixelSize: 32) == nil)
   #expect(AttachmentImage.thumbnail(Data("invalid".utf8), maxPixelSize: 32) == nil)
+}
+
+@Test func aReadOfARunningMessageNeverTakesStreamedTextBack() {
+  var streamed = ConversationMessage(id: "msg_a", type: "assistant", time: MessageTime(created: 1))
+  streamed.content = [ConversationPart(type: "text", id: "part_a", text: "1. O mar brilha.\n2. As ondas")]
+  // The server keeps a running step's text only when it ends: its read lags what the deltas showed.
+  var read = streamed
+  read.content = [ConversationPart(type: "text", id: "part_a", text: "")]
+  #expect(ConversationProjection.merge([streamed], page: [read])[0].content?[0].text == "1. O mar brilha.\n2. As ondas")
+  read.content = []
+  #expect(ConversationProjection.merge([streamed], page: [read])[0].content?[0].text == "1. O mar brilha.\n2. As ondas")
+  // A read that is ahead, or that changed the text, wins; so does any read of a finished message.
+  read.content = [ConversationPart(type: "text", id: "part_a", text: "1. O mar brilha.\n2. As ondas beijam")]
+  #expect(ConversationProjection.merge([streamed], page: [read])[0].content?[0].text == "1. O mar brilha.\n2. As ondas beijam")
+  read.content = [ConversationPart(type: "text", id: "part_a", text: "")]
+  read.time.completed = 2
+  #expect(ConversationProjection.merge([streamed], page: [read])[0].content?[0].text == "")
 }

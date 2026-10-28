@@ -50,7 +50,8 @@ extension ConversationPart {
     if ["glob", "grep", "list"].contains(name) { return .search }
     if name == "skill", skillName?.isEmpty == false { return .skills }
     if name == "read" {
-      let ext = URL(fileURLWithPath: input["path"]?.string ?? "").pathExtension.lowercased()
+      // Not `URL(fileURLWithPath:)`, which asks the file system whether the path is a folder.
+      let ext = ((input["path"]?.string ?? "") as NSString).pathExtension.lowercased()
       let loaded = status == "completed" && metadata["loaded"]?.array?.contains { $0.string != nil } == true
       if !loaded && !["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"].contains(ext) { return .read }
     }

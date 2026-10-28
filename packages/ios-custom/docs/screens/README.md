@@ -87,8 +87,8 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Conversa · mensagem expandida | Mensagem recolhida → Mostrar mensagem completa | [PNG](conversation-user-expanded-dark.png) | [PNG](conversation-user-expanded-light.png) |
 | Conversa · resposta e rodapé | Rolar a conversa; copiar/play, contexto/cache e prompt fixo | [PNG](conversation-answer-footer-dark.png) | [PNG](conversation-answer-footer-light.png) |
 | Conversa · pendente | Primeira conversa com admissão sintética ainda não entregue | [PNG](conversation-user-pending-dark.png) | — |
-| Troca rápida · folha | Conversa → avatar/título com ⌄; atual com ✓, sessão trabalhando, não lidas e Nova sessão | [PNG](session-switcher-open-dark.png) | [PNG](session-switcher-open-light.png) |
-| Troca rápida · busca | Folha Sessões → buscar “contraste”; resultado sintético e Nova sessão | [PNG](session-switcher-search-dark.png) | [PNG](session-switcher-search-light.png) |
+| Troca rápida · folha | Conversa → avatar/título com ⌄; mesmos chips, grupos e linhas da aba, atual com ✓ e Nova sessão no cabeçalho | [PNG](session-switcher-open-dark.png) | [PNG](session-switcher-open-light.png) |
+| Troca rápida · busca | Folha Sessões → buscar “contraste”; busca combinada com o chip e resultado agrupado | [PNG](session-switcher-search-dark.png) | [PNG](session-switcher-search-light.png) |
 | Conversa · atividade e fila | Conversa em execução: cartão Atividade aberto (Ler, Shell, Agente, Editar), bandeja trabalhando + duas mensagens na fila e composer vazio | [PNG](conversation-activity-open-dark.png) | [PNG](conversation-activity-open-light.png) |
 | Cabeçalho do chat no Mac | Variante do Mac do avatar com anel, título e subtítulo compartilhados, com `…` e + | [PNG](conversation-title-bar-mac-dark.png) | — |
 | Composer com texto | Conversa → campo de mensagem; teclado e microfone compacto | [PNG](conversation-composer-text-dark.png) | [PNG](conversation-composer-text-light.png) |

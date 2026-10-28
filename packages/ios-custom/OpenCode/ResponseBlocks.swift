@@ -26,17 +26,9 @@ struct ResponseBlocks: View {
             .padding(.top, prose.spacing.first ?? 0)
         case .block(let block):
           let index = blocks.firstIndex { $0.id == block.id } ?? 0
-          let spacing = MarkdownBlocks.spacing(block, after: index > 0 ? blocks[index - 1] : nil)
-          // Every stack level re-measures its children on each layout pass; most blocks need neither.
-          if case .footnote = block.kind, index == 0 || !isFootnote(blocks[index - 1]) {
-            VStack(alignment: .leading, spacing: 8) {
-              Text("Notas").appFont(.heading, weight: .semibold).foregroundStyle(theme.color(.markdownHeading))
-              quoted(block)
-            }
-            .padding(.top, spacing)
-          } else {
-            quoted(block).padding(.top, spacing)
-          }
+          ResponseBlockItem(block: block, source: source, messageID: messageID, partID: partID, rasters: rasters,
+            openNote: openNote, notesHeader: isFootnote(block) && (index == 0 || !isFootnote(blocks[index - 1])))
+            .padding(.top, MarkdownBlocks.spacing(block, after: index > 0 ? blocks[index - 1] : nil))
         }
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -45,7 +37,32 @@ struct ResponseBlocks: View {
   private var sections: [MarkdownSection] {
     joinsProse ? MarkdownBlocks.sections(blocks, streaming: !stable) : blocks.map { .block($0) }
   }
-  @ViewBuilder private func quoted(_ block: MarkdownBlock) -> some View {
+  private func isFootnote(_ block: MarkdownBlock) -> Bool { if case .footnote = block.kind { true } else { false } }
+}
+
+/// One block other than prose, with its quotation borders, indentation and, for the first footnote, the
+/// notes heading. The transcript lays each one out as its own item.
+struct ResponseBlockItem: View {
+  @Environment(\.appTheme) private var theme
+  let block: MarkdownBlock
+  let source: String
+  let messageID: String
+  let partID: String
+  let rasters: [ResponseFormulaKey: ResponseFormulaRaster]
+  let openNote: (String) -> Void
+  var notesHeader = false
+  var body: some View {
+    // Every stack level re-measures its children on each layout pass; most blocks need neither.
+    if notesHeader {
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Notas").appFont(.heading, weight: .semibold).foregroundStyle(theme.color(.markdownHeading))
+        quoted
+      }
+    } else {
+      quoted
+    }
+  }
+  @ViewBuilder private var quoted: some View {
     let content = ResponseBlock(block: block, source: source, messageID: messageID, partID: partID, rasters: rasters, openNote: openNote)
     if block.quoteDepth > 0 {
       HStack(alignment: .top, spacing: 12.8) {
@@ -59,7 +76,6 @@ struct ResponseBlocks: View {
       content.padding(.leading, block.indent)
     }
   }
-  private func isFootnote(_ block: MarkdownBlock) -> Bool { if case .footnote = block.kind { true } else { false } }
 }
 
 /// Paragraphs, headings, list items, quotations and rules of one part as a single text, so a
@@ -133,7 +149,11 @@ private struct ResponseBlock: View {
 private struct ResponseDisclosure: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.responseSelectionChanged) private var selection
-  @State private var expanded: Bool
+  @Environment(\.transcriptMemory) private var memory
+  @State private var initial: Bool
+  /// The conversation's memory keeps the reader's choice when the response is rebuilt.
+  private var expanded: Bool { memory?.detail(key) ?? initial }
+  private var key: String { "\(messageID):\(partID):\(block.id)" }
   let block: MarkdownBlock
   let source: String
   let messageID: String
@@ -150,14 +170,17 @@ private struct ResponseDisclosure: View {
     self.openNote = openNote
     #if DEBUG
     let arguments = ProcessInfo.processInfo.arguments
-    _expanded = State(initialValue: initiallyOpen || arguments.contains("-OpenCodeMarkdownFixture") && arguments.contains("-OpenCodeMarkdownExpandDetails"))
+    _initial = State(initialValue: initiallyOpen || arguments.contains("-OpenCodeMarkdownFixture") && arguments.contains("-OpenCodeMarkdownExpandDetails"))
     #else
-    _expanded = State(initialValue: initiallyOpen)
+    _initial = State(initialValue: initiallyOpen)
     #endif
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
-      Button { expanded.toggle(); selection?.selected() } label: {
+      Button {
+        if let memory { memory.setDetail(key, expanded: !expanded) } else { initial.toggle() }
+        selection?.selected()
+      } label: {
         HStack(alignment: .top, spacing: 6) {
           Image(systemName: "chevron.right").appSymbol(.inline).frame(width: 14, height: 26).rotationEffect(.degrees(expanded ? 90 : 0))
           SelectableResponseText(block: block, messageID: messageID, partID: partID, theme: theme,

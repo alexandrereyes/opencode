@@ -240,9 +240,11 @@ import XCTest
       let transcript = app.collectionViews["conversation-transcript"]
       // Add a local quote through the real selection menu, never submit or answer the permission.
       if !app.buttons["draft-quotes"].exists {
-        for _ in 0..<3 { transcript.swipeDown(velocity: .slow) }
+        // The transcript lays out only the rows near the screen: scroll until the answer's last paragraph is one.
         let response = app.textViews.matching(NSPredicate(format: "value CONTAINS 'Recomendo o'"))
           .firstMatch
+        for _ in 0..<3 where !response.exists { transcript.swipeDown(velocity: .slow) }
+        for _ in 0..<4 where !response.exists { transcript.swipeUp(velocity: .slow) }
         XCTAssertTrue(response.waitForExistence(timeout: 10))
         response.tap()
         response.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.25)).press(
@@ -304,6 +306,210 @@ import XCTest
       app.terminate()
     }
   }
+  /// Sending works like ChatGPT and Claude: the prompt rises to the top of the transcript, the answer grows
+  /// below it without moving the screen, and ↓ appears once it passes the end. Calls the model once.
+  func testSentPromptRisesAndTheAnswerGrowsInPlace() throws {
+    let app = try launch("SEND", theme: environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark")
+    let transcript = app.collectionViews["conversation-transcript"]
+    let composer = app.textViews["conversation-composer"]
+    XCTAssertTrue(composer.waitForExistence(timeout: 10))
+    composer.tap()
+    composer.typeText("Escreva 30 linhas numeradas, uma frase curta sobre o mar em cada. Sem introdução.")
+    let send = app.buttons["composer-send"]
+    XCTAssertTrue(send.waitForExistence(timeout: 5))
+    send.tap()
+    // The sent prompt rises to the top of the transcript.
+    // Its text sits the bubble's padding (8 + 12 points) below the transcript's top edge.
+    let prompt = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Escreva 30 linhas numeradas'")).firstMatch
+    let risen = expectation(for: NSPredicate { _, _ in
+      prompt.exists && abs(prompt.frame.minY - transcript.frame.minY - 20) <= 2
+    }, evaluatedWith: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [risen], timeout: 10), .completed, "the sent prompt rises to the top")
+    let top = prompt.frame.minY
+    // While the answer streams (and once it ends), nothing on screen moves.
+    var samples: [CGFloat] = []
+    let end = app.buttons["Ir para a mais recente"]
+    let deadline = Date().addingTimeInterval(12)
+    while Date() < deadline {
+      samples.append(prompt.frame.minY)
+      RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+    }
+    XCTAssertTrue(end.exists, "↓ appears once the answer passes the end")
+    XCTAssertGreaterThan(samples.count, 10)
+    XCTAssertLessThanOrEqual(samples.map { abs($0 - top) }.max() ?? 0, 0.5, "the answer grows without moving the screen")
+    screenshot("send-risen-" + (environment["OPENCODE_TEST_THEME"] ?? "dark"))
+  }
+
+  /// A refresh in the middle of an answer (here, leaving the app and coming back while it streams) never
+  /// leaves a gap: every sample of the answer numbers its lines from 1 without skipping. Calls the model once.
+  func testStreamingAnswerHasNoGapAcrossARefresh() throws {
+    let app = try launch("SEND", theme: environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark")
+    let composer = app.textViews["conversation-composer"]
+    XCTAssertTrue(composer.waitForExistence(timeout: 10))
+    composer.tap()
+    composer.typeText("Escreva 150 linhas numeradas, uma frase curta sobre o mar em cada. Sem introdução.")
+    app.buttons["composer-send"].tap()
+    let answer = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value BEGINSWITH '1.'"))
+      .firstMatch
+    XCTAssertTrue(answer.waitForExistence(timeout: 30))
+    var samples: [String] = []
+    func sample() { if answer.exists, let value = answer.value as? String { samples.append(value) } }
+    for _ in 0..<4 { sample(); RunLoop.current.run(until: Date().addingTimeInterval(0.25)) }
+    XCUIDevice.shared.press(.home)
+    RunLoop.current.run(until: Date().addingTimeInterval(2))
+    app.activate()
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
+    // The answer is still running on return, so the reconnection's read lands mid-answer.
+    let stop = app.buttons["Parar"]
+    XCTAssertTrue(stop.waitForExistence(timeout: 5), "the answer ended while the app was away")
+    // Until the answer ends (its stop control goes away), then once more.
+    let deadline = Date().addingTimeInterval(90)
+    while Date() < deadline, stop.exists {
+      sample()
+      RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+    }
+    RunLoop.current.run(until: Date().addingTimeInterval(1))
+    sample()
+    XCTAssertGreaterThan(samples.count, 6)
+    for value in samples {
+      let numbers = value.split(separator: "\n").compactMap { line in
+        line.split(separator: ".", maxSplits: 1).first.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+      }
+      XCTAssertEqual(numbers, Array(1..<(numbers.count + 1)), "no gap in: \(value.suffix(300))")
+    }
+    screenshot("stream-refresh-" + (environment["OPENCODE_TEST_THEME"] ?? "dark"))
+  }
+
+  /// Leaving a conversation mid-answer and coming back shows everything streamed meanwhile and keeps streaming:
+  /// the retained conversation recorded the stream off screen. Calls the model once.
+  func testReturningMidAnswerShowsWhatStreamedAwayAndContinuesLive() throws {
+    let session = try XCTUnwrap(environment["OPENCODE_TEST_SEND"])
+    let app = try launch("SEND", theme: environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark")
+    let answer = try ask(app)
+    let before = numbers(answer.value as? String ?? "")
+    app.buttons["Voltar"].tap()
+    RunLoop.current.run(until: Date().addingTimeInterval(4))
+    let row = app.buttons["session-row-" + session]
+    app.revealSessionRow(row)
+    row.tap()
+    XCTAssertTrue(answer.waitForExistence(timeout: 10))
+    let stop = app.buttons["Parar"]
+    XCTAssertTrue(stop.waitForExistence(timeout: 5), "the answer ended while away")
+    let returned = numbers(answer.value as? String ?? "")
+    XCTAssertGreaterThan(returned.count, before.count + 5, "what streamed while away is shown at once")
+    let samples = sampleUntilEnd(answer, stop: stop)
+    XCTAssertGreaterThan(Set(samples.map(\.count)).count, 2, "it keeps streaming live")
+    for value in samples {
+      let lines = numbers(value)
+      XCTAssertEqual(lines, Array(1..<(lines.count + 1)), "no gap in: \(value.suffix(300))")
+    }
+  }
+
+  /// A conversation opened mid-answer, its beginning streamed before the screen existed, shows the answer live
+  /// from what arrives, after a marker, and the whole answer at its end. Calls the model once.
+  func testOpeningMidAnswerShowsItLiveAfterAMarker() throws {
+    let theme = environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"
+    var app = try launch("SEND", theme: theme)
+    _ = try ask(app)
+    // A new process: nothing of this answer was recorded.
+    app.terminate()
+    app = try launch("SEND", theme: theme)
+    let stop = app.buttons["Parar"]
+    XCTAssertTrue(stop.waitForExistence(timeout: 10), "the answer ended before the screen opened")
+    // It reopens at the saved place, above the answer.
+    let end = app.buttons["Ir para a mais recente"]
+    if end.waitForExistence(timeout: 5) { end.tap() }
+    let partial = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value BEGINSWITH '…'"))
+      .firstMatch
+    XCTAssertTrue(partial.waitForExistence(timeout: 15), "the answer shows live, after the missing-start marker")
+    screenshot("open-mid-answer-" + theme)
+    let samples = sampleUntilEnd(partial, stop: stop).filter { $0.hasPrefix("…") }
+    XCTAssertGreaterThan(Set(samples.map(\.count)).count, 2, "it streams live")
+    for value in samples {
+      // The first sample may hold only the end of a line.
+      let lines = numbers(value)
+      guard let first = lines.first else { continue }
+      XCTAssertEqual(lines, Array(first..<(first + lines.count)), "no gap in: \(value.suffix(300))")
+    }
+    let whole = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value BEGINSWITH '1.'"))
+      .firstMatch
+    XCTAssertTrue(whole.waitForExistence(timeout: 15), "the end brings the beginning")
+    let lines = numbers(whole.value as? String ?? "")
+    XCTAssertEqual(lines, Array(1..<(lines.count + 1)))
+    XCTAssertGreaterThan(lines.count, 100)
+  }
+
+  private func ask(_ app: XCUIApplication) throws -> XCUIElement {
+    let composer = app.textViews["conversation-composer"]
+    XCTAssertTrue(composer.waitForExistence(timeout: 10))
+    composer.tap()
+    // Long enough to still be streaming after leaving and coming back, or after a relaunch.
+    composer.typeText("Escreva 200 linhas numeradas, cada uma com uma frase de umas quinze palavras sobre o mar. Sem introdução.")
+    app.buttons["composer-send"].tap()
+    let answer = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value BEGINSWITH '1.'"))
+      .firstMatch
+    XCTAssertTrue(answer.waitForExistence(timeout: 60))
+    RunLoop.current.run(until: Date().addingTimeInterval(1))
+    return answer
+  }
+  private func sampleUntilEnd(_ answer: XCUIElement, stop: XCUIElement) -> [String] {
+    var samples: [String] = []
+    let deadline = Date().addingTimeInterval(120)
+    while Date() < deadline, stop.exists {
+      if answer.exists, let value = answer.value as? String { samples.append(value) }
+      RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    }
+    return samples
+  }
+  private func numbers(_ value: String) -> [Int] {
+    value.split(separator: "\n").compactMap { line in
+      line.split(separator: ".", maxSplits: 1).first.flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+    }
+  }
+
+  /// Hidden for more than 30 seconds while a message arrives: on return the passage on screen has not moved, the
+  /// arrival is merged within seconds without the event stream noticing anything, and ↓ offers it.
+  func testBackgroundArrivalKeepsThePassageAndOffersIt() throws {
+    let session = try XCTUnwrap(environment["OPENCODE_TEST_SEND"])
+    let app = try launch("SEND", theme: environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark")
+    let transcript = app.collectionViews["conversation-transcript"]
+    let reading = transcript.cells.matching(NSPredicate(format: "identifier BEGINSWITH 'text:'")).allElementsBoundByIndex
+      .last { $0.frame.minY < transcript.frame.maxY && $0.frame.maxY > transcript.frame.minY }
+    let anchor = try XCTUnwrap(reading)
+    let before = anchor.frame
+    XCUIDevice.shared.press(.home)
+    // A shell command posts a visible message without calling a model.
+    let password = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    var request = URLRequest(url: URL(string: TestSandbox.url + "/api/session/" + session + "/shell")!)
+    request.httpMethod = "POST"
+    request.setValue("Basic " + Data(("opencode:" + password).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = Data(#"{"command":"echo novidade-de-fundo"}"#.utf8)
+    let posted = expectation(description: "shell posted")
+    URLSession.shared.dataTask(with: request) { _, response, _ in
+      XCTAssertLessThan((response as? HTTPURLResponse)?.statusCode ?? 999, 300, "the shell command was accepted")
+      posted.fulfill()
+    }.resume()
+    wait(for: [posted], timeout: 15)
+    RunLoop.current.run(until: Date().addingTimeInterval(32))
+    app.activate()
+    let end = app.buttons["Ir para a mais recente"]
+    let returned = Date()
+    XCTAssertTrue(end.waitForExistence(timeout: 6), "the arrival is merged and offered by ↓")
+    let merged = Date().timeIntervalSince(returned)
+    XCTAssertEqual(anchor.frame.minY, before.minY, accuracy: 0.5, "the passage on screen did not move")
+    screenshot("background-arrival-" + (environment["OPENCODE_TEST_THEME"] ?? "dark"))
+    end.tap()
+    // The arrival is a collapsed shell step at the end.
+    let steps = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Atividade · Shell · 1 ferramenta'"))
+    XCTAssertTrue(steps.firstMatch.waitForExistence(timeout: 5))
+    let step = try XCTUnwrap(steps.allElementsBoundByIndex.last)
+    XCTAssertLessThanOrEqual(step.frame.maxY, transcript.frame.maxY)
+    let attachment = XCTAttachment(string: String(format: "merged %.1f s after returning", merged))
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
   func testTokensInComments() throws {
     let app = try launch("COMMENT")
     let response = app.textViews.matching(

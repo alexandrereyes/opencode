@@ -361,11 +361,10 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   Tapping truncated text also expands; expanded text does not collapse on tap. There is no height animation or text
   fade. **Alexandre, 25/10:** while the bubble is pinned at the top edge, tapping its body (the prompt text and the
   bubble around it) scrolls once (0.35 s ease-out; instant with Reduzir Movimento) until the turn's first row,
-  the first step even when tools and subagents precede the final-answer divider, sits right below the bubble. The
-  owner (`ConversationScrollState.revealTurn`) starts a distant jump one viewport from that row, after revealing it by
-  identity when it is not laid out, aims each frame at its live position, then holds it as the reading anchor and
-  saves the position. While it runs, it owns the offset like a finger: corrections, older pages and settling wait;
-  a touch or drag stops it; **Ir para a mais recente** and new prompts replace it. A pinned bubble already at its
+  the first step even when tools and subagents precede the final-answer divider, sits right below the bubble (the
+  message's 10-point top padding included). `TranscriptViewController.revealTurn` lays that row out invisibly in the
+  same pass, finds it by message identity on every pass, animates only the last viewport and saves the position; a
+  drag stops it. A pinned bubble already at its
   turn's start only plays a selection haptic. An inline bubble keeps its old taps, so its truncated text expands;
   pinned, expansion is the **Mostrar mensagem completa** control. Its buttons (**Mostrar mensagem completa**,
   **Ir ao trecho citado**, context cards, image thumbnails) and the actions below the bubble (redefinir, copiar) keep their
@@ -857,16 +856,17 @@ under the composer evidence directory; cleanup ledgers list the disposable Sessi
 ### Jump to latest — 22 October
 
 **Alexandre, 22/10: novas mensagens como no web.** The custom web has no `Novas mensagens` divider or upward unread
-jump. `ConversationScrollPlan.Viewport` mirrors `app-custom/src/session/timeline/interaction.ts`: show ↓ only with
-more than 1 point of overflow and a distance from the bottom **strictly greater than `max(400 pt, viewport height)`**.
-This is independent of author, tool-only steps, streaming, watermark and parent/child status. Being near the bottom
-hides the button without silently resuming follow; arriving at the real end uses the web's 0.5-point tolerance.
+jump. Without anything new below, ↓ follows `app-custom/src/session/timeline/interaction.ts`: it shows only at a
+distance from the end **strictly greater than `max(400 pt, viewport height)`**, independent of author, tool-only
+steps, watermark and parent/child status. **Since 27 October** it also shows as soon as content was added below the
+end the reader last saw (an answer growing, messages arriving, even while the app was hidden), from 24 points:
+growth never scrolls the transcript, so ↓ is how the reader learns of it. "Added" is judged by what the store
+publishes (its revision and pending prompts), never by measured height.
 
-Tapping **Ir para a mais recente** clears reading restoration/selection pause and asks the existing single scroll
-owner for one end animation; later height changes follow without replaying it. Submitting a prompt/command or a
-question reply resumes the same follow mode before the request finishes, without an extra animation. Streaming while
-reading retains the bookmark. Dismissal is purely geometric, so scrolling up can show the button again without new
-messages. Per-session native reading persistence and parent/child return behavior remain independent of read receipts.
+Tapping **Ir para a mais recente** scrolls to the end once; nothing follows later growth. Sending a prompt moves the
+prompt to the top of the transcript instead (see *Transcript architecture*). Dismissal is purely geometric, so
+scrolling up can show the button again without new messages. Per-session native reading persistence and
+parent/child return behavior remain independent of read receipts.
 
 Opening the route acknowledges that session's observed `time.idle` through `POST /api/session/:id/view` with `{idle}`,
 without waiting for catalogs, pagination, bottom or a visible response. Root and child acknowledge only themselves.
@@ -1987,21 +1987,46 @@ cases and six subagent/alert cases. The sandbox seed's permission and question r
 
 ## Troca rápida de sessão
 
-In a root conversation, the header's avatar and title (with a small `⌄`) open **Sessões**, a native medium/large
-sheet (VoiceOver: **Trocar de sessão**, a clear button over the avatar and title so their readouts stay). It lists the
-rows the Sessões tab already keeps (roots, without archived sessions or the master; chats included), most recent
-activity first (`SessionSwitcher.rows`: `messageAt ?? created`, then rank), reusing the compact Sessões row with a
-"trabalhando" line for running sessions, the running arc, unread dot and the "Avisar ao terminar" bell. The current session is
-highlighted with ✓ and scrolled into view. Search is local and instant over title, project (or Chats), branch and
-path. Choosing a session replaces the conversation route in place after the sheet dismisses (Back still returns to
-Sessões; the previous draft stays saved; the destination has `.id(route.id)` so its state is rebuilt); choosing the
-current one only closes. **Nova sessão** at the end follows the … menu's Nova sessão (project, checkout and model).
-The sheet is its own view over `SessionStore` (no server reload; the conversation's streaming does not re-render it).
+In a root conversation, the header's avatar and title (with a small `⌄`) open **Sessões**, a native large sheet
+(VoiceOver: **Trocar de sessão**, a clear button over the avatar and title so their readouts stay). The large height
+leaves room for the same `SessionColumnHeader`, `SessionChips`, `SessionColumnSections` and rows as the main tab:
+attention, running, pinned and local date sections, their counts, project icons and inline permission actions. The
+Arquivadas link appears only outside search when there are archived sessions. The sheet starts on **Todas**, or
+**Chats** for a chat. As on the tab, Todas mixes chats and repository sessions in the same groups; a repository
+chip excludes chats and the Chats chip keeps only chats. Mixed lists use the shared chat avatar and the "Chats"
+second line, while the Chats filter retains each chat's own avatar. The bell means **Avisar ao terminar**.
+
+Filters and section collapse are local to each presentation: choosing a chip never changes the tab behind the
+conversation. Project order, badges and preference edits are shared. The current session stays marked with ✓ but
+is not a scroll destination: the sheet always opens at the top, including after closing it while scrolled or
+filtered. The header, chips, search and first section are immediately visible; background updates never recenter
+it. Search is local over title, project, branch and path and combines
+with the selected chip; a filter change starts its results at the top without recreating the List.
+
+The orange **+** stays in the header. It opens Nova sessão using the sheet's chip through the existing
+`NewSessionProjection.start` rules (including restored work), without changing the tab's filter or inheriting the
+current conversation's checkout. The conversation's … menu still inherits its origin as before. Choosing a session
+replaces the route only after the sheet dismisses (Back still returns to Sessões, and both transcripts retain their
+passages); choosing the current one only closes.
+
+Both vertical Lists use `SessionListPresentation` and the Kit's `SessionListOrder`: only row IDs and section placement
+wait during dragging/deceleration, then apply on `.idle` without a structural animation. Data, badges, counts and
+actions remain live; actual removals are discarded immediately. The main tab's "Selecionar todas" uses exactly
+these presented, expanded groups. No custom layout, scroll correction loop or retained list controller is used.
+Only visible running/failed rows request transcript previews. Permission/question descriptions come from their
+existing request data, and queued/dirty preview work is dropped when a row leaves the screen.
 Before, tapping the avatar opened Detalhes da sessão; on root conversations Detalhes stays in the … menu and the
 context footer (the avatar's VoiceOver element still opens it). Children and the master keep the avatar's Detalhes and
 have no switcher: a child returns to its parent, and the master is reached only through its accessory.
-`SessionSwitcherTests` (UI, seed-sessions sandbox) cover opening, the marked current row, running/unread rows, search,
-switching in place, tapping the current row and Nova sessão.
+`SessionSwitcherTests` cover opening/reopening at the top, chips, grouping, combined search, creation, switching and a completion during a held
+gesture; `SessionListsTests` cover the same transition on Sessões and the return and Você open/close check. The offline
+catalog with `-OpenCodeSessionListUpdates` completes one running session 350 ms into a drag and samples row positions
+once before/after that update. Kit tests cover deferred placement, live data, deletion and displayed selection IDs.
+Returning from a conversation previously shifted the bottom-aligned List by 105 pt, also reproduced on `fc6c27d`: hiding the tab
+bar/accessory expanded the covered List and clamped its position. Sessões now remembers the tapped row's identity
+and relative alignment, then makes one native `ScrollViewReader` request once the normal viewport returns; it is
+kept now that the tab bar is gone (28 October), since any covered viewport change would clamp the same way. The
+return and Você open/close assertions are ordinary passing tests. No device performance matrix was needed.
 
 ## Nova sessão (wave 9)
 
@@ -2269,21 +2294,148 @@ report counts frames over 33/50/100 ms, the unrequested on-screen movement of ro
 `--device iphone14` and a lease acquired from the same worktree, on the iPhone 14. Build Debug with
 `SWIFT_OPTIMIZATION_LEVEL=-O` for representative numbers.
 
-### Following a changing tail
+**Trajectories (27 October).** Those scenarios measured where scrolling ended, not what the reader saw on the way.
+`-OpenCodeTrajectory` records the rows on screen (pinned prompts excluded) once per displayed frame, from an event until
+the transcript has been still for 1.5 s: the cold opening, `-OpenCodeFixtureReentry pop` (leave the conversation and
+open it again, three times), `-OpenCodeFixtureReentry child` (cover it with another screen and come back) and a return
+from the background, during which `-OpenCodeFixtureBackgroundArrivals` delivers a prompt and its answer. Each episode
+reports `wrongFrames` (frames with content showing another passage than the final one), `exitWrongFrames` (than the
+passage shown when leaving), `firstExitDeviation`/`finalExitDeviation` (points; −1 when no row is shared, that is,
+another passage), `blankFrames` and the settle time, in `Documents/transcript-trajectory.json`. `measure-scroll.py`
+runs them as `open-middle`, `open-tail`, `reentry-middle`, `reentry-tail`, `child-middle`, `background-middle` and
+`background-tail` (the app is hidden behind Settings for three seconds, with `simctl` or `devicectl`). The driver no
+longer excludes the row whose height changed, the response the reader watches grow: `growingShiftMaxPoints` is that
+row's largest per-frame movement, and `textViewsCreated`/`textViewsDestroyed`/`textReplacements` count response text
+views and whole-text replacements in the measured window. `stream-still` streams while the reader holds still mid-history.
 
-`ConversationScrollState` is the sole owner of tail and reading corrections. It coalesces row/revision/viewport
-notifications and requires matching native display-layout passes without restarting on each notification. It never
-combines `ScrollViewReader.scrollTo` with a tail offset. User scrolling, selection, reading restoration and navigation
-cancel following. An explicit request waits for existing tracking/deceleration, never fighting it. **Ir para o fim**
-requests one animation, then follows later growth without replaying it.
-Prompt expansion is manual and independent of native pinning; following never prepares or changes prompt height.
-Initial tail restoration remains active until the real final native cell is materialized and pinned; automatic
-history prepend is disabled while following, so a transient zero offset cannot page backwards during entry.
-Parsed blocks survive transient row disappearance; the shared bounded Markdown cache and size-only viewport
-observation remain unchanged. Returning from a child reuses a materialized reading anchor instead of first scrolling
-that message back to its top (pinned-header targets still materialize their original message).
+### Transcript architecture — 27 October
+
+The transcript is a UIKit `UICollectionView` (`OpenCode/Transcript/`), not inverted, with its own layout. Header,
+composer, sheets and overlays stay SwiftUI; `TranscriptHost` mounts the view controller.
+
+- **Items.** `TranscriptProjection` splits each message at semantic blocks: a run of prose is one native
+  `ResponseTextView` (selection crosses its paragraphs), while code, tables, media, formulas, activity steps, notices,
+  footers, day chips, prompts and request cards are separate items hosted with `UIHostingConfiguration`. An item's kind
+  carries everything its height depends on (expansion included), so equal kinds share a cached height
+  (`TranscriptHeights`, by item, content, width and text size).
+  A rebuilt native table restores its `TranscriptMemory.tableOffset` only after its content width is measured;
+  the grid is part of that same scrolling content, so separators stay aligned with cells.
+- **Shared conversation chrome.** Activity cells render `ConversationStep` through the shared
+  `ConversationActivityCard` and `ConversationTimeline`; the run tray, composer chips and header use the same
+  `ConversationColumn` components as `custom`. Output remains in per-key `TranscriptMemory`, and the height key
+  includes group, tool detail, filename and file-diff disclosures so returning to an expanded card stays correct.
+- **Layout.** `TranscriptLayout` positions items from cached or estimated heights (`TranscriptGeometry` in the Kit,
+  unit-tested) and pins the current turn's prompt under the header, with a fade once content passes under it.
+- **Anchoring, in the same pass.** The reader's place is an item under the reading line (below the pinned prompt) and
+  its screen position. A cell that self-sizes above it moves the content offset by the same amount through its
+  invalidation context; an unmeasured cell entering above everything on screen keeps what follows it still; data
+  updates restore the anchor from `targetContentOffset` (an item replaced, say a placeholder by its parsed blocks,
+  continues in what replaced it). Nothing corrects the offset afterwards: no display links, no timers, no loops.
+- **Growth never scrolls.** Not even at the end. When content shrinks below what the reader last saw, the content
+  size keeps that bottom scrollable until the next drag, so the offset is never clamped.
+- **Sending works like ChatGPT and Claude.** The sent prompt rises to the top of the transcript (a short animation,
+  instant with Reduce Motion); a trailing space lets it get there and shrinks as the answer grows below it.
+- **Explicit navigation** (↓, search, quotes, tools, a pinned prompt's tap, read aloud) lays the destination out
+  invisibly in the same pass, parsing its Markdown on the spot, and animates only the last viewport, so it lands
+  exactly. Targets are resolved by message and prompt identity on every pass.
+- **Retention.** The view controller is kept with its conversation (`TranscriptMemory.controller`): returning
+  remounts the very view that was left, so its first frame is the last one shown. The same conversation mounted twice
+  (a parent reopened from its child) gets a second view from the same store and memory.
+- **Header switcher.** Choosing a session captures the source passage after dismissing the sheet and replaces the
+  route. The destination uses its registry entry and retained controller, or its normal positioned opening on first
+  visit. Switching A → B → A preserves both passages; Back still returns to Sessões. Successful archive (single or
+  bulk) and deletion evict the affected retained family, while failed operations keep it. Archive preserves disk
+  reading positions and drafts.
+- **Opening.** The view stays hidden until it is laid out at the saved place, so the first visible frame is the final
+  one; Markdown near the place is parsed synchronously first. A failed load or an empty transcript shows at once;
+  otherwise it shows after at most 400 ms at the best place it can resolve, or 2.5 s with a "Restaurando leitura…"
+  indicator while history is paging toward a saved place (then "Retomar leitura" if it is still not loaded).
+- **Background.** Hiding the app keeps the exact passage; arrivals land below and ↓ appears. Returning merges the tail
+  (`ConversationStore.revalidate`) without restarting the event loop or moving anything visible.
+- **Streaming.** Streamed prose edits its text storage from the changed paragraph and is measured in its own
+  unbounded TextKit container, so only invalidated fragments are laid out again; rebuilds are coalesced to one per
+  frame. `ConversationStreamLog` records text and reasoning deltas as they arrive: a read of a running message (the
+  server keeps a part's text only when it ends) or deltas dropped while a read was in flight never open a gap.
+  Retained conversations keep recording while off screen (`SessionStore`'s event loop feeds their logs from the same
+  hub; frames both loops see are recorded once, by sequence; nothing is published or laid out), so leaving mid-answer
+  and coming back shows everything streamed meanwhile and continues live. A part whose beginning streamed before
+  any log saw it (a working session opened from the list, a store that was released) shows live from what arrives:
+  a `…` marker, then the text from its first whole line; its end event brings the whole text, growing above the reader's place without moving it. After
+  a real disconnection (the app suspended), a part that lost deltas keeps its text until its end event instead of
+  continuing past a hole.
+- **History.** Only the reader's own scrolling pages history in near the top (not a search or a resume offer); a
+  transcript shorter than its viewport pages in until it fills it or an empty page ends the history. Prepends keep
+  the screen still (with room below a short transcript until the next drag).
+
+**Verifying.** `measure-scroll.py` (below) runs the reading, history, streaming and trajectory scenarios; the Checkpoint
+B/C targets are zero wrong frames and zero first-frame deviation for `reentry-*`, `child-middle` and `background-*`,
+no intermediate frames for `open-*`, at most 0.5 pt for `paged-up`'s largest unrequested step, and `stream-follow` CPU
+at or below the `List` baseline. `-OpenCodeMeasureCheck` (DEBUG) compares every incremental prose measurement with
+`sizeThatFits` and logs differences. UI coverage: `ConversationFollowTests` (growth keeps the screen still, ↓, the last
+footer whole at the end), `PinnedPromptJumpTests`, `ReadingContinuityTests` (history and relaunch, parent/child, the
+sent prompt rising and its answer growing in place, an answer streaming across a refresh without a gap — both call
+the sandbox model once — and a shell message arriving while the app is hidden for more than 30 seconds, which keeps
+the passage and offers ↓), and app-hosted `ConversationRetentionTests` (registry, double mount, reveal deadlines,
+slow history toward a saved place).
+
+Runners (`test-isolated.py`, `test-quotes.py`) leave the theme to each test. The first launch of an `xcodebuild` run
+sometimes ignores its arguments and opens the app's saved server (also on the `List` baseline); a failure at the
+first `waitForExistence` of a run's first test is that, not the transcript. Seeds whose permission or question was consumed by a resumed sandbox need
+`seed-conversation.ts --reset` before the card tests.
+`test-isolated.py --attempts 2` enables XCTest retries; `OPENCODE_TEST_ATTEMPTS=2` also works through runners that
+delegate to it. Merge verification pairs `SessionSwitcherTests` (including both retained passages),
+`SessionSelectionTests`, `ProjectAvatarTests`, and the affected activity/header catalog cases with the Kit and
+app-hosted tests. Device reentry and streaming scenarios cover changes to registry integration and activity cells.
+
+### Returning to a conversation — 27 October
+
+A conversation is no longer rebuilt from nothing each time it is opened. `SessionStore.conversations`
+(`ConversationRegistry`) keeps the five most recently opened conversations of the server plus every one on the
+navigation stack, and a memory warning keeps only the stack. Each `ConversationStore` keeps its loaded pages and
+cursor, projections, a `TranscriptMemory` with prompt-bubble and `<details>` expansion, fetched shell output and table
+offsets (all previously view state, lost with the row), and the exact passage last shown, even at the end. Returning
+opens at that passage at once, without waiting for the network, catalogs or `ready`: restoration needs only the
+transcript, and no history page is fetched for it. The screen's event loop starts once per appearance, not per scene
+phase; the tail read behind it merges and publishes nothing when unchanged (see the contract's *Retained
+conversations*). Covering the conversation with another screen and coming back no longer restores it again.
+
+Hiding the app keeps the exact passage: if it was following the end, following stops there, so messages that arrive
+meanwhile land below and ↓ appears; returning to the foreground restarts nothing. Following resumes only when the
+reader's own scroll ends at the end (a shrinking area or growing viewport no longer starts it). Disk persistence is
+unchanged: the end is still saved as `followTail`, so a relaunch opens at the end. Response Markdown is parsed
+latest-wins: a newer text no longer cancels the parse in flight (which, in a fast stream, could cancel every parse
+until the stream paused); intermediate results publish at most every 100 ms.
+
+That table measured the `List` transcript, which rebuilt its rows on return; the UIKit transcript (*Transcript
+architecture* above) replaced it. On the iPhone 14 every `reentry-*`, `child-middle`, `open-*` and `background-*`
+episode now shows 0 wrong frames and 0 pt first-frame deviation, `paged-up`'s largest unrequested step is 0.2 pt,
+`read` costs 2.0 s of main-thread CPU (was 4.5 s) and `stream-follow` 6.2 s (was 6.4 s) with no row movement and no
+whole-text replacement.
+
+`measure-scroll.py`, alternating the two Debug `-O` builds (`a16c80c972` with only the instrumentation, then this
+change), medians; trajectory counts sum the three returns of a run. iPhone 14: two iterations; simulator (iPhone 17
+Pro, iOS 27.0): three, on a heavily loaded host, so its frame times are directional only.
+
+| Scenario | iPhone 14 before | iPhone 14 after | Simulator before | Simulator after |
+| --- | ---: | ---: | ---: | ---: |
+| `background-tail`: frames showing another passage after returning | 146.5 (another passage) | 0 (0 pt) | 143 | 0 |
+| `background-middle`: same | 73 (271 pt below the top row, 1 of 2 runs) | 73.5 (same) | 0 | 0 |
+| `reentry-tail`: wrong frames / first-frame deviation | 30 / another passage | 9 / 1,942 pt | 30 / another passage | 9 / 1,882 pt |
+| `reentry-middle`: same | 13 / 2,360 pt | 6 / 68 pt | 7 / 68 pt | 6 / 68 pt |
+| `child-middle`: same | 0 | 0 | 0 | 0 |
+| `open-middle`: wrong frames / first content | 2.5 / 507 ms | 7.5 / 117 ms | 5 / 305 ms | 3 / 615 ms |
+| `stream-follow`: main-thread CPU, 12 s | 6.45 s | 6.37 s | 8.06 s | 7.56 s |
+| `stream-follow`: growing row's largest step / text replacements | 36.7 pt / 288 | 36.7 pt / 288 | 36.7 pt / 292 | 36.7 pt / 299 |
+| `read`: main-thread CPU | 4.24 s | 3.55 s | 2.09 s | 1.90 s |
+| `paged-up`: largest unrequested step | 86.7 pt | 44.3 pt | 406.7 pt | 44.3 pt |
+
+The remaining `background-middle` movement happens on the device in both builds whenever the opening restoration lands
+on `msg_scroll_0153` (one run in two): the top row stays put while rows below it move 271 pt, a re-measurement the
+`List` performs while the app is hidden. Every response still replaces its whole text on each streamed batch.
 
 ### Transcript update and history paging cost
+
+*Historical: this section describes the `List` transcript, replaced on 27 October.*
 
 Streamed deltas republish the whole message list; rows must not re-render because of it. Conversation environment
 contexts and transcript rows compare by rendered data (their handlers capture the view's state storage), rows
@@ -2330,10 +2482,8 @@ After `build-for-testing` with that destination/DerivedData, run
 `python3 packages/ios-custom/script/test-follow.py --label follow`.
 The DEBUG-only `-OpenCodeFixtureFollow` control uses a four-message measured slice, grows three real Markdown rows in
 sequence, then continues growing the last row (24 updates per run). XCTest records native offsets at display cadence
-in both themes, requiring no backward step above 2 pt and a final gap
-within 2 pt. Pure `ConversationScrollPlan` tests cover coalescing, layout changes, exclusive reading ownership and
-cancellation; the UIKit-hosted check proves an explicit end request waits for existing deceleration and cannot run
-after navigation hides the reader. Empty-tail restoration and offline jump-to-latest navigation are also checked without
+in both themes, now requiring that growth never moves the offset and that ↓ appears (`ConversationScrollPlan` and
+its follow owner were removed with the `List`). Empty-tail restoration and offline jump-to-latest navigation are also checked without
 resetting any viewed watermark. `--live` explicitly enables tiny read-only follow-ups in the two owned sandbox replay
 children; it never answers seeded requests. The runner supplies sandbox credentials even for the disconnected fixture client,
 records video/follow logs in `$TMPDIR/opencode/ios-follow-prints/`, and removes private xctestrun credentials.

@@ -19,12 +19,14 @@ struct SessionColumnHeader: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   var voiceActive = false
-  let voice: () -> Void
+  var voice: (() -> Void)?
   var settings: (() -> Void)?
   var account: (() -> Void)?
   let newSession: () -> Void
   var newSessionDisabled = false
   var selection: SessionColumnSelection?
+  var close: (() -> Void)?
+  var newSessionIdentifier = "new-session"
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -89,12 +91,14 @@ struct SessionColumnHeader: View {
           .accessibilityLabel("Ações das sessões selecionadas")
           .accessibilityIdentifier("sessions-selection-menu")
         }
-        Button(action: voice) {
-          symbol("waveform", color: voiceActive ? .primary : .textStrong)
+        if let voice {
+          Button(action: voice) {
+            symbol("waveform", color: voiceActive ? .primary : .textStrong)
+          }
+          .glassEffect(.regular.interactive(), in: .circle)
+          .accessibilityLabel(voiceActive ? "Encerrar conversa por voz" : "Conversar por voz")
+          .accessibilityIdentifier("voice-start")
         }
-        .glassEffect(.regular.interactive(), in: .circle)
-        .accessibilityLabel(voiceActive ? "Encerrar conversa por voz" : "Conversar por voz")
-        .accessibilityIdentifier("voice-start")
         if let settings {
           Button(action: settings) { symbol("gearshape", color: .textStrong) }
             .glassEffect(.regular.interactive(), in: .circle)
@@ -106,12 +110,18 @@ struct SessionColumnHeader: View {
           .opacity(newSessionDisabled ? 0.5 : 1)
           .disabled(newSessionDisabled)
           .accessibilityLabel("Nova sessão")
+          .accessibilityIdentifier(newSessionIdentifier)
         if let account {
           Button(action: account) { AccountAvatar() }
             .glassEffect(.regular.interactive(), in: .circle)
             .accessibilityLabel("Você")
             .accessibilityHint("Ajustes, Dados do iPhone, LLM proxy e temas")
             .accessibilityIdentifier("sessions-account")
+        }
+        if let close {
+          Button(action: close) { symbol("xmark", color: .textStrong) }
+            .glassEffect(.regular.interactive(), in: .circle)
+            .accessibilityLabel("Fechar").accessibilityIdentifier("switcher-close")
         }
       }
       .buttonStyle(.plain)

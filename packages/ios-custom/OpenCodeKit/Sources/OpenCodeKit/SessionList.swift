@@ -17,7 +17,7 @@ public struct SessionRow: Sendable, Identifiable {
   public let activeChildren: Int
   public let requestCount: Int
   public let rank: Double
-  /// A managed `custom.chats` conversation: listed under Chats, never under Recentes or a project.
+  /// A managed `custom.chats` conversation: listed in Todas and Chats, never under a repository filter.
   public var chat = false
   public var id: String { entry.session.id }
   public var session: Session { entry.session }

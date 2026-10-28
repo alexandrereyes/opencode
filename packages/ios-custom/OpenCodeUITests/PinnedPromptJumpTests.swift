@@ -1,7 +1,11 @@
 import XCTest
 
 /// The offline fixture opens at msg_scroll_0148's turn: tool steps, then a long final answer below its divider.
+/// A turn starts right below its prompt when its first step's content sits the message's 10-point top padding
+/// below the prompt: the padding belongs to the message, whether it is drawn inside its cell or above it.
 @MainActor final class PinnedPromptJumpTests: XCTestCase {
+  private let padding: CGFloat = 10
+
   override func setUp() { continueAfterFailure = false }
 
   func testPinnedPromptReturnsToTheStartOfItsTurnInBothThemes() throws {
@@ -21,12 +25,13 @@ import XCTest
       settle()
       let header = transcript.cells.containing(.any, identifier: "user-content-" + id).firstMatch
       // The turn's first row holds its tool steps; the final answer and its divider come after it.
-      let start = transcript.cells.containing(NSPredicate(format: "identifier BEGINSWITH 'tool-group-context:msg_scroll_0149'")).firstMatch
-      let answer = transcript.cells.containing(.button, identifier: "read-aloud-message-msg_scroll_0151").firstMatch
+      let start = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'tool-group-context:msg_scroll_0149'")).firstMatch
+      // The final answer's first paragraphs: one item of the answer (its text views share the part's identifier).
+      let answer = transcript.cells["text:msg_scroll_0151:text:0:0"]
       let text = app.descendants(matching: .any)["user-prompt-" + id]
       let toggle = app.buttons["user-prompt-toggle-" + id]
       var pinned: Bool { abs(header.frame.minY - transcript.frame.minY) <= 1 }
-      var atStart: Bool { start.exists && abs(start.frame.minY - header.frame.maxY) <= 1.5 }
+      var atStart: Bool { start.exists && abs(start.frame.minY - header.frame.maxY - padding) <= 1.5 }
       func card() -> XCUICoordinate {
         // The bubble's padding, beside the prompt text: the bubble's own tap rather than the text's.
         let content = app.descendants(matching: .any)["user-content-" + id].frame
@@ -119,12 +124,14 @@ import XCTest
       XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
       settle()
       let header = transcript.cells.containing(.any, identifier: "user-content-" + id).firstMatch
-      let start = transcript.cells.containing(NSPredicate(format: "identifier CONTAINS 'msg_scroll_0160'")).firstMatch
+      // The turn's first row: the topmost item of msg_scroll_0160 (cells are named by item).
+      let start = transcript.cells.matching(NSPredicate(format: "identifier CONTAINS 'msg_scroll_0160'")).firstMatch
       XCTAssertTrue(header.exists)
       XCTAssertEqual(header.frame.minY, transcript.frame.minY, accuracy: 1)
-      XCTAssertFalse(start.exists)
+      // Several screens above: a transcript may keep some rows around, but none of this turn's is on screen.
+      XCTAssertFalse(start.exists && start.frame.maxY > transcript.frame.minY)
       app.descendants(matching: .any)["user-prompt-" + id].tap()
-      XCTAssertTrue(wait { start.exists && abs(start.frame.minY - header.frame.maxY) <= 1.5 })
+      XCTAssertTrue(wait { start.exists && abs(start.frame.minY - header.frame.maxY - self.padding) <= 1.5 })
       XCTAssertEqual(header.frame.minY, transcript.frame.minY, accuracy: 1)
       shot(app, "pinned-identity-jumped-" + theme)
       app.terminate()

@@ -39,6 +39,21 @@ import XCTest
     app.openYou()
     if appearance { reveal(app.descendants(matching: .any)["settings-themes"].firstMatch, app: app) }
   }
+  func testHeaderAvatarOpensAndClosesYou() throws {
+    let app = try launch(override: environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark")
+    defer { app.terminate() }
+    try app.requireSandbox()
+    app.openYou()
+    XCTAssertTrue(app.descendants(matching: .any)["settings-themes"].firstMatch.waitForExistence(timeout: 10))
+    app.buttons["settings-close"].tap()
+    XCTAssertTrue(app.navigationBars["Você"].waitForNonExistence(timeout: 10))
+    XCTAssertTrue(app.accountButton.isHittable)
+    app.openYou()
+    XCTAssertTrue(app.navigationBars["Você"].exists)
+    app.showSessions()
+    XCTAssertTrue(app.accountButton.isHittable)
+    XCTAssertFalse(app.tabBars.firstMatch.exists)
+  }
   private func reveal(_ element: XCUIElement, app: XCUIApplication) {
     // Você is a sheet over the Sessões list: scroll the topmost list, resolved again before every swipe.
     var list: XCUIElement {

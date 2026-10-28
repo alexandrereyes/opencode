@@ -2,26 +2,27 @@
 import OpenCodeKit
 import SwiftUI
 
-/// Records native offsets at display cadence, not XCTest's much slower UI snapshots.
+/// Grows the newest rows while recording the transcript's offset at display cadence, not XCTest's much slower
+/// UI snapshots. Growth never scrolls: the offset must not change while the content height does.
 struct ConversationFollowFixture: UIViewRepresentable {
   let store: ConversationStore
-  let state: ConversationScrollState
   let color: UIColor
-  func makeUIView(context: Context) -> Driver { Driver(store: store, state: state) }
+  let view: () -> UIScrollView?
+  func makeUIView(context: Context) -> Driver { Driver(store: store, view: view) }
   func updateUIView(_ view: Driver, context: Context) { view.setTitleColor(color, for: .normal) }
   static func dismantleUIView(_ view: Driver, coordinator: ()) { view.stop() }
 
   final class Driver: UIButton {
     private let store: ConversationStore
-    private let scrollState: ConversationScrollState
+    private let scrollView: () -> UIScrollView?
     private var task: Task<Void, Never>?
     private var link: CADisplayLink?
     private var offsets: [Double] = []
     private var heights: [Double] = []
     private var iteration = 0
-    init(store: ConversationStore, state: ConversationScrollState) {
+    init(store: ConversationStore, view: @escaping () -> UIScrollView?) {
       self.store = store
-      scrollState = state
+      scrollView = view
       super.init(frame: .zero)
       setTitle("Testar crescimento", for: .normal)
       accessibilityIdentifier = "follow-fixture"
@@ -49,9 +50,9 @@ struct ConversationFollowFixture: UIViewRepresentable {
       }
     }
     @objc private func sample() {
-      // Display-link callbacks precede the layout/correction work of that frame.
+      // Display-link callbacks precede the layout of that frame; sample what it committed.
       Task { @MainActor [weak self] in
-        guard let self, link != nil, let view = scrollState.view else { return }
+        guard let self, link != nil, let view = scrollView() else { return }
         offsets.append(view.contentOffset.y)
         heights.append(view.contentSize.height)
       }
@@ -59,14 +60,14 @@ struct ConversationFollowFixture: UIViewRepresentable {
     private func finish() {
       link?.invalidate()
       link = nil
-      guard let view = scrollState.view else { return }
+      guard let view = scrollView() else { return }
       let report: [String: Double] = [
-        "animations": Double(scrollState.tailAnimationCount),
         "backward": zip(offsets, offsets.dropFirst()).map { max(0, $0 - $1) }.max() ?? 0,
+        "forward": zip(offsets, offsets.dropFirst()).map { max(0, $1 - $0) }.max() ?? 0,
         "advance": (offsets.last ?? 0) - (offsets.first ?? 0),
         "heightChanges": Double(zip(heights, heights.dropFirst()).filter { abs($0 - $1) > 1 }.count),
         "samples": Double(offsets.count),
-        "gap": view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom - view.contentOffset.y,
+        "below": view.contentSize.height - view.bounds.height - view.contentOffset.y,
       ]
       if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]),
         let json = String(data: data, encoding: .utf8)

@@ -63,7 +63,7 @@ import XCTest
 
     // So does the session switcher, through the same compact row.
     app.buttons["conversation-switcher"].tap()
-    let search = app.searchFields.firstMatch
+    let search = app.textFields["switcher-search"]
     XCTAssertTrue(search.waitForExistence(timeout: 10))
     search.tap()
     search.typeText(svg[0])
