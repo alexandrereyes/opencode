@@ -55,6 +55,11 @@ import SwiftUI
       window.setFrame(NSRect(x: -4000, y: 40, width: size?.first ?? 1600, height: size?.last ?? 1000), display: true)
     }
     try? await Task.sleep(for: .seconds(2))
+    if let query = MacFixture.value("-OpenCodeMacModelPalette") {
+      runtime.openModelPalette(theme: theme)
+      runtime.modelPalette.state?.query = query == "empty" ? "" : query
+      try? await Task.sleep(for: .milliseconds(300))
+    }
     if runtime.search.visible, ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSearchFixture"),
       let error = MacSearchChecks.geometry(runtime) {
       print("MacCapture busca: \(error)")
@@ -151,11 +156,12 @@ import SwiftUI
     let overlays = NSApp.windows.filter { other in
       other !== window && other.isVisible
         && (other.sheetParent === window || String(describing: type(of: other)).contains("Popover")
-          || (other.parent === window && other.identifier?.rawValue == "mac-search-suggestions"))
-    }
+          || (other.parent === window && ["mac-search-suggestions", "mac-model-palette"].contains(other.identifier?.rawValue ?? ""))
+          || (other.parent?.sheetParent === window && other.identifier?.rawValue == "mac-model-palette"))
+    }.sorted { ($0.identifier?.rawValue == "mac-model-palette" ? 1 : 0) < ($1.identifier?.rawValue == "mac-model-palette" ? 1 : 0) }
     for other in overlays {
       guard let picture = draw(other) else { continue }
-      if other.identifier?.rawValue == "mac-search-suggestions" {
+      if ["mac-search-suggestions", "mac-model-palette"].contains(other.identifier?.rawValue ?? "") {
         base = compose(base, window, picture, other) ?? base
         continue
       }

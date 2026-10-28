@@ -5,6 +5,7 @@
 # (exit 134); a minimum width wider than a screen fails the run.
 #
 #   packages/ios-custom/script/test-mac-window.sh [runs] [idle seconds]
+#   OPENCODE_MAC_CHOICES_ONLY=1 ... # palette, rail and child navigation, without the wider window/search suite
 #
 # It moves the window over the connected screens while it runs and starts from the default size. It runs a copy
 # of the build under its own bundle identifier (`br.com.alexandrem.opencode.mac.debug.tests`, ad-hoc signed), so
@@ -39,15 +40,19 @@ for run in $(seq 1 "$runs"); do
     mkdir -p "$OPENCODE_MAC_CAPTURES"
     captures=(-OpenCodeMacCapture "$OPENCODE_MAC_CAPTURES")
   fi
+  choices=()
+  if [[ "${OPENCODE_MAC_CHOICES_ONLY:-0}" == 1 ]]; then choices=(-OpenCodeMacChoicesOnly); fi
   set +e
   timeout $((idle + 240)) "$app" -OpenCodeMacFixture contexto -OpenCodeMacFixtureRoot "$root" \
-    -OpenCodeServerURL http://127.0.0.1:4207 -OpenCodeMacSearchFixture \
+    -OpenCodeServerURL "${OPENCODE_MAC_TEST_SERVER_URL:-http://127.0.0.1:4213}" -OpenCodeMacSearchFixture -OpenCodeMacChoicesFixture \
     -OpenCodeTheme openchamber-dark -OpenCodeMacStress "$idle" \
-    "${captures[@]}" >"$log" 2>&1
+    "${captures[@]}" "${choices[@]}" >"$log" 2>&1
   code=$?
   set -e
-  if [[ $code -eq 0 ]] && grep -q '^MacStress ok' "$log" && grep -q '^MacStress duas janelas independentes ok' "$log" \
-    && grep -q '^MacStress busca:.* ok' "$log"; then
+  if [[ $code -eq 0 && "${OPENCODE_MAC_CHOICES_ONLY:-0}" == 1 ]] && grep -q '^MacStress escolhas ok' "$log"; then
+    echo "run $run: escolhas ok; log: $log"
+  elif [[ $code -eq 0 ]] && grep -q '^MacStress ok' "$log" && grep -q '^MacStress duas janelas independentes ok' "$log" \
+    && grep -q '^MacStress busca:.* ok' "$log" && grep -q '^MacStress escolhas:.* ok' "$log"; then
     echo "run $run: ok"
   else
     failed=1

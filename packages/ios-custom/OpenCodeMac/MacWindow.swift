@@ -25,7 +25,7 @@ struct MacWindow: View {
   var body: some View {
     NavigationSplitView(columnVisibility: $runtime.columns) {
       MacSessionColumn(store: store, runtime: runtime)
-        .navigationSplitViewColumnWidth(min: 300, ideal: 330, max: 480)
+        .navigationSplitViewColumnWidth(min: 352, ideal: 382, max: 532)
         .background(MacSidebarDivider(visible: runtime.state.sidebarVisible))
     } detail: {
       // Contexto shares the detail column with the chat instead of being an inspector: an inspector gets its

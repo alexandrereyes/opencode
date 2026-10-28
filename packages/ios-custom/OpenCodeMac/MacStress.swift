@@ -22,6 +22,11 @@ import SwiftUI
     print("MacStress app ativo no início: \(NSApp.isActive)")
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
+    if let error = await MacChoicesChecks.run(runtime) { return finish(error, status: 1) }
+    await step("Nova sessão e paleta") { runtime.newSession() }
+    if let error = await MacChoicesChecks.newSession(runtime) { return finish(error, status: 1) }
+    await step("fechar Nova sessão e paleta") { runtime.newSessionRequest = nil }
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacChoicesOnly") { return finish("escolhas ok", status: 0) }
     guard let secondID = runtime.store?.rows.first(where: { $0.id != runtime.selection.sessionID })?.id else {
       return finish("sem segunda sessão", status: 1)
     }

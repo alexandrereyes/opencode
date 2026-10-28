@@ -138,9 +138,9 @@ struct MacComposer: View {
         attach
         if embedded == nil {
           ComposerModelChip(label: store.modelLabel(store.selectedModel(draft)).isEmpty ? "Modelo"
-            : store.modelLabel(store.selectedModel(draft))) { picking = .model }
+            : store.modelLabel(store.selectedModel(draft))) { openModelPalette() }
             .buttonStyle(.plain).foregroundStyle(theme.color(.text))
-            .help("Modelo e esforço")
+            .help("Modelo e esforço (⌥⌘M)")
             .accessibilityIdentifier("model-picker")
           agent
           if store.mcps.summary.visible { mcp }
@@ -151,7 +151,7 @@ struct MacComposer: View {
     }
     .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 10)
     .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 18))
-    .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(.border), lineWidth: 0.7) }
+    .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(store.isChild ? .accent : .border), lineWidth: store.isChild ? 1 : 0.7) }
     .overlay(alignment: .topTrailing) { corner }
   }
 
@@ -317,9 +317,9 @@ struct MacComposer: View {
         draft.selection = NSRange(location: 0, length: 0)
         return
       }
-      // Embedded, the host screen shows the model and agent pickers itself.
+      if item.token.id == "model" { openModelPalette(); return }
+      // Embedded, the host screen shows the agent picker itself.
       guard embedded == nil else { return }
-      if item.token.id == "model" { picking = .model }
       if item.token.id == "agent", !store.isChild, !store.masterMode { picking = .agent }
       return
     }
@@ -329,6 +329,12 @@ struct MacComposer: View {
   private func firstSuggestion() -> (() -> Void)? {
     guard let trigger = draft.trigger, let first = suggestionReturn.first, first.trigger == trigger else { return nil }
     return { choose(first.item, replacing: trigger) }
+  }
+
+  private func openModelPalette() {
+    guard let windowRuntime else { return }
+    if embedded != nil { windowRuntime.openModelPalette(theme: theme); return }
+    windowRuntime.modelPalette.open(runtime: windowRuntime, conversation: store, draft: draft, theme: theme)
   }
 }
 

@@ -16,11 +16,7 @@ import OpenCodeKit
       } ?? []
   }
   func committed(_ model: ModelReference) {
-    recent = Array(
-      ([ModelReference(id: model.id, providerID: model.providerID)]
-        + recent.filter {
-          $0.id != model.id || $0.providerID != model.providerID
-        }).prefix(10))
+    recent = ModelPaletteMemory.recording(model, in: recent)
     defaults.set(try? JSONEncoder().encode(recent), forKey: recentKey)
   }
   func remember(_ models: [ModelInfo]) {

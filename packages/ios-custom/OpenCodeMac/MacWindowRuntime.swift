@@ -47,6 +47,8 @@ import SwiftUI
   /// The title's old switcher popover is gone (⌘K replaces it); the search presentation still resets this flag.
   var switcherVisible = false
   let search: MacSearch
+  let modelPalette = MacModelPalette()
+  var newSessionPalette: (() -> Void)?
   var archiveRequest: SessionRow?
   /// The widths the columns got in the last layout, for checks (not observed).
   @ObservationIgnored var measuredContextWidth: CGFloat = 0
@@ -100,6 +102,7 @@ import SwiftUI
   }
 
   func close() {
+    modelPalette.close()
     search.visible = false
     inputs.values.forEach { $0.readAloud.stop() }
     let drafts = drafts

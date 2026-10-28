@@ -28,16 +28,20 @@ struct MacSessionColumn: View {
   }
 
   var body: some View {
+    HStack(spacing: 0) {
+      MacProjectRail(store: store) { name, intent in
+        projectAction = ProjectAction(name: name, intent: intent)
+      } add: { showProjects = true }
+      sessionList
+    }
+  }
+
+  private var sessionList: some View {
     List {
       VStack(spacing: 14) {
         SessionQuotaRings(quota: store.quota) { provider in
           runtime.proxyPane = .provider(provider)
           openWindow(id: MacProxyWindow.id)
-        }
-        SessionChips(store: store) { name, intent in
-          projectAction = ProjectAction(name: name, intent: intent)
-        } add: {
-          showProjects = true
         }
         if let selection = selectionActions { selectionBar(selection) }
       }
@@ -68,16 +72,21 @@ struct MacSessionColumn: View {
           withAnimation(.snappy(duration: 0.2)) { runtime.sessionSelection.toggle(row.id) }
         }
       ) { row, content in
-        content
-          .background {
-            if !runtime.sessionSelection.active && runtime.selection.sessionID == row.id {
-              RoundedRectangle(cornerRadius: 12).fill(theme.color(.highlight)).padding(-7)
+        VStack(spacing: 0) {
+          content
+            .background {
+              if !runtime.sessionSelection.active && runtime.selection.sessionID == row.id {
+                RoundedRectangle(cornerRadius: 12).fill(theme.color(.highlight)).padding(-7)
+              }
             }
+            // The hairline between rows ends with the row's text, like the mock, not at the column's edge.
+            .alignmentGuide(.listRowSeparatorTrailing) { $0.width }
+            .contextMenu { if !runtime.sessionSelection.active { rowActions(row) } }
+            .disabled(store.busy.contains(row.id))
+          if !runtime.sessionSelection.active {
+            MacSubagentTree(store: store, runtime: runtime, rootID: row.id)
           }
-          // The hairline between rows ends with the row's text, like the mock, not at the column's edge.
-          .alignmentGuide(.listRowSeparatorTrailing) { $0.width }
-          .contextMenu { if !runtime.sessionSelection.active { rowActions(row) } }
-          .disabled(store.busy.contains(row.id))
+        }
       }
     }
     .listStyle(.plain)

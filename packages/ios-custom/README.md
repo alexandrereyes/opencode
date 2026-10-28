@@ -2591,6 +2591,62 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
 - **Settings**: see [Ajustes](#ajustes). `-OpenCodeServerURL`/`OPENCODE_SERVER_URL` and
   `-OpenCodeServerPassword`/`OPENCODE_SERVER_PASSWORD` override the server for a launch, as on the iPhone.
 
+### Approved Mac choices — 28 October
+
+The approved palette C, project rail C and subagent banner A + tree C are implemented independently of the
+general-polish and ⌘K fixes. Their contract and reference images are `.agent-artifacts/mac-app/ESCOLHAS.md` and
+`escolhas/` in the `mac-escolhas` worktree.
+
+- **Model palette** (`OpenCodeMac/MacModelPalette.swift`): the composer capsule, `/model` (including Nova sessão)
+  and **⌥⌘M** open a centered, dark-material AppKit child panel with a dimmed background. ⇧⌘M keeps its existing
+  Sessão mestra action. ↑↓ select; ←→ choose supported effort; Return applies; ⌘Return applies and writes the
+  existing `model.default` preference through `SessionStore.rememberNewSessionModel`; Esc or outside click closes
+  and restores editor focus. Clicking an effort applies immediately. **Padrão** keeps the server's default effort,
+  distinct from **none**; other supported levels use L/M/H/XH/MAX (unknown variants retain their names).
+  Nova sessão follows the same explicit ⌘Return rule; merely applying a model there does not overwrite the default
+  on Send. iPhone's existing new-session rule is unchanged. Model choices are cached: opening makes no request.
+  The Kit's `ModelPalette` owns visible-model ranking, accent-preserving highlights, groups and efforts;
+  `ModelPaletteMemory` owns the existing per-server bounded recent list. Favorites reuse `Preferences.Models`
+  and `modelFavorite`, including ⌘D; no competing local favorite store was introduced. Empty search is favorites,
+  recent choices, then providers. The shared `ModelCatalogCache.committed` calls the same recent-list projection.
+- **Project rail** (`OpenCodeMac/MacProjectRail.swift`, Kit `ProjectRail`): 52 pt wide, full-height and independently
+  scrollable. Todas, fixed Chats, then the saved repository chips and Add. Repositories retain `SessionList.chipGroups`
+  ordering (working/unread before manual order) and its 1.5 s settling behavior; manual changes apply immediately.
+  The sidebar's width range grows by 52 pt to preserve the rows' usable width. Project icons/monograms are 32 pt;
+  counts include root sessions, with separate working, pending and unread dots. Click uses the chip semantics,
+  including state filters; right click offers filters/removal/moves. Dragging a repository onto another saves its
+  target position using the existing `project.move`. Chats stays pinned on Mac, while its saved iPhone position is
+  preserved. No iPhone chip view changed. ⌘K and the rail observe the same `selectedProject`/`filter`.
+- **Open subagent** (`OpenCodeMac/MacSubagentNavigation.swift`, Kit `SubagentNavigation`): a full-width 8%-tint
+  lilac banner inside the chat, pixel-grid icon, SUBAGENTE, title, latest transcript agent/model/effort (session
+  fallback), and a parent-title Back button (⌘[). The composer keeps its child placeholder and gains a lilac border.
+  Sessões keeps the root selected and adds only the open ancestry underneath, indented once per generation; Back
+  removes the departed branch. Metadata is read from the existing live conversation/family, without another poller.
+  `MacSubagentIdentity` is the integration point for the general-polish agent's column-3 metadata. Response mascots
+  remain that agent's responsibility.
+
+**Checks and captures:** `swift test` in OpenCodeKit covers ranking, visibility, favorites, effort, persisted recents,
+rail order/counts/indicators/drop intents and nested ancestry. `script/test-mac-window.sh` now also runs
+`MacChoicesChecks` against the closed in-memory fixture, exercising the real palette's keys, persisted preferences,
+zero catalog reads on opening, rail filters, child navigation and Nova sessão. Set `OPENCODE_MAC_DERIVED`,
+`OPENCODE_MAC_TEST_DOMAIN` and `OPENCODE_MAC_CAPTURES` to isolated values. Its explicit launch URL defaults to
+`http://127.0.0.1:4213` (`OPENCODE_MAC_TEST_SERVER_URL` overrides it); no fixture request leaves the process.
+`-OpenCodeMacChoicesFixture` provides a richer visible catalog and in-memory favorite/default mutations;
+`-OpenCodeMacModelPalette empty|<query>` opens it for the normal capture pipeline. Evidence for this change goes
+to `$TMPDIR/opencode/mac-escolhas-prints/`, including the production views drawn by AppKit when locked.
+`OPENCODE_MAC_CHOICES_ONLY=1` runs those focused checks without the broader window/search stress suite.
+
+Verification on this worktree: **598 Kit tests passed**, warning-free macOS Debug build, successful iOS/Watch
+Simulator build with no new warnings (the 13 existing source warning sites in `ResponseText.swift` and vendored
+WatchRTC are unchanged), and the focused window script passed. It checks native text-field focus and typing,
+↑↓/←→, ⌘D, Return versus ⌘Return, Esc, the independent Nova sessão selection, rail filters and child/back.
+Palette construction plus first layout/draw in the four-model fixture measured **40.7 ms cold, 16.9–19.2 ms warm**,
+with zero additional catalog reads. The full window script reached the existing window-search `MacSearchChecks.layout`
+stage, then failed its panel-anchoring assertion while moving to the built-in display at 1500×940; rerun that suite
+after integrating the parallel search fix. The exact trace is `mac-escolhas-prints/validacao-completa-busca.log`.
+Comparisons are `comparacao-paleta.png`, `comparacao-trilho.png` and `comparacao-subagente.png`; the latter compares
+the combined banner/tree against both approved subagent references. `nova-sessao-paleta.png` captures the second host.
+
 ### Chat (polish 1) — 27 October
 
 Briefing: `.agent-artifacts/mac-app/POLIMENTO-CHAT.md` of the `mac-polish-chat` worktree. The chat column is the

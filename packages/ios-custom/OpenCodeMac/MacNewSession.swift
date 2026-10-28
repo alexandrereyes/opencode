@@ -52,6 +52,8 @@ struct MacNewSession: View {
     .modifier(FloatingVoiceScope())
     .toastOverlay(store.toast)
     .task { await store.open() }
+    .onAppear { runtime.newSessionPalette = openModelPalette }
+    .onDisappear { runtime.newSessionPalette = nil; runtime.modelPalette.close() }
     .task {
       await store.draft.load()
       store.draft.focused = true
@@ -208,28 +210,11 @@ struct MacNewSession: View {
   /// The model with its effort and the agent, then Cancelar and Enviar (⌘Return).
   private var footer: some View {
     HStack(spacing: 10) {
-      Menu {
-        ForEach(store.visibleModels, id: \.identity) { info in
-          let variants = info.variants ?? []
-          if variants.isEmpty {
-            Button(info.name) { store.model = ModelReference(id: info.id, providerID: info.providerID) }
-          } else {
-            Menu(info.name) {
-              Button("Padrão") { store.model = ModelReference(id: info.id, providerID: info.providerID, variant: "default") }
-              ForEach(variants) { variant in
-                Button(variant.id) {
-                  store.model = ModelReference(id: info.id, providerID: info.providerID, variant: variant.id)
-                }
-              }
-            }
-          }
-        }
-        if store.visibleModels.isEmpty { Text("Nenhum modelo visível. Escolha os modelos nos Ajustes.") }
-      } label: {
+      Button(action: openModelPalette) {
         Text(store.modelLabel).appFont(.chrome).lineLimit(1).foregroundStyle(theme.color(.text))
           .composerCapsule(horizontal: 9)
       }
-      .help("Modelo e esforço")
+      .help("Modelo e esforço (⌥⌘M)")
       if !store.master {
         Menu {
           ForEach(store.primaryAgents, id: \.id) { agent in
@@ -260,6 +245,14 @@ struct MacNewSession: View {
     }
     .menuStyle(.button).menuIndicator(.hidden).fixedSize(horizontal: false, vertical: true)
     .buttonStyle(.plain)
+  }
+
+  private func openModelPalette() {
+    store.draft.focused = false
+    store.draft.focusSuppressed = true
+    runtime.modelPalette.open(window: runtime.window, sessions: store.sessions, models: store.models,
+      providers: store.composer.providers, current: store.selectedModel, theme: theme,
+      restore: { store.draft.focusSuppressed = false; store.draft.focused = true }) { store.choosePaletteModel($0) }
   }
 }
 
@@ -366,6 +359,12 @@ private struct MacBaseBranchPicker: View {
   private let origin: NewSessionOrigin?
   private let startInChats: Bool
   private var inheritedModel: ModelReference?
+
+  /// Return is a choice for this session; only the palette's explicit ⌘Return writes the shared default.
+  func choosePaletteModel(_ value: ModelReference) {
+    model = value
+    inheritedModel = value
+  }
   @ObservationIgnored private var pendingTouch: String?
   @ObservationIgnored private var mutations: [UUID: Task<Bool, Never>] = [:]
 
