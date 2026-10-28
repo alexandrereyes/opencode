@@ -202,3 +202,34 @@ it.live("credentials come from the environment; a missing key or key ID means un
     yield* Effect.promise(() => rm(directory, { recursive: true }))
   }),
 )
+
+it.live("a session alert uses the alert push type with the bare bundle topic; OPENCODE_APNS_ORIGIN redirects tests", () =>
+  Effect.gen(function* () {
+    const fake = yield* fakeApns
+    const directory = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "apns-")))
+    const file = path.join(directory, "AuthKey.p8")
+    yield* Effect.promise(() => Bun.write(file, keys().privateKey.export({ type: "pkcs8", format: "pem" }).toString()))
+    const client = yield* load().pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: { OPENCODE_APNS_KEY_PATH: file, OPENCODE_APNS_KEY_ID: "KEY1234567", OPENCODE_APNS_ORIGIN: fake.origin },
+          }),
+        ),
+      ),
+    )
+    if (!client) throw new Error("client expected")
+    yield* Effect.addFinalizer(() => client.close)
+    const body = { aps: { alert: { title: "Sessão", body: "Terminou · repo" }, "thread-id": "ses_1" } }
+    expect(
+      yield* client.send({ token: "c0ffee", environment: "production", priority: 10, expiration: 1, body, type: "alert" }),
+    ).toEqual({ status: "sent" })
+    expect(fake.received[0]?.headers).toMatchObject({
+      "apns-push-type": "alert",
+      "apns-topic": defaults.bundleID,
+      "apns-priority": "10",
+    })
+    expect(JSON.parse(fake.received[0]?.body ?? "")).toEqual(body)
+    yield* Effect.promise(() => rm(directory, { recursive: true }))
+  }),
+)

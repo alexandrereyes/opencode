@@ -37,7 +37,10 @@ export const Data = Schema.Struct({
   projects: Schema.Record(Schema.String, Schema.mutableKey(ProjectLibrary)),
   sidebarOrder: Schema.Array(Schema.String),
   pinnedSessions: Schema.Array(Schema.String),
+  /** Written by app builds before "Avisar ao terminar"; kept so they keep working, but nothing reads it. */
   mutedSessions: optional(Schema.Array(Schema.String)),
+  /** Sessions with "Avisar ao terminar": the server pushes an alert when their work ends. */
+  notifySessions: optional(Schema.Array(Schema.String)),
   masterSessions: optional(Schema.Record(Schema.String, Session.ID)),
   models: Schema.Struct({
     user: Schema.Array(Model),
@@ -81,6 +84,7 @@ export const Intent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("sidebar.order"), order: Schema.Array(Schema.String) }),
   Schema.Struct({ type: Schema.Literal("sidebar.pin"), session: Schema.String, pinned: Schema.Boolean }),
   Schema.Struct({ type: Schema.Literal("sidebar.mute"), session: Schema.String, muted: Schema.Boolean }),
+  Schema.Struct({ type: Schema.Literal("sidebar.notify"), session: Schema.String, notify: Schema.Boolean }),
   Schema.Struct({
     type: Schema.Literal("model.visibility"),
     providerID: Schema.String,

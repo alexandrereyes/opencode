@@ -38,6 +38,7 @@
     "./transcript/rpc": "./src/transcript/rpc.ts",
     "./quotes/rpc": "./src/quotes/rpc.ts",
     "./live-activity/rpc": "./src/live-activity/rpc.ts",
+    "./notifications/rpc": "./src/notifications/rpc.ts",
     "./watch/rpc": "./src/watch/rpc.ts"
   },
   "scripts": {

@@ -38,7 +38,7 @@ import Testing
         """.utf8))
     let row = try #require(
       SessionList.rows(
-        entries: [entry], projects: [], active: [], pins: [], muted: [], autoApprove: false,
+        entries: [entry], projects: [], active: [], pins: [], notify: [], autoApprove: false,
         ranks: ["ses_row": 123456], chatRoot: nil
       ).first)
     #expect(row.interactionAt == (message.isEmpty ? 1000 : 42000))

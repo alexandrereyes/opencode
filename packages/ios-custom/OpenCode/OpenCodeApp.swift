@@ -5,7 +5,7 @@ import SwiftUI
 
 @main
 struct OpenCodeApp: App {
-  @UIApplicationDelegateAdaptor(TranscriptionAppDelegate.self) private var delegate
+  @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
   init() {
     FilePreviewStorage.clean()
     VoiceLaunchRouter.launcher = AppVoiceLauncher()

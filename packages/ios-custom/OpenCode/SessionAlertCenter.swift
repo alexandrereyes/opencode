@@ -54,7 +54,8 @@ import SwiftUI
         (store.preferences?.revision ?? -1) > preferences.revision ? store.preferences : preferences
       let admitted = policy.admit(
         signal, server: server, session: session, root: root,
-        current: store.currentSessionID, muted: latest?.data.mutedSessions ?? [],
+        current: store.currentSessionID,
+        notified: pushes(store) ? latest?.data.notifySessions ?? [] : [],
         autoApprove: latest?.data.settings.autoApprove ?? false)
       UserDefaults.standard.set(policy.claims, forKey: storageKey)
       guard admitted else { return }
@@ -80,8 +81,17 @@ import SwiftUI
         self.present(Message(session: target, project: project, content: content))
       }
     } catch {
-      // A missing session/ancestry or failed mute read cannot safely produce an alert.
+      // A missing session/ancestry or failed preferences read cannot safely produce an alert.
     }
+  }
+  /// Whether this server pushes bell finishes to this device. The Mac has no APNs: its bell list keeps them and
+  /// `MacSessionFinish` posts the system notification.
+  private func pushes(_ store: SessionStore) -> Bool {
+    #if os(iOS)
+    SessionNotificationAgent.shared.pushing.contains(store.client.configuration.url)
+    #else
+    false
+    #endif
   }
   private func present(_ next: Message) {
     message = next

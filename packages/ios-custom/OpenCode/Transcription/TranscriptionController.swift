@@ -282,7 +282,7 @@ import UIKit
 }
 
 #if os(iOS)
-final class TranscriptionAppDelegate: NSObject, UIApplicationDelegate {
+class TranscriptionAppDelegate: NSObject, UIApplicationDelegate {
   func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
                    completionHandler: @escaping () -> Void) {
     let completion = BackgroundDownloadCompletion(completionHandler)

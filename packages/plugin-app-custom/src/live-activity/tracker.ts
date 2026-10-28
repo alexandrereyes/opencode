@@ -112,7 +112,7 @@ export type Event =
       readonly created: number
       readonly data: { readonly sessionID: string; readonly metadata?: Readonly<Record<string, unknown>> }
     }
-  /** Mapped by the hub from `rpc.custom.preferences.updated`: muted sessions may have changed. */
+  /** Mapped by the hub from `rpc.custom.preferences.updated`: "Avisar ao terminar" sessions may have changed. */
   | { readonly type: "preferences.updated" }
   /** Published before the request leaves `ctx.request.pending()`, so the settled ID is excluded from that read. */
   | { readonly type: "form.replied" | "form.cancelled"; readonly data: { readonly id: string } }
@@ -146,8 +146,8 @@ export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
 
 export type TrackerContext = {
   session: Pick<Plugin.Context["session"], "get" | "scan" | "active" | "family">
-  /** Muted session IDs from `custom.preferences` (`mutedSessions`); muted sessions are never unread. */
-  muted: () => Effect.Effect<readonly string[]>
+  /** "Avisar ao terminar" session IDs from `custom.preferences` (`notifySessions`). */
+  watched: () => Effect.Effect<readonly string[]>
   message: Pick<Plugin.Context["message"], "list">
   request: Pick<Plugin.Context["request"], "pending">
 }
@@ -172,6 +172,12 @@ type Entry = {
   /** Latest observed activity, which orders working rows and picks the family's activity text. */
   activityAt: number
   ended?: { readonly outcome: "succeeded" | "failed" | "interrupted"; readonly at: number; cleared: boolean }
+  /**
+   * Top-level only: the latest family work this process saw (an execution start or end, or a shell launch, of the
+   * session or a descendant). Session alerts use it to tell a new piece of work from one already reported, even
+   * when it started and ended between two evaluations.
+   */
+  workedAt?: number
   activity?: string
   /** Tool call ID → tool name of the current execution, to describe `session.tool.called`. */
   readonly tools: Map<string, string>
@@ -191,6 +197,16 @@ type Request = {
 /** Push alert of one attention item or failed session; keyed by `<status>:<sessionID>`. */
 export type Mark = { readonly title: string; readonly body: string }
 
+/** A top-level session with "Avisar ao terminar": whether its family still works and how its own last run ended. */
+export type Watch = {
+  readonly ref: ReturnType<typeof ref>
+  /** The same roll-up as a "working" row: its execution, any descendant's, or an unfinished background shell. */
+  readonly working: boolean
+  readonly outcome?: "succeeded" | "failed" | "interrupted"
+  /** See `Entry.workedAt`; absent when this process never saw the family work. */
+  readonly workedAt?: number
+}
+
 export type Derived = {
   readonly state: LiveActivity.AgentsState
   /** Every attention item and failed session, untruncated, in alert priority order. */
@@ -199,6 +215,8 @@ export type Derived = {
   readonly wakeAt?: number
   /** Top-level session → its oldest pending request of the attention kind (subagents included); watch-only. */
   readonly requests: ReadonlyMap<string, string>
+  /** Known, unarchived top-level sessions with "Avisar ao terminar". */
+  readonly watched: ReadonlyMap<string, Watch>
 }
 
 /**
@@ -210,11 +228,11 @@ export function makeTracker(ctx: TrackerContext) {
   const sessions = new Map<string, Entry>()
   const shells = new Map<string, Shell>()
   const firstSeen = new Map<string, number>()
-  const muted = new Set<string>()
-  const refreshMuted = Effect.fn("LiveActivity.refreshMuted")(function* () {
-    const ids = yield* ctx.muted()
-    muted.clear()
-    for (const id of ids) muted.add(id)
+  const watched = new Set<string>()
+  const refreshWatched = Effect.fn("LiveActivity.refreshWatched")(function* () {
+    const ids = yield* ctx.watched()
+    watched.clear()
+    for (const id of ids) watched.add(id)
   })
   const state = { requests: [] as Request[], focus: undefined as string | undefined }
 
@@ -279,7 +297,7 @@ export function makeTracker(ctx: TrackerContext) {
   /** Reconstructs running, waiting, failed and recently idle sessions, e.g. after a restart. */
   const rebuild = Effect.fn("LiveActivity.rebuild")(function* (now: number) {
     const active = yield* ctx.session.active()
-    yield* refreshMuted()
+    yield* refreshWatched()
     const scan = (after?: Session.ID): Effect.Effect<readonly SessionScan.Info[]> =>
       ctx.session
         .scan({ parentID: null, archived: false, limit: 500, after })
@@ -320,6 +338,7 @@ export function makeTracker(ctx: TrackerContext) {
       ].flatMap((id) => rootOf(id) ?? []),
     )
     for (const root of roots) {
+      root.workedAt = now
       // A top-level session waiting for background work: its most recent turn started at its latest prompt.
       if (!root.running && root.startedAt === undefined) root.startedAt = yield* latestPrompt(root.id)
       const family = yield* ctx.session
@@ -383,6 +402,11 @@ export function makeTracker(ctx: TrackerContext) {
     return top && !top.parentID ? top : undefined
   }
 
+  const worked = (id: string, at: number) => {
+    const top = rootOf(id)
+    if (top) top.workedAt = Math.max(top.workedAt ?? 0, at)
+  }
+
   const apply = Effect.fn("LiveActivity.apply")(function* (event: Event, now: number) {
     switch (event.type) {
       case "permission.asked":
@@ -394,7 +418,7 @@ export function makeTracker(ctx: TrackerContext) {
       case "permission.replied":
         return yield* refreshPending(now, event.data.requestID)
       case "preferences.updated":
-        return yield* refreshMuted()
+        return yield* refreshWatched()
       case "shell.created": {
         const owner = event.data.info.metadata.sessionID
         if (event.data.info.status !== "running" || typeof owner !== "string") return
@@ -405,6 +429,7 @@ export function makeTracker(ctx: TrackerContext) {
         })
         const target = yield* lineage(owner)
         if (target) target.activityAt = Math.max(target.activityAt, event.created)
+        worked(owner, event.created)
         return
       }
       case "shell.exited":
@@ -465,6 +490,7 @@ export function makeTracker(ctx: TrackerContext) {
           target.activity = undefined
           target.tools.clear()
         }
+        worked(id, event.created)
         return yield* refreshPending(now)
       }
       case "session.execution.succeeded":
@@ -488,6 +514,7 @@ export function makeTracker(ctx: TrackerContext) {
             cleared: false,
           }
         }
+        worked(id, event.created)
         return yield* refreshPending(now)
       }
       case "session.tool.input.started":
@@ -521,7 +548,7 @@ export function makeTracker(ctx: TrackerContext) {
 
   /**
    * The Sessões unread dot (`custom.navigation`, iOS `SessionList`): a top-level session whose idle transition is newer
-   * than its viewed watermark, after a newer success/failure or with a succeeded/failed outcome; muted ones excluded.
+   * than its viewed watermark, after a newer success/failure or with a succeeded/failed outcome.
    */
   const unseen = (entry: Entry) => {
     const viewed = entry.viewedAt ?? 0
@@ -531,7 +558,6 @@ export function makeTracker(ctx: TrackerContext) {
       (entry.completionAt ?? 0) > viewed || entry.ended?.outcome === "succeeded" || entry.ended?.outcome === "failed"
     )
   }
-  const unread = (entry: Entry) => unseen(entry) && !muted.has(entry.id)
   const unreadAt = (entry: Entry) =>
     (entry.completionAt ?? 0) > (entry.viewedAt ?? 0) ? (entry.completionAt ?? 0) : (entry.idleAt ?? 0)
 
@@ -597,9 +623,9 @@ export function makeTracker(ctx: TrackerContext) {
         const rollup = family(entry)
         const status: LiveActivity.RowStatus | undefined =
           kind ??
-          (failed(entry) ? "failed" : rollup.running ? "working" : idle(entry) || unread(entry) ? "idle" : undefined)
+          (failed(entry) ? "failed" : rollup.running ? "working" : idle(entry) || unseen(entry) ? "idle" : undefined)
         if (!status) return []
-        return [{ entry, status, oldest, ref: ref(entry), rollup, unread: status === "idle" && unread(entry) }]
+        return [{ entry, status, oldest, ref: ref(entry), rollup, unread: status === "idle" && unseen(entry) }]
       })
     const of = (status: LiveActivity.RowStatus) => rows.filter((row) => row.status === status)
     const working = of("working")
@@ -699,6 +725,19 @@ export function makeTracker(ctx: TrackerContext) {
       marks,
       ...(expiries.length > 0 ? { wakeAt: Math.min(...expiries) } : {}),
       requests: new Map(waiting.flatMap((row) => (row.oldest ? [[row.entry.id, row.oldest.id] as const] : []))),
+      watched: new Map(
+        [...watched].flatMap((id) => {
+          const entry = sessions.get(id)
+          if (!entry || entry.parentID || entry.archived) return []
+          const watch: Watch = {
+            ref: ref(entry),
+            working: family(entry).running,
+            ...(entry.ended ? { outcome: entry.ended.outcome } : {}),
+            ...(entry.workedAt === undefined ? {} : { workedAt: entry.workedAt }),
+          }
+          return [[id, watch] as const]
+        }),
+      ),
     }
   }
 

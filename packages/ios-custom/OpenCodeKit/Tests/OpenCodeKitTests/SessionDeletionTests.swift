@@ -30,7 +30,9 @@ private func deletionSession(_ id: String, parent: String? = nil) throws -> Sess
     "revision": JSONValue.number(1), "data": .object([
       "projects": .object([:]), "settings": .object(["autoApprove": .bool(false)]),
       "pinnedSessions": .array([.string(parent), .string(encoded), .string("ses_keep")]),
-      "mutedSessions": .array([.string(other), .string("invalid")]),
+      "notifySessions": .array([.string(other), .string("invalid")]),
+      // Left by older builds; nothing reads it, so deletion does not clean it either.
+      "mutedSessions": .array([.string(encoded)]),
       "masterSessions": .object(["local": .string("ses_master")]),
     ]),
   ]))
@@ -39,9 +41,9 @@ private func deletionSession(_ id: String, parent: String? = nil) throws -> Sess
     try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode($0))
   }
   #expect(intents.compactMap { $0.object?["session"]?.string } == [parent, encoded, other])
-  #expect(intents.compactMap { $0.object?["type"]?.string } == ["sidebar.pin", "sidebar.pin", "sidebar.mute"])
+  #expect(intents.compactMap { $0.object?["type"]?.string } == ["sidebar.pin", "sidebar.pin", "sidebar.notify"])
   #expect(intents[0].object?["pinned"] == .bool(false))
-  #expect(intents[2].object?["muted"] == .bool(false))
+  #expect(intents[2].object?["notify"] == .bool(false))
 }
 
 @Test func deletionUsesOneBodylessDeleteAndSurfacesFailure() async throws {

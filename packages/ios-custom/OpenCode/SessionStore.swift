@@ -2,6 +2,9 @@ import Foundation
 import Observation
 import OpenCodeKit
 import SwiftUI
+#if os(macOS)
+import UserNotifications
+#endif
 
 @MainActor @Observable
 final class SessionStore {
@@ -233,7 +236,7 @@ final class SessionStore {
   var rows: [SessionRow] {
     SessionList.rows(
       entries: entries.filter { $0.session.id != masterID }, projects: projects, active: active,
-      pins: preferences?.data.pinnedSessions ?? [], muted: preferences?.data.mutedSessions ?? [],
+      pins: preferences?.data.pinnedSessions ?? [], notify: preferences?.data.notifySessions ?? [],
       autoApprove: preferences?.data.settings.autoApprove ?? false, ranks: order.ranks,
       chatRoot: chatRoot)
   }
@@ -500,16 +503,34 @@ final class SessionStore {
     defer { busy.remove(row.id) }
     if await client.rename(row.id, to: change, toast: toast) { await reload() }
   }
-  func mute(_ row: SessionRow) async {
+  /// "Avisar ao terminar". Turning the first bell on asks for notification permission; without it nothing changes.
+  func toggleNotify(_ row: SessionRow) async {
+    guard !busy.contains(row.id) else { return }
+    if !row.notify, !(await Self.authorizeNotifications()) {
+      Haptics.play(.warning)
+      toast.show("Permita as notificações do OpenCode nos Ajustes para receber o aviso.", kind: .error)
+      return
+    }
     await perform(row.id, feedback: .light) {
       let keys =
-        row.muted
-        ? SessionPreferenceKey.matching(row.id, in: preferences?.data.mutedSessions ?? [])
+        row.notify
+        ? SessionPreferenceKey.matching(row.id, in: preferences?.data.notifySessions ?? [])
         : [SessionPreferenceKey.encode(row.id)]
       for key in keys {
-        preferences = try await client.mutate(.mute(session: key, muted: !row.muted))
+        preferences = try await client.mutate(.notify(session: key, notify: !row.notify))
       }
     }
+    #if os(iOS)
+    if !row.notify { SessionNotificationAgent.shared.connected(client) }
+    #endif
+  }
+  /// The Mac has no APNs yet: it asks for local notifications, which `MacSessionFinish` posts itself.
+  private static func authorizeNotifications() async -> Bool {
+    #if os(iOS)
+    await SessionNotificationAgent.shared.authorize()
+    #else
+    (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) ?? false
+    #endif
   }
   func mutate(_ intent: PreferenceIntent, id: String = "projects") async {
     await perform(id) {

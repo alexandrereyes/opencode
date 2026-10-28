@@ -115,10 +115,10 @@ public struct OpenCodeClient: Sendable {
     do {
       return try await rpc("custom.preferences", "mutate", input: intent)
     } catch ClientError.rpc("rpc.invalid_input") {
-      // Muting was added after the original preferences contract. An absent
-      // mutedSessions field alone is not a capability signal: it is optional today too.
-      if case .mute = intent {
-        throw ClientError.operation("Este servidor ainda não permite silenciar sessões. Atualize o servidor para usar este recurso.")
+      // "Avisar ao terminar" was added after the original preferences contract. An absent
+      // notifySessions field alone is not a capability signal: it is optional today too.
+      if case .notify = intent {
+        throw ClientError.operation("Atualize o servidor para usar o aviso ao terminar.")
       }
       throw ClientError.rpc("rpc.invalid_input")
     }

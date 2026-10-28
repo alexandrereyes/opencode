@@ -42,6 +42,23 @@ import UserNotifications
     }
   }
 
+  /// "Avisar ao terminar" (`MacSessionFinish`): shown even with the app in front, since the session is not open.
+  func finished(_ session: Session, failed: Bool, server: URL) {
+    guard !MacLaunch.fixture else { return }
+    let content = UNMutableNotificationContent()
+    content.title = String(session.displayTitle.prefix(80))
+    let project = URL(fileURLWithPath: session.location.directory).lastPathComponent
+    content.body = (failed ? "Terminou com erro" : "Terminou") + (project.isEmpty ? "" : " · " + project)
+    content.sound = .default
+    content.threadIdentifier = session.id
+    content.userInfo = ["sessionID": session.id, "server": server.absoluteString, "finished": true]
+    let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+    Task {
+      guard await authorize() else { return }
+      try? await UNUserNotificationCenter.current().add(request)
+    }
+  }
+
   func badge(_ count: Int) {
     NSApp.dockTile.badgeLabel = SessionAlertNotification.badge(count)
   }
@@ -87,10 +104,12 @@ import UserNotifications
     }
   }
 
-  /// In front, the in-app banner already shows it.
+  /// In front, the bell already lists the in-app alerts; a finish of a bell session still shows.
   nonisolated func userNotificationCenter(
     _ center: UNUserNotificationCenter, willPresent notification: UNNotification
-  ) async -> UNNotificationPresentationOptions { [] }
+  ) async -> UNNotificationPresentationOptions {
+    notification.request.content.userInfo["finished"] as? Bool == true ? [.banner, .list, .sound] : []
+  }
 }
 
 extension MacRuntime {

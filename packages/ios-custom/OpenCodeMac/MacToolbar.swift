@@ -119,8 +119,9 @@ struct MacSessionMenuItems: View {
     }
     .shortcut(.pin, enabled: shortcuts)
     .disabled(row == nil)
-    Button(row?.muted == true ? "Reativar" : "Silenciar", systemImage: row?.muted == true ? "bell" : "bell.slash") {
-      if let row { Task { await store.mute(row) } }
+    Button(row?.notify == true ? "Não avisar ao terminar" : "Avisar ao terminar",
+      systemImage: row?.notify == true ? "bell.slash" : "bell") {
+      if let row { Task { await store.toggleNotify(row) } }
     }
     .disabled(row == nil)
     Button("Marcar como lida", systemImage: "envelope.open") {

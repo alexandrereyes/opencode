@@ -35,6 +35,7 @@ import OpenCodeKit
             #if os(iOS)
             DeviceAgent.shared.connected(client)
             AgentsActivityAgent.shared.connected(client)
+            SessionNotificationAgent.shared.connected(client)
             #endif
           }
           // iPhone data requests go to the device agent only; they must not trigger screen reloads.

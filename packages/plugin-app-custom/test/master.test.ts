@@ -267,7 +267,9 @@ const profile: Preferences.Profile = {
     projects: {},
     sidebarOrder: [],
     pinnedSessions: [JSON.stringify(["http://other", root.id])],
-    mutedSessions: ["ses_muted"],
+    // Left by older app builds; ignored now that "Avisar ao terminar" replaced muting.
+    mutedSessions: [JSON.stringify(["http://localhost:4096", "ses_read"])],
+    notifySessions: [JSON.stringify(["http://localhost:4096", "ses_failed"])],
     models: { user: [], variant: {} },
     settings: {
       followUpBehavior: "steer",
@@ -286,6 +288,7 @@ function fixture(
     messages?: Record<string, unknown[]>
     worktreeFails?: boolean
     branchFails?: boolean
+    profile?: Preferences.Profile
   } = {},
 ) {
   const rows = [...(input.rows ?? [master, root, child])]
@@ -436,7 +439,7 @@ function fixture(
         }),
     },
     preferences: {
-      get: () => Effect.succeed(profile),
+      get: () => Effect.succeed(input.profile ?? profile),
       mutate: (intent) => {
         calls.intents.push(intent)
         return Effect.void
@@ -537,8 +540,10 @@ test("list aggregates subagent requests and work, unread, failed, marks and coun
     lastActivityAgo: "há 10 h",
     cost: 0.5,
   })
-  expect(byID.get(failed.id)).toMatchObject({ state: "idle", unread: true, failed: true })
+  expect(byID.get(failed.id)).toMatchObject({ state: "idle", unread: true, failed: true, notify: true })
   expect(byID.get(read.id)).toMatchObject({ unread: false, project: "other" })
+  expect(byID.get(read.id)).not.toHaveProperty("muted")
+  expect(byID.get(root.id)).not.toHaveProperty("notify")
   expect(byID.has(self)).toBe(false)
   expect(byID.has(child.id)).toBe(false)
   expect(byID.has(archived.id)).toBe(false)
@@ -736,9 +741,9 @@ test("update renames, switches model and agent, and pins or unpins across server
     model: { providerID: "llm-proxy", id: "gpt-6-luna", variant: "low" },
     agent: "build",
     pinned: false,
-    muted: true,
+    notify: true,
   })
-  expect(result.output).toEqual({ sessionID: root.id, changed: ["title", "model", "agent", "pinned", "muted"] })
+  expect(result.output).toEqual({ sessionID: root.id, changed: ["title", "model", "agent", "pinned", "notify"] })
   expect(f.calls.updates).toEqual([
     { sessionID: root.id, title: "Login com hash" },
     { sessionID: root.id, model: luna },
@@ -746,7 +751,15 @@ test("update renames, switches model and agent, and pins or unpins across server
   ])
   expect(f.calls.intents).toEqual([
     { type: "sidebar.pin", session: JSON.stringify(["http://other", root.id]), pinned: false },
-    { type: "sidebar.mute", session: JSON.stringify(["http://localhost:4096", root.id]), muted: true },
+    { type: "sidebar.notify", session: JSON.stringify(["http://localhost:4096", root.id]), notify: true },
+  ])
+  // Turning it off removes every server key of that session.
+  const off = fixture({
+    profile: { ...profile, data: { ...profile.data, notifySessions: [JSON.stringify(["http://other", root.id])] } },
+  })
+  await off.run("session_update", { sessionID: root.id, notify: false })
+  expect(off.calls.intents).toEqual([
+    { type: "sidebar.notify", session: JSON.stringify(["http://other", root.id]), notify: false },
   ])
 })
 

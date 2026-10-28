@@ -70,16 +70,16 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   `custom.directories/home` is cached per server after its first successful read. Both RPC contracts and implementations
   match installed `1de0005…`. Missing RPCs hide branch metadata/leave absolute paths, without affecting the list.
 - **Data:** the `custom.navigation` RPC (paginated by 500), `custom.preferences` (selected repositories, pinned and
-  muted sessions), `custom.subscriptions` (usage strip), and `custom.transcript/list` for previews. Previews read the
+  "Avisar ao terminar" sessions), `custom.subscriptions` (usage strip), and `custom.transcript/list` for previews. Previews read the
   latest messages of each three-line row ("Precisa de você" and "Trabalhando"), as
   `packages/app-custom/src/agent-dashboard/preview.ts` does; compact rows show no preview and read no transcript.
 - **Working:** list, status and repository filters (including removing, reordering, and adding repositories), opening
-  a session (the native conversation reader), Permitir/Negar, archive, pin, mute, pull to refresh, deletion, and the
+  a session (the native conversation reader), Permitir/Negar, archive, pin, "Avisar ao terminar", pull to refresh, deletion, and the
   list of archived sessions (open/delete; the backend has no unarchive).
-- **Swipe actions:** trailing, from left to right, **Silenciar/Reativar**, **Arquivar**, **Renomear** and
+- **Swipe actions:** trailing, from left to right, **Avisar ao terminar/Não avisar**, **Arquivar**, **Renomear** and
   **Excluir**; leading, **Marcar como lida** (unread only) and **Fixar/Desafixar**. There is no "Mais" action: the
-  long-press menu keeps the full row action list (Abrir sessão, Renomear, Fixar, Silenciar, Marcar como lida, Excluir
-  sessão). Pinning reuses `custom.preferences` (`sidebar.pin`), shared with the web, and the row moves into the pinned
+  long-press menu keeps the full row action list (Abrir sessão, Renomear, Fixar, Avisar ao terminar, Marcar como lida,
+  Excluir sessão). Pinning reuses `custom.preferences` (`sidebar.pin`), shared with the web, and the row moves into the pinned
   group as soon as the mutation returns. Renomear reuses the conversation menu's alert, validation (`SessionRename`),
   `PATCH /api/session/:id` and toasts, then reloads the list once the server confirms. After `build-for-testing`,
   `python3 packages/ios-custom/script/test-session-swipe.py --device … --derived … --server-url … --home …` imports two
@@ -104,8 +104,8 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Filter chips:** "Todas" first, as a compact icon-only chip (`square.stack`, a stack of every session; at least
   44 pt wide, same height and selected styling; VoiceOver "Todas" with its selected state, identifier `filter-all`). A
   long-press state filter adds its name beside the icon. Then Chats and the selected repositories ordered
-  lexicographically by `SessionList.chipGroups`: (1) chips with a running root session (green arc) first; (2) then chips with an unread,
-  unmuted root session (the rows' orange dot, as a small corner badge; muted rows keep their gray dot); (3) then the
+  lexicographically by `SessionList.chipGroups`: (1) chips with a running root session (green arc) first; (2) then chips with an unread
+  root session (the rows' orange dot, as a small corner badge); (3) then the
   saved manual position, `projects["local"]` as reordered by "Mover para antes/depois"; (4) then the name (natural,
   case- and accent-insensitive, pt-BR). Running + unread precede running only. Chats is part of the saved order:
   `projects["local"].chatsIndex` (plugin `custom.preferences`) counts the repositories before it, absent (older servers
@@ -132,9 +132,12 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   `project.updated` reloads the projects, so a change shows without reopening the app. `test-session-chips.py
   --icon NAME=FILE=RRGGBB` sets icons (and clears the others) for `SessionChipsTests`, which checks each chip's pixels
   for the icon color, its absence elsewhere, and a live removal and restore through the API.
-- **Muting:** stored in `custom.preferences` (`mutedSessions`, intent `sidebar.mute`) and respected by in-app alerts.
-  A muted session shows a crossed-out bell, appears in the "Silenciadas" filter, and shows
-  its unread dot in a neutral color. It still appears in "Precisa de você".
+- **Avisar ao terminar (28/10, replaced "Silenciar"):** a per-session bell stored in `custom.preferences`
+  (`notifySessions`, intent `sidebar.notify`), off for every session. A row with the bell shows a small `bell.fill`
+  (VoiceOver ", avisa ao terminar"). When that session's whole family stops working, the server pushes an APNs alert
+  (see [Notifications](#notifications)). Muting is gone: rows muted by older builds show the normal orange dot, light
+  their chip, count everywhere and alert in the app; the "Silenciadas" filter was removed. `mutedSessions` is ignored
+  (older builds may still write it) and never turns into a bell.
 - **Avatar:** two-letter monogram of the repository (the first letters of the first two words, or the first two
   letters of a single word: `abacato-v2` → `AV`, `opencode2` → `OP`). The color comes from `project.icon.color`, or a
   stable choice from the project ID when the project has none, through the theme's avatar tokens. A project with its
@@ -188,7 +191,7 @@ app, without the web's "Projetos" and "Worktrees" groups.
   symbol legible on it (`check-theme-contrast.ts`, at least 4.5:1). Its second line reads **Chats** where projects read
   `path · branch`. The running arc, `+N`, badges, unread dot and selection circle stay as on any row. Under the Chats
   chip each chat keeps its own avatar and has no second line (`SessionRow.sharesChatAvatar(mixed:)`, environment
-  `sessionRowsMixChats`); it is a native symbol, with no generated image per row. Muted sessions stay in "Precisa de você"; the master stays out of the
+  `sessionRowsMixChats`); it is a native symbol, with no generated image per row. The master stays out of the
   rows. The day sections follow the web only for the seven-day window; Alexandre chose four date sections instead
   of one per weekday.
 - **Rows:** swipe, long press, avatar, running ring and `+N` are unchanged in every section. "Precisa de você" rows
@@ -1962,7 +1965,7 @@ In a root conversation, the header's avatar and title (with a small `⌄`) open 
 sheet (VoiceOver: **Trocar de sessão**, a clear button over the avatar and title so their readouts stay). It lists the
 rows the Sessões tab already keeps (roots, without archived sessions or the master; chats included), most recent
 activity first (`SessionSwitcher.rows`: `messageAt ?? created`, then rank), reusing the compact Sessões row with a
-"trabalhando" line for running sessions, the running arc, unread dot and muted bell. The current session is
+"trabalhando" line for running sessions, the running arc, unread dot and the "Avisar ao terminar" bell. The current session is
 highlighted with ✓ and scrolled into view. Search is local and instant over title, project (or Chats), branch and
 path. Choosing a session replaces the conversation route in place after the sheet dismisses (Back still returns to
 Sessões; the previous draft stays saved; the destination has `.id(route.id)` so its state is rebuilt); choosing the
@@ -3450,7 +3453,7 @@ iPhone (WARP, org alexandrerm, master@alexandrem.com.br)
   servers.
 - **Preferences scope:** `custom.preferences` stores the selected repositories per server. The custom web app stores
   the server that serves it under the key `"local"`, and the app uses the same key for this route, so both share
-  one selection. Pinned and muted sessions are global.
+  one selection. Pinned and "Avisar ao terminar" sessions are global.
 - **Transport:** plain HTTP inside the WARP tunnel. HTTP handles requests, and SSE (`/api/event`) handles live
   events. This is the server's native contract, and it already sends an SSE heartbeat every 15 seconds. The nginx on
   the route has buffering disabled, a one-hour read timeout, and WebSocket upgrades enabled. A WebSocket for events
@@ -3583,9 +3586,10 @@ never starts a fallback, and a failed native read remains an error. Newer server
 tool media. This supports the installed `custom.1de0005…` release, which predates that RPC; see the
 [compatibility audit](docs/conversation-contract.md#production-compatibility-audit-2026-10-22).
 
-That release also lacks the `sidebar.mute` preference intent. Its rejection gets an explicit pt-BR server-update notice;
-no local-only mute or successful mutation is fabricated. Missing `mutedSessions` still decodes normally and is not treated
-as a capability flag, since it is optional even in the newer contract.
+Servers before "Avisar ao terminar" lack the `sidebar.notify` preference intent. Its rejection gets an explicit pt-BR
+"Atualize o servidor para usar o aviso ao terminar." notice; no local-only bell or successful mutation is fabricated.
+Missing `notifySessions` still decodes normally and is not treated as a capability flag, since it is optional even in
+the newer contract.
 
 Debug simulator builds accept `-OpenCodeNativeTranscript` to skip the optional RPC and exercise the **same native
 reader used by fallback**, including Sessões previews and older pages. The switch and its state are excluded from
@@ -3597,19 +3601,31 @@ does not answer requests, send prompts, reset seeds or change service lifecycle;
 
 ## Notifications
 
-System/push notifications are not part of the MVP. Wave 7's in-app banners need no notification permission and work
-only while the app receives live events. When push arrives, it will come from the OpenCode backend, through a new area in
-`packages/plugin-app-custom` that follows the same pattern as the existing areas (an `index.ts` that registers the
-behavior and an `rpc.ts` with the contract):
+**"Avisar ao terminar" (28/10).** The only system notification: the server alerts when a session with the bell on
+finishes. Contract: [`plugin-app-custom/docs/session-notifications.md`](../plugin-app-custom/docs/session-notifications.md).
 
-1. **Registration:** the app requests permission, obtains the APNs device token, and sends it to the plugin over RPC,
-   together with the APNs environment.
-2. **Triggers:** the plugin observes events with `ctx.event.subscribe` (as `chats` already does) and decides what
-   deserves a notification. Candidates: a session finished or became idle, a permission or form is waiting for an
-   answer, and a run failed.
-3. **Delivery:** the plugin calls APNs over HTTP/2 with token-based authentication (a `.p8` key, its Key ID, and the
-   Team ID). The key stays in the server configuration and is never committed to the repository.
-4. **Opening:** the payload carries the server and the Session, so tapping the notification opens the right session.
+1. **Permission:** asked the first time a bell is turned on (`SessionNotificationAgent.authorize()`), never at launch.
+   Without it the bell stays off and a toast points to Ajustes.
+2. **Registration:** with permission, `registerForRemoteNotifications`; the hex token, the device ID, the server key
+   and the APNs environment go to `custom.notifications/register` on every event-stream connection (several devices
+   are supported; APNs-invalid tokens are dropped by the server).
+3. **Trigger and delivery (plugin):** the Live Activity tracker's "working" roll-up (own execution, subagents,
+   background shells) must stay quiet for 5 s; then "Terminou · projeto" or "Terminou com erro · projeto", titled with
+   the session title, `thread-id` = session. A user interruption alerts nothing. Sent through the Live Activity APNs
+   client and credentials.
+4. **Presentation (`willPresent`):** hidden only with the app in the foreground and that session open on the same
+   server (`SessionFinishedAlert.presents`); otherwise banner, list and sound. The in-app banner skips completions of
+   bell sessions while the server pushes, so a finish is not announced twice. Requests and failures keep their in-app
+   banners.
+5. **Opening:** a tap follows the alert's `AgentsDeepLink` (server key, session, directory), the Live Activity route.
+
+Verification: `swift test` (`SessionNotificationTests`, `SubagentAlertTests`), `script/test-session-notify.py`
+(fresh simulator, both themes: rows, swipe, menu, bell off, the deep link a tap follows) and, for the server half,
+`plugin-app-custom/script/e2e-session-notifications.ts` against a sandbox with `OPENCODE_APNS_ORIGIN` pointing at
+`script/fake-apns.ts` (real Luna 6/low runs: success, background shell, failure, interruption, no bell). Fresh iOS 27.0
+simulators on this Mac never start SpringBoard's `com.apple.usernotifications.usernotificationservice`: there
+`getNotificationSettings`, `requestAuthorization` and `simctl push` hang, so the permission prompt, `willPresent` and a
+real banner tap are verified on a device only.
 
 TestFlight builds use the **production** APNs environment (`api.push.apple.com`), while builds installed from Xcode
 use **sandbox** (`api.sandbox.push.apple.com`). Store the environment with each token. The Agentes Live Activity below
@@ -4543,8 +4559,8 @@ result or secretly wakes the parent.
   root execution failure, `permission.asked` and question `form.created` signals can produce a banner. Child terminal
   events, individual tool failures, retries and intentional interruption are not session-failure alerts. Requests
   resolve their actual owner and ancestors to the root; the open owner/root is suppressed. Current server preferences
-  are read before delivery: muting either root or owner suppresses the banner, and auto-approved permissions are not
-  announced. Muting does not remove requests from **Precisa de você**.
+  are read before delivery: auto-approved permissions are not announced, and a finish of a root with "Avisar ao
+  terminar" is left to the system notification while the server pushes (muting no longer exists).
 - `SessionAlertPolicy` claims server + actual owner + kind + watermark (terminal event timestamp or request ID), even
   when a signal is suppressed. The last 500 claims are persisted in server-scoped local preferences. Reconnection
   establishes a fresh live-time boundary; old signals and all reconciliation snapshots are silent. In-flight lookups

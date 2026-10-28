@@ -1,7 +1,7 @@
 import Foundation
 
 public enum SessionPreferenceKey {
-  // The Mac web app's server key keeps newly pinned and muted sessions shared with it.
+  // The Mac web app's server key keeps newly pinned and "Avisar ao terminar" sessions shared with it.
   public static let server = "http://localhost:4096"
 
   public static func encode(_ sessionID: String) -> String {
@@ -31,7 +31,8 @@ public struct Preferences: Codable, Sendable {
   public struct Data: Codable, Sendable {
     public let projects: [String: Library]
     public let pinnedSessions: [String]
-    public let mutedSessions: [String]?
+    /// "Avisar ao terminar": the server pushes an alert when these sessions finish. Absent on older servers.
+    public let notifySessions: [String]?
     public let masterSessions: [String: String]?
     public let settings: Settings
     public let models: Models?
@@ -74,7 +75,7 @@ public enum PreferenceIntent: Encodable, Sendable {
   case masterSet(String)
   case masterClear
   case pin(session: String, pinned: Bool)
-  case mute(session: String, muted: Bool)
+  case notify(session: String, notify: Bool)
   case open(directory: String)
   case touch(directory: String)
   case close(directory: String)
@@ -86,7 +87,7 @@ public enum PreferenceIntent: Encodable, Sendable {
   case modelVariant(ModelReference)
 
   private enum CodingKeys: String, CodingKey {
-    case type, session, pinned, muted, server, directory, toIndex, providerID, modelID, favorite,
+    case type, session, pinned, notify, server, directory, toIndex, providerID, modelID, favorite,
       visibility, model, variant, sessionID
   }
   public func encode(to encoder: any Encoder) throws {
@@ -128,10 +129,10 @@ public enum PreferenceIntent: Encodable, Sendable {
       try values.encode("sidebar.pin", forKey: .type)
       try values.encode(session, forKey: .session)
       try values.encode(pinned, forKey: .pinned)
-    case .mute(let session, let muted):
-      try values.encode("sidebar.mute", forKey: .type)
+    case .notify(let session, let notify):
+      try values.encode("sidebar.notify", forKey: .type)
       try values.encode(session, forKey: .session)
-      try values.encode(muted, forKey: .muted)
+      try values.encode(notify, forKey: .notify)
     case .chatsMove(let index):
       try values.encode("chats.move", forKey: .type)
       try values.encode("local", forKey: .server)

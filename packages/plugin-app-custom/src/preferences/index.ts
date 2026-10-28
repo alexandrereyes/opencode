@@ -87,6 +87,12 @@ export function applyIntent(profile: Preferences.Profile, intent: Preferences.In
         ? data.mutedSessions
         : [...(data.mutedSessions ?? []), intent.session]
       : (data.mutedSessions ?? []).filter((item) => item !== intent.session)
+  if (intent.type === "sidebar.notify")
+    data.notifySessions = intent.notify
+      ? data.notifySessions?.includes(intent.session)
+        ? data.notifySessions
+        : [...(data.notifySessions ?? []), intent.session]
+      : (data.notifySessions ?? []).filter((item) => item !== intent.session)
   if (intent.type === "model.visibility") {
     const index = data.models.user.findIndex(
       (item) => item.providerID === intent.providerID && item.modelID === intent.modelID,
@@ -183,6 +189,7 @@ function mutableData(data: Preferences.Data) {
     sidebarOrder: [...data.sidebarOrder],
     pinnedSessions: [...data.pinnedSessions],
     mutedSessions: data.mutedSessions && [...data.mutedSessions],
+    notifySessions: data.notifySessions && [...data.notifySessions],
     masterSessions: data.masterSessions && { ...data.masterSessions },
     models: {
       user: data.models.user.map((model) => ({ ...model })),

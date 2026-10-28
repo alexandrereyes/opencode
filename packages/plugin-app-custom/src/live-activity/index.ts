@@ -4,6 +4,8 @@ import os from "node:os"
 import { load, type Client } from "./apns.js"
 import { fit, makeLifecycle, makeRegistry, stateKey, type Lifecycle, type Storage } from "./lifecycle.js"
 import { marksFrom } from "../master/inventory.js"
+import { makeNotificationRegistry, makeNotifier, type Notifier } from "../notifications/index.js"
+import { Notifications } from "../notifications/rpc.js"
 import { Preferences } from "../preferences/rpc.js"
 import { LiveActivity } from "./rpc.js"
 import { eventTypes, makeTracker, type Event, type Tracker, type TrackerContext } from "./tracker.js"
@@ -32,6 +34,7 @@ type Running = {
   readonly signal: Queue.Queue<void>
   readonly tracker: Tracker
   readonly registry: ReturnType<typeof makeRegistry>
+  readonly notifications: ReturnType<typeof makeNotificationRegistry>
 }
 
 /**
@@ -53,6 +56,7 @@ export function makeHub(options: HubOptions) {
       signal: yield* Queue.sliding<void>(1),
       tracker: makeTracker(member.ctx),
       registry: makeRegistry(member.ctx.storage),
+      notifications: makeNotificationRegistry(member.ctx.storage),
     }
     runtime.current = running
     // Subscribe before rebuilding so nothing published meanwhile is lost; events wait for the rebuild.
@@ -77,11 +81,24 @@ export function makeHub(options: HubOptions) {
         .pipe(Effect.catchCause((cause) => Effect.logWarning("Live Activity rebuild failed", { cause })))
       const push: LiveActivity.Push = client ? "configured" : "unconfigured"
       yield* Deferred.succeed(running.ready, { host, push })
-      yield* loop(running, host, client ? makeLifecycle({ registry: running.registry, send: client.send }) : undefined)
+      yield* loop(
+        running,
+        host,
+        client
+          ? {
+              lifecycle: makeLifecycle({ registry: running.registry, send: client.send }),
+              notifier: makeNotifier({ registry: running.notifications, send: client.send }),
+            }
+          : undefined,
+      )
     }).pipe(Effect.forkIn(scope, { startImmediately: true }))
   })
 
-  const loop = (running: Running, host: string, lifecycle: Lifecycle | undefined) => {
+  const loop = (
+    running: Running,
+    host: string,
+    push: { readonly lifecycle: Lifecycle; readonly notifier: Notifier } | undefined,
+  ) => {
     // The app learns the boot state through `snapshot`; `changed` reports differences from then on.
     const emitted = { key: "null", at: -Infinity }
     return Effect.gen(function* () {
@@ -99,11 +116,17 @@ export function makeHub(options: HubOptions) {
           Effect.catchCause((cause) => Effect.logWarning("Live Activity changed event failed", { cause })),
         )
       }
-      if (lifecycle) {
-        const plan = yield* lifecycle.evaluate(derived, now)
+      if (push) {
+        const plan = yield* push.lifecycle.evaluate(derived, now)
         if (plan.wakeAt !== undefined) wakes.push(plan.wakeAt)
         yield* plan.deliver.pipe(
           Effect.catchCause((cause) => Effect.logWarning("Live Activity push delivery failed", { cause })),
+          Effect.forkIn(running.scope),
+        )
+        const alerts = yield* push.notifier.evaluate(derived.watched, now)
+        if (alerts.wakeAt !== undefined) wakes.push(alerts.wakeAt)
+        yield* alerts.deliver.pipe(
+          Effect.catchCause((cause) => Effect.logWarning("Session notification delivery failed", { cause })),
           Effect.forkIn(running.scope),
         )
       }
@@ -162,6 +185,18 @@ export function makeHub(options: HubOptions) {
     snapshot: () => view.pipe(Effect.map((result) => ({ state: result.state }))),
   }
 
+  const notifications = {
+    register: (input: Notifications.RegisterInput) =>
+      change((running, now) =>
+        running.notifications.register(input, now).pipe(
+          Effect.andThen(Deferred.await(running.ready)),
+          Effect.map((ready) => ({ push: ready.push })),
+        ),
+      ),
+    unregister: (input: { readonly deviceID: string }) =>
+      change((running, now) => running.notifications.unregister(input.deviceID, now).pipe(Effect.as({}))),
+  }
+
   const attach = (member: Member) =>
     lock.withPermit(
       Effect.gen(function* () {
@@ -185,7 +220,7 @@ export function makeHub(options: HubOptions) {
   /** Joins the hub for the lifetime of the calling scope. */
   const join = (member: Member) => Effect.acquireRelease(attach(member), () => detach(member))
 
-  return { join, handlers, view, members, runtime }
+  return { join, handlers, notifications, view, members, runtime }
 }
 
 export type Hub = ReturnType<typeof makeHub>
@@ -225,22 +260,23 @@ export function sharedHub() {
 export const registerLiveActivity = Effect.fn("LiveActivity.register")(function* (ctx: Plugin.Context) {
   const hub = sharedHub()
   const registration = yield* ctx.rpc.register(LiveActivity.Definition, hub.handlers).pipe(Effect.orDie)
+  yield* ctx.rpc.register(Notifications.Definition, hub.notifications).pipe(Effect.orDie)
   yield* hub.join({
     ctx: {
       session: ctx.session,
       message: ctx.message,
       request: ctx.request,
       storage: ctx.storage,
-      muted: () =>
+      watched: () =>
         ctx
           .rpc(Preferences.Definition)
           .get({})
           .pipe(
-            Effect.map((profile) => marksFrom(profile).muted),
+            Effect.map((profile) => marksFrom(profile).notify),
             Effect.orElseSucceed(() => []),
           ),
       events: ctx.event.subscribe().pipe(
-        // A preferences change (mutes) arrives as an RPC event; the tracker only needs to know it happened.
+        // A preferences change ("Avisar ao terminar") arrives as an RPC event; the tracker only needs to know it happened.
         Stream.map((event) =>
           event.type === "rpc.custom.preferences.updated" ? preferencesUpdated : tracked(event) ? event : undefined,
         ),

@@ -272,8 +272,8 @@ struct MacSessionColumn: View {
     Button(row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin") {
       Task { await store.pin(row) }
     }
-    Button(row.muted ? "Reativar" : "Silenciar", systemImage: row.muted ? "bell" : "bell.slash") {
-      Task { await store.mute(row) }
+    Button(row.notify ? "Não avisar ao terminar" : "Avisar ao terminar", systemImage: row.notify ? "bell.slash" : "bell") {
+      Task { await store.toggleNotify(row) }
     }
     if row.unread {
       Button("Marcar como lida", systemImage: "envelope.open") { Task { await store.markRead(row.session) } }

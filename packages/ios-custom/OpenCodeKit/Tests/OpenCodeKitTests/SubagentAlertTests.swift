@@ -30,34 +30,34 @@ private func alertEvent(_ type: String = "session.execution.succeeded", owner: S
       var policy = SessionAlertPolicy()
       policy.connect(at: 10)
       let signal = try #require(SessionAlertSignal(alertEvent(type)))
-      #expect(policy.admit(signal, server: "a", session: root, root: root, current: current, muted: []) == (current != root.id))
+      #expect(policy.admit(signal, server: "a", session: root, root: root, current: current) == (current != root.id))
     }
     var policy = SessionAlertPolicy()
     policy.connect(at: 10)
-    #expect(policy.admit(try #require(SessionAlertSignal(alertEvent(type, owner: child.id))), server: "a", session: child, root: root, current: nil, muted: []) == false)
+    #expect(policy.admit(try #require(SessionAlertSignal(alertEvent(type, owner: child.id))), server: "a", session: child, root: root, current: nil) == false)
   }
   for type in ["session.execution.interrupted", "session.step.failed", "session.tool.failed", "session.execution.started", "rpc.custom.navigation.updated"] {
     #expect(try SessionAlertSignal(alertEvent(type)) == nil)
   }
 }
 
-@Test func requestsRollUpButRespectCurrentOwnerRootMuteAndAutoApprove() throws {
+@Test func requestsRollUpButRespectCurrentOwnerAndAutoApprove() throws {
   let root = try alertSession()
   let child = try alertSession("ses_child", parent: root.id)
   for type in ["permission.asked", "form.created"] {
     let signal = try #require(SessionAlertSignal(alertEvent(type, owner: child.id)))
-    for (current, muted, expected) in [
+    // A bell (pushed by the server) only replaces finish alerts: requests still alert in the app.
+    for (current, notified, expected) in [
       (nil, [String](), true), (root.id, [], false), (child.id, [], false),
-      (nil, [SessionPreferenceKey.encode(root.id)], false),
-      (nil, [SessionPreferenceKey.encode(child.id)], false),
+      (nil, [SessionPreferenceKey.encode(root.id)], true),
     ] {
       var policy = SessionAlertPolicy()
       policy.connect(at: 10)
-      #expect(policy.admit(signal, server: "a", session: child, root: root, current: current, muted: muted) == expected)
+      #expect(policy.admit(signal, server: "a", session: child, root: root, current: current, notified: notified) == expected)
     }
     var policy = SessionAlertPolicy()
     policy.connect(at: 10)
-    #expect(policy.admit(signal, server: "a", session: child, root: root, current: nil, muted: [], autoApprove: true) == (type == "form.created"))
+    #expect(policy.admit(signal, server: "a", session: child, root: root, current: nil, autoApprove: true) == (type == "form.created"))
   }
 }
 
@@ -65,20 +65,20 @@ private func alertEvent(_ type: String = "session.execution.succeeded", owner: S
   let root = try alertSession()
   var policy = SessionAlertPolicy()
   let signal = try #require(SessionAlertSignal(alertEvent()))
-  #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil, muted: []) == false)
+  #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil) == false)
   policy.connect(at: 50)
-  #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil, muted: []) == true)
-  #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil, muted: []) == false)
+  #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil) == true)
+  #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil) == false)
   policy.disconnect()
   policy.connect(at: 200)
   for time in [101.0, 130, 199] {
-    #expect(policy.admit(try #require(SessionAlertSignal(alertEvent(at: time))), server: "a", session: root, root: root, current: nil, muted: []) == false)
+    #expect(policy.admit(try #require(SessionAlertSignal(alertEvent(at: time))), server: "a", session: root, root: root, current: nil) == false)
   }
   var restored = SessionAlertPolicy(claims: policy.claims)
   restored.connect(at: 50)
-  #expect(restored.admit(signal, server: "a", session: root, root: root, current: nil, muted: []) == false)
-  #expect(restored.admit(signal, server: "b", session: root, root: root, current: nil, muted: []) == true)
-  #expect(restored.admit(try #require(SessionAlertSignal(alertEvent("session.execution.failed"))), server: "a", session: root, root: root, current: nil, muted: []) == true)
+  #expect(restored.admit(signal, server: "a", session: root, root: root, current: nil) == false)
+  #expect(restored.admit(signal, server: "b", session: root, root: root, current: nil) == true)
+  #expect(restored.admit(try #require(SessionAlertSignal(alertEvent("session.execution.failed"))), server: "a", session: root, root: root, current: nil) == true)
 }
 
 @Test func suppressedRequestsAreClaimedAndEnvelopeIDsDoNotReplayThem() throws {
@@ -86,10 +86,10 @@ private func alertEvent(_ type: String = "session.execution.succeeded", owner: S
   var policy = SessionAlertPolicy()
   policy.connect(at: 50)
   let signal = try #require(SessionAlertSignal(alertEvent("permission.asked")))
-  #expect(policy.admit(signal, server: "a", session: root, root: root, current: root.id, muted: []) == false)
+  #expect(policy.admit(signal, server: "a", session: root, root: root, current: root.id) == false)
   let duplicate = try #require(SessionAlertSignal(alertEvent("permission.asked", at: 120)))
-  #expect(policy.admit(duplicate, server: "a", session: root, root: root, current: nil, muted: []) == false)
-  #expect(policy.admit(try #require(SessionAlertSignal(alertEvent("permission.asked", id: "req_two"))), server: "a", session: root, root: root, current: nil, muted: []) == true)
+  #expect(policy.admit(duplicate, server: "a", session: root, root: root, current: nil) == false)
+  #expect(policy.admit(try #require(SessionAlertSignal(alertEvent("permission.asked", id: "req_two"))), server: "a", session: root, root: root, current: nil) == true)
 }
 
 private func alertShell(_ id: String, owner: String, status: String = "running") throws -> ShellInfo {
@@ -210,4 +210,18 @@ private actor ChildActions: ConversationActions {
     return (Data("{\"data\":[]}".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
   }
   #expect(try await client.models().isEmpty)
+}
+
+@Test func bellSessionsFinishThroughTheSystemNotificationInstead() throws {
+  let root = try alertSession()
+  for type in ["session.execution.succeeded", "session.execution.failed"] {
+    let signal = try #require(SessionAlertSignal(alertEvent(type)))
+    var policy = SessionAlertPolicy()
+    policy.connect(at: 10)
+    #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil,
+      notified: [SessionPreferenceKey.encode(root.id)]) == false)
+    var plain = SessionAlertPolicy()
+    plain.connect(at: 10)
+    #expect(plain.admit(signal, server: "a", session: root, root: root, current: nil, notified: ["ses_other"]) == true)
+  }
 }

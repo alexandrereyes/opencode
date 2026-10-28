@@ -120,7 +120,7 @@ export function world() {
   const permissions: Permission.Request[] = []
   const prompts = new Map<string, number>()
   const transcripts = new Map<string, SessionMessage.Info[]>()
-  const muted = new Set<string>()
+  const watched = new Set<string>()
   const reads: string[] = []
   const ctx: TrackerContext = {
     session: {
@@ -148,7 +148,7 @@ export function world() {
           }
         }),
     },
-    muted: () => Effect.sync(() => [...muted]),
+    watched: () => Effect.sync(() => [...watched]),
     message: {
       list: ({ sessionID, type }) =>
         Effect.sync(() => {
@@ -178,7 +178,7 @@ export function world() {
     },
   }
   const add = (info: Session.Info) => infos.set(info.id, info)
-  return { ctx, infos, active, forms, permissions, prompts, reads, add, transcripts, muted }
+  return { ctx, infos, active, forms, permissions, prompts, reads, add, transcripts, watched }
 }
 
 export type Scene = "working" | "one-question" | "two-questions" | "mixed" | "failed-only" | "calm"

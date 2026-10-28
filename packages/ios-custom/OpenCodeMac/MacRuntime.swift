@@ -23,6 +23,7 @@ import SwiftUI
   @ObservationIgnored var openMainWindow: (() -> Void)?
   @ObservationIgnored private var building: Task<Void, Never>?
   @ObservationIgnored private var events: Task<Void, Never>?
+  @ObservationIgnored private var finishes: Task<Void, Never>?
   @ObservationIgnored private var conversations: [String: (count: Int, task: Task<Void, Never>)] = [:]
 
   func prepare() async {
@@ -37,6 +38,7 @@ import SwiftUI
   private func rebuild() async {
     await audio.stop()
     events?.cancel()
+    finishes?.cancel()
     conversations.values.forEach { $0.task.cancel() }
     conversations.removeAll()
     windows.values.forEach { $0.close() }
@@ -77,6 +79,10 @@ import SwiftUI
       error = nil
       if let store {
         events = Task { await store.run() }
+        if !MacLaunch.fixture {
+          let finish = MacSessionFinish(store: store)
+          finishes = Task { await finish.run() }
+        }
         observeServices(store)
       }
     } catch {
@@ -89,7 +95,11 @@ import SwiftUI
     guard self.store === store else { return }
     withObservationTracking {
       if let message = store.alerts.message {
-        MacNotifications.shared.post(message, server: store.client.configuration.url)
+        // A bell session's finish is announced by `MacSessionFinish` under the server's rule instead.
+        let bell = store.rows.first { $0.id == message.session.id }?.notify == true
+        if !(bell && (message.content.kind == .succeeded || message.content.kind == .failed)) {
+          MacNotifications.shared.post(message, server: store.client.configuration.url)
+        }
         alertInbox.record(message)
       }
       MacNotifications.shared.badge(store.requestCount)

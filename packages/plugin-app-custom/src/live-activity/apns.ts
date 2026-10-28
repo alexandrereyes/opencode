@@ -23,8 +23,11 @@ export type Push = {
   /** Epoch seconds; the contract sets it to the body's `stale-date`. */
   readonly expiration: number
   readonly body: unknown
-  /** APNs push type; Live Activity updates when omitted. Its topic suffix follows Apple's naming for each type. */
-  readonly type?: "liveactivity" | "widgets"
+  /**
+   * APNs push type; Live Activity updates when omitted. Its topic suffix follows Apple's naming for each type; a
+   * plain alert (session notifications) uses the bundle ID itself.
+   */
+  readonly type?: "liveactivity" | "widgets" | "alert"
   /** Bundle ID the topic is built from; the app's own when omitted (a watch widget uses its watch app's). */
   readonly bundleID?: string
 }
@@ -45,6 +48,8 @@ export const load = Effect.fn("LiveActivity.Apns.load")(function* () {
   const keyID = yield* Config.String("OPENCODE_APNS_KEY_ID").pipe(Config.withDefault(""))
   const teamID = yield* Config.String("OPENCODE_APNS_TEAM_ID").pipe(Config.withDefault(defaults.teamID))
   const bundleID = yield* Config.String("OPENCODE_APNS_BUNDLE_ID").pipe(Config.withDefault(defaults.bundleID))
+  // Tests only: a local stand-in for Apple's hosts, so a sandbox can exercise delivery without reaching any device.
+  const origin = yield* Config.String("OPENCODE_APNS_ORIGIN").pipe(Config.withDefault(""))
   if (!keyPath || !keyID) return undefined
   const key = yield* Effect.tryPromise(() => Bun.file(keyPath).text()).pipe(
     Effect.map((pem) => createPrivateKey(pem)),
@@ -52,7 +57,8 @@ export const load = Effect.fn("LiveActivity.Apns.load")(function* () {
     Effect.option,
   )
   if (Option.isNone(key)) return undefined
-  return makeClient({ key: key.value, keyID, teamID, bundleID })
+  if (origin) yield* Effect.logWarning("APNs requests go to a test origin instead of Apple", { origin })
+  return makeClient({ key: key.value, keyID, teamID, bundleID, ...(origin ? { origin: () => origin } : {}) })
 }, Effect.orDie)
 
 /**
@@ -107,7 +113,10 @@ export function makeClient(input: {
               ":path": `/3/device/${push.token}`,
               authorization: `bearer ${token(now)}`,
               "apns-push-type": push.type ?? "liveactivity",
-              "apns-topic": `${push.bundleID ?? input.bundleID}.push-type.${push.type ?? "liveactivity"}`,
+              "apns-topic":
+                push.type === "alert"
+                  ? (push.bundleID ?? input.bundleID)
+                  : `${push.bundleID ?? input.bundleID}.push-type.${push.type ?? "liveactivity"}`,
               "apns-priority": String(push.priority),
               "apns-expiration": String(push.expiration),
               "content-type": "application/json",

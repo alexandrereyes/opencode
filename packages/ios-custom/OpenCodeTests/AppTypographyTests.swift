@@ -60,7 +60,7 @@ import SwiftUI
       "time":{"created":1792584000000,"updated":1792684000000}}}
       """.utf8))
     let row = try XCTUnwrap(SessionList.rows(entries: [entry], projects: [], active: [], pins: [],
-      muted: [], autoApprove: false, ranks: [:], chatRoot: nil).first)
+      notify: [], autoApprove: false, ranks: [:], chatRoot: nil).first)
     let sizes: [DynamicTypeSize] = [.large, .accessibility5]
     let heights = sizes.map { size in
       let host = UIHostingController(rootView: SessionRowView(row: row, preview: SessionPreview(),

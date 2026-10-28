@@ -51,7 +51,7 @@ private func entry(
       try entry("ses_child", parent: "ses_root", idle: 500, permission: true),
       try entry("ses_grandchild", parent: "ses_child", question: true),
       try entry("ses_archived", archived: true),
-    ], projects: [], active: ["ses_grandchild"], pins: [], muted: [], autoApprove: false,
+    ], projects: [], active: ["ses_grandchild"], pins: [], notify: [], autoApprove: false,
     ranks: [:], chatRoot: nil)
   #expect(rows.count == 1)
   #expect(rows.first?.state == .permission)
@@ -67,10 +67,10 @@ private func entry(
   ]
   let rows = SessionList.rows(
     entries: entries, projects: [], active: [], pins: [entries[0].session.key],
-    muted: [entries[1].session.key], autoApprove: false, ranks: [:], chatRoot: nil)
+    notify: [entries[1].session.key], autoApprove: false, ranks: [:], chatRoot: nil)
   #expect(rows.map(\.id) == ["ses_old", "ses_read", "ses_new"])
   #expect(rows.last?.unread == true)
-  #expect(rows.last?.muted == true)
+  #expect(rows.last?.notify == true)
   #expect(rows[1].unread == false)
 }
 
@@ -98,14 +98,15 @@ private func entry(
   #expect(order.ranks["ses_a"] == 4000)
 }
 
-@Test func autoApprovalStillShowsQuestionsAndMutedAttention() throws {
+@Test func autoApprovalStillShowsQuestionsAndBellAttention() throws {
   let root = try entry("ses_root", permission: true, question: true)
   let rows = SessionList.rows(
     entries: [root], projects: [], active: [root.session.id],
-    pins: [], muted: [root.session.key], autoApprove: true, ranks: [:], chatRoot: nil)
+    pins: [], notify: [root.session.key], autoApprove: true, ranks: [:], chatRoot: nil)
   let row = try #require(rows.first)
   #expect(row.state == .question)
-  #expect(SessionFilter.muted.includes(row))
+  #expect(row.notify)
+  #expect(!SessionFilter.allCases.map(\.rawValue).contains("Silenciadas"))
   #expect(SessionFilter.attention.includes(row))
   #expect(!SessionFilter.running.includes(row))
 }
@@ -113,7 +114,7 @@ private func entry(
 @Test func managedChatsStayListedWithTheirOwnIdentity() throws {
   let chat = try entry("ses_chat", permission: true, directory: "/chats/day/session-a")
   let rows = SessionList.rows(
-    entries: [chat, try entry("ses_repo")], projects: [], active: [], pins: [], muted: [],
+    entries: [chat, try entry("ses_repo")], projects: [], active: [], pins: [], notify: [],
     autoApprove: false, ranks: [:], chatRoot: "/chats")
   #expect(rows.map(\.id).sorted() == ["ses_chat", "ses_repo"])
   let row = try #require(rows.first { $0.id == "ses_chat" })
@@ -140,16 +141,16 @@ private func chipEntry(
 }
 
 /// Builds rows for chips "a"…"h": `running`/`unread` name the projects with such a session.
-private func chipRows(running: Set<String>, unread: Set<String>, muted: Set<String> = []) throws -> [SessionRow] {
+private func chipRows(running: Set<String>, unread: Set<String>, notify: Set<String> = []) throws -> [SessionRow] {
   let ids = ["a", "b", "c", "d", "e", "f", "g", "h"]
   var entries = try ids.map {
     try chipEntry("ses_" + $0, project: $0, directory: "/" + $0, unread: unread.contains($0))
   }
   entries.append(try chipEntry("ses_chat", project: "global", directory: "/chats/day/one", unread: unread.contains("chats")))
-  let mutedKeys = entries.filter { muted.contains(String($0.session.id.dropFirst(4))) }.map(\.session.key)
+  let notifyKeys = entries.filter { notify.contains(String($0.session.id.dropFirst(4))) }.map(\.session.key)
   return SessionList.rows(
     entries: entries, projects: try ids.map(chipProject),
-    active: Set(running.map { $0 == "chats" ? "ses_chat" : "ses_" + $0 }), pins: [], muted: mutedKeys,
+    active: Set(running.map { $0 == "chats" ? "ses_chat" : "ses_" + $0 }), pins: [], notify: notifyKeys,
     autoApprove: false, ranks: [:], chatRoot: "/chats")
 }
 
@@ -162,14 +163,14 @@ private func chipRows(running: Set<String>, unread: Set<String>, muted: Set<Stri
     ChipEntry(key: "e", name: "Ônibus", position: nil), ChipEntry(key: "f", name: "app10", position: nil),
     ChipEntry(key: "g", name: "app9", position: nil), ChipEntry(key: "h", name: "Beta", position: nil),
   ]
-  func order(running: Set<String> = [], unread: Set<String> = [], muted: Set<String> = []) throws -> [String] {
-    SessionList.chipGroups(try chipRows(running: running, unread: unread, muted: muted), chips: chips, chats: "chats")
+  func order(running: Set<String> = [], unread: Set<String> = [], notify: Set<String> = []) throws -> [String] {
+    SessionList.chipGroups(try chipRows(running: running, unread: unread, notify: notify), chips: chips, chats: "chats")
       .map(\.key)
   }
   // Level 3 then 4: manual positions, then natural case/accent-insensitive names (app9 < app10 < Beta < Chats < Ônibus).
   #expect(try order() == ["c", "a", "b", "d", "g", "f", "h", "chats", "e"])
-  // Level 2: unread first, keeping manual/alphabetical order inside; muted unread does not count.
-  #expect(try order(unread: ["d", "h", "a"], muted: ["a"]) == ["d", "h", "c", "a", "b", "g", "f", "chats", "e"])
+  // Level 2: unread first, keeping manual/alphabetical order inside; a bell never hides unread (muting is gone).
+  #expect(try order(unread: ["d", "h", "a"], notify: ["a"]) == ["a", "d", "h", "c", "b", "g", "f", "chats", "e"])
   // Level 1: running first; within it running + unread precede running only, then manual, then name.
   #expect(
     try order(running: ["b", "e", "d", "chats"], unread: ["e", "c"])
@@ -191,7 +192,7 @@ private func chipRows(running: Set<String>, unread: Set<String>, muted: Set<Stri
       try entry("ses_archived", archived: true),
       try entry("ses_child", parent: "ses_archived"),
     ],
-    projects: [], active: [], pins: [], muted: [], autoApprove: false, ranks: [:], chatRoot: nil)
+    projects: [], active: [], pins: [], notify: [], autoApprove: false, ranks: [:], chatRoot: nil)
   #expect(rows.isEmpty)
 }
 
@@ -247,11 +248,11 @@ private func chipRows(running: Set<String>, unread: Set<String>, muted: Set<Stri
 
 @Test func preferenceIntentUsesWebSessionKey() throws {
   let data = try JSONEncoder().encode(
-    PreferenceIntent.mute(session: SessionPreferenceKey.encode("ses_a"), muted: true))
+    PreferenceIntent.notify(session: SessionPreferenceKey.encode("ses_a"), notify: true))
   let value = try JSONDecoder().decode([String: JSONValue].self, from: data)
-  #expect(value["type"] == .string("sidebar.mute"))
+  #expect(value["type"] == .string("sidebar.notify"))
   #expect(value["session"] == .string("[\"http://localhost:4096\",\"ses_a\"]"))
-  #expect(value["muted"] == .bool(true))
+  #expect(value["notify"] == .bool(true))
 }
 
 @Test func sessionPreferencesMatchEveryServerAndLegacyBareIDs() {
@@ -275,10 +276,10 @@ private func chipRows(running: Set<String>, unread: Set<String>, muted: Set<Stri
     ],
     projects: [], active: [],
     pins: ["[\"other\",\"ses_b\"]", "ses_c", "[\"local\",\"ses_a\"]", "[\"third\",\"ses_b\"]"],
-    muted: ["[\"other\",\"ses_a\"]"], autoApprove: false, ranks: [:], chatRoot: nil)
+    notify: ["[\"other\",\"ses_a\"]"], autoApprove: false, ranks: [:], chatRoot: nil)
   #expect(rows.map(\.id) == ["ses_b", "ses_c", "ses_a"])
   #expect(rows.allSatisfy { $0.pinned })
-  #expect(rows.last?.muted == true)
+  #expect(rows.last?.notify == true)
 }
 
 @Test func chipManualOrderPlacesChatsAndMovesThroughOneIntent() throws {

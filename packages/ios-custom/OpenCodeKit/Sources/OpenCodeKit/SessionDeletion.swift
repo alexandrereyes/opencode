@@ -21,10 +21,10 @@ public struct SessionDeletionPlan: Sendable {
     let pins = preferences.data.pinnedSessions.filter { key in
       SessionPreferenceKey.sessionID(key).map(ids.contains) == true
     }.map { PreferenceIntent.pin(session: $0, pinned: false) }
-    let mutes = (preferences.data.mutedSessions ?? []).filter { key in
+    let bells = (preferences.data.notifySessions ?? []).filter { key in
       SessionPreferenceKey.sessionID(key).map(ids.contains) == true
-    }.map { PreferenceIntent.mute(session: $0, muted: false) }
-    return pins + mutes
+    }.map { PreferenceIntent.notify(session: $0, notify: false) }
+    return pins + bells
   }
 
   public static func confirmation(_ title: String) -> String {
