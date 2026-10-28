@@ -3,11 +3,14 @@ import SwiftUI
 
 @main
 struct OpenCodeMacApp: App {
+  @NSApplicationDelegateAdaptor(MacVoiceAppDelegate.self) private var delegate
   private let runtime = MacRuntime.shared
 
   init() {
     FilePreviewStorage.clean()
     MacNotifications.shared.start()
+    MacAudioDevices.shared.start()
+    if !MacLaunch.fixture { TranscriptionController.shared.start() }
     #if DEBUG
     MacStress.openWindowIfNeeded()
     #endif
@@ -57,6 +60,9 @@ struct MacThemed<Content: View>: View {
     let theme = runtime.appearance.theme(systemDark: systemScheme == .dark)
     content
       .environment(\.appTheme, theme)
+      .environment(\.voiceController, runtime.audio.voice)
+      .environment(\.voiceSessionStore, runtime.store)
+      .environment(\.floatingVoice, runtime.audio.presentation)
       .environment(\.locale, Locale(identifier: "pt_BR"))
       .preferredColorScheme(runtime.appearance.colorScheme)
       .tint(theme.color(.primary))

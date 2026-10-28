@@ -25,9 +25,12 @@ struct MacChatColumn: View {
           master: master)
           .id(id)
       } else {
-        ContentUnavailableView("Nenhuma sessão selecionada", systemImage: "bubble.left.and.bubble.right",
-          description: Text("Escolha uma sessão na coluna Sessões."))
-          .foregroundStyle(theme.color(.textSecondary))
+        VStack {
+          ContentUnavailableView("Nenhuma sessão selecionada", systemImage: "bubble.left.and.bubble.right",
+            description: Text("Escolha uma sessão na coluna Sessões."))
+            .foregroundStyle(theme.color(.textSecondary))
+          FloatingVoiceHost(sessions: store).padding(12)
+        }
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -94,6 +97,7 @@ struct MacConversationView: View {
   @State private var commenting: ChatQuote?
   @State private var viewing: MacViewedImage?
   @State private var dropping = false
+  @State private var playerHeight: CGFloat = 0
 
   private var draft: ConversationDraft { sessions.drafts.draft(conversation.id) }
   private var transcript: MacTranscriptController? { conversation.memory.active }
@@ -226,7 +230,7 @@ struct MacConversationView: View {
       quotes: ConversationQuoteContext(index: conversation.quoteIndex, pending: draft.quotes,
         dismissed: conversation.dismissedQuotes),
       search: ConversationSearchHighlight(matches: search.matches, current: search.current?.id),
-      bottomPadding: 16
+      bottomPadding: playerHeight > 0 ? playerHeight + 24 : 16
     ) { context in
       context.openChild = { id in open(child: id) }
       context.openPath = { path in openFile(path) }
@@ -235,17 +239,10 @@ struct MacConversationView: View {
       context.openImage = { image, name in viewing = MacViewedImage(image: image, name: name) }
     }
     .overlay(alignment: .bottomTrailing) {
-      if conversation.memory.state.jumpToLatest {
-        Button { transcript?.scrollToLatest(animated: true) } label: {
-          Image(systemName: "arrow.down").font(.system(size: 13, weight: .semibold)).frame(width: 34, height: 34)
-            .adaptiveGlass(Circle())
-        }
-        .buttonStyle(.plain)
-        .help("Ir para a mais recente (⌘↓)")
-        .accessibilityLabel("Ir para a mais recente")
-        .accessibilityIdentifier("jump-to-latest")
-        .padding(16)
-      }
+      ConversationBottomControls(readAloud: conversation.readAloud, state: conversation.memory.state,
+        jump: { transcript?.scrollToLatest(animated: true) },
+        reveal: { conversation.revealMessage($0, persist: false) }, height: { playerHeight = $0 })
+        .frame(maxWidth: 760)
     }
     .overlay(alignment: .top) {
       if conversation.memory.state.resumeOffered {
@@ -265,6 +262,7 @@ struct MacConversationView: View {
 
   private var bottom: some View {
     VStack(spacing: 8) {
+      FloatingVoiceHost(sessions: sessions)
       if conversation.session?.revert != nil, !conversation.isChild { revertBar }
       ConversationTray(store: conversation, draft: draft)
       MacComposer(store: conversation, draft: draft)

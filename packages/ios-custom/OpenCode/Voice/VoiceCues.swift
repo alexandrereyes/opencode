@@ -2,7 +2,12 @@ import AVFAudio
 import Foundation
 @preconcurrency import WebRTC
 
-enum VoiceCue: Sendable { case lost, restored, failed }
+enum VoiceCue: Sendable {
+  case lost, restored, failed
+  #if os(macOS)
+  case started, ended
+  #endif
+}
 
 @MainActor protocol VoiceCueing: AnyObject {
   /// `lost` starts a soft waiting tick that lasts until `restored`, `failed` or `stop`.
@@ -24,6 +29,13 @@ enum VoiceCue: Sendable { case lost, restored, failed }
 
   func play(_ cue: VoiceCue) {
     switch cue {
+    #if os(macOS)
+    case .started, .ended:
+      release()
+      guard start() else { return }
+      waiting = true
+      finish(Self.tone(cue == .started ? [(440, 0.1), (660, 0.14)] : [(440, 0.1), (330, 0.18)]))
+    #endif
     case .lost:
       VoiceFeedback.lost()
       guard start() else { return }
@@ -50,10 +62,12 @@ enum VoiceCue: Sendable { case lost, restored, failed }
     observer.map(NotificationCenter.default.removeObserver); observer = nil
     player?.stop(); engine?.stop(); player = nil; engine = nil
     guard holding else { return }
+    #if os(iOS)
     let audio = RTCAudioSession.sharedInstance()
     audio.lockForConfiguration()
     try? audio.setActive(false)
     audio.unlockForConfiguration()
+    #endif
     holding = false
   }
 
@@ -71,19 +85,29 @@ enum VoiceCue: Sendable { case lost, restored, failed }
 
   private func start() -> Bool {
     if engine != nil { return true }
+    #if os(iOS)
     let audio = RTCAudioSession.sharedInstance()
     audio.lockForConfiguration()
     // The call already configured playAndRecord; this only adds an activation credit to the shared count.
     holding = (try? audio.setActive(true)) != nil
     audio.unlockForConfiguration()
     guard holding else { VoiceTransport.log.notice("phase=cue-unavailable"); return false }
+    #endif
     let engine = AVAudioEngine()
     let player = AVAudioPlayerNode()
     engine.attach(player)
     do {
+      #if os(iOS)
       try engine.connectNode(player, to: engine.mainMixerNode, format: Self.format)
+      #else
+      engine.connect(player, to: engine.mainMixerNode, format: Self.format)
+      #endif
       try engine.start()
+      #if os(iOS)
       try player.playAudio()
+      #else
+      player.play()
+      #endif
     } catch { VoiceTransport.log.notice("phase=cue-unavailable"); release(); return false }
     self.engine = engine; self.player = player
     observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine,
@@ -92,7 +116,12 @@ enum VoiceCue: Sendable { case lost, restored, failed }
           guard let self, self.waiting, let engine = self.engine, let player = self.player else { return }
           // A route change stops the engine; resume the tick on the new route.
           player.stop()
+          #if os(iOS)
           guard (try? engine.start()) != nil, (try? player.playAudio()) != nil else { return }
+          #else
+          guard (try? engine.start()) != nil else { return }
+          player.play()
+          #endif
           self.schedule(Self.tone([(880, 0.05), (0, 2.95)], level: 0.08), options: .loops)
         }
       }

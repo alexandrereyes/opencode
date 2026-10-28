@@ -57,12 +57,12 @@ struct VoiceTranscriptView: View {
       .accessibilityIdentifier("voice-memory-transcript")
       .scrollContentBackground(.hidden).background(theme.color(.background))
       .foregroundStyle(theme.color(.text))
-      .navigationTitle("Transcrição da voz").navigationBarTitleDisplayMode(.inline)
+      .navigationTitle("Transcrição da voz").inlineNavigationTitle()
       .toolbar {
         ToolbarItem(placement: .confirmationAction) { Button("Concluir") { dismiss() } }
         #if DEBUG
         if memory.isPreview {
-          ToolbarItem(placement: .bottomBar) {
+          ToolbarItem(placement: fixturePlacement) {
             Button("Adicionar fala de demonstração") { memory.previewUpdate() }
               .accessibilityIdentifier("voice-memory-fixture-update")
           }
@@ -70,6 +70,16 @@ struct VoiceTranscriptView: View {
         #endif
       }
     }.tint(theme.color(.primary)).presentationDetents([.large])
+      #if os(macOS)
+      .frame(minWidth: 500, minHeight: 440)
+      #endif
       .task { _ = await memory.prepare() }
+  }
+  private var fixturePlacement: ToolbarItemPlacement {
+    #if os(iOS)
+    .bottomBar
+    #else
+    .automatic
+    #endif
   }
 }

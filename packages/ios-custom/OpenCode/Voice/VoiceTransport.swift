@@ -34,6 +34,9 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
   private var iceConnected = false
   private var interrupted = false
   private var closed = false
+  #if os(macOS)
+  private var muted = false
+  #endif
 
   @MainActor init(event: @escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) {
     self.event = event
@@ -65,6 +68,10 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
         constraints: constraints, delegate: self) else { throw VoiceWireError.invalidAnswer }
       self.peer = peer
       let track = factory.audioTrack(with: factory.audioSource(with: constraints), trackId: "opencode-voice")
+      #if os(macOS)
+      // Recovery can restore mute before the replacement track exists.
+      track.isEnabled = !muted
+      #endif
       microphone = track
       let transceiver = RTCRtpTransceiverInit()
       transceiver.direction = .sendRecv
@@ -130,7 +137,14 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
       }
     }
   }
-  @MainActor func mute(_ muted: Bool) { queue.async { self.microphone?.isEnabled = !muted } }
+  @MainActor func mute(_ muted: Bool) {
+    queue.async {
+      #if os(macOS)
+      self.muted = muted
+      #endif
+      self.microphone?.isEnabled = !muted
+    }
+  }
   @MainActor func resume() { queue.async { self.reactivate() } }
   @MainActor func close() async {
     await withCheckedContinuation { continuation in
@@ -141,11 +155,13 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
         self.channel?.delegate = nil; self.channel?.close(); self.channel = nil
         self.peer?.delegate = nil; self.peer?.close(); self.peer = nil
         self.microphone = nil; self.factory = nil
+        #if os(iOS)
         let audio = RTCAudioSession.sharedInstance()
         audio.lockForConfiguration()
         for _ in 0..<self.activations { try? audio.setActive(false) }
         self.activations = 0
         audio.unlockForConfiguration()
+        #endif
         Self.log.notice("phase=transport-closed")
         continuation.resume()
       }
@@ -156,6 +172,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
     Task { @MainActor in event(value) }
   }
   private func activate() throws {
+    #if os(iOS)
     let audio = RTCAudioSession.sharedInstance()
     guard activations == 0 || !audio.isActive else { return }
     audio.lockForConfiguration()
@@ -173,6 +190,9 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
     try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
     try audio.setActive(true)
     activations += 1
+    #endif
+    // macOS WebRTC owns Core Audio's default input/output and AEC. It follows device changes itself;
+    // re-creating the peer or an AVAudioEngine here would tear down a healthy call on a headset change.
   }
   private func reactivate() {
     guard !closed, peer != nil else { return }
@@ -183,6 +203,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
     if iceConnected, channel?.readyState == .open, !interrupted { emit(.connected) }
   }
   private func installObservers() {
+    #if os(iOS)
     observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.didBecomeInactiveNotification,
       object: nil, queue: nil) { [weak self] _ in
         guard let self else { return }
@@ -207,6 +228,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
         guard let self else { return }
         self.queue.async { if !self.closed { self.emit(.failed) } }
       })
+    #endif
   }
 }
 

@@ -41,6 +41,8 @@ import SwiftUI
     window.setFrame(NSRect(x: -4000, y: 40, width: size?.first ?? 1600, height: size?.last ?? 1000), display: true)
     let delay = MacFixture.value("-OpenCodeMacCaptureDelay").flatMap(Double.init)
     try? await Task.sleep(for: .seconds(delay ?? (MacFixture.current == nil ? 8 : 4)))
+    do { try await MacVoiceChecks.run(runtime) }
+    catch { print("MacVoiceChecks failed: \(error)"); exit(1) }
     let extra = await open(runtime: runtime, context: context, openWindow: openWindow, openSettings: openSettings)
     try? await Task.sleep(for: .seconds(2))
     // `-OpenCodeMacCaptureEvery <s> -OpenCodeMacCaptureCount <n>`: a sequence (`<name>-01.png`…), a short video of

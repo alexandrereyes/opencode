@@ -82,7 +82,7 @@ struct FloatingVoiceBar: View {
       }
     }
     .padding(.horizontal, 14).padding(.vertical, 7)
-    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28))
+    .adaptiveGlass(RoundedRectangle(cornerRadius: 28))
     .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(theme.color(.border), lineWidth: 0.5) }
     .contentShape(RoundedRectangle(cornerRadius: 28))
     .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { value in

@@ -35,12 +35,13 @@ struct MacToolbarIcon: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.isEnabled) private var enabled
   let symbol: String
+  var role: ThemeRole = .text
   @State private var hovering = false
 
   var body: some View {
     Image(systemName: symbol)
       .font(.system(size: 15, weight: .regular))
-      .foregroundStyle(theme.color(.text))
+      .foregroundStyle(theme.color(role))
       .frame(width: 28, height: 26)
       .background(theme.color(.highlight).opacity(hovering && enabled ? 1 : 0), in: RoundedRectangle(cornerRadius: 7))
       .opacity(enabled ? 1 : 0.4)

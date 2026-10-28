@@ -10,6 +10,7 @@ import SwiftUI
 
   let servers = ServerStore(launchOverride: .override(), builtinURL: MacRuntime.localURL)
   let appearance = AppearanceSettings()
+  let audio = MacVoiceSession()
   var store: SessionStore?
   var identity = UUID()
   var appliedRevision = -1
@@ -57,6 +58,7 @@ import SwiftUI
   }
 
   private func rebuild() async {
+    await audio.stop()
     await store?.stop()
     sessionSelection = SessionSelection()
     newSessionRequest = nil
@@ -75,7 +77,9 @@ import SwiftUI
       }
       if let fixture = MacFixture.current {
         let client = fixture.client()
-        store = SessionStore(configuration: MacFixture.configuration, acceptsLaunchSession: false, client: client)
+        store = SessionStore(configuration: MacFixture.configuration, acceptsLaunchSession: false, client: client,
+          draftRoot: MacVoiceChecks.enabled ? MacFixture.value("-OpenCodeMacDraftRoot").map { URL(fileURLWithPath: $0) } : nil)
+        if let store { MacVoiceChecks.prepare(store) }
         // The fixture has no resource hub: the viewer shows the drawn snapshot as its live frame.
         ResourceViewerModel.fixtureFrame = { resource in
           guard let data = try? await client.resourceSnapshot(resource.id, maxWidth: 1200).image else { return nil }

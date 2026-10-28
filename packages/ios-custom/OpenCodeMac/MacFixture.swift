@@ -7,7 +7,9 @@ import OpenCodeKit
 /// working-copy changes; folders and files come from this Mac's checkout (`-OpenCodeMacFixtureRoot <path>`), so
 /// Arquivos lists real files. No request ever leaves the process.
 @MainActor struct MacFixture {
-  static let configuration = ServerConfiguration(url: URL(string: "http://127.0.0.1:9")!)
+  // Voice checks have their own server-scoped draft/memory files, separate from other Mac fixture workers.
+  static let configuration = ServerConfiguration(url: URL(string: MacVoiceChecks.enabled
+    ? "http://127.0.0.1:4203" : "http://127.0.0.1:9")!)
   static let current: MacFixture? = {
     let arguments = ProcessInfo.processInfo.arguments
     guard arguments.contains("-OpenCodeMacFixture") else { return nil }

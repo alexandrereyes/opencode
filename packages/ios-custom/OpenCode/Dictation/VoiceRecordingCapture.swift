@@ -24,6 +24,22 @@ extension VoiceRecordingCapture {
 /// so a deactivation queued by stop/pause always precedes the next activation.
 enum DictationAudioSession {
   private static let queue = DispatchQueue(label: "br.com.alexandrem.opencode.dictation-audio", qos: .userInitiated)
+  #if os(macOS)
+  enum Category { case playAndRecord, playback }
+  enum Mode { case `default`, spokenAudio }
+  struct Options: OptionSet, Sendable {
+    let rawValue: Int
+    static let defaultToSpeaker = Options(rawValue: 1)
+  }
+  // Core Audio uses the system devices. Keep the same serial executor without an AVAudioSession on macOS.
+  static func activate<Value: Sendable>(_ category: Category, mode: Mode = .default, options: Options = [],
+    then start: @escaping @Sendable () throws -> Value) async throws -> Value {
+    try await withCheckedThrowingContinuation { continuation in
+      queue.async { continuation.resume(with: Result { try start() }) }
+    }
+  }
+  static func deactivate() {}
+  #else
   /// `AVAudioRecorder.record()` and `AVAudioPlayer.play()` activate the session again
   /// internally, so `start` runs here too, right after the activation. A failure deactivates.
   static func activate<Value: Sendable>(_ category: AVAudioSession.Category, mode: AVAudioSession.Mode = .default,
@@ -47,6 +63,7 @@ enum DictationAudioSession {
   static func deactivate() {
     queue.async { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
   }
+  #endif
 }
 
 /// Hands a recorder or player between the audio queue and the main actor.
@@ -59,8 +76,13 @@ struct QueuedAudio<Value>: @unchecked Sendable { let value: Value }
   /// stop() advances it without waiting for an activation in flight. The audio queue checks it under the lock right
   /// before recording, so a stopped opening never records and stop() waits at most for that `record()` call.
   private let epoch = OSAllocatedUnfairLock(initialState: 0)
+  #if os(macOS)
+  var authorized: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
+  func authorize() async -> Bool { authorized ? true : await AVCaptureDevice.requestAccess(for: .audio) }
+  #else
   var authorized: Bool { AVAudioApplication.shared.recordPermission == .granted }
   func authorize() async -> Bool { authorized ? true : await AVAudioApplication.requestRecordPermission() }
+  #endif
   func start(at file: URL) async throws {
     let epoch = epoch, ticket = epoch.withLock { $0 }
     let opened = try await DictationAudioSession.activate(.playAndRecord, options: [.defaultToSpeaker]) {

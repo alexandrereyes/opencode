@@ -43,10 +43,28 @@ import UserNotifications
     NSApp.dockTile.badgeLabel = SessionAlertNotification.badge(count)
   }
 
+  func voiceFailed() {
+    guard !MacLaunch.fixture, !NSApp.isActive else { return }
+    let content = UNMutableNotificationContent()
+    content.title = "Conversa por voz encerrada"
+    content.body = "A conexão de voz caiu. Abra o OpenCode para tentar novamente."
+    content.sound = .default
+    content.userInfo = ["voice": true]
+    Task {
+      guard await authorize() else { return }
+      try? await UNUserNotificationCenter.current().add(
+        UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+  }
+
   nonisolated func userNotificationCenter(
     _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
   ) async {
     let info = response.notification.request.content.userInfo
+    if info["voice"] as? Bool == true {
+      await MainActor.run { NSApp.activate(ignoringOtherApps: true) }
+      return
+    }
     guard let id = info["sessionID"] as? String else { return }
     let server = info["server"] as? String
     await MainActor.run {

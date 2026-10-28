@@ -1,6 +1,7 @@
 import OpenCodeKit
 import SwiftUI
 
+#if os(iOS)
 struct VoiceRecordingTouchTarget: UIViewRepresentable {
   let available: Bool
   var label = "Gravar para transcrever"
@@ -54,6 +55,75 @@ struct VoiceRecordingTouchTarget: UIViewRepresentable {
     }
   }
 }
+#else
+/// Keeps the mouse target mounted while a hold becomes a locked recording, just like the iPhone's touch target.
+struct VoiceRecordingTouchTarget: NSViewRepresentable {
+  let available: Bool
+  var label = "Gravar para transcrever"
+  var identifier = "dictation-microphone"
+  let event: (VoiceRecordingGesture.Event) -> Void
+  func makeNSView(context: Context) -> TouchView { TouchView() }
+  func updateNSView(_ view: TouchView, context: Context) {
+    view.available = available; view.event = event
+    view.setAccessibilityElement(available)
+    view.setAccessibilityRole(.button)
+    view.setAccessibilityLabel(label)
+    view.setAccessibilityIdentifier(identifier)
+    view.setAccessibilityHelp("Clique para gravar com as mãos livres. Ou segure: arraste para cima para travar, para a esquerda para cancelar e solte para transcrever. Nada é enviado automaticamente.")
+  }
+  static func dismantleNSView(_ view: TouchView, coordinator: ()) { view.detach() }
+  final class TouchView: NSView {
+    var available = false
+    var event: ((VoiceRecordingGesture.Event) -> Void)?
+    private var origin: CGPoint?
+    private var holdTask: Task<Void, Never>?
+    private var lostKey: NSObjectProtocol?
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      detach()
+      guard let window else { return }
+      lostKey = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification,
+        object: window, queue: .main) { [weak self] _ in
+          MainActor.assumeIsolated { self?.cancelTouch() }
+        }
+    }
+    func detach() {
+      cancelTouch()
+      lostKey.map(NotificationCenter.default.removeObserver)
+      lostKey = nil
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { available ? super.hitTest(point) : nil }
+    override func mouseDown(with event: NSEvent) {
+      guard available, origin == nil else { return }
+      origin = event.locationInWindow
+      self.event?(.began)
+      holdTask = Task { [weak self] in
+        do { try await Task.sleep(for: .seconds(VoiceRecordingGesture.holdDelay)) } catch { return }
+        guard let self, origin != nil else { return }
+        self.event?(.held)
+      }
+    }
+    override func mouseDragged(with event: NSEvent) {
+      guard let origin else { return }
+      self.event?(.moved(CGSize(width: event.locationInWindow.x - origin.x, height: origin.y - event.locationInWindow.y)))
+    }
+    override func mouseUp(with event: NSEvent) {
+      guard origin != nil else { return }
+      holdTask?.cancel(); holdTask = nil; origin = nil
+      self.event?(.ended)
+    }
+    func cancelTouch() {
+      holdTask?.cancel(); holdTask = nil
+      guard origin != nil else { return }
+      origin = nil; event?(.cancelled)
+    }
+    override func accessibilityPerformPress() -> Bool {
+      guard available else { return false }
+      event?(.began); event?(.ended); return true
+    }
+  }
+}
+#endif
 
 struct DictationAction: View {
   @Environment(\.appTheme) private var theme
@@ -166,7 +236,7 @@ private struct DictationLockGuide: View {
       Image(systemName: "chevron.up")
       Spacer(minLength: 48)
     }.appSymbol(.action).foregroundStyle(theme.color(.primary)).padding(.top, 14)
-      .frame(width: 48, height: 140).glassEffect(.regular, in: .capsule)
+      .frame(width: 48, height: 140).adaptiveGlass(Capsule())
       .offset(y: -66 + offset * 0.35)
       .accessibilityHidden(true).allowsHitTesting(false)
   }
@@ -306,7 +376,7 @@ struct DictationPendingView: View {
           Button("Tentar de novo") { recording.retry() }
         } else {
           ProgressView().tint(theme.color(.primary))
-          Text(recording.job?.state == .transcribing ? "Transcrevendo neste iPhone…" : recording.transcription.label)
+          Text(recording.job?.state == .transcribing ? "Transcrevendo neste \(TranscriptionController.device)…" : recording.transcription.label)
         }
         Spacer(minLength: 0)
         Button("Descartar", role: .destructive) { Haptics.play(.warning); recording.discard() }.accessibilityIdentifier("dictation-discard-pending")

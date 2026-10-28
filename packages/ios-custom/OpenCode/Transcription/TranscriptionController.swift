@@ -3,7 +3,9 @@ import Network
 import Observation
 import OpenCodeKit
 import OSLog
+#if os(iOS)
 import UIKit
+#endif
 
 @MainActor @Observable final class DictationJob {
   enum State: Equatable { case waiting, transcribing, failed(String), done }
@@ -58,13 +60,24 @@ import UIKit
     switch status {
     case .missing: "Modelo não baixado"
     case .downloading: !connected ? "Aguardando conexão" : expensive && !cellular ? "Aguardando Wi-Fi" : "Baixando modelo…"
-    case .preparing: optimizing ? "Otimizando o modelo para este iPhone (uma vez por atualização)…" : "Preparando para este iPhone…"
+    case .preparing: optimizing ? "Otimizando o modelo para este \(Self.device) (uma vez por atualização)…" : "Preparando para este \(Self.device)…"
     case .ready: "Pronto · no aparelho"
     case .failed(let reason): reason
     }
   }
   static var downloadMessage: String {
-    "O Parakeet Ultra ocupa 632 MB (603 MiB). Recomendamos Wi-Fi. O download continua em segundo plano e pode ser retomado. Depois do download e a cada atualização do app, o iPhone otimiza o modelo uma vez (cerca de 15 segundos); isso começa sozinho, inclusive enquanto você grava. O áudio nunca sai deste iPhone."
+    #if os(macOS)
+    "O Parakeet Ultra ocupa 632 MB (603 MiB). Recomendamos Wi-Fi. O download continua em segundo plano e pode ser retomado. Depois do download e a cada atualização do app, o Mac prepara o modelo uma vez; isso começa sozinho, inclusive enquanto você grava. O áudio nunca sai deste Mac."
+    #else
+    "O Parakeet Ultra ocupa 632 MB (603 MiB). Recomendamos Wi-Fi. O download continua em segundo plano e pode ser retomado. Depois do download e a cada atualização do app, o \(device) otimiza o modelo uma vez (cerca de 15 segundos); isso começa sozinho, inclusive enquanto você grava. O áudio nunca sai deste \(device)."
+    #endif
+  }
+  static var device: String {
+    #if os(macOS)
+    "Mac"
+    #else
+    "iPhone"
+    #endif
   }
   init(source: (any TranscriptionModelSource)? = nil, engine: (any TranscriptionEngine)? = nil,
        defaults: UserDefaults = .standard, monitorsNetwork: Bool = true, build: String = TranscriptionController.currentBuild,
@@ -82,6 +95,7 @@ import UIKit
     diskBytes = self.source.files.bytesOnDisk
     cellular = defaults.bool(forKey: Self.cellularKey)
     self.source.setHandler { [weak self] event in Task { @MainActor in self?.handle(event) } }
+    #if os(iOS)
     memoryObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
       MainActor.assumeIsolated {
         guard let self else { return }
@@ -90,6 +104,7 @@ import UIKit
         else { self.unloadWhenIdle = true }
       }
     }
+    #endif
     if monitorsNetwork {
       let monitor = NWPathMonitor()
       monitor.pathUpdateHandler = { [weak self] path in
@@ -266,6 +281,7 @@ import UIKit
   }
 }
 
+#if os(iOS)
 final class TranscriptionAppDelegate: NSObject, UIApplicationDelegate {
   func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String,
                    completionHandler: @escaping () -> Void) {
@@ -279,3 +295,4 @@ private final class BackgroundDownloadCompletion: @unchecked Sendable {
   init(_ completion: @escaping () -> Void) { self.completion = completion }
   func call() { completion() }
 }
+#endif

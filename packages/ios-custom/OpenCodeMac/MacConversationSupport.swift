@@ -49,50 +49,6 @@ typealias TranscriptViewController = MacTranscriptController
   func removeAll() { entries.removeAll() }
 }
 
-/// Ouvir: the system's Brazilian Portuguese voice reads the answer; a second click on the same answer stops it.
-/// The iPhone's player (server voices, lock-screen controls) depends on UIKit and the audio session.
-@MainActor @Observable final class ConversationReadAloud: NSObject, AVSpeechSynthesizerDelegate {
-  /// The footer message of the answer being read.
-  private(set) var messageID: String?
-  @ObservationIgnored private let synthesizer = AVSpeechSynthesizer()
-
-  override init() {
-    super.init()
-    synthesizer.delegate = self
-  }
-
-  func read(_ response: ReadAloud.Response, title: String, client: OpenCodeClient) {
-    let same = messageID == response.messageID
-    stop()
-    guard !same else { return }
-    let utterance = AVSpeechUtterance(string: response.text)
-    utterance.voice = AVSpeechSynthesisVoice(language: "pt-BR")
-    messageID = response.messageID
-    synthesizer.speak(utterance)
-  }
-
-  func stop() {
-    synthesizer.stopSpeaking(at: .immediate)
-    messageID = nil
-  }
-
-  nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-    Task { @MainActor in self.messageID = nil }
-  }
-}
-
-/// The iPhone records and transcribes on the device; the Mac composer uses the system's dictation instead, so its
-/// drafts never have a recording pending.
-@MainActor final class VoiceRecordingComposer {
-  var receive: @MainActor (String) async -> Void = { _ in }
-  var pendingChanged: (Bool) -> Void = { _ in }
-  let visible = false
-  init(file: URL) {}
-  func restorePending() {}
-  func discard() {}
-  func suspend() {}
-}
-
 /// `/btw` asks a side question that is not saved to the conversation.
 struct SideQuestionLaunch: Identifiable {
   let id = UUID()

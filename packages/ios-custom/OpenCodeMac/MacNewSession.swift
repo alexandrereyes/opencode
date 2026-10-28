@@ -25,6 +25,7 @@ struct MacNewSession: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       header
+      FloatingVoiceHost()
       if store.master || store.chat || store.project != nil {
         if !store.master { selectors }
         mcps
@@ -48,6 +49,7 @@ struct MacNewSession: View {
     .padding(22)
     .frame(width: 620)
     .background(theme.color(.background))
+    .modifier(FloatingVoiceScope())
     .toastOverlay(store.toast)
     .task { await store.open() }
     .task {

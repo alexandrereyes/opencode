@@ -59,9 +59,8 @@ struct MacWindow: View {
     } message: {
       Text("A sessão sairá de Recentes e ficará na lista de arquivadas. Não há opção de desarquivar nesta versão.")
     }
-    // The event stream stays open while the window is visible, the app frontmost or not: on the Mac the chat is
-    // read beside other apps. Only a hidden or minimized window (`background`) stops it.
-    .task(id: scenePhase == .background) { if scenePhase != .background { await store.run() } }
+    // One owner for all windows and the call: voice keeps the stream through minimized/closed windows.
+    .modifier(MacVoiceWindow(audio: runtime.audio, sessions: store))
     #if DEBUG
     .onChange(of: scenePhase, initial: true) { _, phase in
       if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacLiveTrace") { macTrace("scenePhase \(phase)") }

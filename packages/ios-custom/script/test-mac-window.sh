@@ -19,7 +19,7 @@ derived=${OPENCODE_MAC_DERIVED:-${TMPDIR%/}/opencode/mac-app-work/mac-derived}
 logs=$(mktemp -d "${TMPDIR%/}/opencode/mac-window-stress.XXXXXX")
 xcodebuild -project "$package/OpenCode.xcodeproj" -scheme OpenCodeMac -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$derived" build -quiet
-domain=br.com.alexandrem.opencode.mac.debug.tests
+domain=${OPENCODE_MAC_TEST_DOMAIN:-br.com.alexandrem.opencode.mac.debug.tests}
 copy="$logs/OpenCodeMacTests.app"
 ditto "$derived/Build/Products/Debug/OpenCodeMac.app" "$copy"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $domain" "$copy/Contents/Info.plist"
