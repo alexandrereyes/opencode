@@ -1,5 +1,9 @@
 import AVFoundation
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+#endif
 import MediaPlayer
 import Observation
 import OpenCodeKit
@@ -75,7 +79,12 @@ extension Notification.Name {
       guard let self, player === self.player else { return }
       self.fail("Não foi possível tocar o áudio.")
     }
-    background = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+    #if os(iOS)
+    let backgroundName = UIApplication.didEnterBackgroundNotification
+    #else
+    let backgroundName = NSApplication.didResignActiveNotification
+    #endif
+    background = NotificationCenter.default.addObserver(forName: backgroundName,
       object: nil, queue: .main) { _ in
       MainActor.assumeIsolated { [weak self] in self?.save() }
     }
@@ -110,6 +119,9 @@ extension Notification.Name {
   func toggle() { busy ? pause() : play() }
 
   func play() {
+    #if os(macOS)
+    guard !MacRuntime.shared.audio.voice.state.visible, !VoiceRecordingComposer.audioBusy else { return }
+    #endif
     guard !pieces.isEmpty, !closed else { return }
     if let other = Self.current, other !== self { other.stop() }
     Self.current = self
@@ -359,6 +371,7 @@ extension Notification.Name {
   private func observe() {
     guard observers.isEmpty else { return }
     let center = NotificationCenter.default
+    #if os(iOS)
     observers.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: .main) { note in
       let context = note.userInfo?[AVAudioSession.deactivationContextKey] as? AVAudioSession.DeactivationContext
       guard context?.source == .system else { return }
@@ -383,6 +396,11 @@ extension Notification.Name {
         pause()
       }
     })
+    #else
+    observers.append(center.addObserver(forName: .macAudioDeviceChanged, object: nil, queue: .main) { _ in
+      MainActor.assumeIsolated { [weak self] in if self?.busy == true { self?.pause() } }
+    })
+    #endif
     observers.append(center.addObserver(forName: .audioCaptureWillStart, object: nil, queue: .main) { _ in
       MainActor.assumeIsolated { [weak self] in
         guard let self, busy else { return }

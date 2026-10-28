@@ -46,10 +46,28 @@ import UserNotifications
     NSApp.dockTile.badgeLabel = SessionAlertNotification.badge(count)
   }
 
+  func voiceFailed() {
+    guard !MacLaunch.fixture, !NSApp.isActive else { return }
+    let content = UNMutableNotificationContent()
+    content.title = "Conversa por voz encerrada"
+    content.body = "A conexão de voz caiu. Abra o OpenCode para tentar novamente."
+    content.sound = .default
+    content.userInfo = ["voice": true]
+    Task {
+      guard await authorize() else { return }
+      try? await UNUserNotificationCenter.current().add(
+        UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+  }
+
   nonisolated func userNotificationCenter(
     _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
   ) async {
     let info = response.notification.request.content.userInfo
+    if info["voice"] as? Bool == true {
+      await MainActor.run { MacRuntime.shared.revealVoice() }
+      return
+    }
     guard let id = info["sessionID"] as? String else { return }
     let server = info["server"] as? String
     await MainActor.run {
@@ -73,4 +91,14 @@ import UserNotifications
   nonisolated func userNotificationCenter(
     _ center: UNUserNotificationCenter, willPresent notification: UNNotification
   ) async -> UNNotificationPresentationOptions { [] }
+}
+
+extension MacRuntime {
+  /// Uses the last front conversation window even if a utility window or another app is now active.
+  func revealVoice() {
+    NSApp.activate(ignoringOtherApps: true)
+    guard let front, let window = front.window else { openMainWindow?(); return }
+    window.deminiaturize(nil)
+    window.makeKeyAndOrderFront(nil)
+  }
 }

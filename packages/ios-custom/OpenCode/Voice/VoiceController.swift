@@ -3,6 +3,9 @@ import Foundation
 import Observation
 import OpenCodeKit
 import OSLog
+#if os(macOS)
+import AVFoundation
+#endif
 
 @MainActor @Observable final class VoiceController {
   let preferences: VoicePreferences
@@ -18,7 +21,13 @@ import OSLog
   /// Set when automatic recovery gave up; the UI offers "Tentar de novo".
   private(set) var alert: String?
   /// Whether this call's Live Activity was accepted; background recording stops without it.
+  #if os(iOS)
   var liveActivityActive: Bool { activity.active }
+  #endif
+  #if os(macOS)
+  var permissionDenied = false
+  @ObservationIgnored var stateChanged: (() -> Void)?
+  #endif
   @ObservationIgnored private var transport: (any VoiceTransporting)?
   @ObservationIgnored private var master: (any VoiceMasterServing)?
   @ObservationIgnored private var signaling: VoiceSignaling?
@@ -30,7 +39,9 @@ import OSLog
   @ObservationIgnored private var narrationTask: Task<Void, Never>?
   @ObservationIgnored private var delegationTask: Task<Void, Never>?
   @ObservationIgnored private var retirement: Task<Void, Never>?
+  #if os(iOS)
   @ObservationIgnored private var activity = VoiceActivityDriver()
+  #endif
   @ObservationIgnored private var epoch = UUID()
   /// One GPT Live call inside the conversation; a new link after each network recovery.
   @ObservationIgnored private var link = UUID()
@@ -114,7 +125,12 @@ import OSLog
     }
     #if DEBUG
     let arguments = ProcessInfo.processInfo.arguments
+    #if os(macOS)
+    let isolated = (sessions.client.configuration.url.host == "127.0.0.1" && sessions.client.configuration.url.port == 4203)
+      || (MacLaunch.fixture && MacFixture.value("-OpenCodeServerURL") == "http://127.0.0.1:4203")
+    #else
     let isolated = sessions.client.configuration.url.host == "127.0.0.1" && [4177, 4180, 4183].contains(sessions.client.configuration.url.port ?? -1)
+    #endif
     let fixture = isolated && arguments.contains("-OpenCodeVoiceFixture")
     let fakeMaster = isolated && (fixture || arguments.contains("-OpenCodeVoiceFakeMaster"))
     master = testing?.master(updates) ?? (fakeMaster ? VoiceFakeMaster(update: updates) : VoiceMaster(sessions: sessions, update: updates))
@@ -135,6 +151,12 @@ import OSLog
       }
       return
     }
+    #if os(macOS)
+    if MacLaunch.fixture, testing == nil {
+      connection = Task { await fail("Use o motor falso de voz nesta demonstração local.") }
+      return
+    }
+    #endif
     #else
     master = VoiceMaster(sessions: sessions, update: updates)
     #endif
@@ -194,8 +216,15 @@ import OSLog
     #if DEBUG
     if let testing { return testing.permission }
     #endif
+    #if os(macOS)
+    let allowed = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+      ? true : await AVCaptureDevice.requestAccess(for: .audio)
+    permissionDenied = !allowed
+    return allowed
+    #else
     return AVAudioApplication.shared.recordPermission == .granted
       ? true : await AVAudioApplication.requestRecordPermission()
+    #endif
   }
   private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
     #if DEBUG
@@ -280,6 +309,9 @@ import OSLog
     }
   }
   private func connected() {
+    #if os(macOS)
+    if connectedAt == nil { cues.play(.started) }
+    #endif
     if connectedAt == nil { connectedAt = .now; VoiceFeedback.ready() }
     watchdog?.cancel(); watchdog = nil
     if recovery.active {
@@ -390,10 +422,19 @@ import OSLog
   }
   func mute() { state.muted.toggle(); transport?.mute(state.muted); publish() }
   func resume() { transport?.resume() }
-  func end() async { alert = nil; await retire(); state.apply(.end); detail = ""; publish(); VoiceLaunchLog.record("end") }
+  func end() async {
+    #if os(macOS)
+    let sounded = connectedAt != nil && state.visible
+    #endif
+    alert = nil; await retire(); state.apply(.end); detail = ""; publish(); VoiceLaunchLog.record("end")
+    #if os(macOS)
+    if sounded { cues.play(.ended) }
+    #endif
+  }
   func retry(sessions: SessionStore) async { await end(); start(sessions: sessions) }
   func dismissAlert() { alert = nil }
   /// Waits until a starting call listens or fails, so an intent keeps the process alive meanwhile.
+  @available(macOS 26.0, *)
   func settled(within limit: Duration) async {
     let watch = Task { [weak self] in
       guard let self else { return }
@@ -408,6 +449,9 @@ import OSLog
     VoiceLaunchLog.record("failed", detail: message)
     await retire(); state.apply(.failure(message)); detail = message; publish()
     VoiceFeedback.failed()
+    #if os(macOS)
+    MacNotifications.shared.voiceFailed()
+    #endif
   }
 
   // MARK: Network recovery
@@ -534,9 +578,16 @@ import OSLog
     }
     await memoryEvents?.value; memoryEvents = nil
     if let callID { await memory?.finish(callID) }
-    sessionID = nil; await activity.end()
+    sessionID = nil
+    #if os(iOS)
+    await activity.end()
+    #endif
   }
   private func publish() {
+    #if os(macOS)
+    stateChanged?()
+    #endif
+    #if os(iOS)
     #if DEBUG
     if testing != nil { return }
     #endif
@@ -545,5 +596,6 @@ import OSLog
       guard let self, self.sessionID == id else { return }
       if action == .end { await self.end() } else { self.mute() }
     }
+    #endif
   }
 }

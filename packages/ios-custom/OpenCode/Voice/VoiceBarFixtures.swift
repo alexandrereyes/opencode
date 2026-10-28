@@ -6,8 +6,13 @@ enum VoiceBarFixtures {
   static let names = ["listening", "speaking", "thinking", "connecting", "reconnecting", "offline", "muted", "error", "idle", "long", "interrupted"]
   static let launchState: VoiceBarState? = {
     let arguments = ProcessInfo.processInfo.arguments
+    #if os(macOS)
+    let servers = ["http://127.0.0.1:4203"]
+    #else
+    let servers = ["http://127.0.0.1:4177", "http://127.0.0.1:4180", "http://127.0.0.1:4183"]
+    #endif
     guard let server = arguments.firstIndex(of: "-OpenCodeServerURL"), arguments.indices.contains(server + 1),
-      ["http://127.0.0.1:4177", "http://127.0.0.1:4180", "http://127.0.0.1:4183"].contains(arguments[server + 1]),
+      servers.contains(arguments[server + 1]),
       let index = arguments.firstIndex(of: "-OpenCodeVoiceBarFixture"), arguments.indices.contains(index + 1)
     else { return nil }
     return state(arguments[index + 1])

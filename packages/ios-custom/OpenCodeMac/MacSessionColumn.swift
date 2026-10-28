@@ -87,12 +87,13 @@ struct MacSessionColumn: View {
     // The approved title bar has no sidebar button: Sessões collapses with ⌃⌘S and Visualizar.
     .toolbar(removing: .sidebarToggle)
     .toolbar {
-      // Voice calls stay on the iPhone in this Mac version: the button is shown disabled.
       MacPlainToolbarItem {
         HStack(spacing: 4) {
-          Button {} label: { MacToolbarIcon(symbol: "waveform") }
-            .disabled(true)
-            .help("Conversa por voz (só no iPhone por enquanto)")
+          Button { runtime.voicePresentation.toggle(runtime.app.audio.voice, sessions: store) } label: {
+            MacToolbarIcon(symbol: "waveform", role: runtime.voicePresentation.visible(runtime.app.audio.voice) ? .primary : .text)
+          }
+            .disabled(runtime.app.audio.voice.busy)
+            .help(runtime.voicePresentation.visible(runtime.app.audio.voice) ? "Encerrar conversa por voz" : "Conversar por voz com a Sessão mestra")
             .accessibilityLabel("Conversar por voz")
           Button { openSettings() } label: { MacToolbarIcon(symbol: "gearshape") }
             .help("Configurações (⌘,)")

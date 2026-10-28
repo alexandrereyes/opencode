@@ -46,7 +46,9 @@ final class TranscriptionDownloader: NSObject, TranscriptionModelSource, URLSess
     state.withLock { state in
       if let session = state.sessions[identifier] { return session }
       let configuration = URLSessionConfiguration.background(withIdentifier: identifier)
+      #if os(iOS)
       configuration.sessionSendsLaunchEvents = true
+      #endif
       configuration.isDiscretionary = false
       configuration.allowsExpensiveNetworkAccess = identifier == Self.anyNetworkIdentifier
       configuration.allowsConstrainedNetworkAccess = identifier == Self.anyNetworkIdentifier

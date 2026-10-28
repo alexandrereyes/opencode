@@ -4,7 +4,11 @@
     <key>CFBundleDevelopmentRegion</key><string>pt-BR</string>
     <key>CFBundleName</key><string>OpenCode</string>
     <key>ITSAppUsesNonExemptEncryption</key><false/>
+    <key>NSMicrophoneUsageDescription</key><string>O OpenCode usa o microfone para conversar por voz com a Sessão mestra e transcrever seu ditado neste Mac.</string>
     <key>NSAppTransportSecurity</key><dict><key>NSExceptionDomains</key><dict>
+        <key>llm-proxy-svc</key><dict>
+            <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+        </dict>
         <key>opencode2-mac.alexandrem.com.br</key><dict>
             <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
         </dict>

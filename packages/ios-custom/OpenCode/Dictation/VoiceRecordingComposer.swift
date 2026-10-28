@@ -1,10 +1,17 @@
 import AVFoundation
 import Observation
 import OpenCodeKit
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+#endif
 
 @MainActor @Observable final class VoiceRecordingComposer {
   private static weak var audioOwner: VoiceRecordingComposer?
+  #if os(macOS)
+  static var audioBusy: Bool { audioOwner?.capturing == true }
+  #endif
   enum State { case idle, authorizing, recording, paused, pending }
   private(set) var state = State.idle
   private(set) var elapsed: TimeInterval = 0
@@ -54,9 +61,11 @@ import UIKit
     let wasHolding = gesture.state == .holding
     switch gesture.handle(event) {
     case .startHolding, .startLocked: start()
-    case .handsFree: UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    case .handsFree: Haptics.play(.light)
     case .lock:
+      #if os(iOS)
       UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+      #endif
       announce("Gravação travada. Pode soltar o dedo")
     case .finish:
       // Releasing during the permission prompt never lets a capture open later. A release before one second is
@@ -65,7 +74,7 @@ import UIKit
       if opening && !capture.authorized { discard() }
       else if opening || capture.elapsed < VoiceRecordingGesture.minimumDuration {
         gesture.keepRecording()
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.play(.light)
       } else { finish() }
     case .discard:
       if case .cancelled = event, wasHolding, keepsDraft {
@@ -74,7 +83,7 @@ import UIKit
       }
       discard()
       if wasHolding {
-        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        Haptics.play(.warning)
         discarding = true
         task = Task {
           do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
@@ -107,7 +116,7 @@ import UIKit
         guard !Task.isCancelled, ticket == generation else { return }
         state = .recording
         mark("recording")
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.play(.light)
         announce("Gravando para transcrever")
         startMeter()
         // The first load after an install compiles for the Neural Engine; overlap it with speech.
@@ -168,6 +177,7 @@ import UIKit
   private func observeInterruptions() {
     guard observers.isEmpty else { return }
     let center = NotificationCenter.default
+    #if os(iOS)
     observers = [
       center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: .main) { [weak self] note in
         guard let context = note.userInfo?[AVAudioSession.deactivationContextKey] as? AVAudioSession.DeactivationContext,
@@ -183,6 +193,16 @@ import UIKit
         MainActor.assumeIsolated { self?.suspend() }
       },
     ]
+    #else
+    observers = [
+      center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.suspend() }
+      },
+      center.addObserver(forName: .macAudioDeviceChanged, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.suspend() }
+      },
+    ]
+    #endif
   }
   private func removeObservers() {
     observers.forEach { NotificationCenter.default.removeObserver($0) }; observers = []
@@ -330,7 +350,13 @@ import UIKit
     #endif
   }
   private func announce(_ message: String) {
+    #if os(iOS)
     guard UIAccessibility.isVoiceOverRunning, UIApplication.shared.applicationState == .active else { return }
     UIAccessibility.post(notification: .announcement, argument: message)
+    #else
+    guard NSApp.isActive, let window = NSApp.keyWindow else { return }
+    NSAccessibility.post(element: window, notification: .announcementRequested,
+      userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+    #endif
   }
 }

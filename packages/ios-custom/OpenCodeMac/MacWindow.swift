@@ -58,9 +58,13 @@ struct MacWindow: View {
     } message: {
       Text("A sessão sairá de Recentes e ficará na lista de arquivadas. Não há opção de desarquivar nesta versão.")
     }
-    // A voice bar can attach here as a safe-area inset, using runtime.app's shared call and this window's selection.
+    // The call belongs to the app; this window owns its bar presentation and composer inset.
+    .modifier(MacVoiceWindow(runtime: runtime))
     .focusedSceneValue(\.macWindow, runtime)
     .background(MacWindowConnection(runtime: runtime))
+    .onChange(of: store.deletedIDs) { _, ids in
+      Task { try? await runtime.drafts.remove(ids) }
+    }
     #if DEBUG
     .onChange(of: scenePhase, initial: true) { _, phase in
       if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacLiveTrace") { macTrace("scenePhase \(phase)") }

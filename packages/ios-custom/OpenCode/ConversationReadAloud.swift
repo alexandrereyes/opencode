@@ -55,7 +55,7 @@ struct ConversationBottomControls: View {
       if state.jumpToLatest {
         Button(action: jump) {
           Image(systemName: "arrow.down").frame(width: 42, height: 42)
-        }.buttonStyle(.glass).buttonBorderShape(.circle).accessibilityLabel("Ir para a mais recente")
+        }.adaptiveGlassButtonStyle().buttonBorderShape(.circle).accessibilityLabel("Ir para a mais recente")
       }
       if let player = readAloud.active {
         ReadAloudControls(player: player, reveal: readAloud.messageID.map { id in { reveal(id) } })

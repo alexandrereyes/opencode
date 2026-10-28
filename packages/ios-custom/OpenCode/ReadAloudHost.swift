@@ -93,7 +93,7 @@ struct ReadAloudControls: View {
       rate.padding(.trailing, 4)
     }
     .padding(2)
-    .glassEffect(.regular, in: .capsule)
+    .adaptiveGlass(Capsule())
     .accessibilityElement(children: .contain).accessibilityIdentifier("read-aloud-pill")
   }
 
@@ -154,7 +154,7 @@ struct ReadAloudControls: View {
         .padding(.horizontal, 6).padding(.bottom, 6)
       }
     }
-    .glassEffect(.regular, in: .rect(cornerRadius: 26))
+    .adaptiveGlass(RoundedRectangle(cornerRadius: 26))
     .gesture(DragGesture(minimumDistance: 20).onEnded { if $0.translation.height > 40 { expanded = false } })
     .accessibilityElement(children: .contain).accessibilityIdentifier("read-aloud-panel")
   }

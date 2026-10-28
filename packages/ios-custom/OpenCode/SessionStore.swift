@@ -143,7 +143,8 @@ final class SessionStore {
   @ObservationIgnored private var runID = UUID()
   @ObservationIgnored private var pruning: Task<Void, Never>?
 
-  init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true, client suppliedClient: OpenCodeClient? = nil) {
+  init(configuration: ServerConfiguration = .launch(), acceptsLaunchSession: Bool = true, client suppliedClient: OpenCodeClient? = nil,
+    draftRoot: URL? = nil) {
     self.acceptsLaunchSession = acceptsLaunchSession
     #if DEBUG && os(iOS)
     let isolated = configuration.isolatedTestSandbox
@@ -173,13 +174,13 @@ final class SessionStore {
     #endif
     self.client = client
     voiceMemory = VoiceMemoryStore(client: client)
-    #if DEBUG && os(iOS)
+    #if DEBUG
     if VoiceBarFixtures.launchState != nil { voiceMemory.preview() }
     #endif
     quota = SubscriptionStore(server: configuration.url.absoluteString,
                               client: subscriptionClient(configuration: configuration, client: client))
     catalog = ModelCatalogCache(server: configuration.url.absoluteString)
-    drafts = ConversationDrafts(server: configuration.url.absoluteString)
+    drafts = ConversationDrafts(server: configuration.url.absoluteString, root: draftRoot)
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     quoteDismissals = ChatQuoteDismissals(server: configuration.url.absoluteString)
     hub = EventHub(client: client)

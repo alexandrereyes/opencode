@@ -11,15 +11,18 @@ import UniformTypeIdentifiers
 ///
 /// Return sends and Shift+Return breaks the line (the Mac chat convention). Sending while the agent works uses
 /// the server's follow-up preference, like the iPhone; right-clicking Enviar offers the other delivery (Enviar
-/// agora / Adicionar à fila). The microphone starts the system's dictation: the iPhone's on-device recorder needs
-/// UIKit and the audio session.
+/// agora / Adicionar à fila). Dictation uses the iPhone's local recorder, Parakeet and review flow.
 struct MacComposer: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.voiceController) private var voice
+  @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.macWindowRuntime) private var windowRuntime
   @Bindable var store: ConversationStore
   @Bindable var draft: ConversationDraft
   /// Inside another screen (Nova sessão): only the editor card, which that screen sends from; it shows the model,
   /// MCPs and agent itself.
   var embedded: MacComposerEmbedding? = nil
+  var reviewing = false
   @State private var owner = UUID()
   @State private var suggestionReturn = ComposerSuggestionReturn()
   @State private var picking: MacPicker?
@@ -27,6 +30,7 @@ struct MacComposer: View {
 
   private var hasContent: Bool { draft.hasText || !draft.attachments.isEmpty || !draft.quotes.isEmpty }
   private var canSubmit: Bool {
+    guard !draft.recording.visible else { return false }
     if let embedded { return embedded.canSubmit }
     return hasContent && !draft.sending && !draft.importing && store.ready && store.selectedModel(draft) != nil
   }
@@ -53,10 +57,18 @@ struct MacComposer: View {
         Text(error).appFont(.caption).foregroundStyle(theme.color(.error)).frame(maxWidth: .infinity, alignment: .leading)
       }
       if !draft.quotes.isEmpty { DraftQuotesCard(draft: draft) }
+      if reviewing { FloatingVoiceHost() }
       card
       if embedded == nil { footer }
     }
-    .onAppear { draft.editorOwner = owner }
+    .onAppear {
+      draft.editorOwner = owner
+      draft.recording.willUseAudio = { [weak voice = voice] in voice?.state.visible != true }
+      reviewDictation()
+    }
+    .onChange(of: draft.dictationReview) { reviewDictation() }
+    .onChange(of: scenePhase) { reviewDictation() }
+    .onChange(of: voice?.state.visible) { _, calling in if calling == true { draft.recording.suspend() } }
     #if DEBUG
     .task {
       // `-OpenCodeMacDraft <text>` types a draft (a trigger opens the suggestion panel) and
@@ -71,7 +83,29 @@ struct MacComposer: View {
       firstSuggestion()?()
     }
     #endif
-    .onDisappear { if draft.editorOwner == owner { draft.editorOwner = nil } }
+    .onDisappear {
+      if draft.editorOwner == owner { draft.editorOwner = nil }
+      draft.recording.suspend()
+    }
+    .modifier(MacMicrophonePermission(denied: Binding(get: { draft.recording.permissionDenied }, set: { draft.recording.permissionDenied = $0 })))
+    .alert("Baixar transcrição neste Mac?", isPresented: Binding(get: { draft.recording.asksDownload }, set: { draft.recording.asksDownload = $0 })) {
+      Button("Baixar por Wi-Fi") { draft.recording.transcription.download(cellular: false) }
+      Button("Usar qualquer rede") { draft.recording.transcription.download(cellular: true) }
+      Button("Agora não", role: .cancel) {}
+    } message: { Text(TranscriptionController.downloadMessage) }
+    .sheet(isPresented: Binding(get: { !reviewing && draft.expanded }, set: { draft.expanded = $0 }), onDismiss: {
+      draft.editorOwner = owner; draft.focused = true
+    }) {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Text("Revise a mensagem").font(.headline)
+          Spacer()
+          Button("Concluído") { draft.expanded = false }.keyboardShortcut(.cancelAction)
+        }
+        MacComposer(store: store, draft: draft, embedded: embedded, reviewing: true)
+      }.padding(20).frame(width: 680)
+        .modifier(FloatingVoiceScope())
+    }
     .sheet(item: $picking) { picker in
       MacPickerSheet(picker: picker, store: store, draft: draft)
     }
@@ -86,7 +120,17 @@ struct MacComposer: View {
       if draft.importing {
         ProgressView("Preparando anexos…").controlSize(.small).appFont(.caption)
       }
-      MacComposerEditor(draft: draft, theme: theme, owner: owner, canSubmit: canSubmit, submit: submit,
+      if draft.recording.capturing || draft.recording.discarding {
+        DictationRecordingPanel(recording: draft.recording, hasContent: hasContent)
+      }
+      if draft.recording.state == .pending { DictationPendingView(recording: draft.recording) }
+      if let error = draft.recording.error, draft.recording.state != .pending {
+        Text(error).appFont(.caption).foregroundStyle(theme.color(.error))
+      }
+      if voice?.state.visible == true {
+        Text("Encerre a conversa por voz para ditar.").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+      }
+      MacComposerEditor(draft: draft, theme: theme, owner: owner, canSubmit: canSubmit, submit: submit, dictate: dictate,
         firstSuggestion: firstSuggestion, attach: { items in
           MacAttachments.receive(items, store: store, draft: draft)
         })
@@ -155,27 +199,14 @@ struct MacComposer: View {
   }
 
   @ViewBuilder private var action: some View {
-    if !hasContent {
-      Button {
-        draft.focused = true
-        DispatchQueue.main.async { NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil) }
-      } label: {
-        circle("mic.fill")
-      }
-      .buttonStyle(.plain)
-      .help("Ditar (ditado do macOS)")
-      .accessibilityLabel("Ditar")
-    } else {
-      Button(action: submit) {
-        circle(draft.sending ? "hourglass" : "arrow.up")
-      }
-      .buttonStyle(.plain)
-      .disabled(!canSubmit)
-      .help("Enviar (Return) · Shift+Return quebra a linha")
-      .accessibilityLabel("Enviar")
-      .accessibilityIdentifier("composer-send")
+    HStack(spacing: 0) {
+      DictationCompactMicrophone(recording: draft.recording, hasContent: hasContent, available: dictationAvailable)
+        .help("Clique ou segure para ditar · ⌃⌥Espaço no editor")
+      DictationAction(recording: draft.recording, hasContent: hasContent, canSubmit: canSubmit,
+        sending: draft.sending, available: dictationAvailable, submit: submit)
+        .help("Segure para ditar, arraste para cima para travar · Return envia · Shift+Return quebra a linha")
       .contextMenu {
-        if embedded == nil, store.executing {
+        if hasContent, !draft.recording.visible, embedded == nil, store.executing {
           Button(store.preferences?.data.settings.followUpBehavior == .queue ? "Enviar agora" : "Adicionar à fila") {
             Task { await store.send(draft, alternate: true) }
           }
@@ -185,9 +216,20 @@ struct MacComposer: View {
     }
   }
 
-  private func circle(_ symbol: String) -> some View {
-    Image(systemName: symbol).font(.system(size: 14, weight: .bold)).foregroundStyle(theme.color(.onPrimary))
-      .frame(width: 32, height: 32).background(theme.color(.primary), in: Circle())
+  private var dictationAvailable: Bool { voice?.state.visible != true && !draft.sending && !draft.importing }
+
+  private func dictate() {
+    guard dictationAvailable else { return }
+    guard let windowRuntime, windowRuntime.app.front === windowRuntime else { return }
+    if draft.recording.capturing { draft.recording.finish(); return }
+    draft.recording.handle(.began); draft.recording.handle(.ended)
+  }
+
+  private func reviewDictation() {
+    guard !reviewing, draft.dictationReview, scenePhase == .active, !draft.focusSuppressed else { return }
+    draft.dictationReview = false
+    draft.expanded = true
+    draft.focused = true
   }
 
   /// `● build ⌄ · Contexto 28% · 278,6k / 1M · ⚡ Cache 99,5%`.
@@ -298,6 +340,7 @@ struct MacComposerEditor: NSViewRepresentable {
   let owner: UUID
   let canSubmit: Bool
   let submit: () -> Void
+  var dictate: () -> Void = {}
   let firstSuggestion: () -> (() -> Void)?
   let attach: ([NSPasteboardItem]) -> Bool
 
@@ -324,6 +367,7 @@ struct MacComposerEditor: NSViewRepresentable {
     let text = view.textView
     text.isEditable = !draft.sending
     text.submit = submit
+    text.dictate = dictate
     text.canSubmit = canSubmit && draft.trigger == nil
     text.querying = draft.trigger != nil
     text.firstSuggestion = firstSuggestion

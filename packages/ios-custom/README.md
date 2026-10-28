@@ -2553,7 +2553,7 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
   Constraints in Window passes than there are views") came from it. `script/test-mac-window.sh` guards it.
 - **Title bar (option B)**: one `unifiedCompact` strip, no title. Every item is a `MacPlainToolbarItem`, which on
   macOS 26 hides the shared Liquid Glass capsule (`sharedBackgroundVisibility(.hidden)`): plain 15-pt icons with a
-  hover highlight (`MacToolbarIcon`). Left, over Sessões: voice (disabled until calls come to the Mac),
+  hover highlight (`MacToolbarIcon`). Left, over Sessões: voice (GPT Live; see below),
   Configurações and Nova sessão. Over the chat: `MacChatTitle`, the shared `ConversationAvatar` (now with a `size`,
   30 pt here) and `ConversationTitle` (`App Mac ⌄`, `<worktree> · trabalhando…`), which opens the quick switcher
   (stage 4). Right, after a `ToolbarSpacer(.flexible)`: `…` (rename, pin, mute, delete, Arquivos,
@@ -2642,8 +2642,8 @@ The model capsule and `/model` open the model and effort picker, the agent below
 picker, the MCP capsule a popover with each server's switch; `/btw` asks a side question in a sheet. Sending is
 `ConversationStore.send`, so the delivery follows the server's preference while the agent works (steer or queue)
 and right-clicking Enviar offers the other one (Enviar agora / Adicionar à fila); the tray (`ConversationTray`)
-lists the queue with Editar, Enviar agora and ×. The microphone starts the system dictation: the iPhone's
-on-device recorder needs UIKit and the audio session (`VoiceRecordingComposer` is a stub on the Mac).
+  lists the queue with Editar, Enviar agora and ×. The microphone now uses the shared on-device recorder and
+  Parakeet Ultra; see [Voice on Mac](#voice-on-mac--28-october).
 
 **Requests in the chat.** The iPhone's permission and question cards (`ConversationRequests.swift`, shared) are
 transcript items.
@@ -2658,8 +2658,8 @@ and reversions leave `#if os(iOS)`; `shownConversations`), `ConversationStore` (
 catalog fixture), `ConversationDraft` (imports AppKit on macOS), `ComposerSuggestions` (its DEBUG fixtures are
 iOS-only), `ConversationQuotes` (`QuoteDetailsSheet` is iOS-only), `ConversationRequests` (the permission card's
 `…` menu calls `plainMenuOnMac()`, new in `PlatformGlass.swift`, a no-op on iOS) and `MCPUIError` moved from
-`NewSessionStore` to `ConversationMCPStore`. The Mac supplies its own `ConversationReadAloud` (the system pt-BR voice),
-`VoiceRecordingComposer`, `SideQuestionLaunch`, `ScrollFixtures` and `ConversationOpeningMetrics` (DEBUG).
+  `NewSessionStore` to `ConversationMCPStore`. Since the voice port the Mac shares `ConversationReadAloud` and
+  `VoiceRecordingComposer` too; it supplies `SideQuestionLaunch`, `ScrollFixtures` and `ConversationOpeningMetrics` (DEBUG).
 
 **Checks.** `swift test` (`TranscriptNavigationTests` for the reading rules); the macOS Debug build without warnings;
 the iOS Debug build with the same 13 warnings as before; `script/test-mac-window.sh`;
@@ -2824,10 +2824,8 @@ separate track.
   sidebar visibility, Contexto visibility and width, per server (`OpenCodeMacWindow.<uuid>.<server>`). A deleted or
   archived selection falls back to the first row. Right-click **Abrir em nova janela** and Option-click a session
   open an independent window, as does Arquivo ▸ Nova janela (⌥⌘N).
-- **Voice**: the button stays disabled. The iPhone's GPT Live call (`Voice/`) needs `AVAudioSession` (none on macOS;
-  the WebRTC audio setup must be rewritten for Core Audio), ActivityKit and App Intents controls, UIKit feedback, and
-  for a signed Mac app the microphone entitlement and usage description; that is a port of its own, not a small
-  adjustment. The composer's microphone keeps the system dictation.
+- **Voice**: GPT Live, the floating bar, Parakeet dictation and server read-aloud now share the iPhone implementation;
+  see [Voice on Mac](#voice-on-mac--28-october).
 
 #### Ajustes
 
@@ -2837,7 +2835,44 @@ and its state, saved servers with Usar, Editar… and Remover…, Adicionar serv
 since the Mac has no scanner), **Aparência** (Sistema/Claro/Escuro and the shared `ThemePicker` with its previews),
 **Leitura** (the same `OpenCodeCollapsibleUserMessages` switch), **Modelos** (the shared "Gerenciar modelos" over the
 server's catalog and `model.visibility`), **Assinaturas** (the LLM proxy summary rows, opening the LLM proxy window)
-and **Sobre** (version, commit, server). Voz, Transcrição, Dados do iPhone and Apple Watch belong to the iPhone.
+and **Sobre** (version, commit, server). **Voz** adds the same next-call voice and rolling transcript; **Transcrição**
+adds the same model download, progress, retry, deletion and licenses. Dados do iPhone and Apple Watch stay on iPhone.
+
+### Voice on Mac — 28 October
+
+- **GPT Live:** the toolbar waveform starts the iPhone's `VoiceController`, `VoiceTransport`, lease/signaling,
+  `VoiceMaster` and `VoiceMemoryStore`, using the same private `llm-proxy-svc:8080` origin and saved voice catalog.
+  `FloatingVoiceHost` sits above the composer, so it remains visible when Sessões is collapsed and when changing
+  conversations. The same compact/expanded bar has time, mute/end, retry/resume, spoken text, master progress and
+  the rolling transcript. The empty chat, Nova sessão and the review sheet host it too.
+- **Audio/lifetime:** macOS WebRTC owns the default Core Audio devices and its AEC; it does not configure an
+  `AVAudioSession` or recreate the call when headphones change. `VoiceCuePlayer` uses `AVAudioEngine` for connection,
+  end and recovery cues. `MacRuntime` owns the one event stream and `MacVoiceSession` the one call,
+  including minimized/closed windows. Quit and server changes close local audio and release the lease. A failed
+  background call posts a macOS notification, subject to the system's notification permission.
+- **Permissions:** the first recording/call asks for the microphone; refusal explains the setting and offers a
+  direct System Settings link. Debug/Release have `com.apple.security.device.audio-input` and the pt-BR usage text.
+  ActivityKit and App Intents remain iOS-only.
+- **Dictation:** FluidAudio 0.17.7 supports macOS 14+, so the Mac uses the exact Parakeet Ultra downloader, checksums,
+  model, queue, PCM capture and insertion path. Click for hands-free recording, hold/release to transcribe, drag up
+  to lock or left to discard; **⌃⌥Space in the editor** starts/stops. The fn key stays with macOS. Pause/preview/seek,
+  retry, local pending audio and model management match iOS. Transcription opens a native review sheet containing
+  the same token-preserving editor; it never sends automatically. Device changes and app deactivation pause recording.
+- **Read aloud:** response footers and Markdown files use `custom.speech`, the same `ReadAloudPlayer`, pill/full
+  controls, seeking, speed and server bookmarks. The voice comes from the speech server (separate from GPT Live's
+  voice choice). Starting a call or dictation pauses it; reading cannot start while either owns the microphone.
+- **WebRTC package repair:** the pinned M147 macOS binary exists, but its archive omits the public ObjC headers.
+  `script/prepare-mac-webrtc.py`, a Mac-only build phase, restores the audio/data headers from the **same archive's**
+  iOS slice to the processed build product. It changes no binary, package-manager artifact or iOS slice, and exposes
+  no UIKit API. No new binary dependency or version was introduced.
+
+Verification: `swift test` in OpenCodeKit, the Mac/iOS builds (including Watch), existing hosted iOS voice, dictation
+and read-aloud tests, and `script/test-mac-window.sh`. The new `script/test-mac-voice.py --app <Debug/OpenCodeMac.app>`
+uses an isolated `.debug.voice-tests` copy, the closed in-memory server and the iOS fixtures, with the explicit
+4203 launch URL. It captures all bar states in both themes and exercises AppKit hold/lock, PCM preview, insertion
+and the read-aloud RPC/player. `--parakeet` additionally downloads the pinned model into the evidence folder and
+transcribes the recorded Portuguese fixture with the real local model. Evidence defaults to
+`$TMPDIR/opencode/mac-voz-prints/`. A real microphone, echo and physical headset switching require a hands-on check.
 
 ### Running against a sandbox
 
@@ -2943,8 +2978,6 @@ activated, so `MacStress` opens one through File ▸ New Window.
 
 ### Next stages
 
-- The chat's remaining iPhone details: on-device dictation and read-aloud with server voices.
-- GPT Live voice calls on the Mac (see Voice above).
 - Menu bar extra and widgets stay out.
 
 ### Chat details and independent windows — 28 October
@@ -2968,9 +3001,16 @@ activated, so `MacStress` opens one through File ▸ New Window.
   Two windows sharing a conversation still have only one live conversation consumer, reference-counted by the app.
   Menu commands resolve `focusedSceneValue`; search and file navigation target that window. A notification selects
   its session in the front conversation window (or opens a window when none remains).
-- **Voice integration:** attach the call bar as a safe-area inset at the marked point in `MacWindow`; use
-  `runtime.app` for a shared call service, `runtime.selection` for that window's destination, and `app.front` for
-  notification-style routing. Voice/Dictation/Transcription and read-aloud implementation files are untouched.
+- **Voice integration:** `MacWindow` installs the window environment at the integration point; the chat's bottom
+  `safeAreaInset` places its voice bar above its composer. Every window shows the same app-wide call through
+  `runtime.app.audio.voice`, with its own expansion/transcript-sheet state. `MacRuntime.front` routes the microphone
+  permission/failure alerts and the notification click (restoring a minimized window or opening one if none remains).
+- **Window-local audio:** `MacConversationInput` keeps the draft, dictation job/review and read-aloud controls per
+  window and Session, even when two windows show the same Session. `MacWindowRuntime.drafts` also scopes Nova sessão.
+  A new window copies a legacy saved draft (including local attachments/pending audio) without altering its source.
+  Quotes still synchronize through the Session-scoped RPCs and the existing EventHub; the live conversation consumer
+  remains shared. The front editor handles ⌃⌥Space. Starting another reading stops the previous audio, as on iPhone,
+  but closing/navigating an unrelated window never stops it. Starting the single GPT Live call pauses local audio.
 
 Verification helpers: `DesktopWindowStateTests` covers restoration across windows/servers and Unicode/overlapping
 quote marker offsets. `script/test-mac-window.sh` now asserts two actual windows on different sessions, independent
@@ -2994,6 +3034,15 @@ with their exact `HEAD` contents, using separate DerivedData and fresh imported 
 The additional `SessionReadingTests/testSearchLoadedAndOlderPages` run fails in both themes on the synthetic
 history (counter starts at `3 de 80`, then no older-page offer); the original-files baseline reproduces the same
 assertions. Search does highlight the requested text. Evidence: `reading/` and `reading-baseline/` in that folder.
+
+**Voice + details integration (`mac-app`).** The merge preserves `MacWindowRuntime`, native quote details,
+long-prompt scrolling and row-local shell updates. Its checks use `mac-merge-derived` / `mac-merge-ios-derived`:
+573 Kit tests, Debug/Release Mac builds with zero warnings, the iOS + Watch build with the 13 existing app/vendor
+warnings, root `bun run check`, `test-mac-window.sh` and `test-mac-details.sh`. `test-mac-voice.py` now opens two
+windows on the same Session for every scenario and checks separate drafts/players, the front editor's shortcut,
+shared mute/call identity and independent expansion. Its 40 scenarios produce both `<name>.png` and
+`<name>-second.png` under `$TMPDIR/opencode/mac-merge-voice-prints/`; details and window captures are in
+`mac-merge-details-prints/` and `mac-merge-window-prints/`. No live model call is needed.
 
 ## Platform and distribution
 

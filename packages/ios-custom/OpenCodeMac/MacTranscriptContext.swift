@@ -28,6 +28,7 @@ import SwiftUI
   @ObservationIgnored var revealTurn: (String) -> Bool = { _ in false }
   @ObservationIgnored var revert: (ConversationMessage) -> Void = { _ in }
   @ObservationIgnored var comment: (ChatQuote) -> Void = { _ in }
+  @ObservationIgnored var readAloud: (String) -> Void = { _ in }
   @ObservationIgnored var openImage: (CGImage, String) -> Void = { _, _ in }
   @ObservationIgnored var scrollKey: (NSEvent) -> Bool = { _ in false }
   @ObservationIgnored var blockLookup: (TranscriptPart) -> [MarkdownBlock]? = { _ in nil }

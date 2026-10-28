@@ -13,6 +13,7 @@ import SwiftUI
   static let folder = MacFixture.value("-OpenCodeMacCapture")
   static let name = MacFixture.value("-OpenCodeMacCaptureName") ?? "janela"
   static let quits = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacCaptureQuit")
+  private static var capturingVoice = false
 
   /// The window at the approved mock's proportions, then the column. Launch options open what the capture shows:
   /// `-OpenCodeMacSelect id,id` (selection mode), `-OpenCodeMacNewSession sessoes|origem|mestra`,
@@ -25,6 +26,10 @@ import SwiftUI
     openSettings: OpenSettingsAction
   ) async {
     guard let folder, !MacStress.enabled else { return }
+    if MacVoiceChecks.enabled {
+      guard !capturingVoice else { return }
+      capturingVoice = true
+    }
     guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain && $0.title != "LLM proxy" })
     else { return }
     if MacProxyLaunch.pane != nil {
@@ -41,6 +46,8 @@ import SwiftUI
     window.setFrame(NSRect(x: -4000, y: 40, width: size?.first ?? 1600, height: size?.last ?? 1000), display: true)
     let delay = MacFixture.value("-OpenCodeMacCaptureDelay").flatMap(Double.init)
     try? await Task.sleep(for: .seconds(delay ?? (MacFixture.current == nil ? 8 : 4)))
+    do { try await MacVoiceChecks.run(runtime, openWindow: openWindow) }
+    catch { print("MacVoiceChecks failed: \(error)"); exit(1) }
     let extra = await open(runtime: runtime, context: context, openWindow: openWindow, openSettings: openSettings)
     try? await Task.sleep(for: .seconds(2))
     await MacDetailsFixture.verify(window: window, runtime: runtime, theme: theme, folder: folder)
@@ -57,6 +64,11 @@ import SwiftUI
       return
     }
     shot(window, theme: theme, to: folder + "/" + name + ".png")
+    if MacVoiceChecks.enabled {
+      for other in runtime.app.windows.values where other !== runtime {
+        if let window = other.window { shot(window, theme: theme, to: folder + "/" + name + "-second.png") }
+      }
+    }
     for (suffix, title) in extra {
       guard let other = NSApp.windows.first(where: { $0.isVisible && $0 !== window && title($0) }),
         let picture = (screenLocked ? nil : image(of: other)) ?? drawn(other),

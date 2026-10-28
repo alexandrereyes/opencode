@@ -14,6 +14,94 @@ toque e recolhe por toque/deslize para baixo; VoiceOver reúne estado, tempo e a
 O modo de demonstração do layout é separado do motor falso, conforme
 [`voice-bar-integration.md`](voice-bar-integration.md).
 
+## macOS
+
+O target `OpenCodeMac` compila os mesmos arquivos de voz, ditado e leitura do iPhone por membership do
+projeto, sem cópias. O botão de onda inicia o mesmo controlador: origem privada, reserva, SDP WebRTC,
+renovação/DELETE, recuperação, delegação e memória KV são os contratos abaixo. A voz é a mesma preferência
+local `OpenCodeVoice`, com Rio como padrão e o mesmo fallback; Ajustes → Voz também abre a memória.
+
+A `FloatingVoiceBar` fica **acima do compositor**. Isso mantém a chamada visível com Sessões recolhida,
+durante navegação e junto ao texto; a lista e a barra da mestra mantêm seu espaço. Nova sessão e a revisão
+do ditado têm seu próprio host da mesma faixa. Os controles e o leitor de transcrição são compartilhados.
+
+Diferenças de plataforma:
+
+- O WebRTC usa seu módulo Core Audio e AEC nativos, com entrada/saída padrão do sistema. Não há
+  `AVAudioSession` nem reconstrução do peer ao trocar dispositivos; a seleção padrão é acompanhada pelo
+  próprio WebRTC. Os sinais sonoros usam `AVAudioEngine`, inclusive início/fim no Mac.
+- `MacRuntime` mantém um único `SessionStore.run()` para as janelas; `MacVoiceSession` guarda a chamada. Minimizar ou fechar
+  todas as janelas durante uma chamada preserva áudio e progresso da mestra; encerrar o app ou trocar de
+  servidor fecha a chamada.
+- ActivityKit, vibração de telefone e App Intents continuam exclusivos do iOS. Uma falha com o Mac fora
+  de foco gera uma notificação, se autorizada, sem incluir transcrição. O estado também fica na faixa.
+- A permissão usa `AVCaptureDevice` no primeiro uso, com `NSMicrophoneUsageDescription` em pt-BR e
+  `com.apple.security.device.audio-input` no hardened runtime. Negada, a UI explica e abre Ajustes do Sistema
+  → Privacidade e Segurança → Microfone.
+- FluidAudio **0.17.7 suporta macOS 14+**. O Mac usa o mesmo Parakeet Ultra local, download verificado,
+  gravação PCM, pausa/pré-escuta, rascunhos pendentes e inserção sem sobrescrever a seleção. Clicar inicia
+  mãos livres; segurar e soltar transcreve, arrastar para cima trava, para a esquerda descarta.
+  **⌃⌥Espaço no editor** inicia/para; fn fica com o sistema. A revisão usa um sheet nativo com o editor real,
+  em vez do fullscreen do telefone. Nada é enviado automaticamente. Mudança de dispositivo ou perda de foco
+  pausa o ditado; isso não pausa uma chamada GPT Live.
+- Respostas e arquivos Markdown usam `ConversationReadAloud`/`ReadAloudPlayer` e a voz de `custom.speech`,
+  com os mesmos controles, velocidades, pré-carregamento limitado e posição no servidor. Essa voz de leitura
+  é independente da escolha de GPT Live. Ditado/chamada pausam a leitura.
+
+O arquivo M147 fixado pelo projeto tem um defeito de empacotamento: a slice macOS inclui o binário e o
+umbrella, mas omite os headers públicos. O build do Mac executa `script/prepare-mac-webrtc.py`: recupera
+apenas os headers comuns de áudio/dados da slice iOS **do mesmo arquivo verificado**, no produto de build.
+Não altera o artefato SPM, o binário nem o build do iPhone; não precisa de outra versão ou servidor.
+
+`script/test-mac-voice.py --app <OpenCodeMac.app> [--parakeet]` verifica/captura os componentes nativos
+com a tela bloqueada, por desenho AppKit quando necessário. Usa o motor falso, os onze `VoiceBarFixtures`,
+PCM gravado e um RPC de fala em memória; a opção Parakeet baixa os pesos para um diretório privado e testa
+inferência local real. O runner usa uma cópia `.debug.voice-tests`, URL explícita **4203**, e encerra cada
+processo; capturas e manifesto em `$TMPDIR/opencode/mac-voz-prints/`. Não faz chamada paga. Para o teste
+de estabilidade paralelo, `OPENCODE_MAC_TEST_DOMAIN` separa os defaults do runner de outras frentes.
+
+Áudio real, AEC perceptivo, troca física de fone e os diálogos de permissão precisam da conferência do
+Alexandre. A resolução/rede do proxy não é substituída por uma origem pública se o WARP não permitir acesso.
+
+### Integração com várias janelas
+
+A chamada GPT Live e a Sessão mestra são únicas no app (`runtime.app`). A faixa aparece em **todas as
+janelas**, com expansão e apresentação do leitor independentes. `MacWindow` fornece o ambiente da janela
+no ponto de integração; o `safeAreaInset` do chat reserva o rodapé com a faixa acima de seu compositor.
+`MacRuntime.front` identifica o destino do atalho e dos alertas; clicar na notificação restaura essa janela,
+inclusive minimizada, ou abre uma nova quando todas foram fechadas.
+
+`MacConversationInput` e `MacWindowRuntime.drafts` isolam rascunho, gravação, revisão e player por janela e
+Sessão. Os RPCs de citações continuam compartilhados por Sessão, observados no mesmo EventHub; nenhuma
+nova conexão SSE é criada. Um rascunho anterior é copiado na primeira abertura, com seus anexos/áudio local,
+sem modificar o original. A seleção, o caret e o destino da transcrição pertencem à janela de origem.
+⌃⌥Espaço é tratado pelo editor da janela da frente. Há um áudio de leitura por vez, como no iOS, mas a
+navegação/fechamento da outra janela não interfere no player. O runner `test-mac-voice.py` abre duas janelas
+na mesma Sessão em cada cenário e gera `<nome>.png` e `<nome>-second.png`, verificando isolamento dos
+rascunhos, controles e atalho, expansão independente, mudo compartilhado e ausência de segunda chamada.
+
+### Resultados da porta inicial
+
+- **571 testes Kit** passaram. Os testes hospedados existentes de `VoiceController`, `VoiceMaster`,
+  `VoiceActivity`, `DictationPipeline` e `ReadAloudPlayer`: **45 aprovados, três probes opt-in pulados**.
+  Destino exclusivo: `OpenCode Mac Voz Regression` (`9F27B228-5A90-4051-84D2-40879C80D16A`). O host de
+  testes abriu o fixture offline com URL explícita 4203. Nenhuma chamada a um modelo.
+- O build de macOS Debug e Release passou sem warnings. O build iOS com Watch passou; seus avisos
+  preexistentes estão em `ResponseText`, testes e `Vendor/OpenClawWatchRTC`, fora dos arquivos de voz
+  alterados. O teste de estabilidade da janela também passou.
+- **40 cenários de captura/checks** passaram nos dois temas, incluindo os onze estados da faixa,
+  compacto, motor falso, leitura, gravação/pausa/revisão e Ajustes. Os checks de ditado verificam também
+  token preservado, cancelamento ao perder a janela e novo clique após cancelar. Rascunhos de cada
+  cenário usam diretórios temporários separados. Logs e `verification*.json` acompanham as imagens.
+- Download real dos **632.162.964 bytes**, validação e inferência Parakeet no Mac: **7,957 s** de PCM,
+  **9,220 s** para carregar/preparar e **0,084 s** para transcrever. Texto reconhecido preservou a frase,
+  com um “o” extra em “Não o envie”, como no teste anterior do iPhone: a revisão permanece necessária.
+- O proxy respondeu **HTTP 403** na raiz (sonda GET, sem criar chamada). O microfone do bundle de teste
+  estava **não determinado**. Não foi aberta chamada GPT Live real nem apresentado diálogo para alguém
+  aceitar com a tela bloqueada; entrada/saída real e AEC continuam como verificação manual.
+- O comando de raiz `bun run check` não conseguiu iniciar o lint: `oxlint` ausente nesta worktree.
+  O pacote nativo não pertence ao Turbo; os builds e testes acima são sua validação efetiva.
+
 ## Contrato privado do llm-proxy
 
 Origem fixa: `http://llm-proxy-svc:8080`. O aplicativo não contém tokens ChatGPT nem usa o backend

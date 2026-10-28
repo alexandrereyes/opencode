@@ -349,7 +349,6 @@ private struct MacFooter: View {
   let context: MacTranscriptContext
   var body: some View {
     let store = context.store
-    let reading = store.readAloud.messageID == message.id
     HStack(spacing: 12) {
       Text(ConversationProjection.footer(message, models: store.displayModels)).monospacedDigit()
       Button {
@@ -358,11 +357,11 @@ private struct MacFooter: View {
         store.toast.show("Resposta copiada")
       } label: { Image(systemName: "doc.on.doc") }
         .buttonStyle(.plain).help("Copiar resposta").accessibilityLabel("Copiar resposta")
-      Button { store.readAloudResponse(endingAt: message.id) } label: {
-        Image(systemName: reading ? "stop" : "play")
+      Button { context.readAloud(message.id) } label: {
+        Image(systemName: "play")
       }
-      .buttonStyle(.plain).help(reading ? "Parar leitura" : "Ouvir resposta")
-      .accessibilityLabel(reading ? "Parar leitura" : "Ouvir resposta")
+      .buttonStyle(.plain).help("Ouvir resposta")
+      .accessibilityLabel("Ouvir resposta")
     }
     .appFont(.caption).foregroundStyle(theme.color(.textSecondary))
   }

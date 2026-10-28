@@ -122,6 +122,9 @@ struct MacFilePane: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .modifier(ReadAloudHost(text: files.file.flatMap { MacFileRendering(path: $0.path) == .markdown ? $0.text : nil },
+      title: files.selected.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Arquivo",
+      path: files.selected ?? "", client: files.context.sessions.client))
     .onChange(of: files.selected) { source = false }
   }
 

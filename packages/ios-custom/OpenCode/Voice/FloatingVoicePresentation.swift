@@ -75,6 +75,9 @@ extension EnvironmentValues {
 }
 
 struct FloatingVoiceHost: View {
+  #if os(macOS)
+  @Environment(\.macWindowRuntime) private var windowRuntime
+  #endif
   @Environment(\.voiceController) private var voice
   @Environment(\.voiceSessionStore) private var contextSessions
   @Environment(\.floatingVoice) private var presentation
@@ -91,7 +94,7 @@ struct FloatingVoiceHost: View {
             retry: { presentation.retry(voice, sessions: sessions) }, resume: { presentation.resume(voice) },
             expand: { presentation.expanded = $0 }, transcript: { transcript = true })
         }
-        .alert("Voz sem conexão", isPresented: Binding(get: { voice?.alert != nil },
+        .alert("Voz sem conexão", isPresented: Binding(get: { showsAlert },
           set: { if !$0 { voice?.dismissAlert() } })) {
           Button("Tentar de novo") { presentation.retry(voice, sessions: sessions) }
           Button("Encerrar", role: .cancel) { presentation.end(voice) }
@@ -100,6 +103,12 @@ struct FloatingVoiceHost: View {
     }.sheet(isPresented: $transcript) {
       if let sessions = sessions ?? contextSessions { VoiceTranscriptView(memory: sessions.voiceMemory) }
     }
+  }
+  private var showsAlert: Bool {
+    #if os(macOS)
+    guard let windowRuntime, windowRuntime.app.front === windowRuntime else { return false }
+    #endif
+    return voice?.alert != nil
   }
 }
 

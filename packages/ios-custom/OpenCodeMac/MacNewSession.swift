@@ -18,13 +18,14 @@ struct MacNewSession: View {
   let runtime: MacWindowRuntime
 
   init(store sessions: SessionStore, runtime: MacWindowRuntime, request: MacNewSessionRequest) {
-    _store = State(initialValue: MacNewSessionStore(sessions: sessions, request: request))
+    _store = State(initialValue: MacNewSessionStore(sessions: sessions, request: request, drafts: runtime.drafts))
     self.runtime = runtime
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       header
+      FloatingVoiceHost()
       if store.master || store.chat || store.project != nil {
         if !store.master { selectors }
         mcps
@@ -48,6 +49,7 @@ struct MacNewSession: View {
     .padding(22)
     .frame(width: 620)
     .background(theme.color(.background))
+    .modifier(FloatingVoiceScope())
     .toastOverlay(store.toast)
     .task { await store.open() }
     .task {
@@ -367,13 +369,13 @@ private struct MacBaseBranchPicker: View {
   @ObservationIgnored private var pendingTouch: String?
   @ObservationIgnored private var mutations: [UUID: Task<Bool, Never>] = [:]
 
-  init(sessions: SessionStore, request: MacNewSessionRequest) {
+  init(sessions: SessionStore, request: MacNewSessionRequest, drafts: ConversationDrafts? = nil) {
     self.sessions = sessions
     master = request.master
     origin = request.origin
     startInChats = request.startInChats
     memoryKey = "OpenCodeNewSession." + sessions.client.configuration.url.absoluteString
-    draft = sessions.drafts.draft(request.master ? "new-session-master" : "new-session")
+    draft = (drafts ?? sessions.drafts).draft(request.master ? "new-session-master" : "new-session")
     composer = ConversationStore(id: "new-session", client: sessions.client, hub: sessions.hub,
       catalog: sessions.catalog)
     categories = UserDefaults.standard.dictionary(forKey: memoryKey + ".categories") as? [String: String] ?? [:]

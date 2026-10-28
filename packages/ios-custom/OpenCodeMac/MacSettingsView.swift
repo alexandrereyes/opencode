@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The Mac's Ajustes (⌘,): the iPhone's Você in tabs. Servidores (saved servers, add, edit, remove, pair and switch),
 /// Aparência (the shared theme list), Leitura, Modelos (the shared "Gerenciar modelos"), Assinaturas (the LLM proxy
-/// summary) and Sobre. Voz, Transcrição, Dados do iPhone and Apple Watch belong to the iPhone.
+/// summary), Voz, Transcrição and Sobre. Dados do iPhone and Apple Watch stay on the iPhone.
 struct MacSettingsView: View {
   let runtime: MacRuntime
   /// The tab shown last; the window reopens on it.
@@ -18,6 +18,10 @@ struct MacSettingsView: View {
         .tabItem { Label("Aparência", systemImage: "paintpalette") }.tag("aparencia")
       MacReadingSettings()
         .tabItem { Label("Leitura", systemImage: "text.alignleft") }.tag("leitura")
+      MacVoiceSettings(runtime: runtime)
+        .tabItem { Label("Voz", systemImage: "waveform") }.tag("voz")
+      NavigationStack { TranscriptionSettingsView(transcription: .shared) }
+        .tabItem { Label("Transcrição", systemImage: "mic") }.tag("transcricao")
       MacModelSettings(runtime: runtime)
         .tabItem { Label("Modelos", systemImage: "cpu") }.tag("modelos")
       MacSubscriptionSettings(runtime: runtime)

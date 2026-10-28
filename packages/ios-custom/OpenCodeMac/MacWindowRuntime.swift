@@ -3,11 +3,13 @@ import Observation
 import OpenCodeKit
 import SwiftUI
 
-/// Presentation belongs to a window. Services (including the future voice call) belong to `app`.
+/// Presentation belongs to a window. Services, including the single voice call, belong to `app`.
 @MainActor @Observable final class MacWindowRuntime {
   let app: MacRuntime
   let id: UUID
   let reading: ReadingPositionStore
+  let drafts: ConversationDrafts
+  let voicePresentation = FloatingVoicePresentation()
   weak var window: NSWindow?
   var state: DesktopWindowState {
     didSet {
@@ -46,11 +48,18 @@ import SwiftUI
   var archiveRequest: SessionRow?
   @ObservationIgnored private var memories: [String: TranscriptMemory] = [:]
   @ObservationIgnored private var recent: [String] = []
+  @ObservationIgnored private var inputs: [String: MacConversationInput] = [:]
 
   init(app: MacRuntime, id: UUID, selection: MacSelection? = nil) {
     self.app = app
     self.id = id
     let server = app.store!.client.configuration.url
+    #if DEBUG
+    let root = MacVoiceChecks.enabled ? MacFixture.value("-OpenCodeMacDraftRoot").map { URL(fileURLWithPath: $0) } : nil
+    #else
+    let root: URL? = nil
+    #endif
+    drafts = ConversationDrafts(server: server.absoluteString + "#window=" + id.uuidString, root: root)
     #if DEBUG
     // The scroll benchmark seeds a precise initial anchor in the fixture's store.
     reading = ScrollFixtures.mode == nil
@@ -85,12 +94,25 @@ import SwiftUI
   }
 
   func close() {
+    inputs.values.forEach { $0.readAloud.stop() }
+    let drafts = drafts
+    Task { await drafts.flush() }
     memories.values.forEach { $0.controller = nil }
     memories.removeAll()
     recent.removeAll()
   }
 
   var selectedRow: SessionRow? { store?.rows.first { $0.id == selection.sessionID } }
+
+  func input(_ conversation: ConversationStore) -> MacConversationInput {
+    if let input = inputs[conversation.id] { return input }
+    let input = MacConversationInput(conversation: conversation, sessions: app.store!, draft: drafts.draft(conversation.id))
+    #if DEBUG
+    MacVoiceChecks.prepare(input.draft)
+    #endif
+    inputs[conversation.id] = input
+    return input
+  }
 
   func showFiles(at path: String? = nil, file: String? = nil) {
     contextVisible = true

@@ -146,6 +146,7 @@ final class ComposerInputView: NSScrollView {
 final class ComposerTextNSView: NSTextView {
   weak var input: ComposerInputView?
   var submit: (() -> Void)?
+  var dictate: (() -> Void)?
   var canSubmit = false
   var querying = false
   var firstSuggestion: (() -> (() -> Void)?)?
@@ -165,6 +166,10 @@ final class ComposerTextNSView: NSTextView {
   }
 
   override func keyDown(with event: NSEvent) {
+    if event.keyCode == 49, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.control, .option] {
+      if !event.isARepeat { dictate?() }
+      return
+    }
     let key = event.charactersIgnoringModifiers
     let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
     if key == "\r" || key == "\u{3}" {

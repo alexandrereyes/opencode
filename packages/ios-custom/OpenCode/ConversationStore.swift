@@ -316,6 +316,9 @@ import OpenCodeKit
       part, permissions: family?.permissions ?? [], forms: family?.forms ?? [])
   }
   func send(_ draft: ConversationDraft, alternate: Bool = false) async {
+    #if os(macOS)
+    let quotes = draft.quoteSync ?? self.quotes
+    #endif
     if let newSessionSubmit { await newSessionSubmit(draft); return }
     guard await reversion.wait(), ready, notice == nil else { return }
     if let question = SideQuestionRequest.slashQuestion(draft.document) {

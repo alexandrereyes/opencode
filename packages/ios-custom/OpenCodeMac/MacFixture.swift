@@ -10,7 +10,8 @@ import OpenCodeKit
   // The fragment is a persistence namespace, never a network destination. Parallel test app copies must not
   // share their synthetic root's drafts/reading state just because both use the closed in-memory server.
   static let configuration = ServerConfiguration(
-    url: URL(string: "http://127.0.0.1:9/#" + (Bundle.main.bundleIdentifier ?? "mac-fixture"))!)
+    url: URL(string: (MacVoiceChecks.enabled ? "http://127.0.0.1:4203/#" : "http://127.0.0.1:9/#")
+      + (Bundle.main.bundleIdentifier ?? "mac-fixture"))!)
   static let current: MacFixture? = {
     let arguments = ProcessInfo.processInfo.arguments
     guard arguments.contains("-OpenCodeMacFixture") else { return nil }

@@ -158,7 +158,7 @@ extension ComposerTokenKind {
   @ObservationIgnored private(set) var serverQuotes = false
   @ObservationIgnored weak var quoteSync: QuoteSync?
 
-  init(server: String, id: String) { persistence = DraftPersistence(server: server, sessionID: id) }
+  init(server: String, id: String, root: URL? = nil) { persistence = DraftPersistence(server: server, sessionID: id, root: root) }
   private init(comment quote: ChatQuote, recordingFactory: ((URL) -> VoiceRecordingComposer)?) {
     // Its new attachment files wait in a temporary directory of its own until the comment is committed.
     persistence = DraftPersistence(
@@ -515,7 +515,8 @@ extension ComposerTokenKind {
 @MainActor final class ConversationDrafts {
   private var values: [String: ConversationDraft] = [:]
   private let server: String
-  init(server: String) { self.server = server }
+  private let root: URL?
+  init(server: String, root: URL? = nil) { self.server = server; self.root = root }
   func flush() async {
     for draft in values.values {
       draft.recording.suspend()
@@ -525,7 +526,7 @@ extension ComposerTokenKind {
   }
   func draft(_ id: String) -> ConversationDraft {
     if let draft = values[id] { return draft }
-    let draft = ConversationDraft(server: server, id: id)
+    let draft = ConversationDraft(server: server, id: id, root: root)
     values[id] = draft
     return draft
   }
