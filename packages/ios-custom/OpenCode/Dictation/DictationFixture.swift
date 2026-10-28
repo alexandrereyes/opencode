@@ -28,6 +28,7 @@ import SwiftUI
   }
 }
 
+#if os(iOS)
 struct DictationFixtureRoot: View {
   @Environment(\.colorScheme) private var scheme
   @Environment(\.scenePhase) private var scenePhase
@@ -99,6 +100,8 @@ struct DictationFixtureRoot: View {
     }
   }
 }
+
+#endif
 
 final class DictationFixtureSource: TranscriptionModelSource, @unchecked Sendable {
   let files: TranscriptionModelFiles

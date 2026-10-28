@@ -219,7 +219,7 @@ private struct MacCommands: Commands {
           .disabled(runtime.app.audio.voice.busy)
           // ⌘1…⌘9: the first sessions in the order Sessões shows them, with its filter and collapsed sections.
           let rows = SessionNavigation.numbered(
-            SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now), collapse: collapse)
+            SessionSections.group(store.filtered, now: .now), collapse: collapse)
           if !rows.isEmpty {
             Divider()
             Section("Sessões da lista") {

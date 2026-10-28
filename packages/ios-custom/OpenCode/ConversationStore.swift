@@ -1,7 +1,11 @@
 import Foundation
 import Observation
 import OpenCodeKit
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+#endif
 import UniformTypeIdentifiers
 
 @MainActor @Observable final class ConversationStore {
@@ -561,6 +565,7 @@ import UniformTypeIdentifiers
         }
       }, type)
     }
+    #if os(iOS)
     // A bare UIImage (for example from an attributed insertion) has no file type of its own.
     let image = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UIImage, Error>) in
       _ = provider.loadObject(ofClass: UIImage.self) { object, error in
@@ -569,6 +574,16 @@ import UniformTypeIdentifiers
       }
     }
     guard let data = image.pngData() else { throw AttachmentError.image }
+    #else
+    let image = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<NSImage, Error>) in
+      _ = provider.loadObject(ofClass: NSImage.self) { object, error in
+        if let image = object as? NSImage { return continuation.resume(returning: image) }
+        continuation.resume(throwing: error ?? AttachmentError.image)
+      }
+    }
+    guard let tiff = image.tiffRepresentation, let data = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+    else { throw AttachmentError.image }
+    #endif
     return (data, .png)
   }
   func act(

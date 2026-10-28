@@ -235,7 +235,7 @@ struct MacSessionColumn: View {
 
   /// Rows of the expanded sections, in display order; "Selecionar todas" and the selection use only these.
   private var visibleIDs: [String] {
-    SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now)
+    SessionSections.group(store.filtered, now: .now)
       .filter { !collapse.collapsed($0.kind) }.flatMap(\.rows).map(\.id)
   }
 

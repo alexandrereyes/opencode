@@ -128,7 +128,7 @@ struct MacWindow: View {
       }
       restored = true
       guard runtime.selection.sessionID == nil else { return }
-      runtime.selection.sessionID = SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now)
+      runtime.selection.sessionID = SessionSections.group(store.filtered, now: .now)
         .first?.rows.first?.id
     }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

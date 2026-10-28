@@ -171,7 +171,7 @@ import SwiftUI
 
   func selectNeighbor(_ offset: Int) {
     guard let store else { return }
-    let ids = SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now).flatMap(\.rows).map(\.id)
+    let ids = SessionSections.group(store.filtered, now: .now).flatMap(\.rows).map(\.id)
     if let next = SessionNavigation.neighbor(ids, current: selection.sessionID, offset: offset) {
       selection = MacSelection(sessionID: next)
     }
