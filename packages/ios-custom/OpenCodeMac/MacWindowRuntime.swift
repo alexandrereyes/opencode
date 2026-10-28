@@ -46,7 +46,7 @@ import SwiftUI
   var deleteRequest: Session?
   /// The title's old switcher popover is gone (⌘K replaces it); the search presentation still resets this flag.
   var switcherVisible = false
-  let search = MacSearch()
+  let search: MacSearch
   var archiveRequest: SessionRow?
   /// The widths the columns got in the last layout, for checks (not observed).
   @ObservationIgnored var measuredContextWidth: CGFloat = 0
@@ -58,6 +58,7 @@ import SwiftUI
   init(app: MacRuntime, id: UUID, selection: MacSelection? = nil) {
     self.app = app
     self.id = id
+    search = MacSearch { [weak app] in app?.store }
     let server = app.store!.client.configuration.url
     #if DEBUG
     let root = MacVoiceChecks.enabled ? MacFixture.value("-OpenCodeMacDraftRoot").map { URL(fileURLWithPath: $0) } : nil

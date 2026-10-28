@@ -2857,11 +2857,15 @@ separate track.
 ### Window search — 28 October
 
 The approved **centered search** presentation is `OpenCodeMac/MacSearchPresentation.swift`: an `NSSearchField`
-in the title bar, with a same-width nonactivating suggestions panel 4 pt below it. Typing keeps focus in
-the field. ↑/↓ traverse results across groups (including **Mostrar mais**), Return chooses, Esc closes and
-returns focus to the composer; clicking a result chooses it, clicking outside dismisses, and losing the key
-window closes its list. Each result's
-VoiceOver label includes its group. Matched title spans are bold, preserving the original accents.
+in the title bar, with a same-width nonactivating suggestions panel 4 pt below it. Clicking the field or ⌘K
+(from anywhere in the window, the composer included) focuses it and opens the list; ⌘K selects the previous text.
+Typing stays in the field and refilters on each key. ↑/↓ (and ⌃N/⌃P) traverse results across groups (including
+**Mostrar mais**), scrolling to keep the selection visible; Return or a click chooses, closes and focuses the
+composer. Esc clears a non-empty field; on an empty one it closes and returns focus to the composer. Clicking
+outside dismisses and lets go of the field; losing the key window closes its list. While the field has focus
+the composer receives none of these keys. Each window has its own field, list and state; ⌘K acts on the front
+one. Each result's VoiceOver label includes its group. Matched title spans are bold, preserving the original
+accents.
 
 - **Placement:** `MacSearchPlacement.swift` measures the actual detail area (chat + Contexto) in the window's
   frame view, and centers at `(detail.minX + detail.maxX) / 2`. The field is at most 520 pt; its half-width is
@@ -2893,7 +2897,8 @@ VoiceOver label includes its group. Matched title spans are bold, preserving the
   debounce or RPC is needed. If that loading contract later becomes partial, reuse `composerSessions(_:)` with
   debounce rather than adding an RPC.
 - **Separation:** pure ranking, groups, limits, highlights and chip semantics are in OpenCodeKit's
-  `WindowSearch.swift`; `MacSearch.swift` owns query, keyboard selection and actions, one instance per
+  `WindowSearch.swift` (`WindowSearch.Index` folds titles and metadata once); `MacSearch.swift` owns query,
+  keyboard selection, actions and the per-opening `Catalog`, one instance per
   `MacWindowRuntime`. Presentation is isolated in `MacSearchPresentation.swift` / `MacSearchPlacement.swift`,
   mounted behind `MacWindow.swift`'s detail with title/action geometry markers in `MacToolbar.swift` and
   `MacChatColumn.swift`.
@@ -2913,6 +2918,57 @@ The checks use a closed in-memory fixture and the explicit launch URL `http://12
 The centered-search verification ran all 590 Kit tests, a warning-free Mac build and an iOS/Watch Simulator build
 with the same 13 source warnings (the warning sites are byte-identical to `ba2a22276c`). The captures were drawn
 through AppKit with the screen locked; each open-search capture also asserts the real field/panel geometry.
+
+#### Search fix — 28 October
+
+In the installed app the field took no click, ⌘K opened the list without keyboard focus, no key reached the
+field (↓, ↑, Return and Esc did nothing) and the list was slow. Reproduced with real events against the fixture
+and against a 4211 sandbox with 600 root sessions; the causes were:
+
+- **No focus at all (click, ⌘K, typing and every key).** `MacSearchPlacement` replaced the field's cell with
+  `field.cell = MacSearchCell(textCell: "")`. A cell created that way is not editable nor selectable, so the
+  `NSSearchField` refused first responder (Accessibility even reported it as `AXStaticText`): the click was
+  ignored, ⌘K's `makeFirstResponder` failed silently while `visible = true` still opened the list, and with no
+  field editor `control(_:textView:doCommandBy:)` was never called. `MacSearchField` now supplies the cell
+  through `cellClass`, so NSTextField configures it as editable.
+- **A click would not have opened the list.** It relied on `controlTextDidBeginEditing`, which AppKit sends on
+  the first edit, not on focus; `MacSearchField.becomeFirstResponder` opens it now.
+- **Slow list.** `updateNSView` computed the groups on every SwiftUI update, visible or not, from
+  `SessionStore.rows` (derived again on each access), so every store change re-ran it; each update then built a
+  new `NSHostingView` for the panel; each rendered row derived `store.rows` three or four more times (count,
+  running, avatar, session), about 50 derivations per render; selection and arrows recomputed the groups two or
+  three times; and the ranking ran locale-aware case/diacritic-insensitive `range(of:)` on every candidate.
+  Now `MacSearch.Catalog` derives the rows once per opening (dictionaries for rows, archives, projects, labels,
+  counts and running) and is rebuilt only when the store changed (`withObservationTracking`, lazily while the
+  list is hidden); `WindowSearch.Index` keeps titles and metadata folded, so a key only compares folded strings
+  and highlights only the visible rows; the groups are cached per query; the panel and its hosting view are
+  created once per window (and drawn once, transparent, two seconds after the window appears) and the results
+  observe the search themselves, so `updateNSView` only places the panel.
+- **Why the earlier checks passed:** `MacSearchChecks` called the delegate's `doCommandBy` with a detached
+  `NSTextView` and set the state directly; AppKit never had to make the field first responder or deliver an event.
+
+Esc now clears a non-empty field before closing, ⌃N/⌃P move like ↓/↑, and an outside click also releases the
+field. `MacWindowRuntime` passes its store to `MacSearch`; `MacToolbar.swift` and `MacWindow.swift` are unchanged.
+
+Measured with `-OpenCodeMacSearchTrace` (DEBUG: from the key event's timestamp to the end of the main-thread pass
+that first renders the results or shows the panel), 600 sessions, sandbox 4211:
+
+| | before (focus fixed only) | after |
+| --- | --- | --- |
+| ⌘K → list, first | 403–416 ms | 81–97 ms (≈48 ms is AppKit's first ⌘K menu dispatch, 14 ms the catalog) |
+| ⌘K → list, again | 320–366 ms | 24–52 ms (the search's own work ≈ 2 ms) |
+| key → filtered list | 320–860 ms (one 2.6 s) | 14–49 ms, median 16–22 ms per run (a run's first key up to 88 ms) |
+
+`script/test-mac-search-keyboard.sh [captures]` is the real-event check: it builds, runs a fixture copy under its
+own bundle identifier and `script/mac-search-keyboard.swift` posts HID `CGEvent`s (mouse clicks, ⌘K, typing,
+↓/↑, ⌃N/⌃P, Return, Esc, ⌥⌘N, ⌘W), checking focus, the field's value, the selected row's visibility and the
+panel's window through Accessibility, and the opened session and timings through the trace. It covers click and
+focus, ⌘K from the composer and typing over the selected text, cross-group arrows and scrolling, Return opening
+the selected session and focusing the composer, Esc clearing then closing, a click on a result, outside clicks,
+and ⌘K in the front one of two windows. With the old cell it fails 16 of its checks. It needs an unlocked screen
+and Accessibility for the terminal, waits until the keyboard and mouse have been idle for `OPENCODE_MAC_IDLE`
+seconds (default 5) and gives the front back to the previous app. Captures (focus after a click, typing,
+selection moved by the arrows, scrolled selection) go to `$TMPDIR/opencode/mac-busca-fix-prints/` by default.
 
 #### Ajustes
 
