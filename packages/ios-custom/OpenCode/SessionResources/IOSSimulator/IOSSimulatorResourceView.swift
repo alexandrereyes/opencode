@@ -1,6 +1,11 @@
 import OpenCodeKit
 import SwiftUI
+#if os(iOS)
 import UIKit
+#else
+import AppKit
+import UniformTypeIdentifiers
+#endif
 
 /// iOS Simulator viewer (layout 2B): the shell's live screen, turned upright when the simulator is in landscape
 /// (`meta.rotation` from serve-sim), and the simulator's tools: Início, Girar, Teclado and Captura.
@@ -8,7 +13,9 @@ import UIKit
 struct IOSSimulatorResourceView: View {
   let model: ResourceViewerModel
   @State private var capturing = false
+  #if os(iOS)
   @State private var anchor = CaptureAnchor()
+  #endif
 
   var body: some View {
     ResourceViewerShell(model: model) {
@@ -16,6 +23,7 @@ struct IOSSimulatorResourceView: View {
         .disabled(!model.inControl)
       ResourceToolButton("Girar", systemImage: "rotate.right") { model.send([.button("rotate-right")]) }
         .disabled(!model.inControl)
+      #if os(iOS)
       ResourceToolButton("Teclado", systemImage: "keyboard", active: model.keyboardVisible) {
         model.keyboardVisible.toggle()
       }
@@ -23,9 +31,28 @@ struct IOSSimulatorResourceView: View {
       ResourceToolButton("Captura de tela", systemImage: "camera") { Task { await takeCapture() } }
         .disabled(capturing)
         .background(CaptureAnchorView(anchor: anchor))
+      #else
+      ResourceToolButton("Captura de tela", systemImage: "camera") { Task { await saveCapture() } }
+        .disabled(capturing)
+      #endif
     }
   }
 
+  #if os(macOS)
+  /// The Mac saves the full-size, upright `simctl` screenshot where Alexandre chooses (the iPhone shares it).
+  private func saveCapture() async {
+    capturing = true
+    defer { capturing = false }
+    guard let snapshot = try? await model.client.resourceSnapshot(model.resource.id), let data = snapshot.image else {
+      return NSSound.beep()
+    }
+    let panel = NSSavePanel()
+    panel.nameFieldStringValue = (model.resource.meta.name ?? "Simulador").replacingOccurrences(of: "/", with: "-") + ".jpg"
+    panel.allowedContentTypes = [.jpeg]
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    if (try? data.write(to: url)) == nil { NSSound.beep() }
+  }
+  #else
   /// The simulator's full-size screen (`simctl io screenshot` through the hub, already upright), shared from a
   /// temporary file so the share sheet offers "Salvar imagem" at the original resolution. The file is removed when
   /// the sheet closes.
@@ -54,8 +81,10 @@ struct IOSSimulatorResourceView: View {
     while let presented = controller?.presentedViewController { controller = presented }
     return controller
   }
+  #endif
 }
 
+#if os(iOS)
 /// The capture button's UIKit view, to present the share sheet from it.
 @MainActor final class CaptureAnchor {
   weak var view: UIView?
@@ -71,3 +100,4 @@ private struct CaptureAnchorView: UIViewRepresentable {
   }
   func updateUIView(_ view: UIView, context: Context) { anchor.view = view }
 }
+#endif

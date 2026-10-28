@@ -108,7 +108,14 @@ final class SessionStore {
   func liveConversation(_ id: String) -> ConversationStore? { conversations.existing(id) }
   #endif
   var conversationOpen: Bool { !conversationPath.isEmpty }
+  #if os(macOS)
+  /// The Mac shows a session by selecting it, not by pushing a route; its window sets this while it is in front, so
+  /// alerts stay silent for the session on screen.
+  var shownSessionID: String?
+  var currentSessionID: String? { shownSessionID }
+  #else
   var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
+  #endif
   let toast = ToastCenter()
   let alerts: SessionAlertCenter
   let catalog: ModelCatalogCache

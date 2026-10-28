@@ -1,9 +1,25 @@
 import OpenCodeKit
 import SwiftUI
 
-struct ModelVisibilityView: View {
+/// What "Gerenciar modelos" reads and changes: the conversation's catalog on the iPhone, the server's catalog in
+/// the Mac's Ajustes.
+@MainActor protocol ModelVisibilitySource: AnyObject {
+  var models: [ModelInfo] { get }
+  var providers: [ProviderInfo] { get }
+  var preferences: Preferences? { get }
+  var acting: Set<String> { get }
+  var toast: ToastCenter { get }
+  func providerName(_ id: String) -> String
+  func updateModels(_ intents: [PreferenceIntent], success: String) async
+}
+
+#if os(iOS)
+extension ConversationStore: ModelVisibilitySource {}
+#endif
+
+struct ModelVisibilityView<Source: ModelVisibilitySource>: View {
   @Environment(\.appTheme) private var theme
-  let store: ConversationStore
+  let store: Source
   @State private var search = ""
   @FocusState private var searchFocused: Bool
   private var enabled: [ModelInfo] { store.models.filter { $0.enabled != false } }
@@ -19,6 +35,24 @@ struct ModelVisibilityView: View {
       order: store.preferences?.data.models?.providerOrder ?? [])
   }
   var body: some View {
+    #if os(iOS)
+    list
+      .searchable(text: $search, prompt: "Buscar em todos os modelos")
+      .searchFocused($searchFocused)
+      .onSubmit(of: .search) { searchFocused = false }
+      .scrollDismissesKeyboard(.interactively)
+      .navigationTitle("Gerenciar modelos").navigationBarTitleDisplayMode(.inline)
+      .toastOverlay(store.toast)
+    #else
+    VStack(spacing: 0) {
+      TextField("Buscar em todos os modelos", text: $search).textFieldStyle(.roundedBorder).padding(12)
+      list
+    }
+    .toastOverlay(store.toast)
+    #endif
+  }
+
+  private var list: some View {
     List {
       Section {
         Text(
@@ -87,12 +121,6 @@ struct ModelVisibilityView: View {
     .disabled(store.acting.contains("models"))
     .scrollContentBackground(.hidden).background(theme.color(.background))
     .foregroundStyle(theme.color(.text)).tint(theme.color(.primary))
-    .searchable(text: $search, prompt: "Buscar em todos os modelos")
-    .searchFocused($searchFocused)
-    .onSubmit(of: .search) { searchFocused = false }
-    .scrollDismissesKeyboard(.interactively)
-    .navigationTitle("Gerenciar modelos").navigationBarTitleDisplayMode(.inline)
-    .toastOverlay(store.toast)
   }
   private func visible(_ model: ModelInfo) -> Bool {
     !ConversationProjection.visibleModels([model], preferences: store.preferences?.data.models)

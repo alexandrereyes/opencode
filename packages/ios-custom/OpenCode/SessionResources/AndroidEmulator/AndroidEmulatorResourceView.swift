@@ -41,12 +41,14 @@ private struct AndroidNavigationBar: View {
         button("Voltar", "arrowtriangle.backward", identifier: "resource-android-back") { model.send([.button("back")]) }
         button("Início", "circle", identifier: "resource-android-home") { model.send([.button("home")]) }
         button("Recentes", "square", identifier: "resource-android-recents") { model.send([.button("recents")]) }
+        #if os(iOS)
         Divider().frame(height: 22).overlay(theme.color(.border))
         button(
           model.keyboardVisible ? "Ocultar teclado" : "Teclado",
           model.keyboardVisible ? "keyboard.chevron.compact.down" : "keyboard",
           identifier: "resource-android-keyboard", active: model.keyboardVisible
         ) { model.keyboardVisible.toggle() }
+        #endif
       }
       .padding(.horizontal, 8).frame(height: 48)
       .resourceGlass(.capsule)

@@ -14,8 +14,16 @@ import SwiftUI
   static let name = MacFixture.value("-OpenCodeMacCaptureName") ?? "janela"
   static let quits = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacCaptureQuit")
 
-  /// The window at the approved mock's proportions, then the column.
-  static func window(context: () -> ContextColumnStore?, runtime: MacRuntime, theme: AppTheme) async {
+  /// The window at the approved mock's proportions, then the column. Launch options open what the capture shows:
+  /// `-OpenCodeMacSelect id,id` (selection mode), `-OpenCodeMacNewSession sessoes|origem|mestra`,
+  /// `-OpenCodeMacSwitcher`, `-OpenCodeMacDetails` (Detalhes in Contexto), and in their own pictures
+  /// `-OpenCodeMacOpenResource <id>` (`<name>-recurso.png`), `-OpenCodeMacShellOutput <shell>`
+  /// (`<name>-saida.png`) and `-OpenCodeMacSettings <tab>` (`<name>-ajustes.png`). Sheets and popovers over the
+  /// window are drawn into its picture.
+  static func window(
+    context: () -> ContextColumnStore?, runtime: MacRuntime, theme: AppTheme, openWindow: OpenWindowAction,
+    openSettings: OpenSettingsAction
+  ) async {
     guard let folder else { return }
     guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain && $0.title != "LLM proxy" })
     else { return }
@@ -31,16 +39,92 @@ import SwiftUI
     // are a 1269×794-pt window drawn at 1.25×: `-OpenCodeMacCaptureSize 1269x794` matches them.
     let size = MacFixture.value("-OpenCodeMacCaptureSize")?.split(separator: "x").compactMap { Double($0) }
     window.setFrame(NSRect(x: -4000, y: 40, width: size?.first ?? 1600, height: size?.last ?? 1000), display: true)
-    try? await Task.sleep(for: .seconds(MacFixture.current == nil ? 8 : 5))
+    try? await Task.sleep(for: .seconds(MacFixture.current == nil ? 8 : 4))
+    let extra = await open(runtime: runtime, context: context, openWindow: openWindow, openSettings: openSettings)
+    try? await Task.sleep(for: .seconds(2))
     let path = folder + "/" + name + ".png"
-    if screenLocked || !windowServerImage(window, to: path), let view = window.contentView?.superview ?? window.contentView {
-      if screenLocked { unglaze(view, background: theme.nsColor(.background)) }
-      cached(view, to: path)
+    if screenLocked, let view = window.contentView?.superview ?? window.contentView {
+      unglaze(view, background: theme.nsColor(.background))
+    }
+    if let picture = composed(window, theme: theme),
+      let png = NSBitmapImageRep(cgImage: picture).representation(using: .png, properties: [:]) {
+      try? png.write(to: URL(fileURLWithPath: path))
+    }
+    for (suffix, title) in extra {
+      guard let other = NSApp.windows.first(where: { $0.isVisible && $0 !== window && title($0) }),
+        let picture = (screenLocked ? nil : image(of: other)) ?? drawn(other),
+        let png = NSBitmapImageRep(cgImage: picture).representation(using: .png, properties: [:]) else { continue }
+      try? png.write(to: URL(fileURLWithPath: folder + "/" + name + "-" + suffix + ".png"))
     }
     if let context = context(), runtime.selection.files == nil {
       column(context, runtime: runtime, theme: theme, to: folder + "/" + name + "-coluna.png")
     }
-    if quits { NSApp.terminate(nil) }
+    // A sheet or popover still open would hold `terminate` back.
+    if quits { exit(0) }
+  }
+
+  /// Opens what the launch options ask for and returns the separate windows to capture (suffix, match).
+  private static func open(
+    runtime: MacRuntime, context: () -> ContextColumnStore?, openWindow: OpenWindowAction,
+    openSettings: OpenSettingsAction
+  ) async -> [(String, (NSWindow) -> Bool)] {
+    var extra: [(String, (NSWindow) -> Bool)] = []
+    if let ids = MacFixture.value("-OpenCodeMacSelect")?.split(separator: ",").map(String.init), let first = ids.first {
+      runtime.sessionSelection.start(first)
+      ids.dropFirst().forEach { runtime.sessionSelection.toggle($0) }
+    }
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacDetails") { context()?.detailsOpen = true }
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSwitcher") { runtime.switcherVisible = true }
+    switch MacFixture.value("-OpenCodeMacNewSession") {
+    case "sessoes": runtime.newSession()
+    case "origem": runtime.newSession(from: MacFixture.rootID)
+    case "mestra": runtime.newSessionRequest = MacNewSessionRequest(origin: nil, startInChats: false, master: true)
+    default: break
+    }
+    if let id = MacFixture.value("-OpenCodeMacOpenResource") {
+      openWindow(id: "resource", value: id)
+      extra.append(("recurso", { $0.identifier?.rawValue.hasPrefix("resource") == true }))
+    }
+    if let shell = MacFixture.value("-OpenCodeMacShellOutput"), let directory = context()?.directory {
+      openWindow(id: MacShellOutputWindow.id,
+        value: MacShellOutputWindow.Target(shellID: shell, directory: directory, command: "bun run dev --port 4177"))
+      extra.append(("saida", { $0.identifier?.rawValue.hasPrefix(MacShellOutputWindow.id) == true }))
+    }
+    if let tab = MacFixture.value("-OpenCodeMacSettings") {
+      UserDefaults.standard.set(tab, forKey: "OpenCodeMacSettingsTab")
+      openSettings()
+      extra.append(("ajustes", { $0.identifier?.rawValue.contains("Settings") == true || $0.title == tabTitle(tab) }))
+    }
+    try? await Task.sleep(for: .seconds(2))
+    // Off-screen like the main window, so a capture run never sits under Alexandre's pointer.
+    for window in NSApp.windows where window.isVisible && window.attachedSheet == nil && window.sheetParent == nil
+      && extra.contains(where: { $0.1(window) }) {
+      window.setFrameOrigin(NSPoint(x: -3000, y: 60))
+    }
+    return extra
+  }
+
+  private static func tabTitle(_ tab: String) -> String {
+    ["servidores": "Servidores", "aparencia": "Aparência", "leitura": "Leitura", "modelos": "Modelos",
+     "assinaturas": "Assinaturas", "sobre": "Sobre"][tab] ?? tab
+  }
+
+  /// The window with its sheet and any popover over it, each drawn where it sits.
+  private static func composed(_ window: NSWindow, theme: AppTheme) -> CGImage? {
+    func draw(_ window: NSWindow) -> CGImage? { (screenLocked ? nil : image(of: window)) ?? drawn(window) }
+    guard var base = draw(window) else { return nil }
+    let overlays = NSApp.windows.filter { other in
+      other !== window && other.isVisible
+        && (other.sheetParent === window || String(describing: type(of: other)).contains("Popover"))
+    }
+    for other in overlays {
+      guard let picture = draw(other) else { continue }
+      // AppKit keeps a popover on a screen while the window sits off-screen: draw it under the title instead.
+      let popover = other.sheetParent == nil
+      base = (popover ? place(base, window, picture, at: CGPoint(x: 420, y: 46), width: other.frame.width)
+        : compose(base, window, picture, other)) ?? base
+    }
+    return base
   }
 
   /// The LLM proxy window (`-OpenCodeMacProxy codex|anthropic|resets`), off-screen at
@@ -153,6 +237,20 @@ import SwiftUI
     guard let image = capture(.null, 1 << 3, UInt32(window.windowNumber), 1 << 0 | 1 << 3)?.takeRetainedValue(),
       image.width > 100 else { return nil }
     return image
+  }
+
+  /// `picture` at `point` (window points from the top left).
+  private static func place(_ base: CGImage, _ window: NSWindow, _ picture: CGImage, at point: CGPoint, width: Double)
+    -> CGImage? {
+    let scale = Double(base.width) / window.frame.width
+    let height = Double(picture.height) * width * scale / Double(picture.width)
+    guard let context = CGContext(data: nil, width: base.width, height: base.height, bitsPerComponent: 8,
+      bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return nil }
+    context.draw(base, in: CGRect(x: 0, y: 0, width: base.width, height: base.height))
+    context.draw(picture, in: CGRect(x: point.x * scale, y: Double(base.height) - point.y * scale - height,
+      width: width * scale, height: height))
+    return context.makeImage()
   }
 
   private static func compose(_ base: CGImage, _ window: NSWindow, _ sheet: CGImage, _ sheetWindow: NSWindow) -> CGImage? {

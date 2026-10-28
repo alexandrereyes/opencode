@@ -7,6 +7,7 @@ struct OpenCodeMacApp: App {
 
   init() {
     FilePreviewStorage.clean()
+    MacNotifications.shared.start()
     #if DEBUG
     MacStress.openWindowIfNeeded()
     #endif
@@ -26,6 +27,12 @@ struct OpenCodeMacApp: App {
       if let id { MacThemed(runtime: runtime) { MacResourceWindow(resourceID: id, runtime: runtime) } }
     }
     .defaultSize(width: 520, height: 860)
+
+    // A background task's output, live, in its own window.
+    WindowGroup("Saída", id: MacShellOutputWindow.id, for: MacShellOutputWindow.Target.self) { $target in
+      if let target { MacThemed(runtime: runtime) { MacShellOutputWindow(target: target, runtime: runtime) } }
+    }
+    .defaultSize(width: 760, height: 520)
 
     // One LLM proxy window; it keeps its frame between openings and is listed in the Window menu.
     Window("LLM proxy", id: MacProxyWindow.id) {
@@ -82,18 +89,69 @@ private struct MacRoot: View {
   }
 }
 
+/// The menu bar: Arquivo (Nova sessão, Nova janela, Atualizar), Visualizar (Contexto, Arquivos, the state filters),
+/// Sessão (the selected session's actions and the selection mode), Ir (previous/next, Sessão mestra, Trocar) and
+/// the LLM proxy window in Janela.
 private struct MacCommands: Commands {
+  @Environment(\.openWindow) private var openWindow
   let runtime: MacRuntime
+
   var body: some Commands {
+    CommandGroup(replacing: .newItem) {
+      Button("Nova sessão") { runtime.newSession() }
+        .keyboardShortcut("n", modifiers: .command)
+        .disabled(runtime.store?.preferences == nil)
+      Button("Nova janela") { openWindow(id: "main") }
+        .keyboardShortcut("n", modifiers: [.command, .option])
+      Divider()
+      Button("Atualizar sessões") { Task { await runtime.store?.reload() } }
+        .keyboardShortcut("r", modifiers: .command)
+    }
     CommandGroup(after: .sidebar) {
       Button(runtime.contextVisible ? "Ocultar contexto" : "Mostrar contexto") { runtime.contextVisible.toggle() }
         .keyboardShortcut("i", modifiers: [.command, .option])
       Button("Arquivos") { runtime.showFiles() }
         .keyboardShortcut("f", modifiers: [.command, .shift])
+      if let store = runtime.store {
+        Picker("Filtrar sessões", selection: Binding(get: { store.filter }, set: { store.filter = $0 })) {
+          ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
+        }
+      }
+      Divider()
     }
-    CommandGroup(after: .newItem) {
-      Button("Atualizar sessões") { Task { await runtime.store?.reload() } }
-        .keyboardShortcut("r", modifiers: .command)
+    CommandMenu("Sessão") {
+      if let store = runtime.store {
+        MacSessionMenuItems(store: store, runtime: runtime, shortcuts: true)
+        Divider()
+        Button("Selecionar todas as sessões") {
+          if !runtime.sessionSelection.active, let id = runtime.selection.sessionID { runtime.sessionSelection.start(id) }
+          runtime.bulkRequest = .selectAll
+        }
+        .keyboardShortcut("a", modifiers: [.command, .option])
+        Button("Arquivar selecionadas") { runtime.bulkRequest = .archive }
+          .disabled(!runtime.sessionSelection.active)
+        Button("Excluir selecionadas…") { runtime.bulkRequest = .delete }
+          .disabled(!runtime.sessionSelection.active)
+        Button("Encerrar seleção") { runtime.sessionSelection.clear() }
+          .disabled(!runtime.sessionSelection.active)
+      }
+    }
+    CommandMenu("Ir") {
+      Button("Trocar de sessão…") { runtime.switcherVisible = true }
+        .keyboardShortcut("k", modifiers: .command)
+        .disabled(runtime.store == nil)
+      Divider()
+      Button("Sessão anterior") { runtime.selectNeighbor(-1) }
+        .keyboardShortcut("[", modifiers: .command)
+      Button("Próxima sessão") { runtime.selectNeighbor(1) }
+        .keyboardShortcut("]", modifiers: .command)
+      Button("Voltar à sessão principal") { runtime.selection.childID = nil }
+        .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+        .disabled(runtime.selection.childID == nil)
+      Divider()
+      Button("Sessão mestra") { runtime.openMaster() }
+        .keyboardShortcut("m", modifiers: [.command, .shift])
+        .disabled(runtime.store?.masterAvailability != .available)
     }
   }
 }

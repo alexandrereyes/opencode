@@ -13,9 +13,40 @@ struct SessionSwitcherSheet: View {
   @State private var search = ""
 
   var body: some View {
-    let rows = SessionSwitcher.rows(sessions.rows, query: search) { sessions.directoryLabel($0) }
+    #if os(iOS)
     NavigationStack {
-      ScrollViewReader { proxy in
+      list
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Buscar sessão")
+        .navigationTitle("Sessões").navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .topBarTrailing) {
+            Button("Fechar", systemImage: "xmark") { dismiss() }.accessibilityIdentifier("switcher-close")
+          }
+        }
+    }
+    .sessionRowTimeline()
+    .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    .tint(theme.color(.primary))
+    #else
+    // A popover under the title on the Mac: the search field on top, Return opens the first match.
+    VStack(spacing: 0) {
+      TextField("Buscar sessão", text: $search)
+        .textFieldStyle(.roundedBorder).padding(10)
+        .onSubmit {
+          if let first = SessionSwitcher.rows(sessions.rows, query: search, label: { sessions.directoryLabel($0) }).first {
+            choose(first.id)
+          }
+        }
+      list
+    }
+    .sessionRowTimeline()
+    .tint(theme.color(.primary))
+    #endif
+  }
+
+  private var list: some View {
+    let rows = SessionSwitcher.rows(sessions.rows, query: search) { sessions.directoryLabel($0) }
+    return ScrollViewReader { proxy in
         List {
           ForEach(rows) { row in
             Button {
@@ -62,19 +93,10 @@ struct SessionSwitcherSheet: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden).background(theme.color(.background))
+        #if os(iOS)
         .scrollEdgeEffectStyle(.hard, for: .top)
+        #endif
         .onAppear { proxy.scrollTo(current, anchor: .center) }
       }
-      .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Buscar sessão")
-      .navigationTitle("Sessões").navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
-          Button("Fechar", systemImage: "xmark") { dismiss() }.accessibilityIdentifier("switcher-close")
-        }
-      }
-    }
-    .sessionRowTimeline()
-    .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-    .tint(theme.color(.primary))
   }
 }

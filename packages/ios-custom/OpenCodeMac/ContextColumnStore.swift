@@ -24,6 +24,12 @@ import SwiftUI
   private(set) var loaded = false
   private(set) var error: String?
   private(set) var acting: Set<String> = []
+  /// Detalhes da sessão, read when that part of the column opens: loaded skills, plugins and the MCP servers.
+  private(set) var services: SessionServices?
+  private(set) var mcps: [MCPServer]?
+  var detailsOpen = false {
+    didSet { if detailsOpen && !oldValue { Task { await loadDetails() } } }
+  }
   @ObservationIgnored private var scheduled: Task<Void, Never>?
   @ObservationIgnored private var resourcesTask: Task<Void, Never>?
 
@@ -62,6 +68,8 @@ import SwiftUI
   var summary: ContextColumn.ChangeSummary { ContextColumn.summary(changes) }
   var statuses: [String: ContextColumn.FileStatus] { ContextColumn.statuses(changes, root: root) }
   func agent(_ id: String?) -> AgentInfo? { agents.first { $0.id == id } }
+  /// The question a subagent is waiting on, answered in its own conversation.
+  func question(_ sessionID: String?) -> PendingForm? { family?.forms.first { $0.sessionID == sessionID } }
   func title(_ sessionID: String) -> String? {
     work.first { $0.sessionID == sessionID }?.title ?? members.first { $0.id == sessionID }?.displayTitle
   }
@@ -184,6 +192,25 @@ import SwiftUI
       if let shell = work.shellID, let directory = self.directory {
         try await self.client.stopShell(shell, directory: directory)
       }
+    }
+  }
+
+  /// Skills, plugins and MCPs, like the iPhone's Detalhes da sessão; reread each time the part opens.
+  func loadDetails() async {
+    guard let directory else { return }
+    async let services = client.sessionServices(sessionID: id, directory: directory)
+    async let servers = try? client.mcpServers(directory: directory)
+    self.services = await services
+    mcps = await servers ?? []
+  }
+
+  /// The same switch as the composer's MCP panel: it changes the MCP for every session of this directory.
+  func toggle(_ server: MCPServer) async {
+    guard let directory else { return }
+    let enabled = server.status.status != .connected
+    await act("mcp:" + server.name) {
+      try await self.client.toggleMCP(server.name, enabled: enabled, directory: directory)
+      self.mcps = try await self.client.mcpServers(directory: directory)
     }
   }
 

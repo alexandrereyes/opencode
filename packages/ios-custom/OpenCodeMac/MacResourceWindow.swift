@@ -1,66 +1,47 @@
 import OpenCodeKit
 import SwiftUI
 
-/// A resource in its own window. This first version shows the live picture enlarged (snapshots about once a
-/// second); the iPhone's interactive viewer (stream, taking control, touches and keyboard) is UIKit and is
-/// ported in a later step.
+/// A resource in its own window: the iPhone's interactive viewer (`ResourceViewerScreen`, one view per kind) with
+/// the live stream, the status pill, Assumir controle / Devolver and the kind's tools. In control a click is a
+/// touch, a drag moves it, the trackpad scrolls, and the Mac's keyboard types into the resource (⌘V pastes).
+/// Closing the window gives control back, like closing the iPhone's viewer.
 struct MacResourceWindow: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.dismissWindow) private var dismissWindow
   let resourceID: String
   let runtime: MacRuntime
   @State private var resource: SessionResource?
-  @State private var image: ResourceImage?
-  @State private var taken: Double?
   @State private var failure: String?
 
   var body: some View {
-    VStack(spacing: 0) {
-      HStack(spacing: 10) {
-        Image(systemName: resource.map { resourceSymbol($0.kind) } ?? "display")
-        VStack(alignment: .leading, spacing: 2) {
-          Text(resource.map(ContextColumn.title) ?? "Recurso").appFont(.heading, weight: .semibold)
-            .foregroundStyle(theme.color(.textStrong))
-          Text(resource.map { $0.state.label + (taken.map { " · quadro " + Date(timeIntervalSince1970: $0 / 1000)
-            .formatted(date: .omitted, time: .standard) } ?? "") } ?? "Carregando…")
-            .appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+    Group {
+      if let resource, let client = runtime.store?.client {
+        ResourceViewerScreen(resource: resource, client: client) {
+          dismissWindow(id: "resource", value: resourceID)
         }
-        Spacer()
-      }
-      .padding(12)
-      Divider()
-      ZStack {
-        theme.color(.background)
-        if let image {
-          Image(resource: image).resizable().aspectRatio(contentMode: .fit).padding(16)
-        } else if let failure {
-          Label(failure, systemImage: "exclamationmark.triangle").foregroundStyle(theme.color(.error))
-        } else {
-          ProgressView()
+      } else if let failure {
+        ContentUnavailableView {
+          Label("Recurso indisponível", systemImage: "exclamationmark.triangle")
+        } description: { Text(failure) } actions: {
+          Button("Tentar novamente") { Task { await load() } }
         }
+      } else {
+        ProgressView()
       }
     }
-    .frame(minWidth: 320, minHeight: 420)
+    .frame(minWidth: 360, minHeight: 520)
     .background(theme.color(.background))
     .navigationTitle(resource.map(ContextColumn.title) ?? "Recurso")
-    .task(id: resourceID) { await stream() }
+    .task(id: resourceID) { await load() }
   }
 
-  private func stream() async {
+  private func load() async {
     guard let client = runtime.store?.client else { return }
-    resource = try? await client.resource(resourceID)
-    while !Task.isCancelled {
-      do {
-        let snapshot = try await client.resourceSnapshot(resourceID, maxWidth: 1200)
-        if let data = snapshot.image, let next = ResourceImage(data: data) {
-          image = next
-          taken = snapshot.takenAt
-          failure = nil
-        }
-      } catch {
-        if image == nil { failure = "Sem imagem do recurso agora." }
-      }
-      try? await Task.sleep(for: .seconds(1))
-      if Int(Date.now.timeIntervalSince1970) % 10 == 0 { resource = (try? await client.resource(resourceID)) ?? resource }
+    do {
+      resource = try await client.resource(resourceID)
+      failure = nil
+    } catch {
+      failure = error.localizedDescription
     }
   }
 }

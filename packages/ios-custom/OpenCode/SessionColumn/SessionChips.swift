@@ -36,7 +36,7 @@ struct SessionChips: View {
     ScrollViewReader { proxy in
       ScrollView(.horizontal) {
         HStack(spacing: 8) {
-          Menu {
+          ChipMenu {
             ForEach(SessionFilter.allCases.filter { $0 != .all }) { filter in
               Button(filter.rawValue) { store.filter = filter }
             }
@@ -119,7 +119,7 @@ struct SessionChips: View {
   }
   @ViewBuilder private func chip(_ group: ChipGroup, _ manual: ChipManualOrder) -> some View {
     if group.key == SessionStore.chatsSelection {
-      Menu {
+      ChipMenu {
         moves(group.key, "Chats", manual)
       } label: {
         Chip(
@@ -132,7 +132,7 @@ struct SessionChips: View {
       .accessibilityIdentifier("filter-chats")
     } else if let selected = store.selectedProjects.first(where: { $0.project.id == group.key }) {
       let name = selected.project.displayName
-      Menu {
+      ChipMenu {
         Button("Remover dos filtros", systemImage: "minus.circle", role: .destructive) {
           action(name, .close(directory: selected.directory))
         }
@@ -147,6 +147,22 @@ struct SessionChips: View {
       .accessibilityLabel(group.unread ? name + ", com não lidas" : name)
       .accessibilityIdentifier("filter-project-" + name)
     }
+  }
+}
+
+/// A chip's menu: on the iPhone a long press opens it and a tap runs the primary action; on the Mac a click runs
+/// the primary action and a right click opens the same items, as Mac controls do.
+private struct ChipMenu<Items: View, Label: View>: View {
+  @ViewBuilder let items: () -> Items
+  @ViewBuilder let label: () -> Label
+  let primaryAction: () -> Void
+
+  var body: some View {
+    #if os(macOS)
+    Button(action: primaryAction, label: label).contextMenu(menuItems: items)
+    #else
+    Menu(content: items, label: label, primaryAction: primaryAction)
+    #endif
   }
 }
 

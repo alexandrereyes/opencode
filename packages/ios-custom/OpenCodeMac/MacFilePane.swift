@@ -7,6 +7,8 @@ import SwiftUI
 struct MacFilePane: View {
   @Environment(\.appTheme) private var theme
   let files: MacFilesStore
+  /// Markdown and HTML open rendered; `</>` shows their source.
+  @State private var source = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -32,6 +34,10 @@ struct MacFilePane: View {
     let merge = local && MacTools.fileMerge != nil
       ? ContextColumn.fileMerge(path, root: files.context.root, status: status) : nil
     return HStack(alignment: .firstTextBaseline, spacing: 8) {
+      HStack(spacing: 2) {
+        arrow("chevron.left", offset: -1, help: "Arquivo anterior (⌥⌘←)")
+        arrow("chevron.right", offset: 1, help: "Próximo arquivo (⌥⌘→)")
+      }
       HStack(spacing: 0) {
         Text(url.lastPathComponent.uppercased()).lineLimit(1).truncationMode(.middle)
         if let lines = lines(url) { Text(lines).lineLimit(1).fixedSize() }
@@ -41,6 +47,11 @@ struct MacFilePane: View {
       .help(folder(url) + url.lastPathComponent)
       Spacer(minLength: 6)
       HStack(spacing: 5) {
+        if MacFileRendering(path: path) != nil {
+          link(source ? "Visualizar" : "</>") { source.toggle() }
+            .help(source ? "Mostrar o arquivo renderizado" : "Mostrar o código-fonte")
+          dot
+        }
         if local, let xcode = MacTools.xcode {
           link("Abrir no Xcode") { NSWorkspace.shared.open([url], withApplicationAt: xcode, configuration: .init()) }
         }
@@ -88,6 +99,19 @@ struct MacFilePane: View {
           Label(error, systemImage: "exclamationmark.triangle").appFont(.caption)
             .foregroundStyle(theme.color(.textSecondary))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !source, MacFileRendering(path: file.path) == .markdown, let text = file.text {
+          // The chat's Markdown renderer, piece by piece so a long README stays light.
+          ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+              ForEach(Array(MarkdownSoftBreaks.sections(MarkdownSoftBreaks.unwrap(text)).enumerated()), id: \.offset) {
+                MacMarkdownText(text: $0.element)
+              }
+            }
+            .padding(.horizontal, 6).padding(.vertical, 12)
+          }
+          .id(file.path)
+        } else if !source, MacFileRendering(path: file.path) == .html {
+          MacQuickLook(url: file.url)
         } else if let text = file.text {
           MacCodeView(text: text, path: file.path)
         } else {
@@ -98,6 +122,20 @@ struct MacFilePane: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .onChange(of: files.selected) { source = false }
+  }
+
+  /// ‹ and ›: the previous and next file of the folder, like the iPhone viewer's sibling arrows; ⌥⌘← and ⌥⌘→ too.
+  private func arrow(_ symbol: String, offset: Int, help: String) -> some View {
+    Button { files.step(offset) } label: {
+      Image(systemName: symbol).font(.system(size: 9, weight: .semibold)).frame(width: 16, height: 16)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .foregroundStyle(theme.color(files.sibling(offset) == nil ? .textWeak : .text))
+    .disabled(files.sibling(offset) == nil)
+    .keyboardShortcut(offset < 0 ? .leftArrow : .rightArrow, modifiers: [.command, .option])
+    .help(help)
   }
 
   private func folder(_ url: URL) -> String {
@@ -105,6 +143,18 @@ struct MacFilePane: View {
     let root = files.context.root
     if folder == root { return URL(fileURLWithPath: root).lastPathComponent + "/" }
     return folder.hasPrefix(root + "/") ? String(folder.dropFirst(root.count + 1)) + "/" : folder + "/"
+  }
+}
+
+/// The files Arquivos draws rendered rather than as code: Markdown with the chat's renderer, HTML with Quick Look.
+enum MacFileRendering {
+  case markdown, html
+  init?(path: String) {
+    switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+    case "md", "markdown": self = .markdown
+    case "html", "htm": self = .html
+    default: return nil
+    }
   }
 }
 
