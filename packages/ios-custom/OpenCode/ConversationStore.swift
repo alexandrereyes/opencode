@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 import OpenCodeKit
+import UIKit
+import UniformTypeIdentifiers
 
 @MainActor @Observable final class ConversationStore {
   let id: String
@@ -496,7 +498,7 @@ import OpenCodeKit
       composerCatalog = try await client.composerSources(directory: directory)
     }
     async let files =
-      trigger.character == "!"
+      trigger.character == "&"
       ? client.composerFiles(trigger.query, directory: directory) : []
     async let sessions = trigger.character == "@" ? client.composerSessions(trigger.query) : []
     let apps = trigger.character == "@" ? appScope.map(ComposerAppMentions.shared.apps) ?? [] : []
@@ -534,6 +536,40 @@ import OpenCodeKit
       draft.attachments.append(attachment)
       await draft.persist()
     } catch { toast.show(error.localizedDescription, kind: .error) }
+  }
+  /// Images pasted or dropped into the editor, imported like the "+" menu's photos.
+  func importImages(_ providers: [NSItemProvider], draft: ConversationDraft, reservedBytes: Int = 0) async {
+    guard !providers.isEmpty else { return }
+    draft.importing = true
+    defer { draft.importing = false }
+    for provider in providers {
+      do {
+        let (data, type) = try await Self.imageData(provider)
+        await importAttachment(
+          data, name: "Imagem-\(UUID().uuidString.prefix(6)).\(type.preferredFilenameExtension ?? "png")",
+          mime: type.preferredMIMEType ?? "image/png", draft: draft, reservedBytes: reservedBytes)
+      } catch { toast.show("Não foi possível colar a imagem.", kind: .error) }
+    }
+  }
+  private static func imageData(_ provider: NSItemProvider) async throws -> (Data, UTType) {
+    let type = provider.registeredContentTypes.first { $0.conforms(to: .image) && $0.preferredMIMEType != nil }
+    if let type {
+      return (try await withCheckedThrowingContinuation { continuation in
+        _ = provider.loadDataRepresentation(for: type) { data, error in
+          if let data { return continuation.resume(returning: data) }
+          continuation.resume(throwing: error ?? AttachmentError.image)
+        }
+      }, type)
+    }
+    // A bare UIImage (for example from an attributed insertion) has no file type of its own.
+    let image = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UIImage, Error>) in
+      _ = provider.loadObject(ofClass: UIImage.self) { object, error in
+        if let image = object as? UIImage { return continuation.resume(returning: image) }
+        continuation.resume(throwing: error ?? AttachmentError.image)
+      }
+    }
+    guard let data = image.pngData() else { throw AttachmentError.image }
+    return (data, .png)
   }
   func act(
     _ key: String, success: String, feedback: Haptics.Kind? = nil,

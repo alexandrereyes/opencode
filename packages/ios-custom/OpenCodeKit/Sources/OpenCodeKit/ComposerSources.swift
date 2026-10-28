@@ -112,7 +112,7 @@ public struct ComposerSources: Sendable {
     apps: [ComposerApp], current: String, server: String, directory: String, project: String?
   ) -> [ComposerSuggestion] {
     switch character {
-    case "!":
+    case "&":
       // The token keeps the `@path` text the `@` panel used to insert, so the sent prompt is unchanged.
       return files.map {
         .init(

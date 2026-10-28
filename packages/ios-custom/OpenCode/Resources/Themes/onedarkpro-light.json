@@ -118,7 +118,9 @@
     "quoteHighlight": "#afcafb",
     "quoteUnderline": "#afcafb",
     "quoteBadge": "#5b6985",
-    "quoteBadgeSurface": "#eceef0"
+    "quoteBadgeSurface": "#eceef0",
+    "chatAvatar": "#fba6aa",
+    "chatAvatarSymbol": "#131722"
   },
   "avatars": {
     "lime": {
@@ -262,6 +264,8 @@
     "quoteHighlight": "v2-border-border-focus",
     "quoteUnderline": "v2-border-border-focus",
     "quoteBadge": "ios-derived-quoteBadge",
-    "quoteBadgeSurface": "v2-background-bg-layer-01"
+    "quoteBadgeSurface": "v2-background-bg-layer-01",
+    "chatAvatar": "ios-derived-chatAvatar",
+    "chatAvatarSymbol": "ios-derived-chatAvatarSymbol"
   }
 }

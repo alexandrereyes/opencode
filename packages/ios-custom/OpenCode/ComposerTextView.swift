@@ -1,5 +1,6 @@
 import OpenCodeKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ComposerTextView: UIViewRepresentable {
   @Environment(\.dynamicTypeSize) private var typeSize
@@ -13,9 +14,15 @@ struct ComposerTextView: UIViewRepresentable {
   var canSubmit = false
   /// Picks the open suggestion panel's first item, when it has loaded one for the current trigger.
   var firstSuggestion: (() -> (() -> Void)?)? = nil
+  /// Imports pasted or dropped images as draft attachments; without it they are ignored.
+  var importImages: (([NSItemProvider]) -> Void)? = nil
   func makeCoordinator() -> Coordinator { Coordinator(self) }
   func makeUIView(context: Context) -> ComposerInputView {
     let view = ComposerInputView(frame: .zero, textContainer: nil)
+    // Images are accepted for paste and drop only to leave the text as attachments, never as text glyphs.
+    view.pasteConfiguration = UIPasteConfiguration(
+      acceptableTypeIdentifiers: (view.pasteConfiguration?.acceptableTypeIdentifiers ?? []) + [UTType.image.identifier])
+    view.pasteDelegate = view
     view.backgroundColor = theme.uiColor(.surface).withAlphaComponent(0)
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
@@ -49,6 +56,7 @@ struct ComposerTextView: UIViewRepresentable {
     view.requestFocus = focused
     view.submit = submit
     view.firstSuggestion = firstSuggestion
+    view.importImages = importImages
     view.escape = { draft.dismissSuggestions() }
     view.canSubmit = canSubmit && draft.trigger == nil && draft.editorOwner == owner
     view.tintColor = theme.uiColor(.primary)
@@ -218,13 +226,63 @@ final class ComposerInputView: UITextView {
   }
   override func paste(_ sender: Any?) {
     guard isEditable else { return }
-    if let data = UIPasteboard.general.data(forPasteboardType: Self.pasteboardType),
+    let pasteboard = UIPasteboard.general
+    if let data = pasteboard.data(forPasteboardType: Self.pasteboardType),
       let document = try? JSONDecoder().decode(ComposerDocument.self, from: data) {
       replaceCharacters(in: selectedRange, with: document.editorAttributed(theme: composerTheme, font: composerFont))
       return
     }
+    // The edit menu, ⌘V and the keyboard's "Foto · Colar" suggestion all paste here: image items become
+    // attachments and the other items' text is inserted, so nothing but text ever enters the editor.
+    if pasteboard.hasImages, let importImages {
+      let types = pasteboard.types(forItemSet: nil) ?? []
+      let images = types.indices.filter { types[$0].contains { UTType($0)?.conforms(to: .image) == true } }
+      let text = types.indices.filter { !images.contains($0) }.compactMap { Self.text(pasteboard, item: $0, types: types[$0]) }
+      if !text.isEmpty { insertText(text.joined(separator: "\n")) }
+      let providers = pasteboard.itemProviders
+      importImages(images.filter { $0 < providers.count }.map { providers[$0] })
+      return
+    }
     // External rich text must not import arbitrary attachments or typing attributes.
-    if let text = UIPasteboard.general.string { insertText(text) }
+    if let text = pasteboard.string { insertText(text) }
+  }
+  private static func text(_ pasteboard: UIPasteboard, item: Int, types: [String]) -> String? {
+    if let type = types.first(where: { UTType($0)?.conforms(to: .plainText) == true }),
+      let value = pasteboard.values(forPasteboardType: type, inItemSet: [item])?.first {
+      return value as? String ?? (value as? Data).flatMap { String(data: $0, encoding: .utf8) }
+    }
+    guard let type = types.first(where: { UTType($0)?.conforms(to: .url) == true }),
+      let value = pasteboard.values(forPasteboardType: type, inItemSet: [item])?.first else { return nil }
+    return (value as? URL)?.absoluteString ?? value as? String
+  }
+  override func paste(itemProviders: [NSItemProvider]) {
+    guard isEditable else { return }
+    let images = itemProviders.filter { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }
+    if !images.isEmpty { importImages?(images) }
+    let rest = itemProviders.filter { provider in !images.contains { $0 === provider } }
+    if !rest.isEmpty { super.paste(itemProviders: rest) }
+  }
+  override func canPaste(_ itemProviders: [NSItemProvider]) -> Bool {
+    if importImages != nil, itemProviders.contains(where: { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }) {
+      return isEditable
+    }
+    return super.canPaste(itemProviders)
+  }
+  /// Rich insertions (for example from the keyboard) keep their text; image attachments become draft attachments.
+  override func insertAttributedText(_ string: NSAttributedString) {
+    var images: [NSItemProvider] = []
+    let text = NSMutableString(string: string.string)
+    string.enumerateAttribute(.attachment, in: NSRange(location: 0, length: string.length), options: .reverse) { value, range, _ in
+      guard let attachment = value as? NSTextAttachment, !(attachment is ComposerTokenAttachment) else { return }
+      text.deleteCharacters(in: range)
+      if let image = attachment.image ?? attachment.contents.flatMap(UIImage.init(data:))
+        ?? attachment.fileWrapper?.regularFileContents.flatMap(UIImage.init(data:)) {
+        images.insert(NSItemProvider(object: image), at: 0)
+      }
+    }
+    guard text.length != string.length else { return super.insertAttributedText(string) }
+    if text.length > 0 { insertText(text as String) }
+    if !images.isEmpty { importImages?(images) }
   }
   private var keyboardDismissal: CheckedContinuation<Void, Never>?
   private var keyboardObserver: (any NSObjectProtocol)?
@@ -252,6 +310,7 @@ final class ComposerInputView: UITextView {
     keyboardDismissal = nil
   }
   var escape: (() -> Void)?
+  var importImages: (([NSItemProvider]) -> Void)?
   var firstSuggestion: (() -> (() -> Void)?)?
   func selectSuggestionOnReturn() -> Bool {
     let pick = firstSuggestion?()
@@ -308,6 +367,8 @@ final class ComposerInputView: UITextView {
       return isFirstResponder && isEditable && canSubmit && !querying && markedTextRange == nil
         && submit != nil
     }
+    // A plain-text view offers Paste only for text; an image is pasted as an attachment.
+    if action == #selector(paste(_:)), isEditable, importImages != nil, UIPasteboard.general.hasImages { return true }
     return super.canPerformAction(action, withSender: sender)
   }
   override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -340,4 +401,17 @@ final class ComposerInputView: UITextView {
     return true
   }
   @objc private func dismissSuggestions() { escape?() }
+}
+
+extension ComposerInputView: UITextPasteDelegate {
+  /// Drops and system item-provider pastes: an image never becomes a text attachment.
+  func textPasteConfigurationSupporting(
+    _ textPasteConfigurationSupporting: any UITextPasteConfigurationSupporting, transform item: any UITextPasteItem
+  ) {
+    guard item.itemProvider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else {
+      return item.setDefaultResult()
+    }
+    importImages?([item.itemProvider])
+    item.setNoResult()
+  }
 }

@@ -118,7 +118,9 @@
     "quoteHighlight": "#83d8ed",
     "quoteUnderline": "#83d8ed",
     "quoteBadge": "#406e7a",
-    "quoteBadgeSurface": "#f4eccf"
+    "quoteBadgeSurface": "#f4eccf",
+    "chatAvatar": "#fba89d",
+    "chatAvatarSymbol": "#211d1b"
   },
   "avatars": {
     "lime": {
@@ -262,6 +264,8 @@
     "quoteHighlight": "v2-border-border-focus",
     "quoteUnderline": "v2-border-border-focus",
     "quoteBadge": "ios-derived-quoteBadge",
-    "quoteBadgeSurface": "v2-background-bg-layer-01"
+    "quoteBadgeSurface": "v2-background-bg-layer-01",
+    "chatAvatar": "ios-derived-chatAvatar",
+    "chatAvatarSymbol": "ios-derived-chatAvatarSymbol"
   }
 }

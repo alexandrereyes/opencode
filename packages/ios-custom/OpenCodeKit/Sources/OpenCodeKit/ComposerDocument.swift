@@ -179,7 +179,7 @@ public struct ComposerDocument: Codable, Sendable, Equatable {
 }
 
 public struct ComposerTrigger: Sendable, Equatable {
-  private static let expression = try! NSRegularExpression(pattern: #"(^|[\s(\[{\"'])\s*([@/$#!])([^\s@$#]*)$"#)
+  private static let expression = try! NSRegularExpression(pattern: #"(^|[\s(\[{\"'])\s*([@/$#&])([^\s@$#]*)$"#)
   public let character: String
   public let query: String
   public let range: NSRange
@@ -197,8 +197,8 @@ public struct ComposerTrigger: Sendable, Equatable {
     let word = text.substring(with: NSRange(location: start, length: cursor - start))
     guard let trigger = detect(in: ComposerDocument(text: word), cursor: word.utf16.count),
       trigger.character != "/" || start + trigger.range.location == 0,
-      // A word begins after a token too; `!` right after a token is prose ("@build!").
-      trigger.character != "!" || trigger.range.location > 0 || start == 0
+      // A word begins after a token too; `&` right after a token is prose ("@build&").
+      trigger.character != "&" || trigger.range.location > 0 || start == 0
         || text.character(at: start - 1) != 0xFFFC
     else { return nil }
     return Self(character: trigger.character, query: trigger.query,
@@ -216,12 +216,13 @@ public struct ComposerTrigger: Sendable, Equatable {
     let start = match.range(at: 2).location
     let query = (prefix as NSString).substring(with: match.range(at: 3))
     guard marker != "/" || start == 0 else { return nil }
-    guard marker != "!" || filesTrigger(prefix as NSString, start: start, query: query) else { return nil }
+    guard marker != "&" || filesTrigger(prefix as NSString, start: start, query: query) else { return nil }
     return Self(character: marker, query: query, range: NSRange(location: start, length: cursor - start))
   }
-  /// `!` opens files only at the start or after whitespace, never after brackets or quotes; `!!` and `!=` stay prose.
+  /// `&` opens files only at the start or after whitespace, never glued to a word ("R&D", "?a=1&b=2", "texto&amp;")
+  /// or after brackets or quotes; `&&` and `&=` stay prose.
   private static func filesTrigger(_ prefix: NSString, start: Int, query: String) -> Bool {
-    guard !query.contains("!"), !query.hasPrefix("=") else { return false }
+    guard !query.contains("&"), !query.hasPrefix("=") else { return false }
     guard start > 0, let scalar = UnicodeScalar(prefix.character(at: start - 1)) else { return start == 0 }
     return CharacterSet.whitespacesAndNewlines.contains(scalar)
   }

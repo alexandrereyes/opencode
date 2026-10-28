@@ -43,11 +43,11 @@ struct ComposerTypingDriver: UIViewRepresentable {
     case "idle":
       return Array(repeating: .type(""), count: 200)
     case "mentions":
-      let cycle = typed("Veja !READ") + [.token] + typed("e use $sam") + [.token] + typed("para revisar o texto. ")
+      let cycle = typed("Veja &READ") + [.token] + typed("e use $sam") + [.token] + typed("para revisar o texto. ")
       return Array(Array(repeating: cycle, count: 8).joined().prefix(200))
     case "suggestions":
       let cycle = typed("READ") + Array(repeating: .delete, count: 4) + typed("Fonte1") + Array(repeating: .delete, count: 6)
-      return typed("Abra !") + Array(Array(repeating: cycle, count: 10).joined().prefix(194))
+      return typed("Abra &") + Array(Array(repeating: cycle, count: 10).joined().prefix(194))
     case "toggle":
       // Every keystroke empties or fills the field, swapping the send and microphone controls.
       return Array(Array(repeating: typed("a") + [.delete], count: 100).joined())

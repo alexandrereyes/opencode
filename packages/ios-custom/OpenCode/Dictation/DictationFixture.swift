@@ -6,13 +6,8 @@ import SwiftUI
 @MainActor enum DictationFixtures {
   static var mode: String? {
     let args = ProcessInfo.processInfo.arguments
-    #if os(macOS)
-    let servers = ["http://127.0.0.1:4203"]
-    #else
-    let servers = ["http://127.0.0.1:4177", "http://127.0.0.1:4183"]
-    #endif
     guard let index = args.firstIndex(of: "-OpenCodeDictationFixture"), args.indices.contains(index + 1),
-      servers.contains(ServerConfiguration.launch().url.absoluteString) else { return nil }
+      ServerConfiguration.launch().isolatedTestSandbox else { return nil }
     return args[index + 1]
   }
   nonisolated static let text = "Confira as sessões em andamento e prepare um resumo das alterações. Não envie esta mensagem antes da minha revisão."
@@ -33,7 +28,6 @@ import SwiftUI
   }
 }
 
-#if os(iOS)
 struct DictationFixtureRoot: View {
   @Environment(\.colorScheme) private var scheme
   @Environment(\.scenePhase) private var scenePhase
@@ -105,8 +99,6 @@ struct DictationFixtureRoot: View {
     }
   }
 }
-
-#endif
 
 final class DictationFixtureSource: TranscriptionModelSource, @unchecked Sendable {
   let files: TranscriptionModelFiles

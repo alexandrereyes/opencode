@@ -132,6 +132,8 @@ const roles = {
   quoteUnderline: "v2-border-border-focus",
   quoteBadge: "v2-border-border-focus",
   quoteBadgeSurface: "v2-background-bg-layer-01",
+  chatAvatar: "ios-accent",
+  chatAvatarSymbol: "text-strong",
 } as const
 
 const themes = new Bun.Glob("*.json")
@@ -216,6 +218,11 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     colors.infoFill = legible(colors.infoFill!, [colors.onInfo], 4.5, true)
     colors.onPrimary = legible(colors.onPrimary!, [colors.primary!], 4.5, luminance(colors.primary!) < 0.18)
     colors.onFilledButton = legible(colors.onFilledButton!, [colors.filledButton!], 4.5, luminance(colors.filledButton!) < 0.18)
+    // Chats beside repository sessions share one avatar: the theme's accent hue at the project avatars' lightness,
+    // more saturated than their muted colors so it reads as a category, with a symbol legible on it.
+    const accent = hexToOklch(colors.accent! as HexColor)
+    colors.chatAvatar = oklchToHex({ ...accent, l: mode === "dark" ? 0.46 : 0.81, c: Math.min(accent.c, 0.1) })
+    colors.chatAvatarSymbol = legible(colors.chatAvatarSymbol!, [colors.chatAvatar], 4.5, mode === "dark")
     colors.border = legible(colors.border!, [colors.background!], 1.4, mode === "dark")
     colors.controlBorder = legible(colors.controlBorder!, surfaces, 1.7, mode === "dark")
     const exportedRoles: Record<string, string> = { ...resolvedRoles }
@@ -225,7 +232,7 @@ for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/
     for (const role of ["textStrong", "text", "textSecondary", "textMuted", "textPreview", "textAccent", "glassSecondary", "success", "info", "error",
       "markdownBody", "markdownStrong", "markdownHeading", "markdownQuote", "markdownLink", "inlineCode", "codeText",
       "codeHeaderText", "codeLineNumber", "tableText", "tableHeaderText", "syntaxComment", "userBubbleText", "userBubbleSecondary",
-      "userBubblePendingText", "userBubblePendingSecondary", "infoFill", "onInfo", "onPrimary", "onFilledButton", "border", "controlBorder", "quoteBadge"]) {
+      "userBubblePendingText", "userBubblePendingSecondary", "infoFill", "onInfo", "onPrimary", "onFilledButton", "border", "controlBorder", "quoteBadge", "chatAvatar", "chatAvatarSymbol"]) {
       exportedRoles[role] = `ios-derived-${role}`
     }
     for (const [role, value] of Object.entries(colors)) {

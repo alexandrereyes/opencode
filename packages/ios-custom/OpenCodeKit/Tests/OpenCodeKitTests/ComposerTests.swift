@@ -115,12 +115,12 @@ private func detected(_ text: String) -> ComposerTrigger? {
       current: "ses_current"
     ).map(\.section) == ["Sessões"])
   let all = source.suggestions(
-    try #require(detected("!")), agents: agents, files: files, sessions: sessions,
+    try #require(detected("&")), agents: agents, files: files, sessions: sessions,
     current: "ses_current", directory: "/repo")
   #expect(all.map(\.token.id) == ["docs/infra.md", "src/index.ts"])
   #expect(all.map(\.section) == ["Arquivos", "Arquivos"])
   let filtered = source.suggestions(
-    try #require(detected("Veja !infra")), agents: agents, files: files, sessions: sessions,
+    try #require(detected("Veja &infra")), agents: agents, files: files, sessions: sessions,
     current: "ses_current", directory: "/repo")
   #expect(filtered.map(\.token.id) == ["docs/infra.md"])
   // The same token the `@` panel inserted before, so the prompt sent is unchanged.
@@ -136,28 +136,38 @@ private func detected(_ text: String) -> ComposerTrigger? {
       == .object(["start": .number(5), "end": .number(19), "text": .string("@docs/infra.md")]))
 }
 
-@Test func bangOpensFilesOnlyAtTheStartOrAfterWhitespace() {
-  #expect(detected("!")?.character == "!")
-  #expect(detected("!READ")?.query == "READ")
-  #expect(detected("Veja !src/ind")?.query == "src/ind")
-  #expect(detected("linha\n!doc")?.query == "doc")
-  #expect(detected("tab\t!doc")?.character == "!")
-  #expect(detected("Veja !READ")?.range == NSRange(location: 5, length: 5))
+@Test func ampersandOpensFilesOnlyAtTheStartOrAfterWhitespace() {
+  #expect(detected("&")?.character == "&")
+  #expect(detected("&READ")?.query == "READ")
+  #expect(detected("Veja &src/ind")?.query == "src/ind")
+  #expect(detected("linha\n&doc")?.query == "doc")
+  #expect(detected("tab\t&doc")?.character == "&")
+  #expect(detected("Veja &READ")?.range == NSRange(location: 5, length: 5))
+  // A lone `&` opens like the other markers; the space after it closes the panel without inserting anything.
+  #expect(detected("Tom &")?.query == "")
   for prose in [
-    "ok!", "Pode arrumar!", "Pronto!!", "Sério?!", "fim.!", "(!doc", "\"!doc", "'!doc", "[!doc",
-    "😀!", "👍🏽!", "Olá !!", "a !=", "a !==", "!READ ", "e-mail!x",
+    "a &&", "a && b", "&&", "R&D", "P&G", "AT&T", "AT&", "https://x.dev/?a=1&b=2", "?a=1&b", "texto&amp;", "Tom&",
+    "Tom & ", "Tom & Jerry", "arroz & feijão", "fim.&", "(&doc", "\"&doc", "'&doc", "[&doc", "😀&", "👍🏽&doc",
+    "a &=", "&READ ", "e-mail&x",
   ] {
     #expect(detected(prose) == nil, "\(prose)")
   }
+  // `!` is prose again.
+  for prose in ["!", "!READ", "Veja !READ", "linha\n!doc", "ok!", "Pode arrumar!"] {
+    #expect(detected(prose) == nil, "\(prose)")
+  }
   // Editor text: tokens are U+FFFC, and the word scan restarts after them.
-  #expect(ComposerTrigger.detect(in: "\u{FFFC}!" as NSString, cursor: 2) == nil)
-  #expect(ComposerTrigger.detect(in: "\u{FFFC} !RE" as NSString, cursor: 5)?.query == "RE")
-  #expect(ComposerTrigger.detect(in: "Pode arrumar!" as NSString, cursor: 13) == nil)
-  #expect(ComposerTrigger.detect(in: "!" as NSString, cursor: 1)?.character == "!")
+  #expect(ComposerTrigger.detect(in: "\u{FFFC}&" as NSString, cursor: 2) == nil)
+  #expect(ComposerTrigger.detect(in: "\u{FFFC} &RE" as NSString, cursor: 5)?.query == "RE")
+  #expect(ComposerTrigger.detect(in: "R&D" as NSString, cursor: 3) == nil)
+  #expect(ComposerTrigger.detect(in: "a && b" as NSString, cursor: 4) == nil)
+  #expect(ComposerTrigger.detect(in: "Tom & Jerry" as NSString, cursor: 6) == nil)
+  #expect(ComposerTrigger.detect(in: "&" as NSString, cursor: 1)?.character == "&")
+  #expect(ComposerTrigger.detect(in: "!" as NSString, cursor: 1) == nil)
   let agent = ComposerToken(kind: .agent, id: "build", text: "@build")
   #expect(
-    ComposerTrigger.detect(in: .init(text: "@build!", tokens: [.init(start: 0, end: 6, token: agent)]), cursor: 7)?
-      .character != "!")
+    ComposerTrigger.detect(in: .init(text: "@build&", tokens: [.init(start: 0, end: 6, token: agent)]), cursor: 7)?
+      .character != "&")
 }
 
 @Test func snippetsUseAliasesAndProjectOverrideCaseInsensitively() throws {
@@ -225,7 +235,7 @@ private func detected(_ text: String) -> ComposerTrigger? {
       \.token.id)
       == ["infra-agent", "library"])
   #expect(
-    source.suggestions(try #require(detected("!ÍNFRA")), agents: agents, files: files).map(
+    source.suggestions(try #require(detected("&ÍNFRA")), agents: agents, files: files).map(
       \.token.id)
       == ["docs/infra.md", "docs/my-infra.md"])
 }

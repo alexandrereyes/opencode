@@ -29,7 +29,7 @@ import XCTest
     let agent = try XCTUnwrap(environment["OPENCODE_CASE_AGENT"])
     let target = try XCTUnwrap(environment["OPENCODE_CASE_TARGET"])
     let cases: [(String, String)] = [
-      ("!readme", "README.md"), ("!README", "README.md"), ("!SAFARIBRIDGE", "src/SafariBridge.ts"),
+      ("&readme", "README.md"), ("&README", "README.md"), ("&SAFARIBRIDGE", "src/SafariBridge.ts"),
       ("@especial", target), ("@ESPECIAL", target), ("@SESSÃO", target), ("@sessão", target),
       ("@" + agent.uppercased(), agent), ("$" + skill.uppercased(), skill), ("$" + skill.capitalized, skill),
       ("#COMMIT", "snip-commit"), ("#Commit", "snip-commit"), ("#commit", "snip-commit"),
@@ -55,8 +55,8 @@ import XCTest
     editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
   }
 
-  /// Files moved from `@` to `!`; the script then checks the sent message's file reference on the server.
-  func testBangSendsTheFileReferenceAtNoLongerLists() throws {
+  /// Files moved from `@` to `&`; the script then checks the sent message's file reference on the server.
+  func testAmpersandSendsTheFileReferenceAtNoLongerLists() throws {
     continueAfterFailure = false
     let app = XCUIApplication()
     app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
@@ -79,19 +79,24 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 10))
     XCTAssertFalse(readme.exists)
     editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 7))
-    editor.typeText("Leia !READ")
+    // `!` and a glued `&` are prose.
+    editor.typeText("!READ R&D")
+    XCTAssertFalse(app.staticTexts["Arquivos"].waitForExistence(timeout: 2))
+    XCTAssertFalse(readme.exists)
+    editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 9))
+    editor.typeText("Leia &READ")
     XCTAssertTrue(readme.waitForExistence(timeout: 10))
     XCTAssertTrue(app.staticTexts["Arquivos"].exists)
-    shot("bang-files")
+    shot("ampersand-files")
     readme.tap()
     XCTAssertTrue(readme.waitForNonExistence(timeout: 5))
     editor.typeText("e responda ok!")
     XCTAssertFalse(app.staticTexts["Arquivos"].waitForExistence(timeout: 2))
-    shot("bang-token")
+    shot("ampersand-token")
     let send = app.buttons["composer-send"]
     XCTAssertTrue(send.waitForExistence(timeout: 10) && send.isEnabled)
     send.tap()
     XCTAssertTrue(app.staticTexts["Leia @README.md e responda ok!"].waitForExistence(timeout: 30))
-    shot("bang-sent")
+    shot("ampersand-sent")
   }
 }

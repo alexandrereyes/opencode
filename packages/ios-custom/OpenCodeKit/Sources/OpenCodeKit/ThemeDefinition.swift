@@ -23,6 +23,8 @@ public enum ThemeRole: Int, CaseIterable, Sendable {
     syntaxVariable, syntaxPunctuation, syntaxOperator, syntaxAdded, syntaxRemoved
   case diagramBackground, diagramText, diagramLine, diagramAccent, diagramMuted, diagramSurface, diagramBorder
   case quoteHighlight, quoteUnderline, quoteBadge, quoteBadgeSurface
+  /// The one avatar of chats listed beside repository sessions (a category color, not a project's) and its symbol.
+  case chatAvatar, chatAvatarSymbol
 
   public var name: String { String(describing: self) }
 }

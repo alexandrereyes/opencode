@@ -32,21 +32,19 @@ public struct SessionSection: Sendable, Identifiable {
 public enum SessionSections {
   public static let days = 7
 
-  /// Groups rows already narrowed by the state filter and chip. "Precisa de você" lists permissions, then
-  /// questions, then failures (most recent first), including chats; the other sections keep the rows' order
-  /// and list only chats when `chats` is selected, or only repository sessions otherwise. The remaining rows
-  /// fall into the web's seven local days (`localDays`) by `interactionAt`: today, yesterday and "Esta semana"
-  /// (two to six days ago); older ones go to "Anteriores". Empty sections are omitted.
-  public static func group(_ rows: [SessionRow], chats: Bool, now: Date, calendar: Calendar = .current)
-    -> [SessionSection]
-  {
+  /// Groups rows already narrowed by the state filter and chip, so "Todas" mixes chats with repository sessions
+  /// under the same rules, a repository chip lists none and the Chats chip only chats. "Precisa de você" lists
+  /// permissions, then questions, then failures (most recent first); the other sections keep the rows' order.
+  /// The remaining rows fall into the web's seven local days (`localDays`) by `interactionAt`: today, yesterday
+  /// and "Esta semana" (two to six days ago); older ones go to "Anteriores". Empty sections are omitted.
+  public static func group(_ rows: [SessionRow], now: Date, calendar: Calendar = .current) -> [SessionSection] {
     let failed = rows.filter { $0.state == .failed }.sorted {
       let a = $0.session.time.idle ?? 0
       let b = $1.session.time.idle ?? 0
       return a != b ? a > b : $0.session.key < $1.session.key
     }
     let attention = rows.filter { $0.state == .permission } + rows.filter { $0.state == .question } + failed
-    let listed = rows.filter { !$0.needsYou && $0.chat == chats }
+    let listed = rows.filter { !$0.needsYou }
     let today = calendar.startOfDay(for: now)
     let start = { (days: Int) in
       calendar.date(byAdding: .day, value: -days, to: today).map(calendar.startOfDay) ?? today

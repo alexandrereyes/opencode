@@ -1,6 +1,7 @@
 import Observation
 import OpenCodeKit
 import SwiftUI
+import UniformTypeIdentifiers
 import XCTest
 
 @testable import OpenCode
@@ -10,8 +11,44 @@ import XCTest
   let owner: UUID
   let expanded: Bool
   var theme = AppTheme.selected
+  var importImages: (([NSItemProvider]) -> Void)? = nil
   var body: some View {
-    ComposerTextView(draft: draft, theme: theme, expanded: expanded, owner: owner).padding(30)
+    ComposerTextView(draft: draft, theme: theme, expanded: expanded, owner: owner, importImages: importImages).padding(30)
+  }
+}
+
+private final class PastedImages {
+  var providers: [NSItemProvider] = []
+}
+
+/// Stands in for UIKit's paste item, whose concrete class is private: the text view's paste delegate decides each item.
+private final class PasteItem: NSObject, UITextPasteItem {
+  let itemProvider: NSItemProvider
+  var localObject: Any? { nil }
+  var defaultAttributes: [NSAttributedString.Key: Any] { [:] }
+  var result = "pending"
+  init(_ provider: NSItemProvider) { itemProvider = provider }
+  func setResult(string: String) { result = "string" }
+  func setResult(attributedString: NSAttributedString) { result = "attributed" }
+  func setResult(attachment: NSTextAttachment) { result = "attachment" }
+  func setNoResult() { result = "none" }
+  func setDefaultResult() { result = "default" }
+}
+
+private func pngProvider(_ color: UIColor) -> NSItemProvider {
+  let provider = NSItemProvider()
+  let data = pngData(color)
+  provider.registerDataRepresentation(for: .png, visibility: .all) { completion in
+    completion(data, nil)
+    return nil
+  }
+  return provider
+}
+
+private func pngData(_ color: UIColor, size: CGSize = CGSize(width: 24, height: 16)) -> Data {
+  UIGraphicsImageRenderer(size: size).pngData { context in
+    color.setFill()
+    context.fill(CGRect(origin: .zero, size: size))
   }
 }
 
@@ -32,7 +69,10 @@ import XCTest
     XCTAssertNil(encoded?["sendRevision"])
   }
 
-  private func mount(_ document: ComposerDocument, expanded: Bool = true, focused: Bool = true) throws -> (ConversationDraft, UIWindow) {
+  private func mount(
+    _ document: ComposerDocument, expanded: Bool = true, focused: Bool = true,
+    importImages: (([NSItemProvider]) -> Void)? = nil
+  ) throws -> (ConversationDraft, UIWindow) {
     let draft = ConversationDraft(server: "http://127.0.0.1:4177", id: "composer-test")
     draft.text = document.attributed
     draft.selection = NSRange(location: document.editorOffset(document.text.utf16.count), length: 0)
@@ -42,13 +82,119 @@ import XCTest
     let window = UIWindow(windowScene: try XCTUnwrap(
       UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first))
     window.rootViewController = UIHostingController(rootView:
-      ComposerEditingHost(draft: draft, owner: owner, expanded: expanded))
+      ComposerEditingHost(draft: draft, owner: owner, expanded: expanded, importImages: importImages))
     window.makeKeyAndVisible()
     window.layoutIfNeeded()
     return (draft, window)
   }
 
   private func settle() async throws { try await Task.sleep(for: .milliseconds(40)) }
+
+  /// The edit menu's Colar, ⌘V and the keyboard's "Foto · Colar" suggestion all call `paste(_:)`.
+  func testPastedImagesBecomeAttachmentsAndTheirTextIsKept() async throws {
+    let pasted = PastedImages()
+    let (draft, window) = try mount(ComposerDocument(text: "Veja "), importImages: { pasted.providers += $0 })
+    defer { window.isHidden = true; window.rootViewController = nil }
+    try await settle()
+    let input = try XCTUnwrap(draft.input)
+    UIPasteboard.general.items = [
+      [UTType.png.identifier: pngData(.red)], [UTType.utf8PlainText.identifier: "legenda &RE"],
+      [UTType.png.identifier: pngData(.blue)],
+    ]
+    XCTAssertTrue(input.canPerformAction(#selector(UIResponderStandardEditActions.paste(_:)), withSender: nil))
+    input.paste(nil)
+    try await settle()
+    XCTAssertEqual(pasted.providers.count, 2)
+    XCTAssertTrue(pasted.providers.allSatisfy { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) })
+    XCTAssertEqual(draft.document.text, "Veja legenda &RE")
+    XCTAssertFalse(input.textStorage.string.contains("\u{FFFC}"))
+    XCTAssertTrue(draft.document.validTokens.isEmpty)
+    // The pasted text still opens a trigger, and undo removes only the text.
+    XCTAssertEqual(draft.trigger?.character, "&")
+    input.undoManager?.undo()
+    try await settle()
+    XCTAssertEqual(draft.document.text, "Veja ")
+    // Images alone add nothing to the text.
+    UIPasteboard.general.items = [[UTType.png.identifier: pngData(.green)]]
+    input.paste(nil)
+    try await settle()
+    XCTAssertEqual(pasted.providers.count, 3)
+    XCTAssertEqual(draft.document.text, "Veja ")
+    // Text-only pastes are unchanged.
+    UIPasteboard.general.string = "só texto"
+    input.paste(nil)
+    try await settle()
+    XCTAssertEqual(draft.document.text, "Veja só texto")
+    XCTAssertEqual(pasted.providers.count, 3)
+  }
+
+  func testEditorsWithoutAttachmentsIgnorePastedImages() async throws {
+    let (draft, window) = try mount(ComposerDocument(text: "Pergunta"))
+    defer { window.isHidden = true; window.rootViewController = nil }
+    try await settle()
+    let input = try XCTUnwrap(draft.input)
+    UIPasteboard.general.items = [[UTType.png.identifier: pngData(.red)]]
+    input.paste(nil)
+    input.paste(itemProviders: [pngProvider(.red)])
+    try await settle()
+    XCTAssertEqual(input.textStorage.string, "Pergunta")
+  }
+
+  func testItemProviderPastesDropsAndRichInsertionsImportImagesWithoutGlyphs() async throws {
+    let pasted = PastedImages()
+    let (draft, window) = try mount(ComposerDocument(), importImages: { pasted.providers += $0 })
+    defer { window.isHidden = true; window.rootViewController = nil }
+    try await settle()
+    let input = try XCTUnwrap(draft.input)
+    let image = pngProvider(.red)
+    XCTAssertTrue(input.canPaste([image]))
+    input.paste(itemProviders: [image, NSItemProvider(object: "texto" as NSString)])
+    XCTAssertEqual(pasted.providers.count, 1)
+    await fulfillment(of: [expectation(for: NSPredicate { _, _ in draft.document.text == "texto" }, evaluatedWith: nil)], timeout: 5)
+    // Drops reach the paste delegate one item at a time.
+    let dropped = PasteItem(pngProvider(.blue))
+    input.textPasteConfigurationSupporting(input, transform: dropped)
+    XCTAssertEqual(dropped.result, "none")
+    XCTAssertEqual(pasted.providers.count, 2)
+    let text = PasteItem(NSItemProvider(object: "solto" as NSString))
+    input.textPasteConfigurationSupporting(input, transform: text)
+    XCTAssertEqual(text.result, "default")
+    XCTAssertEqual(pasted.providers.count, 2)
+    // A rich insertion keeps its text and imports its image attachment.
+    let rich = NSMutableAttributedString(string: " antes ")
+    rich.append(NSAttributedString(attachment: NSTextAttachment(image: try XCTUnwrap(UIImage(data: pngData(.green))))))
+    rich.append(NSAttributedString(string: "depois"))
+    input.insertAttributedText(rich)
+    try await settle()
+    XCTAssertEqual(pasted.providers.count, 3)
+    XCTAssertEqual(draft.document.text, "texto antes depois")
+    XCTAssertFalse(input.textStorage.string.contains("\u{FFFC}"))
+  }
+
+  func testPastedImagesImportThroughTheAttachmentFlow() async throws {
+    let client = OpenCodeClient.scrollFixture(configuration: .launch())
+    let store = ConversationStore(id: "paste-images", client: client, hub: EventHub(client: client))
+    let draft = ConversationDraft(server: "http://127.0.0.1:4177", id: "paste-images-\(UUID().uuidString)")
+    defer { Task { try? await draft.persistence.remove() } }
+    let wide = UIGraphicsImageRenderer(size: CGSize(width: 3000, height: 10)).image { context in
+      UIColor.orange.setFill()
+      context.fill(CGRect(x: 0, y: 0, width: 3000, height: 10))
+    }
+    await store.importImages([
+      pngProvider(.red),
+      NSItemProvider(object: wide),
+    ], draft: draft)
+    XCTAssertFalse(draft.importing)
+    XCTAssertEqual(draft.attachments.count, 2)
+    XCTAssertEqual(draft.attachments.first?.mime, "image/png")
+    XCTAssertTrue(draft.attachments.allSatisfy { $0.name.hasPrefix("Imagem-") })
+    // The "+" flow's conversion applies: an oversized image is scaled down as JPEG.
+    XCTAssertEqual(draft.attachments.last?.mime, "image/jpeg")
+    for attachment in draft.attachments {
+      let bytes = try await draft.persistence.bytes(attachment)
+      XCTAssertEqual(bytes.count, attachment.size)
+    }
+  }
 
   func testSendingDisablesFocusedEditorOutsideTheSwiftUIGraphUpdate() async throws {
     let (draft, window) = try mount(ComposerDocument(text: "Envio de exemplo"), expanded: false)
@@ -229,18 +375,25 @@ import XCTest
     XCTAssertEqual(draft.document.validTokens.count, 3)
   }
 
-  func testBangOpensFilesOnlyAtABoundaryAndInsertsTheFileTokenWithUndo() async throws {
+  func testAmpersandOpensFilesOnlyAtABoundaryAndInsertsTheFileTokenWithUndo() async throws {
     let (draft, window) = try mount(.init())
     defer { window.isHidden = true }
     try await settle()
     let input = try XCTUnwrap(draft.input)
-    for prose in ["Pode arrumar!", " ok!", " 😀!", " (!", " Olá !!"] {
+    for prose in ["R&D", " AT&T", " a &&", " b", " 😀&", " (&", " ?a=1&b=2", " !RE", " Pode arrumar!"] {
       input.insertText(prose)
       XCTAssertNil(draft.trigger, prose)
     }
+    // A lone `&` opens; the space after it closes the panel and inserts nothing.
+    input.insertText(" Tom &")
+    XCTAssertEqual(draft.trigger?.character, "&")
+    input.insertText(" Jerry")
+    XCTAssertNil(draft.trigger)
+    XCTAssertTrue(draft.document.text.hasSuffix(" Tom & Jerry"))
+    XCTAssertTrue(draft.document.validTokens.isEmpty)
     // A paste on a new line starts a word, like typing.
-    input.insertText("\n!RE")
-    XCTAssertEqual(draft.trigger?.character, "!")
+    input.insertText("\n&RE")
+    XCTAssertEqual(draft.trigger?.character, "&")
     XCTAssertEqual(draft.trigger?.query, "RE")
     try await settle()
     let file = ComposerToken(kind: .file, id: "README.md", text: "@README.md", value: "/repo/README.md")
@@ -251,15 +404,15 @@ import XCTest
     XCTAssertNil(draft.trigger)
     input.undoManager?.undo()
     try await settle()
-    XCTAssertTrue(draft.document.text.hasSuffix("\n!RE"), draft.document.text)
+    XCTAssertTrue(draft.document.text.hasSuffix("\n&RE"), draft.document.text)
     XCTAssertTrue(draft.document.validTokens.isEmpty)
     input.undoManager?.redo()
     try await settle()
     XCTAssertEqual(draft.document.validTokens.map(\.token), [file])
     input.deleteBackward()
-    input.insertText("!")
-    XCTAssertNil(draft.trigger, "`!` right after a token is prose")
-    XCTAssertTrue(draft.document.text.hasSuffix("\n@README.md!"), draft.document.text)
+    input.insertText("&")
+    XCTAssertNil(draft.trigger, "`&` right after a token is prose")
+    XCTAssertTrue(draft.document.text.hasSuffix("\n@README.md&"), draft.document.text)
   }
 
   func testTypingPublishesDerivedComposerStateOnlyWhenItChanges() async throws {

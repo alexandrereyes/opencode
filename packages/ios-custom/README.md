@@ -52,10 +52,10 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 (`packages/app-custom/src/shell/titlebar/sidebar-model.ts`, `sidebar-order.ts`, `sidebar-rows.ts`, and
 `packages/app-custom/src/shell/notifications/session-attention.ts`) and is not changed by this work.
 
-- **Rows:** only root sessions, without archived sessions or chats. Running state, permissions, and questions of
-  subagents roll up into their root session. Managed chats (`custom.chats`) are listed only under the **Chats** chip,
-  after the status chip and before repositories, like the web sidebar's separate Chats section; their requests still
-  count in **Precisa de você** and the tab badge. Pinned sessions come first, then the activity order. When a session has
+- **Rows:** only root sessions, without archived sessions or the Sessão mestra. Running state, permissions, and
+  questions of subagents roll up into their root session. Managed chats (`custom.chats`) appear under **Todas** (and a
+  state filter) mixed with repository sessions, in the same sections and rules, and alone under the **Chats** chip;
+  a repository chip lists none. Their requests count in **Precisa de você** and the tab badge. Pinned sessions come first, then the activity order. When a session has
   several states, the priority is permission > question > running > failed > unread > stopped. The rows are grouped
   into the sections described in [Layout D](#layout-d-precisa-de-você--27-october).
 - **Row metadata (wave 10):** the PWA sidebar's exact compact elapsed time (`0s`, `59s`, `1m`, `1h`, `1d`), floored
@@ -177,8 +177,18 @@ app, without the web's "Projetos" and "Worktrees" groups.
   | 4 | Hoje, Ontem, Esta semana (neutral) | the rest by local day of `interactionAt`; "Esta semana" is 2–6 days ago | `SessionList.rows` |
   | 5 | Anteriores (neutral, collapsed by default) | older than the seven local days (the web's `localDays`) | `SessionList.rows` |
 
-  The discreet **Arquivadas N** row closes the list and opens the archived sheet. Outside "Precisa de você", chats
-  appear only under the Chats chip, as before. Muted sessions stay in "Precisa de você"; the master stays out of the
+  The discreet **Arquivadas N** row closes the list and opens the archived sheet. Since 28 October every section
+  mixes chats with repository sessions under "Todas" (before, only "Precisa de você" did); the Chats chip still lists
+  only chats.
+- **Chat avatar when mixed:** wherever chats sit beside repository sessions ("Todas", a state filter, the session
+  switcher) a chat row shows one shared avatar instead of its title monogram: `bubble.left.and.bubble.right.fill`
+  (two speech bubbles, a conversation rather than a repository) on the theme role `chatAvatar`, with `chatAvatarSymbol`.
+  `generate-themes.ts` derives `chatAvatar` from each theme's `accent` hue at the project avatars' lightness (oklch
+  L 0.46 dark, 0.81 light) with more chroma (up to 0.1), so it follows every theme as a category color, and makes the
+  symbol legible on it (`check-theme-contrast.ts`, at least 4.5:1). Its second line reads **Chats** where projects read
+  `path · branch`. The running arc, `+N`, badges, unread dot and selection circle stay as on any row. Under the Chats
+  chip each chat keeps its own avatar and has no second line (`SessionRow.sharesChatAvatar(mixed:)`, environment
+  `sessionRowsMixChats`); it is a native symbol, with no generated image per row. Muted sessions stay in "Precisa de você"; the master stays out of the
   rows. The day sections follow the web only for the seven-day window; Alexandre chose four date sections instead
   of one per weekday.
 - **Rows:** swipe, long press, avatar, running ring and `+N` are unchanged in every section. "Precisa de você" rows
@@ -361,10 +371,10 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   capsule as the compact `MCP · N/M` pill, a flexible space and a round button:
   microphone when the field is empty (WhatsApp style); with text, send plus a compact microphone at its left
   ([Microphone beside Send](#microphone-beside-send--25-october)). The agent (`build ⌄`) opens the line below the card.
-- **Triggers:** `@` context (sessions, apps, agents, references), `!` files, `/` commands, `$` skills, and `#`
+- **Triggers:** `@` context (sessions, apps, agents, references), `&` files, `/` commands, `$` skills, and `#`
   snippets open a suggestion panel above the composer; the chosen item becomes a colored token in the field. Return
   picks the panel's first (highlighted) item (see [Quote comment composer](#quote-comment-composer--24-october) and
-  [Files on `!`](#files-on---26-october)).
+  [Files on `&`](#files-on---28-october)).
 - **Selection:** selecting text in a response shows the native edit menu with `Copiar`, `Comentar`, and `Pergunta
 paralela`. A comment attaches the quoted passage above the composer (`Citações · 1`) and is sent with the message.
   The side question (`/btw`) opens in a sheet that is not saved to the conversation.
@@ -547,7 +557,7 @@ marks retained after relaunch. No physical device, production mutation or new ba
 **Alexandre, 24/10: o comentário usa o mesmo compositor.** The **Comentário** sheet hosts the message composer's own
 `ComposerEditor`, configured by `ComposerComment` (placeholder, the message draft's other attachment bytes for the
 shared 25 MiB limit, and the commit action), instead of a separate text field. It keeps the same card, `ComposerTextView`
-(label **Comentário**, identifier `comment-composer`), `@`/`!`/`$`/`#` suggestions and tokens, focus, dictation (hold, lock,
+(label **Comentário**, identifier `comment-composer`), `@`/`&`/`$`/`#` suggestions and tokens, focus, dictation (hold, lock,
 pending download; a finished transcription refocuses the comment) and the **+** menu with **Fotos** and **Arquivos**.
 It omits the model/effort, MCP and agent selectors (they belong to the message, as on the web, whose comment editor has
 none), `/` commands (they only run at the start of the message itself; the web's comment editor has no commands either)
@@ -581,7 +591,7 @@ suggestions 9.3/12.6 → 9.2/13.2 ms, one hitch each. An earlier batch varied by
 Captures are in `$TMPDIR/opencode/ios-comment-composer/prints/`.
 
 **Return in suggestions (Alexandre, 24/10).** In both composers (message and comment), Return on the software or a
-hardware keyboard picks the suggestion panel's first, highlighted item for `@`, `!`, `$`, `#` and `/` exactly as a tap
+hardware keyboard picks the suggestion panel's first, highlighted item for `@`, `&`, `$`, `#` and `/` exactly as a tap
 does, instead of a line break. `ComposerSuggestions` records that item in a non-observed `ComposerSuggestionReturn`
 once its results for the current trigger have loaded, so typing still does not re-render the composer.
 `ComposerReturn.selectsSuggestion` gates it: no marked text (composition keeps Return), panel open, and an item loaded
@@ -590,7 +600,7 @@ Return keeps its previous meaning (line break; Shift+Return still sends). The we
 (`app-custom/src/composer/suggestions/machine.ts`) selects its active item on Enter/Tab too, but swallows Enter while its
 list is empty or loading; iOS deliberately keeps the line break there. Dictation inserts through the draft, not Return,
 and is unaffected. Covered by the Kit truth table, `ComposerEditingUITests/testReturnPicksTheLoadedFirstSuggestionAndOtherwiseBreaksTheLine`
-(`$` picked, line break without a panel, empty `#` list and an unloaded `!` query) and the comment/message checks in
+(`$` picked, line break without a panel, empty `#` list and an unloaded `&` query) and the comment/message checks in
 `testCommentUsesTheComposerWithoutSelectorsAndCancelKeepsNothing`. Interleaved profiles stayed flat (plain busy p50
 7.1 → 6.0 ms, suggestions 8.1 → 8.5 ms, mentions 8.3 → 8.0 ms).
 
@@ -658,37 +668,63 @@ controlled and nothing is sent), restores the MCP state and deletes the Session.
 ### Case-insensitive suggestions — 24 October
 
 Every trigger ignores case. `$`, `#`, `/`, agents, references and apps rank locally with case- and
-diacritic-insensitive folding; files (`!`) come from `/api/fs/find`, whose fuzzy search ignores case too. Session titles
+diacritic-insensitive folding; files (`&`) come from `/api/fs/find`, whose fuzzy search ignores case too. Session titles
 are searched by the server with SQLite `LIKE`, which ignores case only for ASCII letters, so a query with other
 cased letters (Ã, Í, Ç…) is also sent lowered, uppercased and capitalized (`ComposerSources.caseVariants`) and the
 results are merged by recency; accents are still matched as typed there ("sessao" does not find "Sessão"). The web
 composer does the same in `composer/session-search.ts`.
 
 After `build-for-testing`, `script/test-composer-case.py` (same environment variables as `test-app-mentions.py`)
-creates a fake repository, two disposable Sessions and one snippet, runs `ComposerCaseUITests` (`!`, `@`, `$`, `#`,
+creates a fake repository, two disposable Sessions and one snippet, runs `ComposerCaseUITests` (`&`, `@`, `$`, `#`,
 `/` in several cases, then Return on `#COMMIT`) and removes them.
 
-### Files on `!` — 26 October
+### Files on `&` — 28 October
 
-**Alexandre, 26/10: arquivos saem do `@` e vão para o `!`.** `@` keeps sessions, apps, agents and references and no
-longer lists files or calls `/api/fs/find`. `!` lists only files, with the same panel, icons, path styling, ranking
-and 20-result server search the `@` file section had. Choosing a file inserts the same `@path` token as before
-(`ComposerTokenKind.file`, absolute `value`), so the sent prompt is unchanged: `@path` in the text, and a
-`files:[{uri:"file:///…", mention}]` entry with the same UTF-16 range.
+**Alexandre, 26/10: arquivos saem do `@`; 28/10: o gatilho de arquivos passa de `!` para `&`.** `@` keeps sessions,
+apps, agents and references and does not list files or call `/api/fs/find`. `&` lists only files, with the same
+panel, icons, path styling, ranking and 20-result server search the `@` file section had. Choosing a file inserts the
+same `@path` token as before (`ComposerTokenKind.file`, absolute `value`), so the sent prompt is unchanged: `@path` in
+the text, and a `files:[{uri:"file:///…", mention}]` entry with the same UTF-16 range. `!` is plain text again.
 
-`!` opens the panel only at the start of the text or right after whitespace or a line break (including a paste or a
-restored draft that puts the caret there). After a letter, a digit, punctuation, a bracket or quote, an emoji or a
-token, it is prose: "Pode arrumar!", "ok!", "Sério?!", "👍!" and dictation never open anything. `!!` and `!=` stay
-prose as well, so "Olá !!" and "a != b" do not open a list. Space, Escape and a tap outside dismiss it as for `@`.
+`&` opens the panel only at the start of the text or right after whitespace or a line break (including a paste or a
+restored draft that puts the caret there). Glued to a letter, digit, punctuation, a bracket or quote, an emoji or a
+token, it is prose: `R&D`, `P&G`, `AT&T`, `?a=1&b=2`, `texto&amp;`, `👍&` and dictation never open anything. `&&` and
+`&=` stay prose too, so `a && b` does not open a list. A lone `&` followed by a space (`Tom & Jerry`, `arroz & feijão`)
+behaves like a lone `@`: the space ends the query, so the panel closes without inserting anything and the text stays
+as typed. Typed continuously, the 180 ms debounce means the list never even appears; after a pause it shows briefly
+and closes on the space. Space, Escape and a tap outside dismiss it as for `@`.
 
-The iOS app has no shell mode (the web's `!` on an empty composer, `app-custom/src/composer/suggestions/machine.ts`,
-is not ported and the TUI's is its own), so `!` at the start opens files. The trigger lives in OpenCodeKit's
+The iOS app has no shell mode, and `&` has no other meaning in the composer. The trigger lives in OpenCodeKit's
 `ComposerTrigger`/`ComposerSources`, which only this app uses; the web, TUI and server are unchanged. A typed but
-unchosen `!text` is sent as plain text, as before.
+unchosen `&text` is sent as plain text.
 
-`ComposerEditingUITests/testBangListsFilesAndAtDoesNot` (fixture) and
-`ComposerCaseUITests/testBangSendsTheFileReferenceAtNoLongerLists` (live; `test-composer-case.py` then checks the
-sent message's `file://…/README.md` reference on the server) cover it in both themes.
+`ComposerEditingUITests/testAmpersandListsFilesAndAtDoesNot` (fixture) and
+`ComposerCaseUITests/testAmpersandSendsTheFileReferenceAtNoLongerLists` (live; `test-composer-case.py` then checks the
+sent message's `file://…/README.md` reference, mention range and text on the server) cover it in both themes.
+
+### Pasted images — 28 October
+
+**Alexandre, 28/10: colar uma imagem no compositor vira anexo.** The keyboard's "Foto · Colar de …" suggestion,
+**Colar** in the edit menu and ⌘V all call the editor's `paste(_:)`, which only read the composer's own token format
+and plain text, so an image did nothing; the plain-text view also did not offer Colar for an image or accept a dropped
+one. `ComposerInputView` now sends image items to `ConversationStore.importImages`, the "+" menu's
+`importAttachment` path (25 MiB draft limit, HEIC/oversize conversion, thumbnail chip, removal, saved draft), named
+`Imagem-XXXXXX.<ext>`. Several images become several attachments. Text and images together: each pasteboard item is
+classified, image items are attached and the other items' text is inserted (undoable, and it still opens `&`/`@`
+triggers). An image never enters the text: no `U+FFFC`/glyph from paste, `paste(itemProviders:)`, drops (the
+`UITextPasteDelegate` answers `setNoResult()` for images) or `insertAttributedText` (image attachments are imported,
+the text is kept). The paste configuration adds `public.image` to the defaults so Colar and drops accept images.
+
+It applies to every `ComposerEditor`: the conversation (roots, children and chats), **Nova sessão**, the master
+session and the quote comment sheet (whose attachments travel with the comment). Editors without attachments (the
+`/btw` side question, the composer fixture) keep ignoring images.
+
+`ComposerEditingTests` covers menu/⌘V paste with text and several images, undo, item providers, the drop delegate,
+rich insertions and the import flow. After `build-for-testing`, `script/test-paste-image.py` (same environment as
+`test-composer-case.py`) runs `ComposerPasteImageUITests` against an owned conversation: Colar with two images, ⌘V
+with one more and a real send, the comment sheet, and the keyboard suggestion, which the simulator offers after the
+test runner copies an image (its bar is outside the app's accessibility tree, so the test taps above the keys). The
+script then checks the sent messages' image parts on the server.
 
 ### Composer editing stability — 23 October
 
@@ -959,7 +995,8 @@ Tables are native, horizontally scrollable grids with header styling, column ali
 CSV/TSV/Markdown copy and CSV/Markdown export through Files. With wrapping on, `MarkdownTable.columnWidths` gives each
 column at least its longest word (up to 240 pt, so a URL may still break) and water-fills the remaining width: words
 and numbers break only between words, and when the minimums exceed the screen the table scrolls horizontally from its
-leading edge. Short inline code in prose (up to half a line) never breaks inside, so `/proventos` or `--all-pages`
+leading edge. The grid lines are layers of a content subview, so they scroll with the cells; the rounded outer border
+belongs to the viewport and stays fixed. Short inline code in prose (up to half a line) never breaks inside, so `/proventos` or `--all-pages`
 moves to the next line whole; table cells and longer spans wrap as before. Code cards retain one selectable TextKit 2 text view,
 including source-line numbers aligned to wrapped lines, a language header, wrap toggle and copy without the gutter.
 TextKit 2-backed caret geometry is cached; the legacy layout manager is never accessed. Inline-code backgrounds have
@@ -1355,6 +1392,16 @@ space only where it touches a word or token on either side, none against whitesp
 opening bracket. Tokens, quotes and attachments are untouched (the native incremental, undoable insertion). The
 review stays as before, also with earlier text: the message composer opens fullscreen with the caret after the
 inserted text, so the whole message is reread before sending; the comment sheet refocuses the comment.
+
+**Alexandre, 28/10: arrastar o microfone dentro da folha.** A touch that begins on either microphone belongs to it:
+`VoiceRecordingTouchTarget` adds a recognizer that recognizes at touch down, ends with the touch, never cancels or
+delays the view's own touches, and every other recognizer must wait for it to fail. The comment sheet's presentation
+pan and its scroll view therefore can no longer take the upward lock drag (which moved the sheet and cancelled the
+touch, leaving a paused draft); away from the microphone the sheet drags and closes as before. The comment sheet is
+the only sheet with this microphone (Nova sessão and the master are pushed, the fullscreen composer is a cover and
+the side question has none); the conversation composer behaves as before.
+`DictationUITests/testCommentSheetMicrophoneDragUpLocksWithoutMovingTheSheet` covers both microphones and a drag
+elsewhere; the offline dictation fixture now accepts any isolated loopback sandbox port.
 
 To make room, the agent (`build ⌄`, `agent-picker`; `child-agent` text for children and the master) left the control
 row for the line below the card (`ComposerFooter`): before the usage in a conversation, alone in Nova sessão, the
@@ -2060,8 +2107,8 @@ allocation) → `claim` with the draft's fixed Session ID → MCP intents on the
 creation keep the allocation in the protected draft, so a retry claims the same directory instead of allocating another.
 
 `NewSessionChatsTests` (UI) checks the Sessões `+` opens in Chats, Chats stays first in Projeto (also while searching
-"chat"), sends a Luna 6/low prompt, checks Recentes is unchanged and the Chats chip lists the new row and preselects
-Chats. Its second case checks the `+` per chip (repository → that project, Chats → Chats, Todas → Chats or restored
+"chat"), sends a Luna 6/low prompt, checks "Todas" lists a chat row (its second line reads "Chats") and the Chats chip lists
+the new row and preselects Chats. Its second case checks the `+` per chip (repository → that project, Chats → Chats, Todas → Chats or restored
 project work), switching projects and Chats in the selector, and an emptied draft. Run it against an isolated sandbox
 with two selected projects (`OPENCODE_TEST_CHATS_PROJECT`, default `demo`, and `OPENCODE_TEST_CHATS_OTHER_PROJECT`)
 and an empty or chat new-session draft; it creates one real chat per run. `script/test-new-session.py` accepts
@@ -4149,12 +4196,12 @@ the intended two tasks. The root shell, queue, B's permission and D's question a
 - `ComposerDocument` / `ComposerSpan` model the plain display text plus typed token ranges in UTF-16. The TextKit 2
   editor retains encoded token attributes, snaps the caret out of tokens and deletes an intersected token as a unit.
   Raw trigger text remains plain text. `ComposerTrigger` recognizes word boundaries; `/` is only active at offset 0,
-  and `!` only at offset 0 or after whitespace.
+  and `&` only at offset 0 or after whitespace.
   Space, Escape and a tap in the transcript dismiss suggestions. Trigger queries disable autocorrection,
   autocapitalization and predictive suggestions; prose restores the keyboard defaults. Unselected correction
   ranges cannot replace a token.
 - `ComposerSources` merges recent root sessions, mentionable agents and visible references for `@` (files moved to
-  `!` on 26/10); supported
+  `&` on 26–28/10); supported
   local commands plus backend commands and noncolliding slash skills for `/`; skills for `$`; project-over-global
   case-insensitive snippets (including aliases) for `#`. File/session searches debounce 180 ms and cancel stale reads.
   The glass panel highlights the first result, groups by source and has explicit empty/error states. Catalog
@@ -4217,7 +4264,7 @@ Token backgrounds use attributed text highlights rather than a separately drawn 
   Both TextKit subclasses use the designated initializer: UIKit's `textViewUsingTextLayoutManager` factory bypasses
   Swift subclass property defaults. The designated initializer retains the platform's TextKit 2 default.
 - **Comentar** presents a native sheet with a read-only passage, token-capable comment editor, Concluir and Remover.
-  In comments, `@`, `!`, `$`, and `#` work as in the main composer; `/` does not, as in the web.
+  In comments, `@`, `&`, `$`, and `#` work as in the main composer; `/` does not, as in the web.
   A sandbox UI/server check selects a file, Explore, the fixture skill and `#resumo` in the real comment editor,
   concludes, relaunches, then sends with a short main text/file mention. The comment's file/agent/skill arrive in
   structured arrays without main-text ranges; the main file keeps UTF-16 range 33–47. The model-facing `User comment:`
@@ -4227,7 +4274,7 @@ Token backgrounds use attributed text highlights rather than a separately drawn 
   `Citações · N` is collapsed by default above the composer card and expands to edit/remove individual quotes.
   Quotes survive relaunch through `DraftSnapshot` (old wave-3 snapshots decode with an empty quote array), restore
   from queued messages, count as sendable content on their own, and clear only after successful submission.
-  Comments support the existing `@`, `!`, `$` and `#` suggestions; there is no separate binary-attachment picker in a comment.
+  Comments support the existing `@`, `&`, `$` and `#` suggestions; there is no separate binary-attachment picker in a comment.
 - `PromptRequest(document:…quotes:)` emits the web's `metadata.quotes` and `commentPrompt` ComposerPart shapes, keeps
   `displayText`/`comments:[]`, and appends `Comments on earlier assistant messages:` after the main text/context.
   Comment file/agent/skill tokens travel without `mention` ranges; main offsets remain untouched. Snippets expand

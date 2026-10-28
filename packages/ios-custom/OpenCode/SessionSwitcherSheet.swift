@@ -92,6 +92,8 @@ struct SessionSwitcherSheet: View {
           .listRowSeparator(.hidden).listRowBackground(theme.color(.background))
         }
         .listStyle(.plain)
+        // Chats and repository sessions share this list, so chats use the shared chat avatar.
+        .environment(\.sessionRowsMixChats, true)
         .scrollContentBackground(.hidden).background(theme.color(.background))
         #if os(iOS)
         .scrollEdgeEffectStyle(.hard, for: .top)
