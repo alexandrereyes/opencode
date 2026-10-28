@@ -9,6 +9,7 @@ import UserNotifications
 @MainActor final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
   static let shared = MacNotifications()
   private var authorized: Bool?
+  private var posted: UUID?
 
   /// Asks once per launch, the first time there is something to notify.
   private func authorize() async -> Bool {
@@ -25,6 +26,8 @@ import UserNotifications
 
   func post(_ message: SessionAlertCenter.Message, server: URL) {
     guard !MacLaunch.fixture, !NSApp.isActive else { return }
+    guard posted != message.id else { return }
+    posted = message.id
     let notification = SessionAlertNotification(title: message.session.displayTitle, content: message.content)
     let content = UNMutableNotificationContent()
     content.title = notification.title
@@ -52,11 +55,17 @@ import UserNotifications
     await MainActor.run {
       NSApp.activate(ignoringOtherApps: true)
       let runtime = MacRuntime.shared
-      guard let store = runtime.store, server == nil || store.client.configuration.url.absoluteString == server else {
+      if let store = runtime.store, let server, store.client.configuration.url.absoluteString != server {
         return
       }
-      store.alerts.openingSession()
-      store.conversationPath = [.init(id: id)]
+      runtime.store?.alerts.openingSession()
+      if let front = runtime.front {
+        front.select(id)
+        front.window?.makeKeyAndOrderFront(nil)
+      } else {
+        runtime.pendingNotification = (id, server)
+        runtime.openMainWindow?()
+      }
     }
   }
 

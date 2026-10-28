@@ -1,3 +1,4 @@
+import AppIntents
 import OpenCodeKit
 import SwiftUI
 
@@ -14,13 +15,15 @@ struct OpenCodeMacApp: App {
   }
 
   var body: some Scene {
-    WindowGroup("OpenCode", id: "main") {
-      MacRoot(runtime: runtime)
+    WindowGroup("OpenCode", id: "main", for: MacWindowTarget.self) { $target in
+      MacRoot(runtime: runtime, target: target)
+    } defaultValue: {
+      MacWindowTarget()
     }
     .defaultSize(width: 1500, height: 940)
     // One thin strip level with the window buttons, like the approved option B.
     .windowToolbarStyle(.unifiedCompact(showsTitle: false))
-    .commands { MacCommands(runtime: runtime) }
+    .commands { MacCommands() }
 
     // A resource opens in its own window, like the iPhone's full-screen viewer.
     WindowGroup("Recurso", id: "resource", for: String.self) { $id in
@@ -64,12 +67,14 @@ struct MacThemed<Content: View>: View {
 }
 
 private struct MacRoot: View {
+  @Environment(\.openWindow) private var openWindow
   let runtime: MacRuntime
+  let target: MacWindowTarget
   var body: some View {
     MacThemed(runtime: runtime) {
       Group {
         if let store = runtime.store, runtime.appliedRevision == runtime.servers.revision {
-          MacWindow(store: store, runtime: runtime).id(runtime.identity)
+          MacWindowScene(app: runtime, store: store, target: target).id(runtime.identity)
         } else if let error = runtime.error {
           ContentUnavailableView {
             Label("Credenciais indisponíveis", systemImage: "key")
@@ -85,6 +90,37 @@ private struct MacRoot: View {
       // and AppKit aborts ("more Update Constraints in Window passes than there are views").
       .frame(minHeight: 620)
       .task(id: runtime.servers.revision) { await runtime.prepare() }
+      .onAppear { runtime.openMainWindow = { openWindow(id: "main", value: MacWindowTarget()) } }
+    }
+  }
+}
+
+private struct MacWindowScene: View {
+  let app: MacRuntime
+  let store: SessionStore
+  let target: MacWindowTarget
+  @State private var runtime: MacWindowRuntime?
+  var body: some View {
+    Group {
+      if let runtime {
+        MacWindow(store: store, runtime: runtime)
+      } else {
+        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    }
+    .task {
+      guard runtime == nil else { return }
+      let next = MacWindowRuntime(app: app, id: target.id, selection: app.initialSelection)
+      if let id = target.sessionID, next.selection.sessionID == nil || MacLaunch.fixture { next.select(id) }
+      if let pending = app.pendingNotification {
+        if pending.server == nil || pending.server == store.client.configuration.url.absoluteString {
+          next.select(pending.id)
+        }
+        app.pendingNotification = nil
+      }
+      app.windows[target.id] = next
+      app.syncShown()
+      runtime = next
     }
   }
 }
@@ -94,37 +130,40 @@ private struct MacRoot: View {
 /// the LLM proxy window in Janela.
 private struct MacCommands: Commands {
   @Environment(\.openWindow) private var openWindow
-  let runtime: MacRuntime
+  @FocusedValue(\.macWindow) private var runtime
 
   var body: some Commands {
     CommandGroup(replacing: .newItem) {
-      Button("Nova sessão") { runtime.newSession() }
+      Button("Nova sessão") { runtime?.newSession() }
         .keyboardShortcut("n", modifiers: .command)
-        .disabled(runtime.store?.preferences == nil)
-      Button("Nova janela") { openWindow(id: "main") }
+        .disabled(runtime?.store?.preferences == nil)
+      Button("Nova janela") { openWindow(id: "main", value: MacWindowTarget()) }
         .keyboardShortcut("n", modifiers: [.command, .option])
       Divider()
-      Button("Atualizar sessões") { Task { await runtime.store?.reload() } }
+      Button("Atualizar sessões") { Task { await runtime?.store?.reload() } }
         .keyboardShortcut("r", modifiers: .command)
     }
     CommandGroup(after: .sidebar) {
-      Button(runtime.contextVisible ? "Ocultar contexto" : "Mostrar contexto") { runtime.contextVisible.toggle() }
-        .keyboardShortcut("i", modifiers: [.command, .option])
-      Button("Arquivos") { runtime.showFiles() }
-        .keyboardShortcut("f", modifiers: [.command, .shift])
-      if let store = runtime.store {
-        Picker("Filtrar sessões", selection: Binding(get: { store.filter }, set: { store.filter = $0 })) {
-          ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
+      if let runtime {
+        Button(runtime.contextVisible ? "Ocultar contexto" : "Mostrar contexto") { runtime.contextVisible.toggle() }
+          .keyboardShortcut("i", modifiers: [.command, .option])
+        Button("Arquivos") { runtime.showFiles() }
+          .keyboardShortcut("f", modifiers: [.command, .shift])
+        if let store = runtime.store {
+          Picker("Filtrar sessões", selection: Binding(get: { store.filter }, set: { store.filter = $0 })) {
+            ForEach(SessionFilter.allCases) { Text($0.rawValue).tag($0) }
+          }
         }
+        Divider()
       }
-      Divider()
     }
     CommandGroup(after: .textEditing) {
-      Button("Buscar na conversa") { NotificationCenter.default.post(name: .macSearchConversation, object: nil) }
+      Button("Buscar na conversa") { NotificationCenter.default.post(name: .macSearchConversation, object: runtime?.id) }
         .keyboardShortcut("f", modifiers: .command)
+        .disabled(runtime == nil)
     }
     CommandMenu("Sessão") {
-      if let store = runtime.store {
+      if let runtime, let store = runtime.store {
         MacSessionMenuItems(store: store, runtime: runtime, shortcuts: true)
         Divider()
         Button("Selecionar todas as sessões") {
@@ -141,23 +180,24 @@ private struct MacCommands: Commands {
       }
     }
     CommandMenu("Ir") {
-      Button("Trocar de sessão…") { runtime.switcherVisible = true }
-        .keyboardShortcut("k", modifiers: .command)
-        .disabled(runtime.store == nil)
-      Divider()
-      // ⌘[ is the Mac's Back (Finder, Safari, Xcode): from a subagent to the session that started it. The list's
-      // neighbors take ⌥⌘↑/⌥⌘↓, like moving up and down Sessões.
-      Button("Voltar à sessão principal") { runtime.backToParent() }
-        .keyboardShortcut("[", modifiers: .command)
-        .disabled(runtime.selection.childID == nil)
-      Button("Sessão anterior") { runtime.selectNeighbor(-1) }
-        .keyboardShortcut(.upArrow, modifiers: [.command, .option])
-      Button("Próxima sessão") { runtime.selectNeighbor(1) }
-        .keyboardShortcut(.downArrow, modifiers: [.command, .option])
-      Divider()
-      Button("Sessão mestra") { runtime.openMaster() }
-        .keyboardShortcut("m", modifiers: [.command, .shift])
-        .disabled(runtime.store?.masterAvailability != .available)
+      if let runtime {
+        Button("Trocar de sessão…") { runtime.switcherVisible = true }
+          .keyboardShortcut("k", modifiers: .command)
+          .disabled(runtime.store == nil)
+        Divider()
+        // ⌘[ is the Mac's Back; the list's neighbors take ⌥⌘↑/⌥⌘↓.
+        Button("Voltar à sessão principal") { runtime.backToParent() }
+          .keyboardShortcut("[", modifiers: .command)
+          .disabled(runtime.selection.childID == nil)
+        Button("Sessão anterior") { runtime.selectNeighbor(-1) }
+          .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+        Button("Próxima sessão") { runtime.selectNeighbor(1) }
+          .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+        Divider()
+        Button("Sessão mestra") { runtime.openMaster() }
+          .keyboardShortcut("m", modifiers: [.command, .shift])
+          .disabled(runtime.store?.masterAvailability != .available)
+      }
     }
   }
 }

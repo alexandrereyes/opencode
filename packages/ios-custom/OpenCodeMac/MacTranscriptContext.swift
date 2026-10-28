@@ -8,6 +8,7 @@ import SwiftUI
 /// only for the values it read.
 @MainActor @Observable final class MacTranscriptContext {
   let store: ConversationStore
+  let memory: TranscriptMemory
   let client: OpenCodeClient
   var theme = AppTheme.selected
   /// Space on each side of the content column: the transcript reads at most 760 points wide, centered.
@@ -32,8 +33,9 @@ import SwiftUI
   @ObservationIgnored var blockLookup: (TranscriptPart) -> [MarkdownBlock]? = { _ in nil }
   @ObservationIgnored var rasterLookup: (String) -> [ResponseFormulaKey: ResponseFormulaRaster] = { _ in [:] }
 
-  init(store: ConversationStore, client: OpenCodeClient) {
+  init(store: ConversationStore, memory: TranscriptMemory, client: OpenCodeClient) {
     self.store = store
+    self.memory = memory
     self.client = client
   }
 

@@ -2,50 +2,25 @@ import Observation
 import OpenCodeKit
 import SwiftUI
 
-/// App-wide state of the Mac app: the server, the appearance, the Sessões store and what the window shows.
+/// App services have one owner regardless of the number of windows. Window presentation lives in MacWindowRuntime.
 @MainActor @Observable final class MacRuntime {
   static let shared = MacRuntime()
-  /// The Mac app talks to this Mac's own server by default; Configurações can point it elsewhere.
   static let localURL = URL(string: "http://127.0.0.1:4096")!
-
   let servers = ServerStore(launchOverride: .override(), builtinURL: MacRuntime.localURL)
   let appearance = AppearanceSettings()
   var store: SessionStore?
   var identity = UUID()
   var appliedRevision = -1
   var error: String?
-  /// The third column (Contexto) can be hidden; the choice survives relaunches.
-  var contextVisible = UserDefaults.standard.object(forKey: "OpenCodeMacContextVisible") as? Bool ?? true {
-    didSet { UserDefaults.standard.set(contextVisible, forKey: "OpenCodeMacContextVisible") }
-  }
-  var selection = MacSelection() {
-    didSet {
-      syncShown()
-      if let store, !MacLaunch.fixture { MacSelection.save(selection, server: store.client.configuration.url) }
-    }
-  }
-
-  /// The session on screen stays silent only while the app is in front; in the background its alerts become
-  /// notifications too.
-  func syncShown() {
-    store?.shownSessionID = NSApp.isActive ? selection.childID ?? selection.sessionID : nil
-  }
-  /// The Sessões column's selection mode (⌘-click or Selecionar), with its batch actions.
-  var sessionSelection = SessionSelection()
-  /// A batch action asked from the menu bar, carried out by the Sessões column.
-  var bulkRequest: MacBulkRequest?
-  /// The Nova sessão sheet: from Sessões, from a session (inheriting its checkout and model) or for the master.
-  var newSessionRequest: MacNewSessionRequest?
-  /// The title bar's `…` and the Sessão menu ask the chat column to rename or delete the selected session.
-  var renameRequest: SessionRow?
-  var deleteRequest: Session?
-  /// The title's quick switcher (⌘K or a click on the title).
-  var switcherVisible = false
-  /// Archiving from the `…` or the Sessão menu asks for confirmation in the window.
-  var archiveRequest: SessionRow?
-  /// What the LLM proxy window shows; a quota ring sets its provider before opening it.
   var proxyPane: SubscriptionPane? = MacProxyLaunch.pane ?? .provider(.codex)
+  var windows: [UUID: MacWindowRuntime] = [:]
+  weak var front: MacWindowRuntime?
+  var initialSelection: MacSelection?
+  var pendingNotification: (id: String, server: String?)?
+  @ObservationIgnored var openMainWindow: (() -> Void)?
   @ObservationIgnored private var building: Task<Void, Never>?
+  @ObservationIgnored private var events: Task<Void, Never>?
+  @ObservationIgnored private var conversations: [String: (count: Int, task: Task<Void, Never>)] = [:]
 
   func prepare() async {
     if let building { await building.value }
@@ -57,18 +32,22 @@ import SwiftUI
   }
 
   private func rebuild() async {
+    events?.cancel()
+    conversations.values.forEach { $0.task.cancel() }
+    conversations.removeAll()
+    windows.values.forEach { $0.close() }
+    windows.removeAll()
+    front = nil
     await store?.stop()
-    sessionSelection = SessionSelection()
-    newSessionRequest = nil
+    initialSelection = nil
     do {
       #if DEBUG
       if ScrollFixtures.mode == "conversation" {
-        // The iPhone's offline scroll fixture: no server, the shared store loads the bundled conversation.
         let next = SessionStore(configuration: MacFixture.configuration, acceptsLaunchSession: false,
           client: .inMemory(configuration: MacFixture.configuration, answer: { _ in nil }))
         ScrollFixtures.prepare(next)
         store = next
-        selection = MacSelection(sessionID: ScrollFixtures.sessionID)
+        initialSelection = MacSelection(sessionID: ScrollFixtures.sessionID)
         appliedRevision = servers.revision
         identity = UUID()
         return
@@ -76,75 +55,69 @@ import SwiftUI
       if let fixture = MacFixture.current {
         let client = fixture.client()
         store = SessionStore(configuration: MacFixture.configuration, acceptsLaunchSession: false, client: client)
-        // The fixture has no resource hub: the viewer shows the drawn snapshot as its live frame.
         ResourceViewerModel.fixtureFrame = { resource in
           guard let data = try? await client.resourceSnapshot(resource.id, maxWidth: 1200).image else { return nil }
           return NSImage(data: data)
         }
-        selection = fixture.selection
-        appliedRevision = servers.revision
-        identity = UUID()
-        return
+        initialSelection = fixture.selection
+      } else {
+        store = SessionStore(configuration: try servers.configuration(), acceptsLaunchSession: false)
       }
+      #else
+      store = SessionStore(configuration: try servers.configuration(), acceptsLaunchSession: false)
       #endif
-      let configuration = try servers.configuration()
-      store = SessionStore(configuration: configuration, acceptsLaunchSession: false)
-      selection = MacSelection.saved(server: configuration.url) ?? MacSelection()
       appliedRevision = servers.revision
       identity = UUID()
       error = nil
+      if let store {
+        events = Task { await store.run() }
+        observeServices(store)
+      }
     } catch {
       store = nil
       self.error = error.localizedDescription
     }
   }
 
-  /// The selected root session's row, when it is one of Sessões' rows (the master is not).
-  var selectedRow: SessionRow? { store?.rows.first { $0.id == selection.sessionID } }
-
-  func showFiles(at path: String? = nil, file: String? = nil) {
-    contextVisible = true
-    selection.files = MacSelection.Files(folder: path, file: file)
+  private func observeServices(_ store: SessionStore) {
+    guard self.store === store else { return }
+    withObservationTracking {
+      if let message = store.alerts.message {
+        MacNotifications.shared.post(message, server: store.client.configuration.url)
+      }
+      MacNotifications.shared.badge(store.requestCount)
+      if let id = store.conversationPath.last?.id {
+        Task { @MainActor [weak self] in
+          self?.front?.select(id)
+          store.conversationPath = []
+        }
+      }
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in self?.observeServices(store) }
+    }
   }
 
-  /// Nova sessão from Sessões (the chip filter decides the project, like the iPhone's `+`).
-  func newSession() {
-    newSessionRequest = MacNewSessionRequest(origin: nil, startInChats: true)
+  func syncShown() {
+    store?.shownConversations = windows.values.flatMap { [$0.selection.sessionID, $0.selection.childID].compactMap { $0 } }
+    store?.shownSessionID = NSApp.isActive ? front?.selection.childID ?? front?.selection.sessionID : nil
   }
 
-  /// Nova sessão from a session: its project, checkout and model, like the iPhone's conversation menu.
-  func newSession(from id: String) {
-    guard let store, let session = store.rows.first(where: { $0.id == id })?.session else { return newSession() }
-    let origin = NewSessionOrigin(
-      session: session, projects: store.projects, chatRoot: store.chatRoot, model: session.model)
-    newSessionRequest = MacNewSessionRequest(origin: origin, startInChats: false)
-  }
-
-  /// The current master in the middle column, or Nova sessão in its master mode when there is none yet.
-  func openMaster() {
-    guard let store, store.masterAvailability == .available else { return }
-    if let id = store.masterID {
-      selection = MacSelection(sessionID: id, master: true)
-      Task { await store.verifyMaster() }
+  /// Only one event consumer per conversation, even when it is visible in two windows.
+  func mount(_ conversation: ConversationStore) {
+    if var entry = conversations[conversation.id] {
+      entry.count += 1
+      conversations[conversation.id] = entry
       return
     }
-    newSessionRequest = MacNewSessionRequest(origin: nil, startInChats: false, master: true)
+    conversations[conversation.id] = (1, Task { await conversation.run() })
   }
 
-  /// From a subagent back to the session that started it (⌘[ or the chat's `‹`): its parent subagent, else the root.
-  func backToParent() {
-    guard let child = selection.childID else { return }
-    let parent = store?.liveConversation(child)?.session?.parentID
-    selection.childID = parent == nil || parent == selection.sessionID ? nil : parent
-  }
-
-  /// The previous or next row of Sessões, in the order the column shows them (⌥⌘↑ and ⌥⌘↓).
-  func selectNeighbor(_ offset: Int) {
-    guard let store else { return }
-    let ids = SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now).flatMap(\.rows).map(\.id)
-    if let next = SessionNavigation.neighbor(ids, current: selection.sessionID, offset: offset) {
-      selection = MacSelection(sessionID: next)
-    }
+  func unmount(_ conversation: ConversationStore) {
+    guard var entry = conversations[conversation.id] else { return }
+    entry.count -= 1
+    if entry.count > 0 { conversations[conversation.id] = entry; return }
+    entry.task.cancel()
+    conversations[conversation.id] = nil
   }
 }
 
@@ -157,35 +130,6 @@ struct MacNewSessionRequest: Identifiable {
   var master = false
 }
 
-/// Launch flags the Mac reads once.
 enum MacLaunch {
   static let fixture = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFixture")
-}
-
-/// What the window shows: the selected root session, a subagent opened from Contexto in the middle column,
-/// and the Arquivos view over the Contexto column.
-struct MacSelection: Equatable, Codable {
-  struct Files: Equatable, Codable {
-    /// The folder shown; nil opens the session's checkout root.
-    var folder: String?
-    /// The file selected in the list and shown below it.
-    var file: String?
-  }
-  var sessionID: String?
-  /// A subagent of `sessionID` opened in the middle column.
-  var childID: String?
-  var files: Files?
-  /// The selected session is the Sessão mestra (it is not one of Sessões' rows).
-  var master = false
-
-  /// The window reopens on the session (and subagent, and Arquivos) it showed, per server.
-  static func saved(server: URL) -> MacSelection? {
-    UserDefaults.standard.data(forKey: key(server)).flatMap { try? JSONDecoder().decode(Self.self, from: $0) }
-  }
-
-  static func save(_ selection: MacSelection, server: URL) {
-    UserDefaults.standard.set(try? JSONEncoder().encode(selection), forKey: key(server))
-  }
-
-  private static func key(_ server: URL) -> String { "OpenCodeMacSelection." + server.absoluteString }
 }

@@ -52,7 +52,7 @@ struct MacToolbarIcon: View {
 /// `…` (the session's actions) and Nova sessão, over Contexto or, with Contexto hidden, at the chat's end.
 struct MacSessionActions: View {
   @Bindable var store: SessionStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
 
   var body: some View {
     HStack(spacing: 2) {
@@ -60,7 +60,7 @@ struct MacSessionActions: View {
         MacSessionMenuItems(store: store, runtime: runtime)
         Divider()
         Button("Buscar na conversa", systemImage: "magnifyingglass") {
-          NotificationCenter.default.post(name: .macSearchConversation, object: nil)
+        NotificationCenter.default.post(name: .macSearchConversation, object: runtime.id)
         }
         Button("Arquivos", systemImage: "folder") { runtime.showFiles() }
         Button(runtime.contextVisible ? "Ocultar contexto" : "Mostrar contexto", systemImage: "sidebar.right") {
@@ -89,7 +89,7 @@ struct MacSessionActions: View {
 /// conversation menu and row actions together.
 struct MacSessionMenuItems: View {
   let store: SessionStore
-  let runtime: MacRuntime
+  let runtime: MacWindowRuntime
   /// The menu bar carries the shortcuts; the title bar's copy shows the same items without registering them twice.
   var shortcuts = false
 
@@ -132,7 +132,7 @@ struct MacSessionMenuItems: View {
 struct MacChatTitle: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: SessionStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
   let title: String
   let usage: ContextUsage?
   let running: Bool

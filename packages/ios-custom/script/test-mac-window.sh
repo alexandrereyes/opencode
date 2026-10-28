@@ -19,7 +19,7 @@ derived=${OPENCODE_MAC_DERIVED:-${TMPDIR%/}/opencode/mac-app-work/mac-derived}
 logs=$(mktemp -d "${TMPDIR%/}/opencode/mac-window-stress.XXXXXX")
 xcodebuild -project "$package/OpenCode.xcodeproj" -scheme OpenCodeMac -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$derived" build -quiet
-domain=br.com.alexandrem.opencode.mac.debug.tests
+domain=${OPENCODE_MAC_TEST_DOMAIN:-br.com.alexandrem.opencode.mac.debug.tests}
 copy="$logs/OpenCodeMacTests.app"
 ditto "$derived/Build/Products/Debug/OpenCodeMac.app" "$copy"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $domain" "$copy/Contents/Info.plist"
@@ -34,12 +34,18 @@ failed=0
 for run in $(seq 1 "$runs"); do
   clear_state
   log="$logs/run-$run.log"
+  captures=()
+  if [[ -n "${OPENCODE_MAC_CAPTURES:-}" ]]; then
+    mkdir -p "$OPENCODE_MAC_CAPTURES"
+    captures=(-OpenCodeMacCapture "$OPENCODE_MAC_CAPTURES")
+  fi
   set +e
   timeout $((idle + 240)) "$app" -OpenCodeMacFixture contexto -OpenCodeMacFixtureRoot "$root" \
-    -OpenCodeTheme openchamber-dark -OpenCodeMacStress "$idle" >"$log" 2>&1
+    -OpenCodeTheme openchamber-dark -OpenCodeMacStress "$idle" \
+    "${captures[@]}" >"$log" 2>&1
   code=$?
   set -e
-  if [[ $code -eq 0 ]] && grep -q '^MacStress ok' "$log"; then
+  if [[ $code -eq 0 ]] && grep -q '^MacStress ok' "$log" && grep -q '^MacStress duas janelas independentes ok' "$log"; then
     echo "run $run: ok"
   else
     failed=1

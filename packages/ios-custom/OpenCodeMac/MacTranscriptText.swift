@@ -263,6 +263,8 @@ final class MacResponseTextView: NSTextView {
   var standaloneTheme: AppTheme?
   private var quoteRanges: [(NSRange, Int)] = []
   private var ruleRanges: [NSRange] = []
+  private var quoteMap = QuoteTextMap()
+  private var highlights: [ResponseQuoteHighlight] = []
 
   convenience init() {
     self.init(usingTextLayoutManager: true)
@@ -280,11 +282,41 @@ final class MacResponseTextView: NSTextView {
   }
 
   func show(_ text: NSAttributedString, prose: MarkdownProse, theme: AppTheme) {
+    let selection = quoteMap.original(selectedRange())
     self.prose = prose
-    quoteRanges = zip(prose.segments, prose.ranges).compactMap { $0.quoteDepth > 0 ? ($1, $0.quoteDepth) : nil }
-    ruleRanges = zip(prose.segments, prose.ranges).compactMap { $0.kind == .rule ? $1 : nil }
+    let decorated = NSMutableAttributedString(attributedString: text)
+    highlights = (part.flatMap { context?.responseQuotes($0) } ?? []).compactMap { highlight in
+      let ranges = highlight.ranges.flatMap { ConversationSearch.renderedRanges($0, block: prose.block) }
+      let ending = highlight.ranges.last.map {
+        !ConversationSearch.renderedRanges(NSRange(location: NSMaxRange($0) - 1, length: 1), block: prose.block).isEmpty
+      } ?? false
+      return ranges.isEmpty ? nil : ResponseQuoteHighlight(mark: highlight.mark, ranges: ranges, badge: highlight.badge && ending)
+    }
+    for highlight in highlights {
+      for range in highlight.ranges where NSMaxRange(range) <= decorated.length {
+        decorated.addAttributes([
+          .backgroundColor: theme.nsColor(.quoteHighlight).withAlphaComponent(context?.quotes.active == highlight.mark.id ? 0.28 : 0.12),
+          .underlineStyle: NSUnderlineStyle.single.rawValue,
+          .underlineColor: theme.nsColor(.quoteUnderline).withAlphaComponent(0.4),
+        ], range: range)
+      }
+    }
+    quoteMap = QuoteTextMap(highlights.filter(\.badge).compactMap { highlight in
+      highlight.ranges.last.map { QuoteTextMap.Marker(id: highlight.mark.id, number: highlight.mark.number, offset: NSMaxRange($0)) }
+    })
+    for insertion in quoteMap.insertions {
+      decorated.insert(NSAttributedString(string: String(insertion.marker.number), attributes: [
+        .font: NSFont.systemFont(ofSize: 12, weight: .medium), .baselineOffset: 6,
+        .foregroundColor: theme.nsColor(.quoteBadge),
+      ]), at: insertion.range.location)
+    }
+    quoteRanges = zip(prose.segments, prose.ranges).compactMap { $0.quoteDepth > 0 ? (quoteMap.display($1), $0.quoteDepth) : nil }
+    ruleRanges = zip(prose.segments, prose.ranges).compactMap { $0.kind == .rule ? quoteMap.display($1) : nil }
     selectedTextAttributes = [.backgroundColor: theme.nsColor(.primary).withAlphaComponent(0.28)]
-    if let storage = textStorage, !storage.isEqual(to: text) { replace(storage, with: text) }
+    if let storage = textStorage, !storage.isEqual(to: decorated) {
+      replace(storage, with: decorated)
+      if selection.length > 0, NSMaxRange(selection) <= text.length { setSelectedRange(quoteMap.display(selection)) }
+    }
     needsDisplay = true
   }
 
@@ -343,6 +375,45 @@ final class MacResponseTextView: NSTextView {
     return union
   }
 
+  func quoteTop(_ id: String) -> CGFloat? {
+    highlights.first { $0.mark.quote.id == id }?.ranges.first.flatMap { rect(for: quoteMap.display($0))?.minY }
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    let wasSelected = selectedRange().length > 0
+    let index = characterIndexForInsertion(at: point)
+    let link = index < (textStorage?.length ?? 0) && textStorage?.attribute(.link, at: index, effectiveRange: nil) != nil
+    super.mouseDown(with: event)
+    guard !wasSelected, !link, selectedRange().length == 0, event.clickCount == 1 else { return }
+    if let insertion = quoteMap.insertions.first(where: { rect(for: $0.range)?.insetBy(dx: -5, dy: -5).contains(point) == true }),
+      let mark = highlights.first(where: { $0.mark.id == insertion.marker.id })?.mark {
+      context?.quotes.open?(mark)
+      return
+    }
+    let original = quoteMap.original(NSRange(location: index, length: 0)).location
+    if let mark = highlights.first(where: { $0.ranges.contains { NSLocationInRange(original, $0) } })?.mark {
+      context?.quotes.open?(mark)
+    }
+  }
+
+  override func accessibilityChildren() -> [Any]? {
+    let markers: [NSAccessibilityElement] = quoteMap.insertions.compactMap { insertion in
+      guard let rect = rect(for: insertion.range), let window,
+        let mark = highlights.first(where: { $0.mark.id == insertion.marker.id })?.mark else { return nil }
+      let element = MacQuoteAccessibility()
+      element.setAccessibilityRole(.button)
+      element.setAccessibilityLabel("Citação \(mark.number)")
+      element.setAccessibilityValue(mark.pending ? "rascunho" : "enviada")
+      element.setAccessibilityIdentifier("quote-marker-" + mark.id)
+      element.setAccessibilityParent(self)
+      element.setAccessibilityFrame(window.convertToScreen(convert(rect, to: nil)))
+      element.press = { [weak self] in self?.context?.quotes.open?(mark) }
+      return element
+    }
+    return (super.accessibilityChildren() ?? []) + markers
+  }
+
   override func clicked(onLink link: Any, at charIndex: Int) {
     guard let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:)) else { return }
     if let context { return context.open(url) }
@@ -365,12 +436,12 @@ final class MacResponseTextView: NSTextView {
   override func copy(_ sender: Any?) {
     guard let prose, selectedRange().length > 0 else { return super.copy(sender) }
     NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(prose.block.copyText(in: selectedRange()), forType: .string)
+    NSPasteboard.general.setString(prose.block.copyText(in: quoteMap.original(selectedRange())), forType: .string)
   }
 
   private func quote() -> ChatQuote? {
     guard let prose, let part else { return nil }
-    return ChatQuote.selection(source: part.source, block: prose.block, range: selectedRange(),
+    return ChatQuote.selection(source: part.source, block: prose.block, range: quoteMap.original(selectedRange()),
       messageID: part.messageID, partID: part.partID)
   }
 
@@ -383,6 +454,32 @@ final class MacResponseTextView: NSTextView {
   override func keyDown(with event: NSEvent) {
     if context?.scrollKey(event) == true { return }
     super.keyDown(with: event)
+  }
+}
+
+private final class MacQuoteAccessibility: NSAccessibilityElement {
+  var press: () -> Void = {}
+  override func accessibilityPerformPress() -> Bool { press(); return true }
+}
+
+/// Code and table cells keep the same source mapping, selection and numbered quote actions as prose.
+struct MacSelectableBlock: NSViewRepresentable {
+  let block: MarkdownBlock
+  let part: TranscriptPart
+  let transcript: MacTranscriptContext
+  var tableHeader = false
+  func makeNSView(context: Context) -> MacResponseTextView { MacResponseTextView() }
+  func updateNSView(_ view: MacResponseTextView, context: Context) {
+    view.context = transcript
+    view.part = part
+    // Reading this observable value updates this cell only when its marks change.
+    _ = transcript.quotes
+    view.show(MacResponseTextStyle.text(block, theme: transcript.theme, tableHeader: tableHeader),
+      prose: MarkdownProse([block]), theme: transcript.theme)
+  }
+  func sizeThatFits(_ proposal: ProposedViewSize, nsView: MacResponseTextView, context: Context) -> CGSize? {
+    guard let width = proposal.width, width > 0 else { return nil }
+    return CGSize(width: width, height: nsView.fittingHeight(width: width))
   }
 }
 

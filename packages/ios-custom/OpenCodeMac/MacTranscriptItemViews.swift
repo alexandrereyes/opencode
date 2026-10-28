@@ -150,25 +150,17 @@ private struct MacPromptRow: View {
     let shown = expanded || !folds
     let attachments = MacPromptAttachments(message)
     return VStack(alignment: .trailing, spacing: 8) {
-      if shown {
-        ForEach(message.quotes) { quote in
-          MacQuoteCard(quote: quote).frame(maxWidth: 520)
-        }
-      }
-      if !text.isEmpty {
-        Text(text)
-          .appFont(.message)
-          .foregroundStyle(bubbleTheme.color(.userBubbleText))
-          .lineLimit(shown ? nil : 2)
-          .textSelection(.enabled)
-          .multilineTextAlignment(.leading)
-          .frame(maxHeight: shown ? context.viewport * 0.4 : nil, alignment: .top)
-          .contentShape(Rectangle())
-          .onTapGesture { tapped() }
-      } else if !shown, !message.quotes.isEmpty {
-        Label(message.quotes.map { $0.comment.isEmpty ? $0.text : $0.comment }.joined(separator: " · "),
-          systemImage: "text.quote")
-          .appFont(.message).lineLimit(2).foregroundStyle(bubbleTheme.color(.userBubbleSecondary))
+      if shown && (!message.quotes.isEmpty || MacPromptRow.truncates(text, width: bubbleWidth)) {
+        MacCappedScroll(maxHeight: context.viewport * 0.4) {
+          VStack(alignment: .leading, spacing: 8) {
+            ForEach(message.quotes) { quote in
+              MacQuoteCard(quote: quote, source: { context.quotes.source?(quote) })
+            }
+            promptText(shown: true)
+          }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(width: bubbleWidth)
+      } else {
+        promptText(shown: shown)
       }
       if !attachments.files.isEmpty {
         HStack(spacing: 6) {
@@ -189,7 +181,7 @@ private struct MacPromptRow: View {
       }
       if folds {
         Button(expanded ? "Mostrar menos" : "Mostrar mensagem completa") {
-          context.store.memory.setBubble(message.id, expanded: !expanded)
+          context.memory.setBubble(message.id, expanded: !expanded)
         }
         .buttonStyle(.plain).appFont(.caption, weight: .medium)
         .foregroundStyle(bubbleTheme.color(.userBubbleSecondary))
@@ -197,6 +189,17 @@ private struct MacPromptRow: View {
     }
     .padding(.horizontal, 14).padding(.vertical, 10)
     .background(bubbleTheme.color(.userBubble), in: RoundedRectangle(cornerRadius: 16))
+  }
+
+  @ViewBuilder private func promptText(shown: Bool) -> some View {
+    if !text.isEmpty {
+      Text(text).appFont(.message).foregroundStyle(bubbleTheme.color(.userBubbleText))
+        .lineLimit(shown ? nil : 2).textSelection(.enabled).multilineTextAlignment(.leading)
+        .contentShape(Rectangle()).onTapGesture { tapped() }
+    } else if !shown, !message.quotes.isEmpty {
+      Label(message.quotes.map { $0.comment.isEmpty ? $0.text : $0.comment }.joined(separator: " · "), systemImage: "text.quote")
+        .appFont(.message).lineLimit(2).foregroundStyle(bubbleTheme.color(.userBubbleSecondary))
+    }
   }
 
   @ViewBuilder private var meta: some View {
@@ -233,7 +236,7 @@ private struct MacPromptRow: View {
   private func tapped() {
     if context.pinned == "prompt:" + message.id, context.revealTurn(message.id) { return }
     if folds, !expanded {
-      context.store.memory.setBubble(message.id, expanded: true)
+      context.memory.setBubble(message.id, expanded: true)
     }
   }
 
@@ -251,6 +254,7 @@ private struct MacPromptRow: View {
 private struct MacQuoteCard: View {
   @Environment(\.appTheme) private var theme
   let quote: ChatQuote
+  let source: () -> Void
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
       Label("Citação", systemImage: "quote.bubble").appFont(.caption).lineLimit(1)
@@ -258,6 +262,7 @@ private struct MacQuoteCard: View {
       if !quote.comment.isEmpty {
         Text(quote.comment).appFont(.secondary).foregroundStyle(theme.color(.userBubbleText))
       }
+      Button("Ir ao trecho citado", action: source).buttonStyle(.plain).appFont(.caption)
     }
     .foregroundStyle(theme.color(.userBubbleSecondary))
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -378,10 +383,10 @@ private struct MacResponseBlock: View {
       if MarkdownCodeProjection.language(language) == "mermaid" || language?.lowercased() == "mermaid" {
         MacDiagram(source: block.text, block: block)
       } else {
-        MacCodeBlock(block: block, language: language)
+        MacCodeBlock(block: block, language: language, part: part, context: context)
       }
     case .table:
-      MacTable(block: block)
+      MacTable(block: block, part: part, context: context)
     case .formula:
       if let formula = block.runs.first?.formula {
         MacFormula(formula: formula, raster: context.rasters(part)[ResponseFormulaKey(formula)])
@@ -452,6 +457,8 @@ struct MacCodeBlock: View {
   @Environment(\.appTheme) private var theme
   let block: MarkdownBlock
   let language: String?
+  var part: TranscriptPart?
+  var context: MacTranscriptContext?
   @State private var copied = false
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -474,10 +481,15 @@ struct MacCodeBlock: View {
       .padding(.horizontal, 12).padding(.vertical, 6)
       Rectangle().fill(theme.color(.codeBorder)).frame(height: 0.7)
       ScrollView(.horizontal) {
-        Text(MacResponseTextStyle.attributed(block.codeDisplay, theme: theme))
-          .textSelection(.enabled)
-          .fixedSize(horizontal: true, vertical: true)
-          .padding(12)
+        if let part, let context {
+          MacSelectableBlock(block: block.codeDisplay, part: part, transcript: context)
+            .frame(width: max(200, context.width - context.inset * 2 - 24,
+              CGFloat(block.codeDisplay.text.split(separator: "\n").map(\.count).max() ?? 0) * 8))
+            .padding(12)
+        } else {
+          Text(MacResponseTextStyle.attributed(block.codeDisplay, theme: theme))
+            .textSelection(.enabled).fixedSize(horizontal: true, vertical: true).padding(12)
+        }
       }
       .scrollIndicators(.automatic)
     }
@@ -489,6 +501,8 @@ struct MacCodeBlock: View {
 struct MacTable: View {
   @Environment(\.appTheme) private var theme
   let block: MarkdownBlock
+  var part: TranscriptPart?
+  var context: MacTranscriptContext?
   var body: some View {
     let table = block.table
     let rows = table?.rows ?? []
@@ -497,7 +511,7 @@ struct MacTable: View {
         ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
           GridRow {
             ForEach(Array(row.enumerated()), id: \.offset) { column, runs in
-              MacTableCell(block: block, runs: runs, alignment: alignment(column), header: index == 0)
+              MacTableCell(block: block, runs: runs, alignment: alignment(column), header: index == 0, part: part, context: context)
             }
           }
           if index < rows.count - 1 {
@@ -523,14 +537,23 @@ private struct MacTableCell: View {
   let runs: [MarkdownRun]
   let alignment: MarkdownTable.Alignment
   let header: Bool
+  var part: TranscriptPart?
+  var context: MacTranscriptContext?
   var body: some View {
     let frame: Alignment = switch alignment {
     case .center: .center
     case .trailing: .trailing
     case .leading: .leading
     }
-    Text(MacResponseTextStyle.attributed(block.cell(runs, alignment: alignment), theme: theme, tableHeader: header))
-      .textSelection(.enabled)
+    Group {
+      if let part, let context {
+        MacSelectableBlock(block: block.cell(runs, alignment: alignment), part: part, transcript: context, tableHeader: header)
+          .frame(width: min(320, max(80, CGFloat(runs.map(\.text).joined().count) * 7)))
+      } else {
+        Text(MacResponseTextStyle.attributed(block.cell(runs, alignment: alignment), theme: theme, tableHeader: header))
+          .textSelection(.enabled)
+      }
+    }
       .frame(minWidth: 60, maxWidth: 360, alignment: frame)
       .padding(.horizontal, 10).padding(.vertical, 6)
       .background(header ? theme.color(.tableSurface) : Color.clear)
@@ -571,11 +594,11 @@ private struct MacDetails: View {
   let part: TranscriptPart
   let context: MacTranscriptContext
   private var key: String { "details:\(part.partID):\(block.id)" }
-  private var open: Bool { context.store.memory.detail(key) ?? false }
+  private var open: Bool { context.memory.detail(key) ?? false }
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Button {
-        context.store.memory.setDetail(key, expanded: !open)
+        context.memory.setDetail(key, expanded: !open)
       } label: {
         HStack(spacing: 6) {
           Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10, weight: .semibold))
@@ -663,6 +686,16 @@ private struct MacActivityItem: View {
       label
       if open, let detail { detailView(detail) }
       if item.kind == .files, open { diffs }
+    }
+    .task(id: "\(open):\(item.parts.first?.part.status ?? ""):\(item.parts.first?.part.metadata["shellID"]?.string ?? "")") {
+      guard open, let part = item.parts.first?.part, part.name == "shell" else { return }
+      repeat {
+        if let output = try? await store.shellOutput(part), !Task.isCancelled {
+          context.memory.setOutput(key, value: output)
+        }
+        if !part.running { return }
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+      } while !Task.isCancelled
     }
   }
 
@@ -797,6 +830,9 @@ private struct MacActivityItem: View {
     guard item.kind == .part || item.kind == .search, let part = item.parts.first?.part else { return nil }
     if part.type == .reasoning { return part.text?.isEmpty == false ? part.text : nil }
     if let error = part.errorText { return error }
+    if part.name == "shell" {
+      return context.memory.output(key) ?? (part.output.isEmpty ? "Aguardando saída…" : part.output)
+    }
     return part.output.isEmpty ? nil : part.output
   }
 

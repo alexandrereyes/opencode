@@ -7,7 +7,10 @@ import OpenCodeKit
 /// working-copy changes; folders and files come from this Mac's checkout (`-OpenCodeMacFixtureRoot <path>`), so
 /// Arquivos lists real files. No request ever leaves the process.
 @MainActor struct MacFixture {
-  static let configuration = ServerConfiguration(url: URL(string: "http://127.0.0.1:9")!)
+  // The fragment is a persistence namespace, never a network destination. Parallel test app copies must not
+  // share their synthetic root's drafts/reading state just because both use the closed in-memory server.
+  static let configuration = ServerConfiguration(
+    url: URL(string: "http://127.0.0.1:9/#" + (Bundle.main.bundleIdentifier ?? "mac-fixture"))!)
   static let current: MacFixture? = {
     let arguments = ProcessInfo.processInfo.arguments
     guard arguments.contains("-OpenCodeMacFixture") else { return nil }
@@ -111,7 +114,10 @@ private struct MacFixtureServer: Sendable {
     default:
       // A background task's output, read by cursor like the server's file-backed output.
       if path.hasPrefix("/api/shell/"), path.hasSuffix("/output") {
-        let text = (1...24).map { "[vite] página recarregada · \($0 * 7) ms" }.joined(separator: "\n") + "\n"
+        let count = MacDetailsFixture.mode == "shell" ? max(1, Int(Date().timeIntervalSince1970 - now / 1000)) : 24
+        let text = (1...count).map {
+          MacDetailsFixture.mode == "shell" ? "[swift test] Teste \($0) concluído ✓" : "[vite] página recarregada · \($0 * 7) ms"
+        }.joined(separator: "\n") + "\n"
         let data = Array(text.utf8)
         let cursor = min(Int(query.first { $0.name == "cursor" }?.value ?? "0") ?? 0, data.count)
         let chunk = String(decoding: data[cursor...], as: UTF8.self)
@@ -301,6 +307,7 @@ private struct MacFixtureServer: Sendable {
   /// Two turns, oldest first: the first ended (its answer, an activity card of 15 calls and the footer); the
   /// second runs the four live subagents, with one prompt waiting in the queue (`/inbox`).
   private var rootMessages: [String] {
+    if MacDetailsFixture.mode != nil { return MacDetailsFixture.messages(now: now) }
     let first = now - 48 * minute
     let answer = "## Próxima etapa\n\nClaro! Vou criar o app de Mac com a coluna de contexto ao vivo, reaproveitando a coluna de Sessões do iPhone.\n\n- A janela tem três colunas: Sessões, o chat e o Contexto.\n- O Contexto mostra subagentes, tarefas e recursos em uso.\n\nO componente principal da lista de sessões está em `SessionColumnSections.swift`, e o cabeçalho em `packages/ios-custom/OpenCode/SessionColumn/SessionColumnHeader.swift`."
     let encoded = String(decoding: try! JSONEncoder().encode(answer), as: UTF8.self)

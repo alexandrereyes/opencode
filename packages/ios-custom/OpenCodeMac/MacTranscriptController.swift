@@ -15,8 +15,8 @@ import SwiftUI
   let store: ConversationStore
   let context: MacTranscriptContext
   private let reading: ReadingPositionStore
-  private var memory: TranscriptMemory { store.memory }
-  private var state: TranscriptState { store.memory.state }
+  private let memory: TranscriptMemory
+  private var state: TranscriptState { memory.state }
   private let scrollView = MacTranscriptScrollView()
   private let document = MacTranscriptDocument()
   private(set) var items: [TranscriptItem] = []
@@ -54,14 +54,15 @@ import SwiftUI
   var tiled: () -> Void = {}
   #endif
 
-  init(store: ConversationStore, reading: ReadingPositionStore, client: OpenCodeClient) {
+  init(store: ConversationStore, memory: TranscriptMemory, reading: ReadingPositionStore, client: OpenCodeClient) {
     self.store = store
+    self.memory = memory
     self.reading = reading
-    context = MacTranscriptContext(store: store, client: client)
+    context = MacTranscriptContext(store: store, memory: memory, client: client)
     submitted = store.submitted
-    target = store.memory.anchor ?? reading.position(store.id) ?? ReadingPosition(.followTail)
+    target = memory.anchor ?? reading.position(store.id) ?? ReadingPosition(.followTail)
     super.init(nibName: nil, bundle: nil)
-    geometry.spacerPrompt = store.memory.spacerPrompt
+    geometry.spacerPrompt = memory.spacerPrompt
     parses.landed = { [weak self] in self?.scheduleRebuild() }
     parses.rasterized = { [weak self] in self?.context.rasterRevision += 1 }
     context.blockLookup = { [weak self] in self?.parses.blocks($0) }
@@ -654,6 +655,58 @@ import SwiftUI
   }
 
   /// A pinned prompt's click: its turn's first row moves just below it. False when the prompt is not pinned.
+  func revealQuote(_ quote: ChatQuote) async -> Bool {
+    for page in 0...5 {
+      guard !Task.isCancelled else { return false }
+      if store.messages.contains(where: { $0.id == quote.messageID }) { break }
+      guard page < 5, store.hasOlder else {
+        store.toast.show(store.hasOlder ? "Trecho ainda não carregado. Toque novamente para buscar mais mensagens." : "O trecho citado não está disponível.", kind: .error)
+        return false
+      }
+      await store.older()
+    }
+    guard let message = store.messages.first(where: { $0.id == quote.messageID }),
+      let entry = (message.content ?? []).enumerated().first(where: { message.partID(at: $0.offset) == quote.partID }),
+      let source = entry.element.text else {
+      store.toast.show("O trecho citado não está disponível.", kind: .error)
+      return false
+    }
+    let blocks = await ResponseMarkdownCache.shared.parse(source)
+    guard !Task.isCancelled else { return false }
+    let ranges = ChatQuoteAnchoring.sourceRanges(quote, source: source, blocks: blocks)
+    guard !ranges.isEmpty else {
+      store.toast.show("O trecho citado mudou e não pôde ser localizado.", kind: .error)
+      return false
+    }
+    context.quotes.revealing = context.quotes.index.marks(messageID: quote.messageID, partID: quote.partID)
+      .first { $0.quote.id == quote.id }?.id ?? ChatQuoteMark(quote: quote, number: 1).id
+    rebuild()
+    let index = items.firstIndex { item in
+      guard item.part?.partID == quote.partID else { return false }
+      switch item.kind {
+      case .prose(_, let prose): return ranges.contains { !ConversationSearch.renderedRanges($0, block: prose.block).isEmpty }
+      case .block(_, let block, _): return ranges.contains { !ConversationSearch.renderedRanges($0, block: block).isEmpty }
+      default: return false
+      }
+    }
+    guard let index else {
+      reveal(messageID: quote.messageID, animated: true)
+      return true
+    }
+    let cell = materialize(index)
+    cell.configure(items[index], context: context)
+    geometry.setHeight(Double(cell.measure(width: width, context: context)), at: index)
+    measured[index] = true
+    follow.navigated(toLatest: false)
+    let id = items[index].id
+    scroll(to: { [unowned self] in
+      guard let index = geometry.index(of: id) else { return visibleTop }
+      let offset = cells[id]?.quoteTop(quote.id) ?? 0
+      return visibleTop(line: CGFloat(geometry.tops[index]) + offset, viewportTop: nil)
+    }, animated: true)
+    return true
+  }
+
   func revealTurn(_ prompt: String) -> Bool {
     guard let pinned = geometry.pinned(visibleTop: Double(visibleTop)), items[pinned.index].id == "prompt:" + prompt,
       pinned.index + 1 < items.count else { return false }

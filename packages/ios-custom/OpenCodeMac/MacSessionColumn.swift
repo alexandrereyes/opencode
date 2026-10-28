@@ -10,7 +10,7 @@ struct MacSessionColumn: View {
   @Environment(\.openSettings) private var openSettings
   @Environment(\.openWindow) private var openWindow
   @Bindable var store: SessionStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
   @State private var renameCandidate: SessionRow?
   @State private var renameText = ""
   @State private var deleteCandidate: Session?
@@ -175,6 +175,10 @@ struct MacSessionColumn: View {
 
   /// A click opens the session; ⌘-click starts or extends the selection, like Finder's lists.
   private func open(_ row: SessionRow) {
+    if NSEvent.modifierFlags.contains(.option) {
+      openWindow(id: "main", value: MacWindowTarget(sessionID: row.id))
+      return
+    }
     if NSEvent.modifierFlags.contains(.command) {
       withAnimation(.snappy(duration: 0.2)) {
         if runtime.sessionSelection.active {
@@ -240,6 +244,9 @@ struct MacSessionColumn: View {
 
   @ViewBuilder private func rowActions(_ row: SessionRow) -> some View {
     Button("Abrir sessão", systemImage: "bubble.left") { runtime.selection = MacSelection(sessionID: row.id) }
+    Button("Abrir em nova janela", systemImage: "macwindow.badge.plus") {
+      openWindow(id: "main", value: MacWindowTarget(sessionID: row.id))
+    }
     Button("Selecionar", systemImage: "checkmark.circle") {
       withAnimation(.snappy(duration: 0.2)) { runtime.sessionSelection.start(row.id) }
     }
@@ -269,7 +276,7 @@ struct MacSessionColumn: View {
 private struct MacMasterAccessory: View {
   @Environment(\.appTheme) private var theme
   let store: SessionStore
-  let runtime: MacRuntime
+  let runtime: MacWindowRuntime
   @State private var hovering = false
 
   var body: some View {

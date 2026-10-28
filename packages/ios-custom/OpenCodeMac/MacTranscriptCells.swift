@@ -38,6 +38,16 @@ class MacTranscriptCell: NSView {
 
   func invalidate() { valid = false }
 
+  func quoteTop(_ id: String) -> CGFloat? {
+    func find(_ view: NSView) -> CGFloat? {
+      if let text = view as? MacResponseTextView, let top = text.quoteTop(id) {
+        return text.convert(CGPoint(x: 0, y: top), to: self).y
+      }
+      return view.subviews.lazy.compactMap(find).first
+    }
+    return find(self)
+  }
+
   /// A prompt pinned at the top with content passing under it draws a fade below itself.
   func setPinned(_ pinned: Bool) {
     guard fade.isHidden == pinned || fade.frame.width != bounds.width else { return }
@@ -95,15 +105,6 @@ final class MacProseCell: MacTranscriptCell {
     func mark(_ range: NSRange, _ color: NSColor) {
       for shown in ConversationSearch.renderedRanges(range, block: prose.block) where NSMaxRange(shown) <= length {
         value.addAttribute(.backgroundColor, value: color, range: shown)
-      }
-    }
-    for quote in context.responseQuotes(part) {
-      for range in quote.ranges { mark(range, context.theme.nsColor(.textAccent).withAlphaComponent(0.12)) }
-      if let last = quote.ranges.last {
-        for shown in ConversationSearch.renderedRanges(last, block: prose.block) where NSMaxRange(shown) <= length {
-          value.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: shown)
-          value.addAttribute(.underlineColor, value: context.theme.nsColor(.textAccent).withAlphaComponent(0.4), range: shown)
-        }
       }
     }
     for match in context.search.matches where match.partID == part.partID {

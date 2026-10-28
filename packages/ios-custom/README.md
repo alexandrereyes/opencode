@@ -2544,7 +2544,7 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
 `paridade-*.png`).
 
 - **Columns**: `NavigationSplitView` (Sessões | detail). The detail is an `HStack` of the chat and Contexto with a
-  draggable hairline between them (`MacColumnDivider`, 400–760 pt, `@AppStorage("OpenCodeMacContextWidth")`);
+  draggable hairline between them (`MacColumnDivider`, 400–760 pt, restored per window);
   Contexto is offered the room first (`layoutPriority(1)`, `minWidth: 400`), so a narrower window shrinks it before
   the chat goes below 460 pt and the window's minimum is the sum of the minimums (1191 pt with Sessões at its 330-pt
   ideal). Contexto is no longer an `.inspector`: an inspector gets its own, empty part of the title bar, so `…` and
@@ -2594,8 +2594,8 @@ each reload, in one `ScrollView` reused from the previous session.
 **Subagents.** The activity card's agent chip (and its pixel button), Contexto's rows and the session alerts open the
 child in the middle column over its root (`MacSelection.childID`). The child is a full conversation (its own live
 store from the registry); a header with `‹ <root title> › <child title>`, the agent and `trabalhando…` leads back,
-and so does ⌘[ (Ir ▸ Voltar à sessão principal, `MacRuntime.backToParent`: a nested subagent goes back to its
-parent subagent). A notification or banner about a subagent opens it the same way (`MacWindow.select`: its root in
+and so does ⌘[ (Ir ▸ Voltar à sessão principal, `MacWindowRuntime.backToParent`: a nested subagent goes back to its
+parent subagent). A notification or banner about a subagent opens it the same way (`MacWindowRuntime.select`: its root in
 Sessões, the child in the middle column). Returning shows the root exactly where it was left (the retained
 transcript view). The prompt bubble follows Ajustes ▸ Leitura (`OpenCodeCollapsibleUserMessages`, like the
 iPhone's Você ▸ Leitura): on, long prompts and prompts with quotes fold to two lines; off, every prompt shows whole,
@@ -2820,10 +2820,10 @@ separate track.
   Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
   to ⌥⌘↑/⌥⌘↓, up and down Sessões. The title bar's `…` shows the same session actions and Buscar na conversa.
   Shortcuts avoid the text editing keys (⌘A, ⌘⌫, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓).
-- **Restoration**: the window reopens on the session, subagent and Arquivos folder it showed (per server,
-  `OpenCodeMacSelection.<server>`), with Contexto shown or hidden as left; a session deleted or archived meanwhile
-  falls back to the first row. More windows (Arquivo ▸ Nova janela) show the same selection: the selection is
-  app-wide.
+- **Restoration**: each window has a stable scene UUID and restores its own session, subagent, Arquivos folder/file,
+  sidebar visibility, Contexto visibility and width, per server (`OpenCodeMacWindow.<uuid>.<server>`). A deleted or
+  archived selection falls back to the first row. Right-click **Abrir em nova janela** and Option-click a session
+  open an independent window, as does Arquivo ▸ Nova janela (⌥⌘N).
 - **Voice**: the button stays disabled. The iPhone's GPT Live call (`Voice/`) needs `AVAudioSession` (none on macOS;
   the WebRTC audio setup must be rewritten for Core Audio), ActivityKit and App Intents controls, UIKit feedback, and
   for a signed Mac app the microphone entitlement and usage description; that is a port of its own, not a small
@@ -2943,10 +2943,57 @@ activated, so `MacStress` opens one through File ▸ New Window.
 
 ### Next stages
 
-- The chat's remaining iPhone details: on-device dictation, read-aloud with server voices, the quote marks' numbered
-  badges and details sheet, the prompt bubble's internal scroll beyond 40% and the tool output's shell polling.
+- The chat's remaining iPhone details: on-device dictation and read-aloud with server voices.
 - GPT Live voice calls on the Mac (see Voice above).
-- Windows with their own selection; menu bar extra and widgets stay out.
+- Menu bar extra and widgets stay out.
+
+### Chat details and independent windows — 28 October
+
+- **Quotes:** AppKit renders raised 12-point inline numbers using `QuoteTextMap` (UTF-16 decoration mapping); copy,
+  selection and new quote anchors exclude the numbers. Prose, code and table cells use the same native text view.
+  Clicking a passage or its number opens the shared iPhone `QuoteDetailsSheet` as a native Mac sheet; existing
+  links and text selections keep their actions. `QuotedPassage` and `DraftQuotesCard` moved unchanged into
+  `ConversationQuotes.swift`, shared by both targets. The tray supports editing, removal and source navigation;
+  the Mac comment editor uses the token/attachment composer and the existing `lend`/`commit` flow. Sent marks use
+  the existing dismissal/sync policy and offer navigation to the carrying message. Source navigation validates
+  the anchor, loads at most five older pages per request and briefly highlights hidden marks.
+- **Long prompts:** `MacCappedScroll` measures the full text/context at its actual width and puts it in an
+  `NSScrollView` capped at 40% of the transcript viewport. Attachments, expansion controls, time and copy remain
+  outside. Folding and pinned-prompt navigation retain their existing behavior.
+- **Shell:** an expanded shell tool polls `ConversationStore.shellOutput` once a second while running and once
+  after completion. The result is stored in the per-key observable output box, updating only its hosted row;
+  hiding/collapsing the row cancels its task. No transcript reload or second event subscription is needed.
+- **Windows:** `MacRuntime` owns the server, SessionStore, event consumer, alert delivery, badge and subscriptions.
+  `MacWindowRuntime` owns presentation and a separate transcript memory/reading store for every window/session.
+  Two windows sharing a conversation still have only one live conversation consumer, reference-counted by the app.
+  Menu commands resolve `focusedSceneValue`; search and file navigation target that window. A notification selects
+  its session in the front conversation window (or opens a window when none remains).
+- **Voice integration:** attach the call bar as a safe-area inset at the marked point in `MacWindow`; use
+  `runtime.app` for a shared call service, `runtime.selection` for that window's destination, and `app.front` for
+  notification-style routing. Voice/Dictation/Transcription and read-aloud implementation files are untouched.
+
+Verification helpers: `DesktopWindowStateTests` covers restoration across windows/servers and Unicode/overlapping
+quote marker offsets. `script/test-mac-window.sh` now asserts two actual windows on different sessions, independent
+columns/files/child state and transcript memories, and closes one without changing the other. It accepts
+`OPENCODE_MAC_TEST_DOMAIN` and `OPENCODE_MAC_CAPTURES` for isolated parallel workers. `zsh script/test-mac-details.sh`
+checks real native quote copying, internal prompt scrolling and changing shell output without a conversation
+revision; it captures each case through AppKit, including on a locked desktop. Both use their own app copies.
+The closed in-memory fixture includes the bundle identifier in its persistence namespace, so parallel copies
+also have independent synthetic drafts and reading positions.
+The dedicated validation environment uses sandbox **4205**, DerivedData `mac-detalhes-derived` and
+`mac-detalhes-ios-derived`, and captures under `$TMPDIR/opencode/mac-detalhes-prints/`.
+
+Validation on this change: **572 Kit tests**, the repository `bun run check`, the two-window stability run and
+all four native details checks pass. The final Mac build has no warnings. The iOS test build has the same **17
+unique warnings** as a baseline build, with no new ones. `QuoteHighlightTests` passes 7/9 in dark and 6/9 in light;
+`PinnedPromptJumpTests` passes the distant-jump case (both themes), while its initial-position case fails.
+The four failing checks (missing-source notice, sent-mark restoration, multiple marks, initial pinned position)
+also fail at the same assertions in the light baseline: a VFS overlay substitutes the three shared Swift files
+with their exact `HEAD` contents, using separate DerivedData and fresh imported sessions. The evidence is in
+`mac-detalhes-prints/ios-baseline/`; these pre-existing iPhone regressions remain a separate follow-up.
+The additional `SessionReadingTests/testSearchLoadedAndOlderPages` run fails in both themes on the synthetic
+history (counter starts at `3 de 80`, then no older-page offer); the original-files baseline reproduces the same
+assertions. Search does highlight the requested text. Evidence: `reading/` and `reading-baseline/` in that folder.
 
 ## Platform and distribution
 

@@ -15,9 +15,9 @@ struct MacNewSession: View {
   @State private var store: MacNewSessionStore
   @State private var addingProject = false
   @State private var choosingBase = false
-  let runtime: MacRuntime
+  let runtime: MacWindowRuntime
 
-  init(store sessions: SessionStore, runtime: MacRuntime, request: MacNewSessionRequest) {
+  init(store sessions: SessionStore, runtime: MacWindowRuntime, request: MacNewSessionRequest) {
     _store = State(initialValue: MacNewSessionStore(sessions: sessions, request: request))
     self.runtime = runtime
   }

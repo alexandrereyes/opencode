@@ -9,13 +9,12 @@ struct MacWindow: View {
   @Environment(\.openWindow) private var openWindow
   @Environment(\.openSettings) private var openSettings
   @Bindable var store: SessionStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
   @State private var context: ContextColumnStore?
   @State private var restored = false
-  @AppStorage("OpenCodeMacContextWidth") private var contextWidth = 520.0
 
   var body: some View {
-    NavigationSplitView {
+    NavigationSplitView(columnVisibility: $runtime.columns) {
       MacSessionColumn(store: store, runtime: runtime)
         .navigationSplitViewColumnWidth(min: 300, ideal: 330, max: 480)
     } detail: {
@@ -26,10 +25,10 @@ struct MacWindow: View {
         MacChatColumn(store: store, runtime: runtime, context: context)
           .frame(minWidth: 460, maxWidth: .infinity)
         if runtime.contextVisible {
-          MacColumnDivider(width: $contextWidth)
+          MacColumnDivider(width: $runtime.contextWidth)
           // Offered the room first, up to the dragged width; a narrower window shrinks it to 400 pt before the
           // chat goes below its 460, so the window's minimum stays the two minimums.
-          inspector.frame(minWidth: 400, maxWidth: min(max(contextWidth, 400), 760)).layoutPriority(1)
+          inspector.frame(minWidth: 400, maxWidth: min(max(runtime.contextWidth, 400), 760)).layoutPriority(1)
         }
       }
     }
@@ -38,7 +37,7 @@ struct MacWindow: View {
     .sessionAlertOverlay(modal: false)
     .environment(\.sessionAlerts, SessionAlertsContext(center: store.alerts, open: { id in
       store.alerts.openingSession()
-      select(id)
+      runtime.select(id)
     }))
     .sessionRowTimeline()
     // Nova sessão and the archive confirmation belong to the window, so they open with Sessões collapsed too.
@@ -59,9 +58,9 @@ struct MacWindow: View {
     } message: {
       Text("A sessão sairá de Recentes e ficará na lista de arquivadas. Não há opção de desarquivar nesta versão.")
     }
-    // The event stream stays open while the window is visible, the app frontmost or not: on the Mac the chat is
-    // read beside other apps. Only a hidden or minimized window (`background`) stops it.
-    .task(id: scenePhase == .background) { if scenePhase != .background { await store.run() } }
+    // A voice bar can attach here as a safe-area inset, using runtime.app's shared call and this window's selection.
+    .focusedSceneValue(\.macWindow, runtime)
+    .background(MacWindowConnection(runtime: runtime))
     #if DEBUG
     .onChange(of: scenePhase, initial: true) { _, phase in
       if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacLiveTrace") { macTrace("scenePhase \(phase)") }
@@ -75,13 +74,6 @@ struct MacWindow: View {
       let next = ContextColumnStore(id: id, sessions: store)
       context = next
       await next.run()
-    }
-    // Shared views (alerts, Arquivadas, notifications) open a session by pushing an iPhone route; here that
-    // selects it.
-    .onChange(of: store.conversationPath.last?.id) { _, id in
-      guard let id else { return }
-      store.conversationPath = []
-      select(id)
     }
     .onChange(of: store.rows.map(\.id), initial: true) { _, ids in
       guard !ids.isEmpty else { return }
@@ -113,19 +105,13 @@ struct MacWindow: View {
       runtime.selection.sessionID = SessionSections.group(store.filtered, chats: store.chatsSelected, now: .now)
         .first?.rows.first?.id
     }
-    .onChange(of: store.alerts.message?.id) { _, _ in
-      if let message = store.alerts.message {
-        MacNotifications.shared.post(message, server: store.client.configuration.url)
-      }
-    }
-    .onChange(of: store.requestCount, initial: true) { _, count in MacNotifications.shared.badge(count) }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-      runtime.syncShown()
+      runtime.app.syncShown()
     }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-      runtime.syncShown()
+      runtime.app.syncShown()
     }
-    .onAppear { runtime.syncShown() }
+    .onAppear { runtime.app.syncShown() }
     #if DEBUG
     .task {
       if MacProxyLaunch.pane != nil, MacCapture.folder != nil { openWindow(id: MacProxyWindow.id) }
@@ -151,22 +137,6 @@ struct MacWindow: View {
     .background(theme.color(.background))
   }
 
-  /// A child session selects its root and opens the child in the middle column; the master is selected as such.
-  private func select(_ id: String) {
-    if id == store.masterID {
-      runtime.selection = MacSelection(sessionID: id, master: true)
-      return
-    }
-    if store.rows.contains(where: { $0.id == id }) {
-      runtime.selection = MacSelection(sessionID: id)
-      return
-    }
-    if let root = store.rows.first(where: { $0.memberIDs.contains(id) }) {
-      runtime.selection = MacSelection(sessionID: root.id, childID: id)
-      return
-    }
-    runtime.selection = MacSelection(sessionID: id)
-  }
 }
 
 /// The hairline between the chat and Contexto; dragging it resizes Contexto.

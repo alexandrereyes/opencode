@@ -52,7 +52,7 @@ struct MacComposer: View {
       if let error = draft.error ?? draft.persistenceError {
         Text(error).appFont(.caption).foregroundStyle(theme.color(.error)).frame(maxWidth: .infinity, alignment: .leading)
       }
-      if !draft.quotes.isEmpty { MacDraftQuotes(draft: draft, store: store) }
+      if !draft.quotes.isEmpty { DraftQuotesCard(draft: draft) }
       card
       if embedded == nil { footer }
     }
@@ -74,6 +74,9 @@ struct MacComposer: View {
     .onDisappear { if draft.editorOwner == owner { draft.editorOwner = nil } }
     .sheet(item: $picking) { picker in
       MacPickerSheet(picker: picker, store: store, draft: draft)
+    }
+    .sheet(item: $draft.commenting) { quote in
+      MacQuoteCommentSheet(quote: quote, store: store, draft: draft)
     }
   }
 
@@ -512,48 +515,6 @@ private struct MacMCPPanel: View {
     }
     .padding(14).frame(minWidth: 260)
     .task { await store.refresh() }
-  }
-}
-
-/// `Citações · N`: the quotes the next prompt carries, with removal and a way to their passage.
-private struct MacDraftQuotes: View {
-  @Environment(\.appTheme) private var theme
-  @Bindable var draft: ConversationDraft
-  let store: ConversationStore
-  @State private var expanded = false
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Button {
-        expanded.toggle()
-      } label: {
-        HStack {
-          Label("Citações · \(draft.quotes.count)", systemImage: "bubble.left")
-          Spacer()
-          Image(systemName: expanded ? "chevron.up" : "chevron.down")
-        }
-        .appFont(.chrome).foregroundStyle(theme.color(.textSecondary)).contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-      if expanded {
-        ForEach(Array(draft.quotes.enumerated()), id: \.element.id) { index, quote in
-          VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top) {
-              Text("\(index + 1)").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-              Text(quote.text).appFont(.secondary).lineLimit(4).foregroundStyle(theme.color(.textSecondary))
-              Spacer()
-              Button { draft.removeQuote(quote) } label: { Image(systemName: "xmark") }
-                .buttonStyle(.plain).help("Remover citação")
-            }
-            if !quote.comment.isEmpty { Text(quote.comment).appFont(.secondary).padding(.leading, 18) }
-            Button("Ir ao trecho citado") { store.revealMessage(quote.messageID, persist: false) }
-              .buttonStyle(.plain).appFont(.caption).foregroundStyle(theme.color(.textAccent)).padding(.leading, 18)
-          }
-        }
-      }
-    }
-    .padding(12)
-    .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 12))
-    .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(theme.color(.border), lineWidth: 0.7) }
   }
 }
 

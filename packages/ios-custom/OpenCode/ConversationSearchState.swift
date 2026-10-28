@@ -10,6 +10,8 @@ import SwiftUI
   private(set) var paging = false
   @ObservationIgnored private var task: Task<Void, Never>?
   @ObservationIgnored private var aligned: String?
+  /// Desktop windows route navigation to their own transcript; nil preserves the iPhone's navigation owner.
+  @ObservationIgnored var navigate: ((String, Double) -> Void)?
   var current: ConversationMatch? {
     index.flatMap { matches.indices.contains($0) ? matches[$0] : nil }
   }
@@ -28,11 +30,13 @@ import SwiftUI
   func reveal(_ store: ConversationStore) {
     guard let current else { return }
     aligned = nil
+    if let navigate { navigate(current.messageID, 0); return }
     store.revealMessage(current.messageID, persist: false)
   }
   func align(_ match: ConversationMatch, offset: Double, store: ConversationStore) {
     guard current?.id == match.id, aligned != match.id else { return }
     aligned = match.id
+    if let navigate { navigate(match.messageID, max(0, offset - 24)); return }
     store.revealMessage(match.messageID, offset: max(0, offset - 24), persist: false)
   }
   func older(_ store: ConversationStore) {

@@ -21,10 +21,10 @@ import SwiftUI
   /// (`<name>-saida.png`) and `-OpenCodeMacSettings <tab>` (`<name>-ajustes.png`). Sheets and popovers over the
   /// window are drawn into its picture.
   static func window(
-    context: () -> ContextColumnStore?, runtime: MacRuntime, theme: AppTheme, openWindow: OpenWindowAction,
+    context: () -> ContextColumnStore?, runtime: MacWindowRuntime, theme: AppTheme, openWindow: OpenWindowAction,
     openSettings: OpenSettingsAction
   ) async {
-    guard let folder else { return }
+    guard let folder, !MacStress.enabled else { return }
     guard let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain && $0.title != "LLM proxy" })
     else { return }
     if MacProxyLaunch.pane != nil {
@@ -43,6 +43,7 @@ import SwiftUI
     try? await Task.sleep(for: .seconds(delay ?? (MacFixture.current == nil ? 8 : 4)))
     let extra = await open(runtime: runtime, context: context, openWindow: openWindow, openSettings: openSettings)
     try? await Task.sleep(for: .seconds(2))
+    await MacDetailsFixture.verify(window: window, runtime: runtime, theme: theme, folder: folder)
     // `-OpenCodeMacCaptureEvery <s> -OpenCodeMacCaptureCount <n>`: a sequence (`<name>-01.png`…), a short video of
     // a live conversation, a stream or paging.
     if let every = MacFixture.value("-OpenCodeMacCaptureEvery").flatMap(Double.init),
@@ -71,7 +72,7 @@ import SwiftUI
 
   /// Opens what the launch options ask for and returns the separate windows to capture (suffix, match).
   private static func open(
-    runtime: MacRuntime, context: () -> ContextColumnStore?, openWindow: OpenWindowAction,
+    runtime: MacWindowRuntime, context: () -> ContextColumnStore?, openWindow: OpenWindowAction,
     openSettings: OpenSettingsAction
   ) async -> [(String, (NSWindow) -> Bool)] {
     var extra: [(String, (NSWindow) -> Bool)] = []
@@ -173,7 +174,7 @@ import SwiftUI
   }
 
   /// The window with its sheet and any popover over it (`composed`), as a PNG.
-  private static func shot(_ window: NSWindow, theme: AppTheme, to path: String) {
+  static func shot(_ window: NSWindow, theme: AppTheme, to path: String) {
     if screenLocked, let view = window.contentView?.superview ?? window.contentView {
       unglaze(view, background: theme.nsColor(.background))
     }
@@ -309,7 +310,7 @@ import SwiftUI
   }
 
   /// The column unscrolled, at its default width.
-  private static func column(_ store: ContextColumnStore, runtime: MacRuntime, theme: AppTheme, to path: String) {
+  private static func column(_ store: ContextColumnStore, runtime: MacWindowRuntime, theme: AppTheme, to path: String) {
     let content = ContextColumnSections(store: store, runtime: runtime)
       .padding(.horizontal, 18).padding(.vertical, 12)
       .frame(width: 430)

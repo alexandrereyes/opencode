@@ -7,7 +7,7 @@ import SwiftUI
 /// over it.
 struct MacContextColumn: View {
   let store: ContextColumnStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
 
   var body: some View {
     ZStack {
@@ -34,7 +34,7 @@ struct MacContextColumn: View {
 struct ContextColumnSections: View {
   @Environment(\.appTheme) private var theme
   let store: ContextColumnStore
-  let runtime: MacRuntime
+  let runtime: MacWindowRuntime
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -104,7 +104,7 @@ extension ContextSectionLabel where Trailing == EmptyView {
 private struct ContextSummaryLine: View {
   @Environment(\.appTheme) private var theme
   let store: ContextColumnStore
-  let runtime: MacRuntime
+  let runtime: MacWindowRuntime
 
   private var label: SessionDirectoryLabel? { store.session.flatMap { store.sessions.directoryLabel($0) } }
   private var branch: String? { label?.branch ?? store.located?.branch }
@@ -208,7 +208,7 @@ private enum SubagentColumns {
 private struct ContextSubagents: View {
   @Environment(\.appTheme) private var theme
   let store: ContextColumnStore
-  let runtime: MacRuntime
+  let runtime: MacWindowRuntime
   @State private var expanded = false
 
   var body: some View {
@@ -511,7 +511,7 @@ private struct ContextResources: View {
 private struct ContextDetails: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: ContextColumnStore
-  let runtime: MacRuntime
+  let runtime: MacWindowRuntime
   @State private var allSkills = false
   @State private var allPlugins = false
 

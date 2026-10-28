@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 struct MacChatColumn: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: SessionStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
   let context: ContextColumnStore?
   @State private var renaming = false
   @State private var renameText = ""
@@ -34,7 +34,7 @@ struct MacChatColumn: View {
     .background(theme.color(.background))
     .onChange(of: runtime.selection, initial: true) { _, selection in
       // The root and the subagent over it stay in the registry like the iPhone's navigation stack.
-      store.shownConversations = [selection.sessionID, selection.childID].compactMap { $0 }
+      runtime.app.syncShown()
       if let id = shownID { store.conversations.touch(id) }
     }
     .toolbar {
@@ -86,17 +86,22 @@ struct MacConversationView: View {
   @Environment(\.appTheme) private var theme
   @Bindable var conversation: ConversationStore
   let sessions: SessionStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
   /// The Sessão mestra: its own agent and title, like the iPhone's master conversation.
   var master = false
   @State private var search = ConversationSearchState()
   @State private var revertCandidate: ConversationMessage?
   @State private var commenting: ChatQuote?
+  @State private var quoteDetail: ChatQuoteMark?
+  @State private var quoteEditing: ChatQuote?
+  @State private var quoteRevealed: String?
+  @State private var quoteTask: Task<Void, Never>?
   @State private var viewing: MacViewedImage?
   @State private var dropping = false
 
   private var draft: ConversationDraft { sessions.drafts.draft(conversation.id) }
-  private var transcript: MacTranscriptController? { conversation.memory.active }
+  private var memory: TranscriptMemory { runtime.memory(conversation.id) }
+  private var transcript: MacTranscriptController? { memory.active }
   private var parentID: String? {
     conversation.session?.parentID ?? (runtime.selection.childID == conversation.id ? runtime.selection.sessionID : nil)
   }
@@ -120,6 +125,7 @@ struct MacConversationView: View {
       bottom
     }
     .background(theme.color(.background))
+    .environment(\.conversationQuotes, quoteContext)
     .overlay {
       if dropping {
         RoundedRectangle(cornerRadius: 14).strokeBorder(theme.color(.primary), style: StrokeStyle(lineWidth: 2, dash: [6]))
@@ -143,7 +149,30 @@ struct MacConversationView: View {
     } message: { _ in
       Text("A mensagem volta para o campo de texto e as seguintes ficam ocultas até Refazer. Enviar uma nova mensagem apaga as ocultas de vez.")
     }
-    .sheet(item: $commenting) { quote in MacQuoteCommentSheet(quote: quote, draft: draft) }
+    .sheet(item: $commenting) { quote in MacQuoteCommentSheet(quote: quote, store: conversation, draft: draft) }
+    .sheet(item: $quoteDetail, onDismiss: {
+      if let quote = quoteEditing { quoteEditing = nil; draft.commenting = quote }
+    }) { mark in
+      QuoteDetailsSheet(mark: mark, edit: {
+        quoteEditing = draft.quotes.first { $0.id == mark.quote.id }
+        quoteDetail = nil
+      }, remove: {
+        quoteDetail = nil
+        if mark.pending { draft.removeQuote(mark.quote); return }
+        if !conversation.dismissQuotes([mark.quote.id]) {
+          conversation.toast.show("A marcação foi removida, mas não pôde ser salva no Mac.", kind: .error)
+        }
+      }, source: {
+        quoteDetail = nil
+        revealQuote(mark.quote)
+      }, message: {
+        quoteDetail = nil
+        if let id = mark.carryingMessageID {
+          memory.setBubble(id, expanded: true)
+          transcript?.reveal(messageID: id, animated: true)
+        }
+      }, close: { quoteDetail = nil })
+    }
     .sheet(item: $viewing) { image in MacImageSheet(image: image) }
     .sheet(item: $conversation.sideQuestion) { launch in MacSideQuestionSheet(store: conversation, launch: launch) }
     .onChange(of: conversation.reversion.boundary(conversation.session)) { _, _ in conversation.updateActivity() }
@@ -152,8 +181,13 @@ struct MacConversationView: View {
       search.update(conversation, reset: true)
     }
     .onChange(of: conversation.revision) { _, _ in if search.open { search.update(conversation) } }
-    .onReceive(NotificationCenter.default.publisher(for: .macSearchConversation)) { _ in openSearch() }
-    .task { await conversation.run() }
+    .onReceive(NotificationCenter.default.publisher(for: .macSearchConversation)) { note in
+      if note.object as? UUID == runtime.id { openSearch() }
+    }
+    .onAppear {
+      runtime.app.mount(conversation)
+      search.navigate = { id, offset in transcript?.reveal(messageID: id, offset: offset, animated: true) }
+    }
     .task(id: conversation.session) { await conversation.presented() }
     .task(id: conversation.session?.location.directory) {
       await conversation.mcps.load(directory: conversation.session?.location.directory)
@@ -161,6 +195,21 @@ struct MacConversationView: View {
     .task { await draft.load() }
     .onAppear { if conversation.masterMode != master { conversation.masterMode = master } }
     #if DEBUG
+    .task(id: conversation.hasTranscript) {
+      guard conversation.hasTranscript, MacLaunch.fixture, let mode = MacDetailsFixture.mode else { return }
+      await draft.load()
+      draft.text = NSAttributedString(string: "")
+      draft.quotes = mode == "quotes" || mode == "details" ? MacDetailsFixture.quotes : []
+      if mode == "bubble" { memory.setBubble("msg_details_prompt", expanded: true) }
+      if mode == "shell" {
+        for row in conversation.activity.messages.flatMap(\.rows) where row.kind == .group {
+          conversation.expansionValues[row.id] = true
+          for part in row.parts { conversation.expansionValues["activity:detail:" + part.id] = true }
+        }
+      }
+      try? await Task.sleep(for: .seconds(2))
+      transcript?.reveal(messageID: "msg_details_prompt")
+    }
     .onChange(of: conversation.hasTranscript, initial: true) { _, loaded in
       // Captures can show the first activity card open (`-OpenCodeMacOpenActivity`), like the approved mock.
       guard loaded, ProcessInfo.processInfo.arguments.contains("-OpenCodeMacOpenActivity"),
@@ -181,6 +230,8 @@ struct MacConversationView: View {
     }
     #endif
     .onDisappear {
+      quoteTask?.cancel()
+      runtime.app.unmount(conversation)
       conversation.readAloud.stop()
       search.cancelPaging()
       transcript?.capture()
@@ -222,9 +273,8 @@ struct MacConversationView: View {
 
   private var timeline: some View {
     MacTranscriptHost(
-      store: conversation, sessions: sessions,
-      quotes: ConversationQuoteContext(index: conversation.quoteIndex, pending: draft.quotes,
-        dismissed: conversation.dismissedQuotes),
+      store: conversation, sessions: sessions, memory: memory, reading: runtime.reading,
+      quotes: quoteContext,
       search: ConversationSearchHighlight(matches: search.matches, current: search.current?.id),
       bottomPadding: 16
     ) { context in
@@ -235,7 +285,7 @@ struct MacConversationView: View {
       context.openImage = { image, name in viewing = MacViewedImage(image: image, name: name) }
     }
     .overlay(alignment: .bottomTrailing) {
-      if conversation.memory.state.jumpToLatest {
+      if memory.state.jumpToLatest {
         Button { transcript?.scrollToLatest(animated: true) } label: {
           Image(systemName: "arrow.down").font(.system(size: 13, weight: .semibold)).frame(width: 34, height: 34)
             .adaptiveGlass(Circle())
@@ -248,18 +298,38 @@ struct MacConversationView: View {
       }
     }
     .overlay(alignment: .top) {
-      if conversation.memory.state.resumeOffered {
+      if memory.state.resumeOffered {
         Button("Continuar de onde parou") { transcript?.resume() }
           .buttonStyle(.plain).appFont(.caption, weight: .medium)
           .padding(.horizontal, 12).padding(.vertical, 6)
           .adaptiveGlass(Capsule())
-          .padding(.top, CGFloat(conversation.memory.state.stickyHeight) + 8)
+          .padding(.top, CGFloat(memory.state.stickyHeight) + 8)
       }
     }
     .overlay {
       if !conversation.hasTranscript && conversation.error == nil {
         ProgressView("Carregando conversa…").appFont(.caption)
       }
+    }
+  }
+
+  private var quoteContext: ConversationQuoteContext {
+    ConversationQuoteContext(index: conversation.quoteIndex, pending: draft.quotes,
+      dismissed: conversation.dismissedQuotes, revealing: quoteRevealed,
+      open: { quoteDetail = $0 }, source: revealQuote, active: quoteDetail?.id)
+  }
+
+  private func revealQuote(_ quote: ChatQuote) {
+    quoteTask?.cancel()
+    quoteRevealed = conversation.quoteIndex.marks(messageID: quote.messageID, partID: quote.partID)
+      .first { $0.quote.id == quote.id }?.id ?? ChatQuoteMark(quote: quote, number: 1).id
+    quoteTask = Task { @MainActor in
+      guard await transcript?.revealQuote(quote) == true else {
+        quoteRevealed = nil
+        return
+      }
+      do { try await Task.sleep(for: .seconds(3)) } catch { return }
+      quoteRevealed = nil
     }
   }
 
@@ -411,36 +481,53 @@ private struct MacImageSheet: View {
 }
 
 /// Comentar: a quote of the selected passage with its comment, attached to the next prompt (`Citações · N`).
-private struct MacQuoteCommentSheet: View {
+struct MacQuoteCommentSheet: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
   let quote: ChatQuote
+  let store: ConversationStore
   let draft: ConversationDraft
-  @State private var comment = ""
+  @State private var editor: ConversationDraft
+  @State private var lent = false
+  @State private var committed = false
+  init(quote: ChatQuote, store: ConversationStore, draft: ConversationDraft) {
+    self.quote = quote
+    self.store = store
+    self.draft = draft
+    _editor = State(initialValue: draft.commentEditor(quote))
+  }
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       Text("Comentar trecho").appFont(.heading, weight: .semibold)
       Text(quote.text).appFont(.secondary).lineLimit(6).foregroundStyle(theme.color(.textSecondary))
         .padding(.leading, 12)
         .overlay(alignment: .leading) { Rectangle().fill(theme.color(.primary)).frame(width: 2) }
-      TextField("Comentário (opcional)", text: $comment, axis: .vertical).lineLimit(3...8)
-        .textFieldStyle(.roundedBorder)
+      MacComposer(store: store, draft: editor, embedded: MacComposerEmbedding(canSubmit: lent && !editor.importing, submit: commit))
       HStack {
         Spacer()
         Button("Cancelar") { dismiss() }.keyboardShortcut(.cancelAction)
-        Button("Adicionar citação") {
-          let editor = draft.commentEditor(quote)
-          editor.text = NSAttributedString(string: comment)
-          Task {
-            await draft.commit(quote, from: editor)
-            draft.focused = true
-          }
-          dismiss()
-        }
+        Button("Concluir", action: commit).disabled(!lent || editor.importing)
         .keyboardShortcut(.defaultAction)
       }
     }
     .padding(20).frame(width: 480)
+    .task {
+      guard !lent else { return }
+      await draft.lend(quote, to: editor)
+      lent = true
+      editor.focused = true
+    }
+    .onDisappear { if !committed { Task { try? await editor.discard() } } }
+  }
+  private func commit() {
+    guard lent, !editor.importing, !committed else { return }
+    committed = true
+    Task {
+      await draft.commit(quote, from: editor)
+      try? await editor.discard()
+      draft.focused = true
+    }
+    dismiss()
   }
 }
 

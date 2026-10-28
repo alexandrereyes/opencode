@@ -10,11 +10,40 @@ import SwiftUI
 @MainActor enum MacStress {
   static let enabled = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacStress")
 
-  static func run(runtime: MacRuntime, openWindow: OpenWindowAction) async {
-    guard enabled else { return }
+  private static var started = false
+  static func run(runtime: MacWindowRuntime, openWindow: OpenWindowAction) async {
+    guard enabled, !started else { return }
+    started = true
     let idle = MacFixture.value("-OpenCodeMacStress").flatMap(Double.init) ?? 30
     try? await Task.sleep(for: .seconds(3))
     guard let window = mainWindow else { return finish("sem janela principal", status: 1) }
+    guard let secondID = runtime.store?.rows.first(where: { $0.id != runtime.selection.sessionID })?.id else {
+      return finish("sem segunda sessão", status: 1)
+    }
+    let target = MacWindowTarget(sessionID: secondID)
+    await step("segunda janela") { openWindow(id: "main", value: target) }
+    guard let second = runtime.app.windows[target.id], let secondWindow = second.window,
+      second.selection.sessionID == secondID, secondWindow !== window,
+      second.store === runtime.store else { return finish("janelas não independentes", status: 1) }
+    let original = runtime.state
+    await step("estado independente") {
+      second.contextVisible = false
+      second.contextWidth = 640
+      second.selection.files = MacSelection.Files(folder: "/tmp")
+      second.selection.childID = "ses_mac_c1"
+      second.columns = .detailOnly
+    }
+    guard runtime.state == original, runtime.memory(secondID) !== second.memory(secondID) else {
+      return finish("estado vazou entre janelas", status: 1)
+    }
+    second.selection.childID = nil
+    second.selection.files = nil
+    second.columns = .all
+    print("MacStress duas janelas independentes ok · \(runtime.selection.sessionID ?? "-") / \(secondID)")
+    if let folder = MacCapture.folder {
+      MacCapture.shot(window, theme: .selected, to: folder + "/janelas-1.png")
+      MacCapture.shot(secondWindow, theme: .selected, to: folder + "/janelas-2.png")
+    }
     let start = window.frame
     for screen in NSScreen.screens {
       let area = screen.visibleFrame
@@ -50,6 +79,10 @@ import SwiftUI
     await step("recurso") { openWindow(id: "resource", value: "res_iphone") }
     await step("fechar recurso") { NSApp.windows.first { $0.identifier?.rawValue.hasPrefix("resource") == true }?.close() }
     await step("parada \(Int(idle)) s", wait: idle) { window.makeKeyAndOrderFront(nil) }
+    await step("fechar segunda janela") { secondWindow.close() }
+    guard runtime.app.windows[target.id] == nil, runtime.selection == original.selection else {
+      return finish("fechar janela alterou a outra", status: 1)
+    }
     finish("ok", status: 0)
   }
 

@@ -8,7 +8,7 @@ import SwiftUI
 struct MacFilesView: View {
   @Environment(\.appTheme) private var theme
   let context: ContextColumnStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
   @State private var files: MacFilesStore?
 
   var body: some View {
@@ -35,7 +35,7 @@ struct MacFilesView: View {
 private struct MacFilesContent: View {
   @Environment(\.appTheme) private var theme
   @Bindable var files: MacFilesStore
-  @Bindable var runtime: MacRuntime
+  @Bindable var runtime: MacWindowRuntime
   @State private var searching = false
   @FocusState private var searchFocused: Bool
 
