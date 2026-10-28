@@ -3,7 +3,8 @@ import Foundation
 // MARK: Ring
 
 /// The complication and dashboard ring: arcs proportional to the counts, in a fixed order, with a gap at the
-/// bottom for the mascot. Remaining (idle) sessions are gray; with no sessions at all the ring is fully gray.
+/// bottom for the mascot. Unread sessions are orange (`primary`); an older backend without `unread` shows its recently
+/// finished (`idle`) sessions in gray instead. With no sessions at all the ring is fully gray.
 public struct WatchRing: Equatable, Sendable {
   public struct Arc: Equatable, Sendable {
     public let role: ThemeRole
@@ -19,7 +20,7 @@ public struct WatchRing: Equatable, Sendable {
   public init(counts: AgentsState.Counts?) {
     let parts: [(ThemeRole, Int)] = counts.map {
       [(.success, $0.working), (.accent, $0.question), (.warning, $0.permission), (.error, $0.failed),
-       (.border, $0.idle)]
+       ($0.finished.unread ? .primary : .border, $0.finished.count)]
     } ?? []
     let total = parts.reduce(0) { $0 + max($1.1, 0) }
     guard total > 0 else {

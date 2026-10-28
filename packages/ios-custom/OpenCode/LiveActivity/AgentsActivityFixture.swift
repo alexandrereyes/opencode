@@ -74,7 +74,8 @@ enum AgentsActivityFixtures {
     "question": 1,
     "permission": 0,
     "failed": 0,
-    "idle": 3
+    "idle": 3,
+    "unread": 3
   },
   "activeTotal": 4,
   "focus": {
@@ -149,7 +150,8 @@ enum AgentsActivityFixtures {
     "question": 2,
     "permission": 0,
     "failed": 0,
-    "idle": 3
+    "idle": 3,
+    "unread": 3
   },
   "activeTotal": 4,
   "focus": {
@@ -233,7 +235,8 @@ enum AgentsActivityFixtures {
     "question": 1,
     "permission": 1,
     "failed": 2,
-    "idle": 1
+    "idle": 1,
+    "unread": 1
   },
   "activeTotal": 3,
   "focus": {
@@ -312,7 +315,8 @@ enum AgentsActivityFixtures {
     "question": 0,
     "permission": 0,
     "failed": 0,
-    "idle": 1
+    "idle": 1,
+    "unread": 1
   },
   "activeTotal": 2,
   "focus": {
@@ -370,7 +374,8 @@ enum AgentsActivityFixtures {
     "question": 0,
     "permission": 0,
     "failed": 1,
-    "idle": 2
+    "idle": 2,
+    "unread": 2
   },
   "activeTotal": 0,
   "attention": [],

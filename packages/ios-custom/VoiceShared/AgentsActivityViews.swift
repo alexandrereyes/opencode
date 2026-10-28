@@ -213,7 +213,7 @@ struct AgentsIslandExpanded: View {
       Text("\(Text(row.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong)))  \(Text(row.project).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)))")
         .lineLimit(1).truncationMode(.tail)
       Spacer(minLength: 6)
-      Text(row.statusLabel).font(.system(size: 12)).foregroundStyle(attributes.color(row.statusRole))
+      Text(state.statusLabel(row)).font(.system(size: 12)).foregroundStyle(attributes.color(state.statusRole(row)))
         .lineLimit(1).monospacedDigit().fixedSize()
     }
     .frame(maxHeight: .infinity)
@@ -286,13 +286,13 @@ struct AgentsWatchView: View {
         .lineLimit(1).truncationMode(.tail)
       // The status label wins over the time, which truncates first.
       HStack(spacing: 0) {
-        Text(row.statusLabel).layoutPriority(1)
+        Text(state.statusLabel(row)).layoutPriority(1)
         if let asked = state.asked(row) {
           Text(verbatim: " · ")
           Text(.currentDate, format: AgentsText.ago(since: asked))
         }
       }
-      .font(.system(size: 11, weight: .medium)).foregroundStyle(attributes.color(row.statusRole)).lineLimit(1)
+      .font(.system(size: 11, weight: .medium)).foregroundStyle(attributes.color(state.statusRole(row))).lineLimit(1)
       .minimumScaleFactor(0.85)
     }
   }

@@ -137,3 +137,76 @@ public extension OpenCodeClient {
     let _: JSONValue = try await rpc("custom.watch", "revoke", input: Input(deviceID: deviceID), timeout: 10)
   }
 }
+
+// MARK: Widget push token
+
+/// The complication's WidgetKit push token, kept in the shared Keychain until the gateway has it for the current
+/// pairing. The extension saves it in `pushTokenDidChange` and tries to send it; whatever it could not send (no
+/// pairing yet, no network in the extension's short runtime) the watch app sends on its next refresh.
+public struct WatchWidgetToken: Sendable {
+  public struct Record: Codable, Equatable, Sendable {
+    public var token: String
+    public var environment: PushEnvironment
+    /// The pairing's device that the gateway confirmed for this token; nil while pending.
+    public var sentTo: String?
+  }
+
+  public enum Outcome: Equatable, Sendable { case sent, upToDate, pending, noToken }
+
+  private let load: @Sendable () -> Record?
+  private let save: @Sendable (Record) -> Void
+  private let send: @Sendable (WatchPairing, Record) async throws -> Void
+
+  public init(store: WatchKeychainStore = WatchKeychainStore(), version: String = "1") {
+    self.init(
+      load: { (try? store.read("widget-token")).flatMap { $0 }.flatMap { try? JSONDecoder().decode(Record.self, from: $0) } },
+      save: { record in try? store.write(try? JSONEncoder().encode(record), account: "widget-token") },
+      send: { pairing, record in
+        guard let token = Data(hex: record.token) else { return }
+        try await WatchGatewayClient(pairing: pairing, version: version).widgetToken(token, environment: record.environment)
+      })
+  }
+
+  public init(load: @escaping @Sendable () -> Record?, save: @escaping @Sendable (Record) -> Void,
+    send: @escaping @Sendable (WatchPairing, Record) async throws -> Void)
+  {
+    self.load = load
+    self.save = save
+    self.send = send
+  }
+
+  /// Saves a new token (or environment) first, then sends it when there is a pairing the gateway does not
+  /// already have it for. A re-pairing (new device ID) sends again; failures stay pending for the next call.
+  @discardableResult
+  public func sync(token: Data?, environment: PushEnvironment, pairing: WatchPairing?) async -> Outcome {
+    var record = load()
+    if let token, record?.token != token.hexToken || record?.environment != environment {
+      record = Record(token: token.hexToken, environment: environment, sentTo: nil)
+      save(record!)
+    }
+    guard var record else { return .noToken }
+    guard let pairing else { return .pending }
+    guard record.sentTo != pairing.deviceID else { return .upToDate }
+    do {
+      try await send(pairing, record)
+    } catch { return .pending }
+    record.sentTo = pairing.deviceID
+    save(record)
+    return .sent
+  }
+}
+
+extension Data {
+  init?(hex: String) {
+    guard hex.count.isMultiple(of: 2) else { return nil }
+    var bytes = [UInt8]()
+    var index = hex.startIndex
+    while index < hex.endIndex {
+      let next = hex.index(index, offsetBy: 2)
+      guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
+      bytes.append(byte)
+      index = next
+    }
+    self.init(bytes)
+  }
+}

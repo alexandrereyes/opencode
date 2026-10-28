@@ -64,27 +64,19 @@ struct AgentsProvider: TimelineProvider {
   static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1"
 }
 
-/// Registers the WidgetKit push token with the gateway; the backend sends `content-changed` pushes.
+/// Receives the WidgetKit push token (it needs `aps-environment` in this extension's entitlements; without it
+/// WidgetKit never issues one). The token is saved in the shared Keychain first, then sent when paired; the watch app
+/// sends whatever is still pending. The backend sends `content-changed` pushes.
 struct AgentsPushHandler: WidgetPushHandler {
   func pushTokenDidChange(_ pushInfo: WidgetPushInfo, widgets: [WidgetInfo]) {
     let token = pushInfo.token
     Task {
-      guard let pairing = try? WatchKeychain().read() else { return }
-      try? await WatchGatewayClient(pairing: pairing, version: AgentsProvider.version)
-        .widgetToken(token, environment: Self.environment)
+      await WatchWidgetToken(version: AgentsProvider.version).sync(token: token, environment: WatchEnvironment.push,
+        pairing: try? WatchKeychain().read())
     }
   }
-
-  static var environment: PushEnvironment {
-    #if targetEnvironment(simulator)
-      PushEnvironment.resolve(profile: nil, simulator: true)
-    #else
-      PushEnvironment.resolve(
-        profile: Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision")
-          .flatMap { try? Data(contentsOf: $0) }, simulator: false)
-    #endif
-  }
 }
+
 
 struct AgentsComplicationView: View {
   @Environment(\.widgetFamily) private var family

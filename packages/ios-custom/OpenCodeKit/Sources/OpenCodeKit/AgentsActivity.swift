@@ -19,13 +19,33 @@ public struct AgentsState: Codable, Hashable, Sendable {
     public var question: Int
     public var permission: Int
     public var failed: Int
+    /// Finished successfully in the last 30 minutes; only shown when `unread` is absent (older backends).
     public var idle: Int
-    public init(working: Int, question: Int, permission: Int, failed: Int, idle: Int) {
+    /// Finished with output not yet viewed (rev. 2026-10-28); absent from older backends.
+    public var unread: Int?
+    public init(working: Int, question: Int, permission: Int, failed: Int, idle: Int, unread: Int? = nil) {
       self.working = working
       self.question = question
       self.permission = permission
       self.failed = failed
       self.idle = idle
+      self.unread = unread
+    }
+
+    /// The fifth count of rings and counters: unread sessions (orange `primary`), or, from an older backend
+    /// without `unread`, the recently finished ones (gray).
+    public var finished: Finished {
+      unread.map { Finished(count: $0, unread: true) } ?? Finished(count: idle, unread: false)
+    }
+  }
+
+  public struct Finished: Equatable, Sendable {
+    public let count: Int
+    /// `true` for unread sessions; `false` for the `idle` fallback.
+    public let unread: Bool
+    public var role: ThemeRole { unread ? .primary : .textSecondary }
+    public var label: String {
+      unread ? (count == 1 ? "não lida" : "não lidas") : (count == 1 ? "concluída há pouco" : "concluídas há pouco")
     }
   }
 
@@ -211,13 +231,14 @@ public extension AgentsState {
     return parts
   }
 
-  /// The ring's arcs in contract order (working, question, permission, failed, idle), proportional to the counts,
+  /// The ring's arcs in contract order (working, question, permission, failed, unread or the `idle` fallback),
+  /// proportional to the counts,
   /// with `gap` (a fraction of the circle) between them. A single non-zero count closes the circle; none draws no
   /// arc (the view shows only the track).
   func gauge(gap: Double) -> [AgentsGaugeArc] {
     let parts: [(Int, ThemeRole, Bool)] = [
       (counts.working, .success, false), (counts.question, .accent, false), (counts.permission, .warning, false),
-      (counts.failed, .error, false), (counts.idle, .textSecondary, true),
+      (counts.failed, .error, false), (counts.finished.count, counts.finished.role, !counts.finished.unread),
     ].filter { $0.0 > 0 }
     let total = Double(parts.reduce(0) { $0 + $1.0 })
     guard total > 0 else { return [] }
@@ -234,8 +255,8 @@ public extension AgentsState {
   /// `ativas` below the ring's number.
   var gaugeLabel: String { activeTotal == 1 ? "ativa" : "ativas" }
 
-  /// One line per non-zero count, at most `AgentsLayout.lockMaxCounters`; with all five, `concluídas há pouco`
-  /// goes first.
+  /// One line per non-zero count, at most `AgentsLayout.lockMaxCounters`; with all five, `não lidas` (or the
+  /// `concluídas há pouco` fallback) goes first.
   var counters: [AgentsCounter] {
     let all = [
       AgentsCounter(count: counts.working, label: "trabalhando", role: .success, emphasized: true),
@@ -244,8 +265,8 @@ public extension AgentsState {
       AgentsCounter(count: counts.permission, label: counts.permission == 1 ? "permissão" : "permissões",
         role: .warning, emphasized: true),
       AgentsCounter(count: counts.failed, label: "com erro", role: .error, emphasized: true),
-      AgentsCounter(count: counts.idle, label: counts.idle == 1 ? "concluída há pouco" : "concluídas há pouco",
-        role: .textSecondary, emphasized: false),
+      AgentsCounter(count: counts.finished.count, label: counts.finished.label, role: counts.finished.role,
+        emphasized: false),
     ].filter { $0.count > 0 }
     return all.count > AgentsLayout.lockMaxCounters ? all.filter(\.emphasized) : all
   }
@@ -277,24 +298,33 @@ public extension AgentsState.Progress {
   var fraction: Double { total > 0 ? min(max(Double(done) / Double(total), 0), 1) : 0 }
 }
 
+public extension AgentsState {
+  /// Row status text and colour. `idle` rows are unread sessions on backends that send `counts.unread`.
+  func statusLabel(_ row: Row) -> String { row.statusLabel(unread: counts.unread != nil) }
+  func statusRole(_ row: Row) -> ThemeRole { row.statusRole(unread: counts.unread != nil) }
+}
+
 public extension AgentsState.Row {
-  var statusLabel: String {
+  /// `unread`: the backend sends `counts.unread`, so `idle` rows are unread sessions (`Não lida`, `primary`);
+  /// otherwise they are recently finished (`Concluída`, gray).
+  func statusLabel(unread: Bool) -> String {
     switch status {
     case .question: "Pergunta"
     case .permission: "Permissão"
     case .failed: "Erro"
     case .working: progress.map { "Trabalhando · \($0.done)/\($0.total)" } ?? "Trabalhando"
-    case .idle: "Concluída"
+    case .idle: unread ? "Não lida" : "Concluída"
     case .unknown: ""
     }
   }
-  var statusRole: ThemeRole {
+  func statusRole(unread: Bool) -> ThemeRole {
     switch status {
     case .question: .accent
     case .permission: .warning
     case .failed: .error
     case .working: .success
-    case .idle, .unknown: .textSecondary
+    case .idle: unread ? .primary : .textSecondary
+    case .unknown: .textSecondary
     }
   }
 }

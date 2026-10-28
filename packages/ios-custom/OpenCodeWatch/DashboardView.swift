@@ -55,7 +55,7 @@ struct DashboardView: View {
                 .listRowBackground(Card(tint: item.kind == .permission ? .warning : .accent, outlined: true))
             case .session(let session):
               // No navigation for sessions in v1: no chevron, not a button.
-              SessionRow(row: session).listRowBackground(Card(tint: nil, outlined: false))
+              SessionRow(row: session, unread: model.state?.counts.unread != nil).listRowBackground(Card(tint: nil, outlined: false))
             }
           }.id(row.id)
         }
@@ -162,20 +162,23 @@ private struct AttentionRow: View {
 
 private struct SessionRow: View {
   let row: AgentsState.Row
+  /// The backend sends `counts.unread`, so `idle` rows are unread sessions.
+  let unread: Bool
   var body: some View {
+    let role = row.statusRole(unread: unread)
     HStack(spacing: 10) {
       ZStack {
         Circle().fill(Color.watch(.surface))
         if let symbol = row.status.watchSymbol {
-          Image(systemName: symbol).font(.system(size: 13, weight: .bold)).foregroundStyle(Color.watch(row.statusRole))
+          Image(systemName: symbol).font(.system(size: 13, weight: .bold)).foregroundStyle(Color.watch(role))
         } else {
-          Circle().fill(Color.watch(row.statusRole)).frame(width: 12, height: 12)
+          Circle().fill(Color.watch(role)).frame(width: 12, height: 12)
         }
       }.frame(width: 32, height: 32)
       VStack(alignment: .leading, spacing: 1) {
         Text(row.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.watch(.textStrong))
           .lineLimit(1).minimumScaleFactor(0.8)
-        Text(row.statusLabel).font(.system(size: 12)).foregroundStyle(Color.watch(row.statusRole)).lineLimit(1)
+        Text(row.statusLabel(unread: unread)).font(.system(size: 12)).foregroundStyle(Color.watch(role)).lineLimit(1)
           .monospacedDigit()
       }
       Spacer(minLength: 0)
