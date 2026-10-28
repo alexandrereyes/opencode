@@ -114,7 +114,10 @@ struct ComposerEditor: View {
           draft: draft, theme: theme, expanded: expanded, owner: editorID,
           label: comment == nil ? "Mensagem" : "Comentário",
           identifier: comment == nil ? "conversation-composer" : "comment-composer",
-          submit: submit, canSubmit: canSubmit, firstSuggestion: firstSuggestion
+          submit: submit, canSubmit: canSubmit, firstSuggestion: firstSuggestion,
+          importImages: { providers in
+            Task { await store.importImages(providers, draft: draft, reservedBytes: comment?.reservedBytes ?? 0) }
+          }
         )
         .overlay(alignment: .topLeading) {
           if draft.isEmpty {

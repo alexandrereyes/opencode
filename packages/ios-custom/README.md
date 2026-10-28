@@ -704,6 +704,30 @@ unchosen `&text` is sent as plain text.
 `ComposerCaseUITests/testAmpersandSendsTheFileReferenceAtNoLongerLists` (live; `test-composer-case.py` then checks the
 sent message's `file://…/README.md` reference, mention range and text on the server) cover it in both themes.
 
+### Pasted images — 28 October
+
+**Alexandre, 28/10: colar uma imagem no compositor vira anexo.** The keyboard's "Foto · Colar de …" suggestion,
+**Colar** in the edit menu and ⌘V all call the editor's `paste(_:)`, which only read the composer's own token format
+and plain text, so an image did nothing; the plain-text view also did not offer Colar for an image or accept a dropped
+one. `ComposerInputView` now sends image items to `ConversationStore.importImages`, the "+" menu's
+`importAttachment` path (25 MiB draft limit, HEIC/oversize conversion, thumbnail chip, removal, saved draft), named
+`Imagem-XXXXXX.<ext>`. Several images become several attachments. Text and images together: each pasteboard item is
+classified, image items are attached and the other items' text is inserted (undoable, and it still opens `&`/`@`
+triggers). An image never enters the text: no `U+FFFC`/glyph from paste, `paste(itemProviders:)`, drops (the
+`UITextPasteDelegate` answers `setNoResult()` for images) or `insertAttributedText` (image attachments are imported,
+the text is kept). The paste configuration adds `public.image` to the defaults so Colar and drops accept images.
+
+It applies to every `ComposerEditor`: the conversation (roots, children and chats), **Nova sessão**, the master
+session and the quote comment sheet (whose attachments travel with the comment). Editors without attachments (the
+`/btw` side question, the composer fixture) keep ignoring images.
+
+`ComposerEditingTests` covers menu/⌘V paste with text and several images, undo, item providers, the drop delegate,
+rich insertions and the import flow. After `build-for-testing`, `script/test-paste-image.py` (same environment as
+`test-composer-case.py`) runs `ComposerPasteImageUITests` against an owned conversation: Colar with two images, ⌘V
+with one more and a real send, the comment sheet, and the keyboard suggestion, which the simulator offers after the
+test runner copies an image (its bar is outside the app's accessibility tree, so the test taps above the keys). The
+script then checks the sent messages' image parts on the server.
+
 ### Composer editing stability — 23 October
 
 The live `UITextView.textStorage` owns editing. Native edits publish a lightweight content revision; SwiftUI only
