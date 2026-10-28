@@ -124,6 +124,31 @@ import UIKit
   func testCurrencyTableAndInlineHTMLDark() throws { try currency("openchamber-dark") }
   func testCurrencyTableAndInlineHTMLLight() throws { try currency("openchamber-light") }
 
+  /// Without wrapping the currency table is wider than the screen; scrolling it moves the grid with the cells.
+  func testWideTableGridScrollsWithItsCells() throws {
+    continueAfterFailure = false
+    app.launchArguments = ["-OpenCodeServerURL", ProcessInfo.processInfo.environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4177",
+      "-OpenCodeTheme", "openchamber-dark", "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "top",
+      "-OpenCodeMarkdownFixture", "-OpenCodeMarkdownFixtureDocument", "markdown-currency-fixture", "-OpenCodeMarkdownTableWrap", "NO"]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
+    app.launch()
+    defer { app.terminate() }
+    let transcript = app.collectionViews["conversation-transcript"]
+    XCTAssertTrue(transcript.waitForExistence(timeout: 25))
+    let table = app.scrollViews.matching(NSPredicate(format: "identifier BEGINSWITH 'markdown-table-content-'")).firstMatch
+    XCTAssertTrue(table.waitForExistence(timeout: 20))
+    reveal(table, transcript: transcript)
+    let first = table.textViews.matching(NSPredicate(format: "value == %@", "90 ACME + 3 GLOBEX")).firstMatch
+    XCTAssertTrue(first.waitForExistence(timeout: 5))
+    let start = first.frame.minX
+    capture(app, "wide-table-start")
+    let origin = table.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.15))
+    origin.press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: -160, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.3)
+    Thread.sleep(forTimeInterval: 1)
+    XCTAssertLessThan(first.frame.minX, start - 40, "a tabela não rolou")
+    capture(app, "wide-table-scrolled")
+  }
+
   /// The synthetic `markdown-currency-fixture` reproduces a financial answer: `R$` values in a right-aligned table,
   /// bold results, an inline formula, display math and a `<sub>` sources note.
   private func currency(_ theme: String) throws {

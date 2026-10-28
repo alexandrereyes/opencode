@@ -217,6 +217,14 @@ import XCTest
       view.contentOffset.x = 10_000
       view.layoutIfNeeded()
       XCTAssertLessThanOrEqual(view.contentOffset.x, max(0, view.contentSize.width - 402))
+      // The grid is content of the scroll view, so it scrolls with the cells and its lines sit between them.
+      XCTAssertTrue(view.grid.superview === view)
+      XCTAssertEqual(view.grid.frame, CGRect(origin: .zero, size: view.contentSize))
+      let lines = try XCTUnwrap(view.grid.layer.sublayers).map(\.frame)
+      XCTAssertEqual(lines.count, (view.columns - 1) * view.cells.count + view.cells.count - 1)
+      for column in 0..<(view.columns - 1) {
+        XCTAssertTrue(lines.contains { $0.width == 1 && abs($0.minX - (view.cells[0][column].frame.maxX + 16)) < 0.5 })
+      }
     }
   }
 

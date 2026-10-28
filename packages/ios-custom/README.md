@@ -963,7 +963,8 @@ Tables are native, horizontally scrollable grids with header styling, column ali
 CSV/TSV/Markdown copy and CSV/Markdown export through Files. With wrapping on, `MarkdownTable.columnWidths` gives each
 column at least its longest word (up to 240 pt, so a URL may still break) and water-fills the remaining width: words
 and numbers break only between words, and when the minimums exceed the screen the table scrolls horizontally from its
-leading edge. Short inline code in prose (up to half a line) never breaks inside, so `/proventos` or `--all-pages`
+leading edge. The grid lines are layers of a content subview, so they scroll with the cells; the rounded outer border
+belongs to the viewport and stays fixed. Short inline code in prose (up to half a line) never breaks inside, so `/proventos` or `--all-pages`
 moves to the next line whole; table cells and longer spans wrap as before. Code cards retain one selectable TextKit 2 text view,
 including source-line numbers aligned to wrapped lines, a language header, wrap toggle and copy without the gutter.
 TextKit 2-backed caret geometry is cached; the legacy layout manager is never accessed. Inline-code backgrounds have

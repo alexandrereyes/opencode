@@ -181,12 +181,18 @@ final class ResponseTableView: UIScrollView {
   var columns = 0
   var identity = ""
   var wrap = true
-  var border = UIColor.clear
+  var border: UIColor {
+    get { grid.color }
+    set { grid.color = newValue }
+  }
+  /// The separators live in a content subview: the scroll view's own drawing stays put while its bounds scroll.
+  let grid = Grid()
   private var measurements: [CGFloat: Measurement] = [:]
-  private var separators: [CGRect] = []
   private var layoutWidth: CGFloat?
   override init(frame: CGRect) {
     super.init(frame: frame)
+    grid.isUserInteractionEnabled = false
+    addSubview(grid)
     showsVerticalScrollIndicator = false
     showsHorizontalScrollIndicator = true
     isDirectionalLockEnabled = true
@@ -199,7 +205,6 @@ final class ResponseTableView: UIScrollView {
     measurements.removeAll(keepingCapacity: true)
     layoutWidth = nil
     setNeedsLayout()
-    setNeedsDisplay()
   }
   func measure(_ width: CGFloat) -> Measurement {
     if let cached = measurements[width] { return cached }
@@ -246,7 +251,7 @@ final class ResponseTableView: UIScrollView {
     // A recycled or narrowed table starts at its leading edge, never past its new content.
     let maximum = max(0, layout.width - bounds.width)
     if contentOffset.x > maximum || contentOffset.x < 0 { contentOffset.x = min(max(0, contentOffset.x), maximum) }
-    separators = []
+    var separators: [CGRect] = []
     var y: CGFloat = 0
     for (row, texts) in cells.enumerated() {
       var x: CGFloat = 0
@@ -259,10 +264,29 @@ final class ResponseTableView: UIScrollView {
       y += layout.heights[row]
       if row < cells.count - 1 { separators.append(CGRect(x: 0, y: y, width: layout.width, height: 1)) }
     }
+    grid.frame = CGRect(origin: .zero, size: contentSize)
+    grid.separators = separators
   }
-  override func draw(_ rect: CGRect) {
-    super.draw(rect)
-    border.setFill()
-    separators.forEach { UIBezierPath(rect: $0).fill() }
+
+  /// One plain layer per separator: no backing bitmap, however wide or tall the table is.
+  final class Grid: UIView {
+    var color = UIColor.clear {
+      didSet { layer.sublayers?.forEach { $0.backgroundColor = color.cgColor } }
+    }
+    var separators: [CGRect] = [] {
+      didSet {
+        let layers = layer.sublayers ?? []
+        layers.dropFirst(separators.count).forEach { $0.removeFromSuperlayer() }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (index, frame) in separators.enumerated() {
+          let line = layers.indices.contains(index) ? layers[index] : CALayer()
+          if line.superlayer == nil { layer.addSublayer(line) }
+          line.frame = frame
+          line.backgroundColor = color.cgColor
+        }
+        CATransaction.commit()
+      }
+    }
   }
 }
