@@ -66,8 +66,11 @@ import XCTest
     start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 70)))
     XCTAssertTrue((bar.value as? String)?.hasPrefix("Compacta") == true)
     app.buttons["Voltar"].tap()
-    app.tabBars.buttons["Você"].tap()
+    // Você (a sheet) keeps the call's bar; ending the call back on Sessões returns the strip to its place.
+    app.openYou()
     XCTAssertTrue(bar.exists)
+    XCTAssertTrue(bar.isHittable)
+    app.showSessions()
     let accessory = app.buttons["master-accessory"].frame
     control(36)
     XCTAssertTrue(bar.waitForNonExistence(timeout: 5))
@@ -77,12 +80,14 @@ import XCTest
     app.terminate()
   }
 
-  /// Voice bar, then the master accessory, then the tab bar: both strips stay visible and tappable.
+  /// Voice bar, then the master accessory where the tab bar was, above the home indicator: both strips stay
+  /// visible and tappable.
   private func assertStacked(file: StaticString = #filePath, line: UInt = #line) {
     let accessory = app.buttons["master-accessory"]
     XCTAssertTrue(accessory.exists, file: file, line: line)
     XCTAssertLessThanOrEqual(bar.frame.maxY, accessory.frame.minY + 1, file: file, line: line)
-    XCTAssertLessThanOrEqual(accessory.frame.maxY, app.tabBars.firstMatch.frame.maxY, file: file, line: line)
+    XCTAssertLessThanOrEqual(accessory.frame.maxY, app.frame.maxY - 20, file: file, line: line)
+    XCTAssertGreaterThanOrEqual(accessory.frame.maxY, app.frame.maxY - 60, file: file, line: line)
     XCTAssertEqual(bar.frame.width, accessory.frame.width, accuracy: 4, file: file, line: line)
     XCTAssertTrue(bar.isHittable, file: file, line: line)
     XCTAssertTrue(accessory.isHittable, file: file, line: line)
@@ -97,15 +102,19 @@ import XCTest
     let voiceIndex = try XCTUnwrap(tree.range(of: "floating-voice-bar")).lowerBound
     XCTAssertLessThan(voiceIndex, try XCTUnwrap(tree.range(of: "master-accessory")).lowerBound)
     let resting = accessory.frame
-    for tab in ["Painel", "Pedidos", "Projetos", "Você", "Sessões"] {
-      app.tabBars.buttons[tab].tap()
+    // Sessões is the only root screen; Você, a sheet over it, keeps the voice bar (the accessory stays beneath).
+    for screen in ["você", "sessões"] {
+      if screen == "você" { app.openYou() } else { app.showSessions() }
       XCTAssertTrue(bar.waitForExistence(timeout: 5))
-      assertStacked()
-      XCTAssertEqual(accessory.frame.minY, resting.minY, accuracy: 1)
+      XCTAssertTrue(bar.isHittable)
+      if screen == "sessões" {
+        assertStacked()
+        XCTAssertEqual(accessory.frame.minY, resting.minY, accuracy: 1)
+      }
       toggle()
       XCTAssertTrue((bar.value as? String)?.hasPrefix("Expandida") == true)
-      assertStacked()
-      capture("stacked-expanded-" + tab.lowercased())
+      if screen == "sessões" { assertStacked() }
+      capture("stacked-expanded-" + screen)
       toggle()
       XCTAssertTrue((bar.value as? String)?.hasPrefix("Compacta") == true)
     }
@@ -147,9 +156,11 @@ import XCTest
     assertStacked()
     XCTAssertGreaterThanOrEqual(bar.frame.minY, app.sessionsTitle.frame.minY)
     capture("stacked-large-expanded")
-    app.tabBars.buttons["Você"].tap()
-    assertStacked()
+    app.openYou()
+    XCTAssertTrue(bar.isHittable)
     capture("stacked-large-settings")
+    app.showSessions()
+    assertStacked()
     app.terminate()
   }
 

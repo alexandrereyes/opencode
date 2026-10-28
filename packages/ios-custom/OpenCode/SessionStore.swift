@@ -88,13 +88,14 @@ final class SessionStore {
       #endif
     }
   }
-  var selectedTab = 3
+  /// Você (settings) as a sheet over Sessões, opened from the header avatar.
+  var settingsOpen = false
   /// Conversations currently on a navigation stack, so screens pushed above one share its live store.
   @ObservationIgnored private let liveConversations = NSMapTable<NSString, ConversationStore>.strongToWeakObjects()
   func register(_ conversation: ConversationStore) { liveConversations.setObject(conversation, forKey: conversation.id as NSString) }
   func liveConversation(_ id: String) -> ConversationStore? { liveConversations.object(forKey: id as NSString) }
   var conversationOpen: Bool { !conversationPath.isEmpty }
-  var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
+  var currentSessionID: String? { !settingsOpen && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
   let toast = ToastCenter()
   let alerts: SessionAlertCenter
   let catalog: ModelCatalogCache

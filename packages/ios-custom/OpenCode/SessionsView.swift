@@ -90,6 +90,7 @@ struct SessionsView: View {
             else { voice?.toggle(sessions: store) }
           },
           settings: settings,
+          account: { store.settingsOpen = true },
           newSession: {
             // Sessões starts new work in Chats; projects and worktrees remain one tap away.
             store.conversationPath.append(
@@ -110,6 +111,7 @@ struct SessionsView: View {
       .scrollEdgeEffectStyle(.soft, for: .top)
       .scrollEdgeEffectStyle(.hard, for: .bottom)
       .floatingVoiceInset(sessions: store)
+      .safeAreaInset(edge: .bottom, spacing: 0) { SessionMasterBar(store: store) }
       .refreshable {
         async let sessions: Void = store.reload()
         await store.quota.refresh()
@@ -226,13 +228,13 @@ struct SessionsView: View {
             : "Isso altera apenas os filtros. O repositório e suas sessões não serão excluídos.")
       }
     }
-    .sessionRowTimeline(active: store.selectedTab == 3 && !store.conversationOpen && !showArchived)
+    .sessionRowTimeline(active: !store.settingsOpen && !store.conversationOpen && !showArchived)
   }
 
-  /// Settings stay in Você on iOS; only the Mac passes this action. A DEBUG fixture renders that variant.
+  /// The iPhone opens Você from its avatar; only the Mac passes the gear. A DEBUG fixture renders that variant.
   private var settings: (() -> Void)? {
     #if DEBUG
-    if ScreenCatalogFixture.settingsButton { return { store.selectedTab = 4 } }
+    if ScreenCatalogFixture.settingsButton { return { store.settingsOpen = true } }
     #endif
     return nil
   }
@@ -333,5 +335,44 @@ struct SessionsView: View {
       Haptics.play(.warning)
       deleteCandidate = row.session
     }
+  }
+}
+
+/// Where the tab bar was, above the home indicator: the Sessão mestra and what needs Alexandre. A bottom inset of
+/// the Sessões list (outside the voice bar's), so the list scrolls its last row above it; pushed screens cover it.
+private struct SessionMasterBar: View {
+  @Environment(\.appTheme) private var theme
+  let store: SessionStore
+
+  var body: some View {
+    Button {
+      store.conversationPath.append(.init(id: "master", master: true))
+    } label: {
+      HStack(spacing: 8) {
+        Image(systemName: "point.3.connected.trianglepath.dotted").appSymbol(.action).foregroundStyle(
+          theme.color(.accent))
+        Text("Sessão mestra").fontWeight(.medium)
+          .lineLimit(1).minimumScaleFactor(0.45)
+        Spacer(minLength: 4)
+        Text(store.masterAvailability == .available
+          ? (store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
+          : store.masterAvailability.label)
+          .foregroundStyle(theme.color(.glassSecondary))
+          .lineLimit(1).minimumScaleFactor(0.45)
+        Image(systemName: "arrow.right").appSymbol(.inline).foregroundStyle(theme.color(.icon))
+      }
+      .appFont(.caption).monospacedDigit()
+      .foregroundStyle(theme.color(.textStrong))
+      .padding(.horizontal, 20)
+      .frame(maxWidth: .infinity, minHeight: 52)
+      .contentShape(Capsule())
+      .accessibilityElement(children: .combine)
+    }
+    .buttonStyle(.plain)
+    .glassEffect(.regular.interactive(), in: .capsule)
+    .accessibilityIdentifier("master-accessory")
+    .padding(.horizontal, AppLayout.margin)
+    .padding(.top, 6)
+    .padding(.bottom, 4)
   }
 }

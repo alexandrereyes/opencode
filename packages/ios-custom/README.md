@@ -15,6 +15,30 @@ submitted to the App Store.
 > **Status:** "Sessões", "Nova sessão", the conversation screen and "Você" (settings) are implemented. All conversation waves (0–7) are complete
 > (see [Second screen: Conversa](#second-screen-conversa)); the remaining exclusions are listed below.
 
+## No tab bar (28 October, option A)
+
+Sessões is the app's root (`AppShell` in `OpenCodeApp.swift`); there is no `TabView`. The removed Painel, Pedidos
+and Projetos tabs were "Esta tela está em construção" placeholders: Pedidos only showed the request count as a badge,
+which the Sessão mestra bar already shows ("N precisam de você"), and adding a repository stays in the chips' **+**
+and Nova sessão.
+- **Header:** "Sessões", then voice, **+** and the **AR** avatar with the former Você tab's ring (a neutral track and
+  a green half, decorative: it never carried data). `SessionColumnHeader` takes it as the optional `account` slot
+  (VoiceOver "Você", identifier `sessions-account`), so the Mac keeps its gear (`settings`) and its own title-bar
+  avatar.
+- **Você** opens from the avatar as a sheet over Sessões (`SessionStore.settingsOpen`), like Arquivadas, the quota
+  detail and the session switcher: the Sessões stack keeps only conversations, and Você keeps its own navigation
+  (themes, servers, pairing). **Fechar** (`settings-close`) or a swipe down closes it. Choosing another server
+  rebuilds the store and reopens Você on the new one, as the tab did.
+- **Sessão mestra bar:** a glass capsule in a bottom `safeAreaInset`, above the home indicator where the tab bar
+  was; the list scrolls its last row (Arquivadas) above it and the floating voice bar stacks over it. It hides
+  while a conversation, the master or Nova sessão is on the stack, as the tab accessory did.
+- **Navigation:** Live Activity links, session alerts and the master bar close Você and push onto the Sessões
+  stack; voice, `opencode-file://` and folder links, the switcher and Nova sessão never depended on a tab.
+  `currentSessionID` treats an open Você as no visible conversation, as the Você tab did.
+- **Tests:** `AppNavigation.swift` replaces tab taps (`openYou()`, `showSessions()`, `bottomChromeTop`);
+  `AppShellTests` checks there is no tab bar, the header order, Você opening and closing, the bar's place and that
+  the list's last row stays above it.
+
 ## Ownership
 
 - This package exists only on the `custom` branch. Branch from `custom` (or `origin/custom`) and target `custom`.
@@ -54,7 +78,7 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 - **Rows:** only root sessions, without archived sessions or the Sessão mestra. Running state, permissions, and
   questions of subagents roll up into their root session. Managed chats (`custom.chats`) appear under **Todas** (and a
   state filter) mixed with repository sessions, in the same sections and rules, and alone under the **Chats** chip;
-  a repository chip lists none. Their requests count in **Precisa de você** and the tab badge. Pinned sessions come first, then the activity order. When a session has
+  a repository chip lists none. Their requests count in **Precisa de você** and the Sessão mestra bar. Pinned sessions come first, then the activity order. When a session has
   several states, the priority is permission > question > running > failed > unread > stopped. The rows are grouped
   into the sections described in [Layout D](#layout-d-precisa-de-você--27-october).
 - **Row metadata (wave 10):** the PWA sidebar's exact compact elapsed time (`0s`, `59s`, `1m`, `1h`, `1d`), floored
@@ -97,7 +121,6 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   Destructive UI tests call `requireSandbox()`, which reads the DEBUG `debug-server-url` marker and throws, without
   acting, unless the app is connected to the sandbox; recreate the simulator between themes, since a relaunch without
   test arguments would use the default server.
-- **Visual only for now:** the other tabs except Você.
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
 - **Filter chips:** "Todas" first, as a compact icon-only chip (`square.stack`, a stack of every session; at least
@@ -145,8 +168,8 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   sessão project selector (`ProjectAvatar`). The running arc, `+N` subagents, state badge and unread dot stay on top;
   Chats rows, the Sessão mestra and the in-app alert banner keep their current avatars. `ProjectIcon.of` resolves each
   icon source once, so row re-renders never decode it again.
-- **Components:** native iOS components themed by tokens: Liquid Glass tab bar, `tabViewBottomAccessory` for the
-  "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and the shared column header in a
+- **Components:** native iOS components themed by tokens: no tab bar (see [No tab bar](#no-tab-bar-28-october-option-a)),
+  a bottom glass bar for the "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and the shared column header in a
   `safeAreaBar` (the navigation bar is hidden on this screen only; pushed screens keep theirs).
 
 ### Layout D ("Precisa de você") — 27 October
@@ -390,7 +413,7 @@ paralela`. A comment attaches the quoted passage above the composer (`Citações
   claimed the whole response and blocked text selection.
 - **Other:** plain background, day chips (`Hoje`, `Ontem`) and one ↓ **Ir para a mais recente** control, following the
   custom web's geometry rather than an unread-message boundary. There is no new-message divider, count or ↑ pill.
-  The tab bar and the "Sessão mestra" accessory are hidden inside the conversation.
+  The "Sessão mestra" bar is hidden inside the conversation.
 - **Token colors** come from the theme, never from fixed values: dedicated semantic roles for context mentions,
   agent mentions, commands, skills, and snippets, generated by `script/generate-themes.ts` from the same web tokens the
   web composer uses where they exist (files: `syntax-property`; agents: `syntax-type`; snippets and sessions:
@@ -1555,8 +1578,9 @@ The waveform, state and active Sessions waveform button use `primary` (orange in
 and ending uses the destructive `error` role with a tonal background.
 Typography comes from `AppTypography`; there are no fixed palette colors.
 
-On tab screens the voice surface stacks above the master accessory (**Alexandre, 25/10**): voice bar,
-then the still tappable "Sessão mestra" accessory, then the tab bar, on every tab. The accessory keeps its
+On Sessões the voice surface stacks above the master accessory (**Alexandre, 25/10**): voice bar, then the still
+tappable "Sessão mestra" bar above the home indicator (the tab bar is gone since 28/10; Você, a sheet, keeps the
+voice bar). The accessory keeps its
 place when a call starts or ends. The voice bar's safe-area inset sits inside the accessory's own inset and
 reserves the whole expanded height, so the last list row remains reachable above both. In a conversation it is
 a sibling immediately above the composer, including with the keyboard open. It starts compact; tap the
@@ -1981,7 +2005,7 @@ switching in place, tapping the current row and Nova sessão.
 
 ## Nova sessão (wave 9)
 
-The orange **+** in Sessões pushes a local draft, not a server Session. The tab bar and "Sessão mestra" accessory are
+The orange **+** in Sessões pushes a local draft, not a server Session. The "Sessão mestra" bar is
 hidden, as in a conversation, and the existing V2 composer focuses automatically. The repository avatar uses the
 same monogram/color projection as Sessões. MCP chips wrap centrally above the repository/directory selectors. With a
 second selector and an open keyboard, the avatar/question compact slightly to keep all chips and the preview note

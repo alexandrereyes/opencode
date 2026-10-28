@@ -23,9 +23,9 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = password
     app.launch()
     defer { app.terminate() }
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
     try app.requireSandbox()
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 30))
     XCTAssertTrue(app.buttons["filter-all"].isSelected)
 

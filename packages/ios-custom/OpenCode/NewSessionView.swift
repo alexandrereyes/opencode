@@ -88,7 +88,7 @@ struct NewSessionView: View {
       }
     }
     .background(theme.color(.background)).tint(theme.color(.primary))
-    .toolbar(.hidden, for: .navigationBar, .tabBar)
+    .toolbar(.hidden, for: .navigationBar)
     .background(
       ConversationBackGesture(
         capture: { store.draft.focused = false }, appeared: {}, enabled: !store.draft.sending)

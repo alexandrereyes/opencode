@@ -63,11 +63,9 @@ import XCTest
     shot("sessions-list-chats")
     chip("filter-project-Projeto Exemplo 0", app)
     shot("sessions-list-repository")
-    for (title, name) in [("Painel", "dashboard-tab-default"), ("Pedidos", "requests-tab-default"),
-                           ("Projetos", "projects-tab-default"), ("Você", "you-settings-default")] {
-      app.tabBars.buttons[title].tap()
-      shot(name)
-    }
+    // No tab bar: Você opens from the header avatar.
+    app.openYou()
+    shot("you-settings-default")
   }
 
   /// Every section of the column: the top of the list, then the days with "Anteriores" expanded.
@@ -202,7 +200,7 @@ import XCTest
   func testSettings() {
     let app = launch()
     defer { app.terminate() }
-    app.tabBars.buttons["Você"].tap()
+    app.openYou()
     tap("settings-themes", app)
     shot("you-themes-default")
     app.navigationBars.buttons.firstMatch.tap()
@@ -335,7 +333,7 @@ import XCTest
   func testSubscriptions() {
     let app = launch()
     defer { app.terminate() }
-    app.tabBars.buttons["Você"].tap()
+    app.openYou()
     tap("proxy-settings-codex", app)
     XCTAssertTrue(app.otherElements["proxy-pool-header"].waitForExistence(timeout: 10))
     shot("you-subscriptions-default")

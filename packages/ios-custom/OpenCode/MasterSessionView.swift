@@ -57,7 +57,7 @@ private struct EmptyMasterView: View {
         FloatingVoiceHost(sessions: store.sessions).padding(.horizontal, 12).padding(.bottom, 6)
       }
     }.background(theme.color(.background)).tint(theme.color(.primary))
-      .toolbar(.hidden, for: .navigationBar, .tabBar)
+      .toolbar(.hidden, for: .navigationBar)
       .toastOverlay(store.composer.toast).environment(store.composer.toast)
       .task(id: store.sessions.masterAvailability == .available) { await store.open() }
       .onDisappear { store.draft.focused = false }

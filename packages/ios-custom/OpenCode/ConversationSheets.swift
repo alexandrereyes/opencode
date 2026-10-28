@@ -69,7 +69,6 @@ struct ConversationAgentsView: View {
     .foregroundStyle(theme.color(.textStrong))
     .navigationTitle("Agentes e tarefas").navigationBarTitleDisplayMode(.inline)
     .toolbar(.visible, for: .navigationBar)
-    .toolbar(.hidden, for: .tabBar)
     .tint(theme.color(.primary))
     .toastOverlay(store.toast)
     .sessionAlertOverlay()

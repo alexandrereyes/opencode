@@ -80,7 +80,7 @@ struct ScrollFixtureRoot: View {
     let theme = appearance.theme(systemDark: systemScheme == .dark)
     Group {
       if ScrollFixtures.mode == "catalog" {
-        AppTabs(store: store, runtime: AppRuntime.shared)
+        AppShell(store: store, runtime: AppRuntime.shared)
           .environment(\.voiceController, AppRuntime.shared.voice)
           .environment(\.voiceSessionStore, store)
       } else if ScrollFixtures.mode == "conversation" {

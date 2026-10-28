@@ -35,25 +35,31 @@ import XCTest
   }
   private func settings(_ app: XCUIApplication, appearance: Bool = false) {
     dismissAlert(app)
-    XCTAssertTrue(app.tabBars.buttons["Você"].waitForExistence(timeout: 5))
-    app.tabBars.buttons["Você"].tap()
-    for _ in 0..<3 {
-      if app.navigationBars["Você"].exists { break }
-      app.navigationBars.buttons.firstMatch.tap()
-    }
-    XCTAssertTrue(app.navigationBars["Você"].waitForExistence(timeout: 10))
+    // Você opens at its root every time: it is a sheet now, not a tab that kept its pushed screen.
+    app.openYou()
     if appearance { reveal(app.descendants(matching: .any)["settings-themes"].firstMatch, app: app) }
   }
   private func reveal(_ element: XCUIElement, app: XCUIApplication) {
-    let list = app.collectionViews.firstMatch
+    // Você is a sheet over the Sessões list: scroll the topmost list, resolved again before every swipe.
+    var list: XCUIElement {
+      let lists = app.collectionViews
+      return lists.element(boundBy: max(0, lists.count - 1))
+    }
     let top = app.navigationBars.firstMatch.frame.maxY
-    let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY - 60 : app.frame.maxY
-    if !element.exists { list.swipeDown(velocity: .fast) }
+    // Você is a sheet: only the floating voice bar can cover its bottom.
+    let bottom = app.frame.maxY - 60
+    // A fast swipe down at the top would dismiss the sheet; drag slowly and hold so it only scrolls.
+    func scrollTowardTop() {
+      let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+      start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 180)), withVelocity: .slow,
+        thenHoldForDuration: 0.3)
+    }
+    if !element.exists { scrollTowardTop() }
     for _ in 0..<20 {
       let frame = element.exists ? element.frame : .zero
       if frame.height > 0 && frame.minY >= top && frame.maxY < bottom && element.isHittable { return }
       if frame.height > 0 && frame.minY < top {
-        list.swipeDown(velocity: .slow)
+        scrollTowardTop()
         continue
       }
       list.swipeUp(velocity: .slow)
@@ -73,7 +79,7 @@ import XCTest
   }
   func testLiveThemesAndAppearancesAcrossScreens() throws {
     let app = try launch()
-    XCTAssertTrue(app.tabBars.buttons["Você"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.accountButton.waitForExistence(timeout: 20))
     settings(app, appearance: true)
     chooseTheme("openchamber", app: app)
     for (family, mode, name) in [("openchamber", "Escuro", "openchamber-dark"),
@@ -91,7 +97,7 @@ import XCTest
       XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'desenvolvimento' OR value CONTAINS 'desenvolvimento'")).firstMatch.waitForExistence(timeout: 5))
       shot("about-" + name)
       app.navigationBars.buttons.firstMatch.tap()
-      app.tabBars.buttons["Sessões"].tap()
+      app.showSessions()
       shot("sessions-" + name)
       let root = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 8 — leitura e temas'")).firstMatch
       app.revealSessionRow(root)
@@ -124,7 +130,7 @@ import XCTest
     selectServer(offlineName, app: app)
     XCTAssertTrue(app.staticTexts["Desconectado"].waitForExistence(timeout: 15))
     shot("server-offline-" + mode)
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 8 — leitura e temas'")).firstMatch.exists)
     shot("sessions-offline-clean-" + mode)
     settings(app)
@@ -133,7 +139,7 @@ import XCTest
     selectServer(manualName, app: app)
     XCTAssertTrue(app.staticTexts["Conectado"].waitForExistence(timeout: 15))
     shot("server-manual-active-" + mode)
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     let root = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Onda 8 — leitura e temas'")).firstMatch
     app.revealSessionRow(root)
     XCTAssertTrue(root.exists)

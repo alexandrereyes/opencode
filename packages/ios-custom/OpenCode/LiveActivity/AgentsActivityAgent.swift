@@ -104,7 +104,7 @@ extension AppRuntime {
       }
     }
     guard let store = await prepare() else { return }
-    store.selectedTab = 3
+    store.settingsOpen = false
     switch link {
     case .session(_, let sessionID, _):
       if store.conversationPath.last?.id != sessionID { store.conversationPath = [.init(id: sessionID)] }

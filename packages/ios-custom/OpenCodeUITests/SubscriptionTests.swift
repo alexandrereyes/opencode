@@ -9,7 +9,7 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
     app.launchEnvironment["OPENCODE_PROXY_STUB"] = stub
     app.launch()
-    XCTAssertTrue(app.tabBars.buttons["Você"].waitForExistence(timeout: 25))
+    XCTAssertTrue(app.accountButton.waitForExistence(timeout: 25))
     return app
   }
   private func shot(_ name: String) {
@@ -19,7 +19,7 @@ import XCTest
     add(attachment)
   }
   private func open(_ app: XCUIApplication, provider: String = "codex") {
-    app.tabBars.buttons["Você"].tap()
+    app.openYou()
     let entry = app.buttons["proxy-settings-" + provider]
     XCTAssertTrue(entry.waitForExistence(timeout: 15))
     entry.tap()
@@ -36,7 +36,7 @@ import XCTest
   func testLiveReadOnlyEntryPointsSelectionAndCancelledConfirmation() throws {
     let app = try launch()
     defer { app.terminate() }
-    app.tabBars.buttons["Você"].tap()
+    app.openYou()
     XCTAssertTrue(app.buttons["proxy-settings-anthropic"].waitForExistence(timeout: 20))
     shot("voce")
     app.buttons["proxy-settings-codex"].tap()
@@ -58,7 +58,7 @@ import XCTest
     selection.tap()
     XCTAssertTrue(app.buttons["proxy-close"].waitForNonExistence(timeout: 5))
     shot("voce-selected")
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     shot("sessions-selected")
     app.buttons["proxy-strip-anthropic"].tap()
     XCTAssertTrue(app.segmentedControls["proxy-provider"].buttons["Claude"].isSelected)
@@ -125,7 +125,7 @@ import XCTest
   func testStubbedUnavailableUnconfiguredAndAccessibleAccountActions() throws {
     for (scenario, title) in [("unavailable", "LLM proxy indisponível"), ("unconfigured", "LLM proxy não configurado")] {
       let app = try launch(stub: scenario)
-      app.tabBars.buttons["Você"].tap()
+      app.openYou()
       app.buttons["proxy-settings-codex"].tap()
       XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 10))
       shot("stub-" + scenario)

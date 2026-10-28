@@ -124,7 +124,8 @@ import XCTest
   func testBannerOpensFromAnotherTabAndPresentedSheet() async throws {
     var app = try launch("PARENT")
     app.buttons["Voltar"].tap()
-    app.tabBars.buttons["Painel"].tap()
+    // Another screen than the conversation: Você, a sheet over Sessões (there are no other tabs).
+    app.openYou()
     try await prompt("SUCCESS", "Responda apenas: Pronto.")
     XCTAssertTrue(app.buttons["session-alert-open"].waitForExistence(timeout: 90))
     screenshot("banner-other-tab")

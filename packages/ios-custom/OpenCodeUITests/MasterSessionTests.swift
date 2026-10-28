@@ -14,8 +14,8 @@ import XCTest
     if old { app.launchEnvironment["OPENCODE_MASTER_OLD_SERVER"] = "1" }
     app.launch()
     if session == nil {
-      XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
-      app.tabBars.buttons["Sessões"].tap()
+      XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
+      app.showSessions()
     }
     return app
   }

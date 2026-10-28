@@ -15,9 +15,7 @@ import XCTest
     if !row.exists { list.swipeDown(velocity: .fast) }
     while Date() < deadline {
       let top = sessionsTop
-      let bar = tabBars.firstMatch.frame
-      let accessory = buttons["master-accessory"]
-      let bottom = accessory.exists ? min(bar.minY, accessory.frame.minY) : bar.minY
+      let bottom = bottomChromeTop
       // Rows older than seven days start inside the collapsed "Anteriores".
       let older = buttons["session-section-older"]
       if !row.exists, older.exists, older.isHittable, older.frame.minY >= top, older.frame.maxY <= bottom,
@@ -41,6 +39,6 @@ import XCTest
       let end = coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: list.frame.midX, dy: top + 100))
       start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0.15)
     }
-    XCTFail("A sessão não ficou visível acima da barra de abas.")
+    XCTFail("A sessão não ficou visível acima da faixa da Sessão mestra.")
   }
 }

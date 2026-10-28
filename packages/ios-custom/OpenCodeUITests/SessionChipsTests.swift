@@ -24,9 +24,9 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = password
     app.launch()
     defer { app.terminate() }
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
     try app.requireSandbox()
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     XCTAssertTrue(app.buttons["filter-chats"].waitForExistence(timeout: 20))
     // The runner resets Chats to the start of the saved order.
     var combined = ["Chats"] + manual
@@ -91,9 +91,9 @@ import XCTest
     shot("chips-chats-moved")
     app.terminate()
     app.launch()
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
     try app.requireSandbox()
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     XCTAssertTrue(app.buttons["filter-chats"].waitForExistence(timeout: 20))
     XCTAssertTrue(settled(app, order: expected(combined, unread: stillUnread)))
     shot("chips-chats-reopened")

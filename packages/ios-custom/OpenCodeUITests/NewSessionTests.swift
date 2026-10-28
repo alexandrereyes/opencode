@@ -10,8 +10,8 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(
       environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
-    app.tabBars.buttons["Sessões"].tap()
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
+    app.showSessions()
     return app
   }
   private func openNewSession(_ app: XCUIApplication) {

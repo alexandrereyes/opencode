@@ -12,14 +12,16 @@ struct SessionColumnSelection {
   let cancel: () -> Void
 }
 
-/// The title row of the Sessões column: "Sessões", then voice, the optional Configurações and Nova sessão.
-/// iOS keeps settings in Você and passes no `settings` action; the Mac passes one to show the gear.
+/// The title row of the Sessões column: "Sessões", then voice, the optional Configurações, Nova sessão and the
+/// optional Você avatar. The iPhone passes `account` (it has no tab bar); the Mac passes `settings` for the gear and
+/// keeps its avatar in its title bar.
 struct SessionColumnHeader: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   var voiceActive = false
   let voice: () -> Void
   var settings: (() -> Void)?
+  var account: (() -> Void)?
   let newSession: () -> Void
   var newSessionDisabled = false
   var selection: SessionColumnSelection?
@@ -104,6 +106,13 @@ struct SessionColumnHeader: View {
           .opacity(newSessionDisabled ? 0.5 : 1)
           .disabled(newSessionDisabled)
           .accessibilityLabel("Nova sessão")
+        if let account {
+          Button(action: account) { AccountAvatar() }
+            .glassEffect(.regular.interactive(), in: .circle)
+            .accessibilityLabel("Você")
+            .accessibilityHint("Ajustes, Dados do iPhone, LLM proxy e temas")
+            .accessibilityIdentifier("sessions-account")
+        }
       }
       .buttonStyle(.plain)
     }
@@ -133,5 +142,21 @@ struct SessionColumnHeader: View {
   private func symbol(_ name: String, color: ThemeRole) -> some View {
     Image(systemName: name).appSymbol(.header).foregroundStyle(theme.color(color))
       .frame(width: 48, height: 48).contentShape(Circle())
+  }
+}
+
+/// Alexandre's "AR" with the ring the Você tab showed: a neutral track and a green half, decorative.
+private struct AccountAvatar: View {
+  @Environment(\.appTheme) private var theme
+
+  var body: some View {
+    ZStack {
+      Circle().stroke(theme.color(.border), lineWidth: 1.5)
+      Circle().trim(from: 0, to: 0.5).stroke(theme.color(.success), lineWidth: 1.5).rotationEffect(.degrees(-90))
+      Text("AR").appFont(.secondary, weight: .medium).foregroundStyle(theme.color(.textStrong))
+        .lineLimit(1).minimumScaleFactor(0.6)
+    }
+    .padding(3)
+    .frame(width: 48, height: 48).contentShape(Circle())
   }
 }
