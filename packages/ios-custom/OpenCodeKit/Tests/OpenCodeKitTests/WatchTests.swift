@@ -355,3 +355,65 @@ private final class OnceFlag: @unchecked Sendable {
   private var claimed = false
   func claim() -> Bool { lock.withLock { defer { claimed = true }; return !claimed } }
 }
+
+// MARK: Widget push token
+
+@Suite struct WatchWidgetTokenTests {
+  final class Fake: @unchecked Sendable {
+    let lock = NSLock()
+    var record: WatchWidgetToken.Record?
+    var sent: [(String, String, PushEnvironment)] = []
+    var fail = false
+    var sync: WatchWidgetToken {
+      WatchWidgetToken(
+        load: { self.lock.withLock { self.record } },
+        save: { record in self.lock.withLock { self.record = record } },
+        send: { pairing, record in
+          try self.lock.withLock {
+            if self.fail { throw URLError(.notConnectedToInternet) }
+            self.sent.append((pairing.deviceID, record.token, record.environment))
+          }
+        })
+    }
+  }
+
+  func pairing(_ id: String) -> WatchPairing {
+    WatchPairing(deviceID: id, deviceToken: "t", gatewayURL: URL(string: "https://gateway.invalid")!,
+      access: .init(clientId: "c", clientSecret: "s"), voice: .init(voiceID: "rio"))
+  }
+
+  @Test func savesBeforePairingAndSendsOnceWhenPaired() async {
+    let fake = Fake()
+    let token = Data([0x0a, 0xff])
+    // Extension, before any pairing: kept for later.
+    #expect(await fake.sync.sync(token: token, environment: .production, pairing: nil) == .pending)
+    #expect(fake.record == .init(token: "0aff", environment: .production, sentTo: nil))
+    // App, after pairing, without a token of its own: sends the saved one.
+    #expect(await fake.sync.sync(token: nil, environment: .production, pairing: pairing("w1")) == .sent)
+    #expect(fake.sent.map(\.0) == ["w1"] && fake.sent.map(\.1) == ["0aff"])
+    #expect(await fake.sync.sync(token: token, environment: .production, pairing: pairing("w1")) == .upToDate)
+    #expect(fake.sent.count == 1)
+  }
+
+  @Test func failureStaysPendingAndRetries() async {
+    let fake = Fake()
+    fake.fail = true
+    #expect(await fake.sync.sync(token: Data([1]), environment: .sandbox, pairing: pairing("w1")) == .pending)
+    #expect(fake.record?.sentTo == nil)
+    fake.fail = false
+    #expect(await fake.sync.sync(token: nil, environment: .sandbox, pairing: pairing("w1")) == .sent)
+    #expect(fake.sent.first?.2 == .sandbox)
+  }
+
+  @Test func newTokenEnvironmentOrPairingSendsAgain() async {
+    let fake = Fake()
+    _ = await fake.sync.sync(token: Data([1]), environment: .sandbox, pairing: pairing("w1"))
+    _ = await fake.sync.sync(token: Data([2]), environment: .sandbox, pairing: pairing("w1"))
+    _ = await fake.sync.sync(token: Data([2]), environment: .production, pairing: pairing("w1"))
+    _ = await fake.sync.sync(token: nil, environment: .production, pairing: pairing("w2"))
+    #expect(fake.sent.map { "\($0.0) \($0.1) \($0.2)" } ==
+      ["w1 01 sandbox", "w1 02 sandbox", "w1 02 production", "w2 02 production"])
+    #expect(await fake.sync.sync(token: nil, environment: .production, pairing: nil) == .pending)
+    #expect(await Fake().sync.sync(token: nil, environment: .production, pairing: pairing("w1")) == .noToken)
+  }
+}

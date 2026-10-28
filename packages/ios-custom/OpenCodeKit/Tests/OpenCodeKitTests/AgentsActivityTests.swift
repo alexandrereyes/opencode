@@ -147,23 +147,23 @@ import Testing
 
   @Test func countersPluralsAndOrder() throws {
     func text(_ state: AgentsState) -> [String] { state.counters.map { "\($0.count) \($0.label)" } }
-    #expect(try text(Self.state("state-one-question")) == ["3 trabalhando", "1 pergunta", "3 concluídas há pouco"])
-    #expect(try text(Self.state("state-two-questions")) == ["2 trabalhando", "2 perguntas", "3 concluídas há pouco"])
+    #expect(try text(Self.state("state-one-question")) == ["3 trabalhando", "1 pergunta", "3 não lidas"])
+    #expect(try text(Self.state("state-two-questions")) == ["2 trabalhando", "2 perguntas", "3 não lidas"])
     var plural = try Self.state("state-mixed")
-    plural.counts = AgentsState.Counts(working: 0, question: 1, permission: 3, failed: 0, idle: 1)
-    #expect(text(plural) == ["1 pergunta", "3 permissões", "1 concluída há pouco"])
+    plural.counts = AgentsState.Counts(working: 0, question: 1, permission: 3, failed: 0, idle: 1, unread: 1)
+    #expect(text(plural) == ["1 pergunta", "3 permissões", "1 não lida"])
     plural.counts.permission = 1
     #expect(text(plural)[1] == "1 permissão")
     let mixed = try Self.state("state-mixed").counters
     #expect(mixed.map(\.role) == [.success, .accent, .warning, .error])
-    #expect(try Self.state("state-working").counters.last == AgentsCounter(count: 1, label: "concluída há pouco",
-      role: .textSecondary, emphasized: false))
+    #expect(try Self.state("state-working").counters.last == AgentsCounter(count: 1, label: "não lida",
+      role: .primary, emphasized: false))
   }
 
   @Test func countersStopAtFourDroppingRecentlyFinishedFirst() throws {
     // state-mixed has all five counts non-zero.
     let mixed = try Self.state("state-mixed")
-    #expect(mixed.counts.idle > 0)
+    #expect(mixed.counts.unread ?? 0 > 0)
     #expect(mixed.counters.map(\.label) == ["trabalhando", "pergunta", "permissão", "com erro"])
     #expect(mixed.counters.count == AgentsLayout.lockMaxCounters)
   }
@@ -171,27 +171,27 @@ import Testing
   @Test func failedOnlyCard() throws {
     let state = try Self.state("state-failed-only")
     #expect(state.activeTotal == 0 && state.gaugeLabel == "ativas")
-    #expect(state.counters.map { "\($0.count) \($0.label)" } == ["1 com erro", "2 concluídas há pouco"])
+    #expect(state.counters.map { "\($0.count) \($0.label)" } == ["1 com erro", "2 não lidas"])
     let arcs = state.gauge(gap: 0)
-    #expect(arcs.map(\.role) == [.error, .textSecondary] && arcs.map(\.dim) == [false, true])
+    #expect(arcs.map(\.role) == [.error, .primary] && arcs.map(\.dim) == [false, false])
     #expect(state.attentionLine == nil)
   }
 
   @Test func gaugeArcsAreProportionalInContractOrder() throws {
     let arcs = try Self.state("state-one-question").gauge(gap: 0)
-    // 3 working, 1 question, 3 idle out of 7.
-    #expect(arcs.map(\.role) == [.success, .accent, .textSecondary])
+    // 3 working, 1 question, 3 unread out of 7.
+    #expect(arcs.map(\.role) == [.success, .accent, .primary])
     #expect(abs(arcs[0].to - 3.0 / 7) < 1e-9 && abs(arcs[1].from - 3.0 / 7) < 1e-9 && abs(arcs[1].to - 4.0 / 7) < 1e-9)
     #expect(arcs.last?.to == 1)
     let gapped = try Self.state("state-one-question").gauge(gap: 0.04)
     #expect(abs(gapped[0].from - 0.02) < 1e-9 && abs(gapped[0].to - (3.0 / 7 - 0.02)) < 1e-9)
     var single = try Self.state("state-working")
-    single.counts.idle = 0
+    single.counts.unread = 0
     #expect(single.gauge(gap: 0.04) == [AgentsGaugeArc(role: .success, dim: false, from: 0, to: 1)])
     single.counts.working = 0
     #expect(single.gauge(gap: 0.04).isEmpty)
     // A tiny share never draws backwards.
-    single.counts = AgentsState.Counts(working: 200, question: 1, permission: 0, failed: 0, idle: 0)
+    single.counts = AgentsState.Counts(working: 200, question: 1, permission: 0, failed: 0, idle: 0, unread: 0)
     #expect(single.gauge(gap: 0.05).allSatisfy { $0.to >= $0.from })
   }
 
@@ -213,11 +213,12 @@ import Testing
 
   @Test func rowLabelsAndProgress() throws {
     let rows = try Self.state("state-one-question").sessions
-    #expect(rows.map(\.statusLabel) == ["Pergunta", "Trabalhando · 2/3", "Trabalhando", "Trabalhando"])
-    #expect(rows.map(\.statusRole) == [.accent, .success, .success, .success])
+    #expect(rows.map { $0.statusLabel(unread: false) } == ["Pergunta", "Trabalhando · 2/3", "Trabalhando", "Trabalhando"])
+    #expect(rows.map { $0.statusRole(unread: false) } == [.accent, .success, .success, .success])
     let mixed = try Self.state("state-mixed").sessions
-    #expect(mixed.map(\.statusLabel) == ["Pergunta", "Permissão", "Erro", "Erro"])
-    #expect(try Self.state("state-failed-only").sessions[1].statusLabel == "Concluída")
+    #expect(mixed.map { $0.statusLabel(unread: true) } == ["Pergunta", "Permissão", "Erro", "Erro"])
+    let failedOnly = try Self.state("state-failed-only")
+    #expect(failedOnly.statusLabel(failedOnly.sessions[1]) == "Não lida")
     #expect(try Self.state("state-working").focus?.progress?.label == "2/3 subagentes")
     #expect(AgentsState.Progress(done: 5, total: 3, unit: "subagents").fraction == 1)
   }
@@ -383,5 +384,96 @@ import Testing
     #expect(mixed.asked(mixed.watchRows[0]) == mixed.attention[0].asked)
     #expect(mixed.asked(mixed.watchRows[1]) == mixed.attention[1].asked)
     #expect(mixed.asked(mixed.sessions[2]) == nil)
+  }
+}
+
+
+/// `counts.unread` (rev. 2026-10-28): unread sessions replace "concluídas há pouco" when the backend sends it; older
+/// backends keep the `idle` behaviour.
+@Suite struct AgentsUnreadTests {
+  private func withUnread(_ name: String, _ unread: Int) throws -> AgentsState {
+    var state = try AgentsActivityTests.state(name)
+    state.counts.unread = unread
+    return state
+  }
+
+  /// The same fixture as an older backend sends it, without `unread`.
+  private func legacy(_ name: String) throws -> AgentsState {
+    var state = try AgentsActivityTests.state(name)
+    state.counts.unread = nil
+    return state
+  }
+
+  @Test func decodesWithAndWithoutUnread() throws {
+    #expect(try AgentsActivityTests.state("state-working").counts.unread == 1)
+    let legacyJSON = #"{"working":1,"question":0,"permission":0,"failed":0,"idle":4}"#
+    let legacyCounts = try JSONDecoder().decode(AgentsState.Counts.self, from: Data(legacyJSON.utf8))
+    #expect(legacyCounts.unread == nil && legacyCounts.finished == AgentsState.Finished(count: 4, unread: false))
+    let json = #"{"working":1,"question":0,"permission":0,"failed":0,"idle":4,"unread":2}"#
+    let counts = try JSONDecoder().decode(AgentsState.Counts.self, from: Data(json.utf8))
+    #expect(counts.unread == 2 && counts.finished == AgentsState.Finished(count: 2, unread: true))
+    let null = #"{"working":1,"question":0,"permission":0,"failed":0,"idle":4,"unread":null}"#
+    #expect(try JSONDecoder().decode(AgentsState.Counts.self, from: Data(null.utf8)).finished.count == 4)
+    // Encoding omits an absent `unread`, as the wire convention requires.
+    let old = AgentsState.Counts(working: 1, question: 0, permission: 0, failed: 0, idle: 4)
+    #expect(!String(decoding: try JSONEncoder().encode(old), as: UTF8.self).contains("unread"))
+  }
+
+  @Test func countersUseUnreadWithPlurals() throws {
+    func text(_ state: AgentsState) -> [String] { state.counters.map { "\($0.count) \($0.label)" } }
+    let one = try withUnread("state-working", 1)
+    #expect(text(one) == ["2 trabalhando", "1 não lida"])
+    #expect(one.counters.last == AgentsCounter(count: 1, label: "não lida", role: .primary, emphasized: false))
+    #expect(text(try withUnread("state-working", 3)) == ["2 trabalhando", "3 não lidas"])
+    // Zero unread hides the line even though `idle` is non-zero.
+    #expect(text(try withUnread("state-working", 0)) == ["2 trabalhando"])
+    // Without `unread`, the fallback is unchanged.
+    #expect(text(try legacy("state-working")) == ["2 trabalhando", "1 concluída há pouco"])
+    #expect(try legacy("state-working").counters.last?.role == .textSecondary)
+    var plural = try legacy("state-working")
+    plural.counts.idle = 3
+    #expect(text(plural).last == "3 concluídas há pouco")
+  }
+
+  @Test func fiveCountsDropUnreadFirst() throws {
+    let mixed = try withUnread("state-mixed", 2)
+    #expect(mixed.counters.map(\.label) == ["trabalhando", "pergunta", "permissão", "com erro"])
+  }
+
+  @Test func failedOnlyWithUnread() throws {
+    let state = try withUnread("state-failed-only", 2)
+    #expect(state.counters.map { "\($0.count) \($0.label)" } == ["1 com erro", "2 não lidas"])
+    let arcs = state.gauge(gap: 0)
+    #expect(arcs.map(\.role) == [.error, .primary] && arcs.map(\.dim) == [false, false])
+  }
+
+  @Test func gaugeUsesTheOrangeArcForUnread() throws {
+    let state = try withUnread("state-one-question", 3)
+    #expect(state.gauge(gap: 0).map(\.role) == [.success, .accent, .primary])
+    let old = try legacy("state-one-question").gauge(gap: 0).last
+    #expect(old?.role == .textSecondary && old?.dim == true)
+    let failed = try legacy("state-failed-only")
+    #expect(failed.counters.map(\.label) == ["com erro", "concluídas há pouco"])
+  }
+
+  @Test func idleRowsReadAsUnread() throws {
+    let state = try withUnread("state-failed-only", 2)
+    let idle = state.sessions[1]
+    #expect(state.statusLabel(idle) == "Não lida" && state.statusRole(idle) == .primary)
+    let old = try legacy("state-failed-only")
+    #expect(old.statusLabel(idle) == "Concluída" && old.statusRole(idle) == .textSecondary)
+    #expect(state.statusLabel(state.sessions[0]) == "Erro")
+  }
+
+  @Test func watchRingUsesOrangeForUnreadAndGrayAsFallback() {
+    let unread = WatchRing(counts: .init(working: 3, question: 1, permission: 0, failed: 0, idle: 4, unread: 1))
+    #expect(unread.arcs.map(\.role) == [.success, .accent, .primary])
+    #expect(unread.arcs.map(\.start) == [0, 0.6, 0.8])
+    let old = WatchRing(counts: .init(working: 3, question: 1, permission: 0, failed: 0, idle: 1))
+    #expect(old.arcs.map(\.role) == [.success, .accent, .border])
+    let onlyUnread = WatchRing(counts: .init(working: 0, question: 0, permission: 0, failed: 0, idle: 0, unread: 2))
+    #expect(onlyUnread.arcs == [.init(role: .primary, start: 0, end: 1)] && !onlyUnread.idle)
+    let none = WatchRing(counts: .init(working: 0, question: 0, permission: 0, failed: 0, idle: 3, unread: 0))
+    #expect(none.idle)
   }
 }

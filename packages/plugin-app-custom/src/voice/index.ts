@@ -3,6 +3,7 @@ import { Model } from "@opencode/schema/model"
 import { Clock, Effect, Schema, Scope } from "effect"
 import { Preferences } from "../preferences/rpc.js"
 import { Voice } from "./rpc.js"
+import { loadInstructions } from "./instructions.js"
 
 export const limits = {
   initialItems: 128,
@@ -43,6 +44,11 @@ export const registerVoice = Effect.fn("Voice.register")(function* (ctx: Plugin.
           compactTokens: limits.compactTokens,
           compactTurns: limits.compactTurns,
         } as const),
+      instructions: (_, context) =>
+        loadInstructions().pipe(
+          Effect.map((instructions) => ({ instructions })),
+          Effect.mapError((cause) => failure(context.error, cause)),
+        ),
       append: (input, context) => voice.append(input).pipe(Effect.mapError((cause) => failure(context.error, cause))),
       context: (input, context) =>
         voice.context(input.scope).pipe(Effect.mapError((cause) => failure(context.error, cause))),

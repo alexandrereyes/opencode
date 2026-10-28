@@ -40,7 +40,7 @@ struct WatchFixture {
     let ms = { (date: Date) in Int((date.timeIntervalSince1970 * 1000).rounded()) }
     let json = """
       {"state":{"v":1,"updatedAt":\(ms(now)),"host":"MacBook Pro",
-       "counts":{"working":3,"question":1,"permission":0,"failed":0,"idle":1},"activeTotal":4,
+       "counts":{"working":3,"question":1,"permission":0,"failed":0,"idle":1,"unread":1},"activeTotal":4,
        "attention":[{"sessionID":"s1","title":"Escolher banco do cache","project":"core","directory":"/r/core",
          "kind":"question","since":\(ms(now - 180)),"text":"Qual banco usar no cache das sessões?",
          "requestID":"fixture-question"}],

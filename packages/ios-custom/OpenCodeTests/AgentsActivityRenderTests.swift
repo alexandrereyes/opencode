@@ -59,7 +59,7 @@ import XCTest
       let lock = AgentsLayout.lockHeight(state)
       XCTAssertLessThanOrEqual(lock, AgentsLayout.lockLimit, name)
       _ = try render(AgentsLockScreenView(attributes: attributes, state: state)
-        .background(attributes.color(.background)), size: CGSize(width: 374, height: lock), name: "v3-\(name)-lock-render")
+        .background(attributes.color(.background)), size: CGSize(width: 374, height: lock), name: "v4-\(name)-lock-render")
       _ = try render(AgentsIslandExpanded(attributes: attributes, state: state).padding(.horizontal, 26)
         .frame(height: AgentsLayout.islandRegion, alignment: .top).background(.black),
         size: CGSize(width: 371, height: AgentsLayout.islandRegion), name: "v2-\(name)-expanded-render")

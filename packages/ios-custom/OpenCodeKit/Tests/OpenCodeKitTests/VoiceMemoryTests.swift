@@ -152,9 +152,9 @@ struct VoiceMemoryTests {
     let history = VoiceMemoryContext(summary: "Fato de teste: pitanga violeta.", turns: [
       turn("user", text: "Qual foi a palavra?"), turn("assistant", role: .assistant, text: "Pitanga violeta."),
     ], master: .init(state: "running", text: "Conferindo uma sessão."))
-    let request = try VoiceSignaling().offerRequest(sdp: "v=0\r\nm=audio 9\r\nm=application 9\r\n", history: history)
+    let request = try VoiceSignaling().offerRequest(sdp: "v=0\r\nm=audio 9\r\nm=application 9\r\n", instructions: "Prompt do servidor", history: history)
     let session = try JSONDecoder().decode(JSONValue.self, from: #require(request.httpBody)).object?["session"]?.object
-    #expect(session?["instructions"]?.string == VoiceProtocol.instructions)
+    #expect(session?["instructions"]?.string == "Prompt do servidor")
     #expect(session?["instructions"]?.string?.contains("pitanga") == false)
     let items = try #require(session?["initial_items"]?.array)
     #expect(items.count == 4)
@@ -163,7 +163,7 @@ struct VoiceMemoryTests {
     #expect(items[1].object?["content"]?.array?.first?.object?["type"]?.string == "input_text")
     #expect(items[2].object?["role"]?.string == "assistant")
     #expect(items[2].object?["content"]?.array?.first?.object?["type"]?.string == "output_text")
-    let legacy = try VoiceSignaling().offerRequest(sdp: "v=0\r\n")
+    let legacy = try VoiceSignaling().offerRequest(sdp: "v=0\r\n", instructions: "Prompt do servidor")
     #expect(try JSONDecoder().decode(JSONValue.self, from: #require(legacy.httpBody)).object?["session"]?.object?["initial_items"] == nil)
   }
 

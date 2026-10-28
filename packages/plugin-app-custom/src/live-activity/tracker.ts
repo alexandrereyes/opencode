@@ -1,5 +1,6 @@
 import type { Plugin } from "@opencode/plugin/effect"
 import { Session } from "@opencode/schema/session"
+import type { SessionScan } from "@opencode/schema/session-scan"
 import { DateTime, Effect } from "effect"
 import path from "node:path"
 import type { LiveActivity } from "./rpc.js"
@@ -16,6 +17,8 @@ export const limits = {
   text: 120,
   rows: 4,
   attention: 3,
+  /** Transcript messages a rebuild reads per session to find unfinished background shells. */
+  shellMessages: 100,
 }
 
 /** The live events the tracker folds; a structural subset of the server events a plugin receives. */
@@ -86,6 +89,31 @@ export type Event =
       /** Read from `ctx.request.pending()` instead, which also covers requests that end without an event. */
       readonly data: unknown
     }
+  | {
+      readonly type: "shell.created"
+      readonly created: number
+      readonly data: {
+        readonly info: {
+          readonly id: string
+          readonly status: string
+          readonly command: string
+          readonly metadata: Readonly<Record<string, unknown>>
+          readonly time: { readonly started: number }
+        }
+      }
+    }
+  | {
+      readonly type: "shell.exited" | "shell.deleted"
+      readonly created: number
+      readonly data: { readonly id: string }
+    }
+  | {
+      readonly type: "session.synthetic"
+      readonly created: number
+      readonly data: { readonly sessionID: string; readonly metadata?: Readonly<Record<string, unknown>> }
+    }
+  /** Mapped by the hub from `rpc.custom.preferences.updated`: muted sessions may have changed. */
+  | { readonly type: "preferences.updated" }
   /** Published before the request leaves `ctx.request.pending()`, so the settled ID is excluded from that read. */
   | { readonly type: "form.replied" | "form.cancelled"; readonly data: { readonly id: string } }
   | { readonly type: "permission.replied"; readonly data: { readonly requestID: string } }
@@ -105,6 +133,10 @@ export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
   "session.tool.called",
   "session.reasoning.started",
   "session.text.started",
+  "session.synthetic",
+  "shell.created",
+  "shell.exited",
+  "shell.deleted",
   "permission.asked",
   "permission.replied",
   "form.created",
@@ -114,6 +146,8 @@ export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
 
 export type TrackerContext = {
   session: Pick<Plugin.Context["session"], "get" | "scan" | "active" | "family">
+  /** Muted session IDs from `custom.preferences` (`mutedSessions`); muted sessions are never unread. */
+  muted: () => Effect.Effect<readonly string[]>
   message: Pick<Plugin.Context["message"], "list">
   request: Pick<Plugin.Context["request"], "pending">
 }
@@ -125,8 +159,12 @@ type Entry = {
   directory: string
   subpath?: string
   readonly created: number
-  /** Last idle transition known from storage (rebuild and hydration only). */
-  readonly idleAt?: number
+  /** Latest idle transition (`time.idle`); an interruption by shutdown does not move it. */
+  idleAt?: number
+  /** Viewed watermark (`time.viewed`): the idle time the user last saw. */
+  viewedAt?: number
+  /** Latest successful or failed execution end, the "new output" of the unread rule. */
+  completionAt?: number
   archived: boolean
   running: boolean
   /** Start of the session's own current (or most recent) execution, when known. */
@@ -138,6 +176,9 @@ type Entry = {
   /** Tool call ID → tool name of the current execution, to describe `session.tool.called`. */
   readonly tools: Map<string, string>
 }
+
+/** A shell a session started that has not finished: a background job keeps its family working. */
+type Shell = { readonly sessionID: string; readonly command: string; readonly startedAt: number }
 
 type Request = {
   readonly id: string
@@ -167,7 +208,14 @@ export type Derived = {
  */
 export function makeTracker(ctx: TrackerContext) {
   const sessions = new Map<string, Entry>()
+  const shells = new Map<string, Shell>()
   const firstSeen = new Map<string, number>()
+  const muted = new Set<string>()
+  const refreshMuted = Effect.fn("LiveActivity.refreshMuted")(function* () {
+    const ids = yield* ctx.muted()
+    muted.clear()
+    for (const id of ids) muted.add(id)
+  })
   const state = { requests: [] as Request[], focus: undefined as string | undefined }
 
   const hydrate = Effect.fn("LiveActivity.hydrate")(function* (sessionID: string) {
@@ -231,19 +279,26 @@ export function makeTracker(ctx: TrackerContext) {
   /** Reconstructs running, waiting, failed and recently idle sessions, e.g. after a restart. */
   const rebuild = Effect.fn("LiveActivity.rebuild")(function* (now: number) {
     const active = yield* ctx.session.active()
-    const scan = (after?: Session.ID): Effect.Effect<readonly Session.Info[]> =>
-      ctx.session.scan({ parentID: null, archived: false, limit: 500, after }).pipe(
-        Effect.flatMap((page) => {
-          const rows = page.data.map((row) => row.session)
-          return page.next && page.next !== after
-            ? scan(page.next).pipe(Effect.map((rest) => [...rows, ...rest]))
-            : Effect.succeed(rows)
-        }),
+    yield* refreshMuted()
+    const scan = (after?: Session.ID): Effect.Effect<readonly SessionScan.Info[]> =>
+      ctx.session
+        .scan({ parentID: null, archived: false, limit: 500, after })
+        .pipe(
+          Effect.flatMap((page) =>
+            page.next && page.next !== after
+              ? scan(page.next).pipe(Effect.map((rest) => [...page.data, ...rest]))
+              : Effect.succeed(page.data),
+          ),
+        )
+    for (const row of yield* scan()) {
+      const entry = fromInfo(row.session, false, row.completionAt)
+      // Unread sessions have no time window; everything else older than a day cannot change the state.
+      if (
+        Object.hasOwn(active, row.session.id) ||
+        (entry.idleAt !== undefined && now - entry.idleAt < limits.failedMs) ||
+        unseen(entry)
       )
-    for (const info of yield* scan()) {
-      const idle = idleAt(info)
-      if (Object.hasOwn(active, info.id) || (idle !== undefined && now - idle < limits.failedMs))
-        sessions.set(info.id, fromInfo(info, false))
+        sessions.set(row.session.id, entry)
     }
     // The running set includes subagents at any depth; each one and its ancestors join the model.
     for (const id of Object.keys(active)) {
@@ -253,11 +308,19 @@ export function makeTracker(ctx: TrackerContext) {
       entry.ended = undefined
       entry.startedAt = yield* executionStart(entry)
     }
+    // Background shells are process-local jobs with no list API for plugins: their launches and completion notices
+    // are in the transcripts. After a server restart Core has already admitted a cancellation notice for each one.
+    for (const entry of [...sessions.values()])
+      for (const [id, shell] of yield* backgroundShells(entry.id)) shells.set(id, shell)
+    for (const shell of shells.values()) yield* lineage(shell.sessionID)
     const roots = new Set(
-      [...sessions.values()].filter((entry) => entry.running).flatMap((entry) => rootOf(entry.id) ?? []),
+      [
+        ...[...sessions.values()].filter((entry) => entry.running).map((entry) => entry.id),
+        ...[...shells.values()].map((shell) => shell.sessionID),
+      ].flatMap((id) => rootOf(id) ?? []),
     )
     for (const root of roots) {
-      // A top-level session waiting for background subagents: its most recent turn started at its latest prompt.
+      // A top-level session waiting for background work: its most recent turn started at its latest prompt.
       if (!root.running && root.startedAt === undefined) root.startedAt = yield* latestPrompt(root.id)
       const family = yield* ctx.session
         .family({ sessionID: Session.ID.make(root.id), limit: 100 })
@@ -267,6 +330,40 @@ export function makeTracker(ctx: TrackerContext) {
     }
     yield* refreshPending(now)
   })
+
+  /** Shells a session moved to the background whose completion notice is not in its recent transcript. */
+  const backgroundShells = (sessionID: string) =>
+    ctx.message.list({ sessionID: Session.ID.make(sessionID), limit: limits.shellMessages }).pipe(
+      Effect.map((page) => {
+        const done = new Set(
+          page.data.flatMap((message) =>
+            message.type === "synthetic" &&
+            message.metadata?.source === "shell" &&
+            typeof message.metadata.shellID === "string"
+              ? [message.metadata.shellID]
+              : [],
+          ),
+        )
+        return page.data.flatMap((message) =>
+          message.type === "assistant"
+            ? message.content.flatMap((part) => {
+                if (part.type !== "tool" || part.name !== "shell" || part.state.status !== "completed") return []
+                const shellID = part.state.metadata?.shellID
+                const command = part.state.input.command
+                if (part.state.metadata?.status !== "running" || typeof shellID !== "string" || done.has(shellID))
+                  return []
+                const shell: Shell = {
+                  sessionID,
+                  command: typeof command === "string" ? command : "",
+                  startedAt: DateTime.toEpochMillis(part.time.ran ?? part.time.created),
+                }
+                return [[shellID, shell] as const]
+              })
+            : [],
+        )
+      }),
+      Effect.orElseSucceed(() => []),
+    )
 
   const latestPrompt = (sessionID: string) =>
     ctx.message.list({ sessionID: Session.ID.make(sessionID), limit: 1, type: "user" }).pipe(
@@ -296,6 +393,24 @@ export function makeTracker(ctx: TrackerContext) {
         return yield* refreshPending(now, event.data.id)
       case "permission.replied":
         return yield* refreshPending(now, event.data.requestID)
+      case "preferences.updated":
+        return yield* refreshMuted()
+      case "shell.created": {
+        const owner = event.data.info.metadata.sessionID
+        if (event.data.info.status !== "running" || typeof owner !== "string") return
+        shells.set(event.data.info.id, {
+          sessionID: owner,
+          command: event.data.info.command,
+          startedAt: event.data.info.time.started,
+        })
+        const target = yield* lineage(owner)
+        if (target) target.activityAt = Math.max(target.activityAt, event.created)
+        return
+      }
+      case "shell.exited":
+      case "shell.deleted":
+        shells.delete(event.data.id)
+        return
     }
     const id = event.data.sessionID
     const entry = sessions.get(id)
@@ -335,7 +450,10 @@ export function makeTracker(ctx: TrackerContext) {
         sessions.delete(id)
         return
       case "session.viewed":
-        if (entry?.ended?.outcome === "failed" && event.data.idle >= entry.ended.at) entry.ended.cleared = true
+        if (!entry) return
+        // Monotone, like the projection: a stale view never makes a newer completion read.
+        entry.viewedAt = Math.max(entry.viewedAt ?? 0, event.data.idle)
+        if (entry.ended?.outcome === "failed" && event.data.idle >= entry.ended.at) entry.ended.cleared = true
         return
       case "session.execution.started": {
         const target = yield* lineage(id)
@@ -356,6 +474,9 @@ export function makeTracker(ctx: TrackerContext) {
         if (target) {
           target.running = false
           target.activityAt = event.created
+          if (event.type !== "session.execution.interrupted" || event.data.reason !== "shutdown")
+            target.idleAt = Math.max(event.created, (target.idleAt ?? 0) + 1)
+          if (event.type !== "session.execution.interrupted") target.completionAt = target.idleAt
           target.ended = {
             outcome:
               event.type === "session.execution.succeeded"
@@ -388,8 +509,31 @@ export function makeTracker(ctx: TrackerContext) {
         if (target) target.activity = "Escrevendo resposta"
         return
       }
+      case "session.synthetic": {
+        // A shell's completion notice; `shell.exited` normally arrived first.
+        const shellID = event.data.metadata?.shellID
+        if (event.data.metadata?.source === "shell" && typeof shellID === "string") shells.delete(shellID)
+        touch(entry)
+        return
+      }
     }
   })
+
+  /**
+   * The Sessões unread dot (`custom.navigation`, iOS `SessionList`): a top-level session whose idle transition is newer
+   * than its viewed watermark, after a newer success/failure or with a succeeded/failed outcome; muted ones excluded.
+   */
+  const unseen = (entry: Entry) => {
+    const viewed = entry.viewedAt ?? 0
+    if (entry.parentID || entry.archived) return false
+    if (entry.idleAt === undefined || entry.idleAt <= viewed) return false
+    return (
+      (entry.completionAt ?? 0) > viewed || entry.ended?.outcome === "succeeded" || entry.ended?.outcome === "failed"
+    )
+  }
+  const unread = (entry: Entry) => unseen(entry) && !muted.has(entry.id)
+  const unreadAt = (entry: Entry) =>
+    (entry.completionAt ?? 0) > (entry.viewedAt ?? 0) ? (entry.completionAt ?? 0) : (entry.idleAt ?? 0)
 
   /** Computes the contract state; also moves the focus, which must stay put while it keeps working. */
   const derive = (now: number, host: string): Derived => {
@@ -406,19 +550,33 @@ export function makeTracker(ctx: TrackerContext) {
       const top = rootOf(entry.id)
       if (top) executing.set(top.id, [...(executing.get(top.id) ?? []), entry])
     }
+    // Unfinished shells (background jobs) of each family, at any depth.
+    const background = new Map<string, Shell[]>()
+    for (const shell of shells.values()) {
+      const top = rootOf(shell.sessionID)
+      if (top) background.set(top.id, [...(background.get(top.id) ?? []), shell])
+    }
     const family = (entry: Entry) => {
       const members = executing.get(entry.id) ?? []
+      const jobs = background.get(entry.id) ?? []
       const latest = members.toSorted((a, b) => b.activityAt - a.activityAt || a.id.localeCompare(b.id))[0]
-      const starts = members.map((member) => member.startedAt ?? member.created)
+      const newest = jobs.toSorted((a, b) => b.startedAt - a.startedAt)[0]
+      const starts = [
+        ...members.map((member) => member.startedAt ?? member.created),
+        ...jobs.map((job) => job.startedAt),
+      ]
       return {
-        running: members.length > 0,
+        running: members.length > 0 || jobs.length > 0,
         startedAt: entry.startedAt ?? (starts.length > 0 ? Math.min(...starts) : entry.created),
         // Subagents created since then belong to the most recent turn.
         since:
           entry.startedAt ??
-          (members.length > 0 ? Math.min(...members.map((member) => member.created)) : entry.created),
+          (members.length > 0 || jobs.length > 0
+            ? Math.min(...members.map((member) => member.created), ...jobs.map((job) => job.startedAt))
+            : entry.created),
         activityAt: Math.max(entry.activityAt, ...members.map((member) => member.activityAt)),
-        activity: latest?.activity,
+        // With nothing executing, the newest unfinished background shell describes the wait.
+        activity: latest ? latest.activity : newest ? describe("shell", { command: newest.command }) : undefined,
       }
     }
     const failed = (entry: Entry) =>
@@ -438,9 +596,10 @@ export function makeTracker(ctx: TrackerContext) {
           .toSorted((a, b) => a.since - b.since || a.id.localeCompare(b.id))[0]
         const rollup = family(entry)
         const status: LiveActivity.RowStatus | undefined =
-          kind ?? (failed(entry) ? "failed" : rollup.running ? "working" : idle(entry) ? "idle" : undefined)
+          kind ??
+          (failed(entry) ? "failed" : rollup.running ? "working" : idle(entry) || unread(entry) ? "idle" : undefined)
         if (!status) return []
-        return [{ entry, status, oldest, ref: ref(entry), rollup }]
+        return [{ entry, status, oldest, ref: ref(entry), rollup, unread: status === "idle" && unread(entry) }]
       })
     const of = (status: LiveActivity.RowStatus) => rows.filter((row) => row.status === status)
     const working = of("working")
@@ -471,14 +630,19 @@ export function makeTracker(ctx: TrackerContext) {
       ...working
         .filter((row) => row !== focused)
         .toSorted((a, b) => b.rollup.activityAt - a.rollup.activityAt || a.entry.id.localeCompare(b.entry.id)),
-      ...of("idle").toSorted(byEnded),
+      // Idle rows are unread sessions only (rev. 2026-10-28), newest output first.
+      ...of("idle")
+        .filter((row) => row.unread)
+        .toSorted((a, b) => unreadAt(b.entry) - unreadAt(a.entry) || a.entry.id.localeCompare(b.entry.id)),
     ]
     const counts = {
       working: working.length,
       question: of("question").length,
       permission: of("permission").length,
       failed: of("failed").length,
-      idle: of("idle").length,
+      // Finished successfully in the last 30 minutes, read or not (the original meaning).
+      idle: of("idle").filter((row) => idle(row.entry)).length,
+      unread: of("idle").filter((row) => row.unread).length,
     }
     const waiting = rows.filter((row) => row.status === "question" || row.status === "permission").toSorted(bySince)
     const focusProgress = focused ? progress(focused) : undefined
@@ -497,7 +661,7 @@ export function makeTracker(ctx: TrackerContext) {
       ]),
     )
     const expiries = rows.flatMap((row) =>
-      row.status === "idle" && row.entry.ended
+      row.status === "idle" && idle(row.entry) && row.entry.ended
         ? [row.entry.ended.at + limits.idleMs]
         : row.status === "failed" && row.entry.ended
           ? [row.entry.ended.at + limits.failedMs]
@@ -540,15 +704,21 @@ export function makeTracker(ctx: TrackerContext) {
 
   /** Forgets sessions that can no longer affect the state. */
   const prune = (now: number) => {
-    const owners = new Set(state.requests.map((request) => request.sessionID))
+    const owners = new Set([
+      ...state.requests.map((request) => request.sessionID),
+      ...[...shells.values()].map((shell) => shell.sessionID),
+    ])
     const live = new Set(
-      [...sessions.values()].filter((entry) => entry.running).flatMap((entry) => rootOf(entry.id)?.id ?? []),
+      [
+        ...[...sessions.values()].filter((entry) => entry.running).map((entry) => entry.id),
+        ...[...shells.values()].map((shell) => shell.sessionID),
+      ].flatMap((id) => rootOf(id)?.id ?? []),
     )
     for (const entry of sessions.values()) {
       if (entry.running || owners.has(entry.id)) continue
       // Members of a family that still runs keep the parent links and the progress of their top-level session.
       if (live.has(rootOf(entry.id)?.id ?? entry.id)) continue
-      if (now - Math.max(entry.activityAt, entry.ended?.at ?? 0) < limits.failedMs) continue
+      if (now - Math.max(entry.activityAt, entry.ended?.at ?? 0) < limits.failedMs || unseen(entry)) continue
       sessions.delete(entry.id)
     }
   }
@@ -628,7 +798,7 @@ function idleAt(info: Session.Info) {
   return info.time.idle ? DateTime.toEpochMillis(info.time.idle) : undefined
 }
 
-function fromInfo(info: Session.Info, running: boolean): Entry {
+function fromInfo(info: Session.Info, running: boolean, completionAt?: number): Entry {
   const idle = idleAt(info)
   const viewed = info.time.viewed ? DateTime.toEpochMillis(info.time.viewed) : undefined
   return {
@@ -639,6 +809,13 @@ function fromInfo(info: Session.Info, running: boolean): Entry {
     ...(info.subpath ? { subpath: info.subpath } : {}),
     created: DateTime.toEpochMillis(info.time.created),
     ...(idle === undefined ? {} : { idleAt: idle }),
+    ...(viewed === undefined ? {} : { viewedAt: viewed }),
+    // Without the scan's completion time, a succeeded/failed outcome ended at the idle transition.
+    ...(completionAt !== undefined
+      ? { completionAt }
+      : idle !== undefined && (info.outcome === "succeeded" || info.outcome === "failed")
+        ? { completionAt: idle }
+        : {}),
     archived: info.time.archived !== undefined,
     running,
     activityAt: Math.max(DateTime.toEpochMillis(info.time.updated), idle ?? 0),

@@ -61,7 +61,8 @@ AgentsState {
     question: number                // sessions with ≥1 pending question (form) request
     permission: number              // sessions with a pending permission request and no pending question
     failed: number                  // sessions stopped with an error (see "Failed")
-    idle: number                    // sessions that finished successfully in the last 30 minutes
+    idle: number                    // sessions that finished successfully in the last 30 minutes (kept for older builds)
+    unread?: number                 // rev. 2026-10-28: finished sessions with unread output (see "Unread")
   }
   activeTotal: number               // working + question + permission ("4 ativas")
   focus?: Focus                     // the session shown with progress; absent when nothing is working
@@ -103,12 +104,23 @@ Row = SessionRef & {
   executing. A parent whose own execution ended while background subagents still run is working, not idle. Its
   `startedAt` is the start of the top-level session's most recent execution (the turn that spawned the running
   descendants), falling back to the earliest start among the executing descendants.
+- **Background jobs (rev. 2026-10-28):** an unfinished background task of the session or of any descendant (a shell
+  moved to the background, a background subagent and equivalents) also makes the family working, even while nothing
+  executes. It stops counting when the task ends; the completion notice then wakes the session as a new execution.
+  Without any known turn of the top-level session, `startedAt` falls back to the earliest start among executing
+  descendants and unfinished tasks. With only tasks pending, `activity` describes the newest one (`Rodando <command>`).
 - **Status precedence per session:** question > permission > failed > working > idle.
 - **Failed:** the session's latest execution ended with `session.execution.failed` (a user interruption is not a
   failure). It stays failed until a new execution starts, the session is viewed (`session.viewed`), archived or
   deleted, or 24 hours pass.
-- **Idle:** neither the session nor any descendant is executing, and its latest execution succeeded within the last
-  30 minutes.
+- **Idle:** neither the session nor any descendant is executing or has an unfinished background task (rev.
+  2026-10-28), and its latest execution succeeded within the last 30 minutes.
+- **Unread (rev. 2026-10-28):** a top-level session that is not working, has no pending request and is not failed,
+  whose latest assistant output is newer than its viewed watermark (`time.viewed`) — the same rule as the orange
+  unread dot in Sessões — and that is **not muted** (`custom.preferences` `mutedSessions`). No time window: it stays
+  unread until the session is viewed (`session.viewed`), archived or deleted. Chats and the current Sessão mestra
+  follow the same rule as other top-level sessions. Unread sessions never keep a Live Activity alive (the end rule
+  is unchanged).
 - **Focus:** among working sessions, keep the current focus while it is still working; otherwise pick the one whose
   execution started most recently. Absent when `counts.working == 0`.
 - **activity** (from the latest step activity of the most recently active **executing** session in the focus
@@ -119,7 +131,9 @@ Row = SessionRef & {
 - **progress:** subagent children created by the focus session's most recent execution; `done` = children whose
   execution finished (any outcome). Omit when there are none.
 - **sessions order:** question, permission (oldest `since` first), failed (most recent first), working (focus first,
-  then most recent activity), idle (most recent first); cut to 4.
+  then most recent activity), unread (most recent first); cut to 4. Rows with `status: "idle"` are emitted **only for
+  unread sessions** (rev. 2026-10-28; read sessions no longer appear as rows). The status string stays `idle` so older
+  builds keep decoding it; newer builds label it `Não lida`.
 - **Size:** the whole APNs body must stay ≤ 4096 bytes. Trim in this order until it fits: `attention[].text`, then
   `sessions` beyond 3, then `attention` beyond 2, then shorten titles.
 
@@ -190,6 +204,10 @@ app runs it does the same locally with `.immediate` dismissal; a null state neve
 - Bodies: [`push-start.json`](live-activity/push-start.json), [`push-update.json`](live-activity/push-update.json),
   [`push-end.json`](live-activity/push-end.json). `push-start` carries `attributes-type`, `attributes` and
   `input-push-token: 1`, so iOS issues an update token for the new activity, which the app reports with `activity`.
+- Every body includes `aps.relevance-score: 50`, matching `OpenCodeKit.LiveActivityRelevance.agents`.
+  Voice uses 100 on every local start/update, including network recovery. This orders this app's activities
+  on the iPhone Lock Screen and in the Dynamic Island without ending/restarting agents or losing its token.
+  Relevance is independent of APNs delivery priority (5/10), urgency, counters and progress.
 
 ## iOS rendering rules
 
@@ -201,18 +219,20 @@ singles one out as "the" session; `focus` is no longer rendered here (it stays i
 
 - **Header:** mascot + `OpenCode`, `host` on the right (unchanged).
 - **Ring** (left): a closed circular gauge split into arcs proportional to the counts, in this order clockwise from
-  12 o'clock: `working` (`success`), `question` (`accent`), `permission` (`warning`), `failed` (`error`), `idle`
-  (`textSecondary` at reduced opacity), with small gaps between arcs. The total is the sum of those five counts. In
+  12 o'clock: `working` (`success`), `question` (`accent`), `permission` (`warning`), `failed` (`error`), `unread`
+  (`primary`, rev. 2026-10-28; falls back to `idle` in `textSecondary` when `unread` is absent), with small gaps
+  between arcs. The total is the sum of those five counts. In
   the centre: `activeTotal` in large bold `textStrong` and `ativas` in small `textSecondary` below it.
 - **Counters** (right of the ring), one line per **non-zero** count, coloured dot + bold number + label:
   `trabalhando` (`success`), `pergunta`/`perguntas` (`accent`), `permissão`/`permissões` (`warning`), `com erro`
-  (`error`), `concluída há pouco`/`concluídas há pouco` (`textSecondary`, number and label not bold). At most 4 lines;
-  when 5 are non-zero, drop the `concluídas há pouco` line first.
+  (`error`), `não lida`/`não lidas` (`primary` dot, `textSecondary` text, not bold; rev. 2026-10-28, replaces
+  `concluídas há pouco`, which only remains as the fallback when `unread` is absent). At most 4 lines; when 5 are
+  non-zero, drop the `não lidas` line first.
 - **Attention line** (bottom, only when `attention` is not empty), after a hairline: dot in the kind colour (`accent`
   question, `warning` permission) + bold first `attention` title + ` · há N min` (`textSecondary`, from `since`);
   when `attentionTotal > 1`, append ` +K` with the remaining count. One line, title truncates first.
 - **Failed only** (`activeTotal == 0`, `failed > 0`): ring with the red and gray arcs, centre `0` / `ativas`, counters
-  `com erro` and `concluídas há pouco`, no attention line.
+  `com erro` and `não lidas`, no attention line.
 - Fixed metrics; the card must fit the 160 pt Lock Screen limit in every state without vertical `ViewThatFits`.
 
 **Dynamic Island** (from `opcao-3-painel-cotas.png`):
@@ -221,7 +241,7 @@ singles one out as "the" session; `focus` is no longer rendered here (it stays i
   when `attentionTotal > 0`; otherwise `activeTotal` in `success`.
 - Expanded: header `N ativas · M precisa(m) de você` (second part `warning`), plus ` · K com erro` in `error` when
   failed > 0; then `sessions` rows (avatar, title, project, status at right: `Pergunta` `accent`, `Permissão`
-  `warning`, `Erro` `error`, `Trabalhando` `success` with ` · done/total` when progress, `Concluída` `textSecondary`).
+  `warning`, `Erro` `error`, `Trabalhando` `success` with ` · done/total` when progress, `Não lida` `primary` for `idle` rows).
   **Rows are single-line** (rev. 2026-10-27): small avatar, title (truncating) followed by the project in
   `textSecondary` on the same line, status at the right. At most 3 rows; the whole expanded presentation must fit
   without clipping on every iPhone with Dynamic Island, so the row count is fixed by measured row height, never by
@@ -244,7 +264,7 @@ singles one out as "the" session; `focus` is no longer rendered here (it stays i
 - Right: the first 2 `sessions` rows, separated by a hairline. Each row: bold title (one line, truncating) and a status
   line: `Pergunta · há N min` (`accent`), `Permissão · há N min` (`warning`), `since` taken from the matching
   `attention` item; `Erro` (`error`); `Trabalhando` (`success`) with ` · done/total` when the row has progress;
-  `Concluída` (`textSecondary`).
+  `Não lida` (`primary`) for `idle` rows.
 - Fixed metrics that fit the `.small` size on the smallest supported watch without clipping. Tap uses the same
   `widgetURL` as the Lock Screen card.
 
@@ -295,6 +315,27 @@ session's latest own execution start (from `session.execution.started`), else th
 members. `activity` comes from the executing member with the latest tool, reasoning or text event. `progress` counts
 direct children created since the top-level session's latest execution started (or, without one, since the earliest
 executing member was created), finished or not. Working rows are ordered by the family's latest activity.
+
+**Background shells (rev. 2026-10-28).** Core's jobs are process-local and plugins have no API to list them, so the
+tracker follows the public events: `shell.created` (the shell tool tags `metadata.sessionID`; status `running`) adds
+an unfinished shell to its session's family, `shell.exited`/`shell.deleted` or the completion notice
+(`session.synthetic` with `metadata.source: "shell"` and `shellID`) remove it. Background subagents need nothing
+extra: the child session executes and rolls up. A rebuild reads the last 100 messages of every tracked session: a
+`shell` tool result with `metadata.status: "running"` and no later notice for its `shellID` is an unfinished shell
+(its start is the tool's run time; a top-level session waiting only for such work starts at its latest prompt). After
+a server restart Core admits a cancellation notice for every background shell, so none stays counted. A long-lived
+background process (a dev server) keeps its session working until it exits.
+
+**Unread (rev. 2026-10-28).** The rule is `custom.navigation`'s `unreadAt` as the web and iOS lists combine it: a
+nonarchived top-level session whose `time.idle` is newer than `time.viewed`, either after a success or failure newer
+than `time.viewed` (the scan's `completionAt`; live, the execution end) or with a `succeeded`/`failed` outcome. The
+tracker keeps `idleAt`, `viewedAt` (monotone, from `session.viewed`) and `completionAt` per session; an interruption
+moves `idleAt` like the projection (not a shutdown) but is no completion. Mutes come from `custom.preferences`
+(`mutedSessions`, server-qualified keys decoded like the Mestra inventory) at rebuild and on every
+`rpc.custom.preferences.updated`, which the hub maps to an internal `preferences.updated` event. A rebuild keeps every
+unseen top-level session whatever its age, muted ones included, so unmuting shows them at once; read sessions older
+than a day are dropped. `counts.idle` keeps its meaning (succeeded in the last 30 minutes, read or not) and still
+drives the 30-minute wake-up; idle rows are only the unread ones, ordered by their unread time.
 
 **Startup.** The aggregator subscribes first, then rebuilds from `ctx.session.active()`, a scan of top-level
 nonarchived sessions (running, or with a terminal outcome in the last 24 h: `outcome`, `time.idle`, `time.viewed`),

@@ -119,6 +119,8 @@ export function world() {
   const forms: Form.Info[] = []
   const permissions: Permission.Request[] = []
   const prompts = new Map<string, number>()
+  const transcripts = new Map<string, SessionMessage.Info[]>()
+  const muted = new Set<string>()
   const reads: string[] = []
   const ctx: TrackerContext = {
     session: {
@@ -146,9 +148,11 @@ export function world() {
           }
         }),
     },
+    muted: () => Effect.sync(() => [...muted]),
     message: {
-      list: ({ sessionID }) =>
+      list: ({ sessionID, type }) =>
         Effect.sync(() => {
+          if (type !== "user") return { data: transcripts.get(sessionID) ?? [], cursor: {} }
           const at = prompts.get(sessionID)
           return {
             data:
@@ -174,7 +178,7 @@ export function world() {
     },
   }
   const add = (info: Session.Info) => infos.set(info.id, info)
-  return { ctx, infos, active, forms, permissions, prompts, reads, add }
+  return { ctx, infos, active, forms, permissions, prompts, reads, add, transcripts, muted }
 }
 
 export type Scene = "working" | "one-question" | "two-questions" | "mixed" | "failed-only" | "calm"
@@ -255,5 +259,58 @@ export function scene(name: Scene, server = world()) {
   return Effect.gen(function* () {
     for (const event of events) yield* tracker.apply(event, "created" in event ? event.created : T)
     return tracker
+  })
+}
+
+/** A shell the session started, as `shell.created` publishes it (the shell tool tags it with the session ID). */
+export function shellStarted(sessionID: string, shellID: string, at: number, command: string): Event {
+  return {
+    type: "shell.created",
+    created: at,
+    data: { info: { id: shellID, status: "running", command, metadata: { sessionID }, time: { started: at } } },
+  }
+}
+
+export function shellExited(shellID: string, at: number): Event {
+  return { type: "shell.exited", created: at, data: { id: shellID } }
+}
+
+/** The completion notice Core admits for a background shell. */
+export function shellNotice(sessionID: string, shellID: string, at: number): Event {
+  return { type: "session.synthetic", created: at, data: { sessionID, metadata: { source: "shell", shellID } } }
+}
+
+/** A shell tool call answered with "moved to the background", as stored in the transcript. */
+export function backgroundShellMessage(id: string, shellID: string, at: number, command: string) {
+  return Schema.decodeUnknownSync(SessionMessage.Assistant)({
+    id,
+    type: "assistant",
+    agent: "build",
+    model: { providerID: "llm-proxy", id: "gpt-6.1-sol-ultrafast" },
+    time: { created: at, completed: at },
+    content: [
+      {
+        type: "tool",
+        id: `call_${shellID}`,
+        name: "shell",
+        state: {
+          status: "completed",
+          input: { command, background: true },
+          content: [{ type: "text", text: `Command moved to the background (shell ID: ${shellID}).` }],
+          metadata: { status: "running", shellID },
+        },
+        time: { created: at, ran: at, completed: at },
+      },
+    ],
+  })
+}
+
+export function shellNoticeMessage(id: string, shellID: string, at: number) {
+  return Schema.decodeUnknownSync(SessionMessage.Synthetic)({
+    id,
+    type: "synthetic",
+    text: `<shell id="${shellID}" state="completed">ok</shell>`,
+    metadata: { source: "shell", shellID, state: "completed" },
+    time: { created: at },
   })
 }

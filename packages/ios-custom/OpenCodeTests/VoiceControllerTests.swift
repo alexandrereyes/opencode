@@ -27,7 +27,7 @@ import XCTest
   var asked: (() -> Void)?
   var stopped = false
   func ask(_ request: VoiceMasterRequest) async throws {
-    requests.append(request); update?(.progress("Consultando a sessão de teste.")); asked?()
+    requests.append(request); update?(.progress("Consultando a sessão de teste.", narrate: false)); asked?()
   }
   func stop() { stopped = true }
 }
@@ -55,6 +55,11 @@ private actor VoiceTestHTTP {
       "leaseExpiresAt": formatter.string(from: .now.addingTimeInterval(60))]),
       HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
   }
+}
+
+private actor VoiceTestInstructions {
+  private var calls = 0
+  func load() -> String { calls += 1; return "Prompt do servidor \(calls)" }
 }
 
 @MainActor private final class VoiceTestPath: VoicePathMonitoring {
@@ -221,8 +226,10 @@ private actor LiveMemoryHTTP {
     preferences.voice = .viola
     let transport = VoiceTestTransport()
     let http = VoiceTestHTTP()
+    let instructions = VoiceTestInstructions()
     let controller = VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
-      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) }), preferences: preferences)
+      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) },
+      instructions: { await instructions.load() }), preferences: preferences)
     let sessions = SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!))
     let first = expectation(description: "first call")
     transport.answered = { first.fulfill() }
@@ -241,7 +248,23 @@ private actor LiveMemoryHTTP {
       try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap($0.httpBody)).object?["session"]?.object?["audio"]?.object?["output"]?.object?["voice"]?.string
     }
     XCTAssertEqual(voices, ["viola", "cove"])
+    let prompts = try offers.map {
+      try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap($0.httpBody)).object?["session"]?.object?["instructions"]?.string
+    }
+    XCTAssertEqual(prompts, ["Prompt do servidor 1", "Prompt do servidor 2"])
     XCTAssertNil(controller.toast.message)
+  }
+  func testUnavailableServerPromptDoesNotReachProxy() async {
+    let http = VoiceTestHTTP()
+    let controller = VoiceController(testing: .init(transport: { _ in VoiceTestTransport() },
+      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) },
+      instructions: { throw ClientError.operation("Não foi possível carregar o prompt de voz.") }))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await controller.settled(within: .seconds(3))
+    XCTAssertEqual(controller.state.phase, .failed)
+    let requests = await http.requests
+    XCTAssertTrue(requests.isEmpty)
+    await controller.end()
   }
   func testFallbackToastDoesNotOverwriteTheSavedPreference() async throws {
     let name = "voice-controller-" + UUID().uuidString
@@ -389,7 +412,7 @@ private actor LiveMemoryHTTP {
     let requests = await http.requests
     let offer = try XCTUnwrap(requests.first { $0.url?.path.hasSuffix("/calls") == true })
     let session = try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap(offer.httpBody)).object?["session"]?.object
-    XCTAssertEqual(session?["instructions"]?.string, VoiceProtocol.instructions)
+    XCTAssertEqual(session?["instructions"]?.string, "Instruções da fixture de voz.")
     XCTAssertTrue(session?["initial_items"]?.array?.first?.object?["content"]?.array?.first?.object?["text"]?.string?.contains("pitanga violeta") == true)
     await controller.end()
     await memory.stop()
@@ -664,7 +687,7 @@ private actor LiveMemoryHTTP {
         let sdp = try await transport.offer()
         let (lease, reservation) = try await URLSession.shared.data(for: signal.leaseRequest(method: "POST"))
         _ = try signal.parseLease(lease, status: (reservation as? HTTPURLResponse)?.statusCode ?? 0)
-        let (data, result) = try await URLSession.shared.data(for: signal.offerRequest(sdp: sdp, voice: voice))
+        let (data, result) = try await URLSession.shared.data(for: signal.offerRequest(sdp: sdp, instructions: "Teste silencioso do catálogo de vozes.", voice: voice))
         let response = try XCTUnwrap(result as? HTTPURLResponse)
         let accepted = response.statusCode == 201
         if accepted { _ = try VoiceSignaling.parseAnswer(data, response: response) }

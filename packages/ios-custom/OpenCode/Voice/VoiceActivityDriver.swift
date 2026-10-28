@@ -24,7 +24,7 @@ import OpenCodeKit
     if sessionID == nil {
       do {
         _ = try Activity.request(attributes: VoiceActivityAttributes(sessionID: id.uuidString, started: .now),
-          content: ActivityContent(state: content, staleDate: nil), pushType: nil)
+          content: ActivityContent(state: content, staleDate: nil, relevanceScore: LiveActivityRelevance.voice), pushType: nil)
         sessionID = id.uuidString
       } catch { unavailable = true }
       return
@@ -58,7 +58,7 @@ import OpenCodeKit
   }
   private nonisolated static func apply(_ content: VoiceActivityAttributes.ContentState, sessionID: String?) async {
     guard let activity = Activity<VoiceActivityAttributes>.activities.first(where: { $0.attributes.sessionID == sessionID }) else { return }
-    await activity.update(ActivityContent(state: content, staleDate: nil))
+    await activity.update(ActivityContent(state: content, staleDate: nil, relevanceScore: LiveActivityRelevance.voice))
   }
   private nonisolated static func finish(_ ids: [String]) async {
     for activity in Activity<VoiceActivityAttributes>.activities where ids.contains(activity.attributes.sessionID) {

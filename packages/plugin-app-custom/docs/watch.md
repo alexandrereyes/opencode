@@ -102,7 +102,10 @@ candidates; the answer must be ICE-lite with UDP candidates, otherwise `502 {cod
 
 - **Session config is built by the backend**, equivalent to the iPhone's (`OpenCodeKit/Voice.swift`): model,
   `voiceID`, the same pt-BR instructions, and `initial_items` from voice memory (`custom.voice`, scope `global`).
-  Port the instructions into the plugin as the single server-side copy; do not change the iPhone path now.
+  Both Watch and iPhone fetch `custom.voice/instructions` for each call. It rereads `voice.md` from the global
+  config directory (`OPENCODE_CONFIG_DIR`, otherwise `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`).
+  Edits apply to the next call without restarting; absent files use `src/voice/voice.md` bundled with the plugin.
+  Empty or unreadable files fail call creation before reserving a proxy lease.
 - **Lease and liveness:** the backend renews the lease every 5 s **only while heartbeats arrive** (the watch sends
   one every 5 s). No heartbeat for 15 s, a `DELETE`, a sideband close or the 30-minute cap ends the call: close the
   sideband, `DELETE` the lease, emit `status: ended`. One active call per device; a new call ends the previous.
@@ -110,7 +113,9 @@ candidates; the answer must be ICE-lite with UDP candidates, otherwise `502 {cod
 - **Delegation (server-side):** the backend handles GPT Live delegation on the sideband with the same behaviour as
   the iPhone's `VoiceMaster` (`OpenCode/Voice/VoiceMaster.swift`): `delegation.created` → ensure the Sessão mestra
   (`custom.master`) and send the task to it (steer by default, queue when asked), stream its progress back with
-  `delegation.context.append` (`channel: speakable`, ≤ 500 UTF-8 bytes per part) and as `master` events. Turns are
+   `delegation.context.append` (`channel: speakable`, ≤ 500 UTF-8 bytes per part) and as `master` events. Routine
+   tool activity produces only visual `master` events; confirmations, text updates, blockers and results supply
+   voice context, with the prompt asking for relevant news rather than repetitive acknowledgements. Turns are
   appended to voice memory (`custom.voice.append`) so the watch and the iPhone share one memory. First verify on the
   Mac, with one short call, which `session.delegation` setting makes `delegation.created` arrive on the sideband and
   whether appends sent there are accepted; record the result in "Backend implementation notes".
@@ -123,7 +128,7 @@ operation must keep the call. Ending the call from the system call UI ends it on
 ## Complication and widget push
 
 - Families: `accessoryCircular` (approved ring: arcs proportional to `counts.working` green, `question` lavender,
-  `permission` amber, `failed` red, remaining gray; big `activeTotal` in the centre; mascot in the gap; when
+  `permission` amber, `failed` red, `unread` orange (rev. 2026-10-28; gray `idle` only as fallback); big `activeTotal` in the centre; mascot in the gap; when
   `activeTotal == 0`, the mascot alone with a gray ring), plus `accessoryCorner` and `accessoryRectangular`
   (one line: `N ativas · M precisam de você`). Tap opens the app on the dashboard.
 - Data: the widget timeline reads `/watch/v1/state` (high-level `URLSession`, allowed in widget extensions) and

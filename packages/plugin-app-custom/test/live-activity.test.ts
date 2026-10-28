@@ -17,6 +17,11 @@ import {
   session,
   tool,
   world,
+  backgroundShellMessage,
+  shellExited,
+  shellNotice,
+  shellNoticeMessage,
+  shellStarted,
   type Scene,
 } from "./fixture/live-activity"
 
@@ -71,7 +76,7 @@ test("status precedence: question beats permission, failed beats working, and ch
     }),
   )
   const state = tracker.derive(T, host).state
-  expect(state.counts).toEqual({ working: 0, question: 1, permission: 1, failed: 0, idle: 0 })
+  expect(state.counts).toEqual({ working: 0, question: 1, permission: 1, failed: 0, idle: 0, unread: 0 })
   expect(state.attention).toEqual([
     expect.objectContaining({ sessionID: ids.cache, kind: "question", since: T - 4 * minute, text: "Seguir?" }),
     expect.objectContaining({
@@ -146,7 +151,8 @@ test("failed lasts until a new execution, a view of that failure, archival, dele
   await run(tracker.apply(execution("failed", ids.nav, T + minute), T + minute))
   expect(statusOf(T + 2 * minute)).toEqual([[ids.nav, "failed"]])
   expect(tracker.derive(T + 2 * minute, host).wakeAt).toBe(T + minute + limits.failedMs)
-  expect(statusOf(T + minute + limits.failedMs)).toEqual([])
+  // The failure expires; never viewed, the session is still unread, like the Sessões dot.
+  expect(statusOf(T + minute + limits.failedMs)).toEqual([[ids.nav, "idle"]])
 })
 
 function interruptedEvent(sessionID: string) {
@@ -166,7 +172,7 @@ test("a user interruption is neither failed nor idle; success stays idle for 30 
     }),
   )
   const derived = tracker.derive(T, host)
-  expect(derived.state.counts).toEqual({ working: 0, question: 0, permission: 0, failed: 0, idle: 1 })
+  expect(derived.state.counts).toEqual({ working: 0, question: 0, permission: 0, failed: 0, idle: 1, unread: 1 })
   expect(derived.wakeAt).toBe(T - minute + limits.idleMs)
   expect(tracker.derive(T - minute + limits.idleMs, host).state.counts.idle).toBe(0)
 })
@@ -382,7 +388,8 @@ test("rebuild restores running, waiting, failed and idle sessions without any ev
   const tracker = makeTracker(server.ctx)
   await run(tracker.rebuild(T))
   const state = tracker.derive(T, host).state
-  expect(state.counts).toEqual({ working: 1, question: 1, permission: 0, failed: 1, idle: 1 })
+  // idleB finished two hours ago: no longer idle, still unread.
+  expect(state.counts).toEqual({ working: 1, question: 1, permission: 0, failed: 1, idle: 1, unread: 2 })
   expect(state.focus).toMatchObject({ sessionID: ids.live, startedAt: T0, progress: { done: 1, total: 2 } })
   expect(state.sessions.map((row) => [row.sessionID, row.status])).toEqual([
     [ids.cache, "question"],
@@ -408,7 +415,7 @@ test("a parent waiting for background subagents is working until the last one en
       yield* tracker.apply(execution("succeeded", ids.live, T - 8 * minute), T)
     }),
   )
-  expect(view(T).counts).toEqual({ working: 1, question: 0, permission: 0, failed: 0, idle: 0 })
+  expect(view(T).counts).toEqual({ working: 1, question: 0, permission: 0, failed: 0, idle: 0, unread: 0 })
   expect(view(T).activeTotal).toBe(1)
   expect(view(T).focus).toMatchObject({
     sessionID: ids.live,
@@ -420,7 +427,7 @@ test("a parent waiting for background subagents is working until the last one en
   expect(view(T).focus?.progress).toEqual({ done: 1, total: 2, unit: "subagents" })
   await run(tracker.apply(execution("failed", "ses_bg_b", T), T))
   // Nothing in the family runs any more: idle, and a subagent failure is not the parent's.
-  expect(view(T).counts).toEqual({ working: 0, question: 0, permission: 0, failed: 0, idle: 1 })
+  expect(view(T).counts).toEqual({ working: 0, question: 0, permission: 0, failed: 0, idle: 1, unread: 1 })
   expect(view(T).focus).toBeUndefined()
   expect(view(T).sessions).toEqual([expect.objectContaining({ sessionID: ids.live, status: "idle" })])
 })
@@ -468,6 +475,7 @@ test("a running grandchild rolls up to the top level and supplies the focus acti
     permission: 0,
     failed: 0,
     idle: 1,
+    unread: 1,
   })
 })
 
@@ -486,11 +494,16 @@ test("rebuild with only subagents running maps them to their top-level sessions"
     server.prompts.set(id, T - 15 * minute + index)
     server.active.add(id)
   }
-  // An old top level outside the 24-hour scan whose grandchild still runs; only `get` can find it.
+  // An old, read top level outside the 24-hour scan whose grandchild still runs; only `get` can find it.
   server.add(
     session(ids.deploy, {
       outcome: "succeeded",
-      time: { created: T - 3 * 86_400_000, updated: T - 2 * 86_400_000, idle: T - 2 * 86_400_000 },
+      time: {
+        created: T - 3 * 86_400_000,
+        updated: T - 2 * 86_400_000,
+        idle: T - 2 * 86_400_000,
+        viewed: T - 2 * 86_400_000,
+      },
     }),
   )
   server.add(session("ses_deploy_child", { parentID: ids.deploy, time: { created: T - 30 * minute, updated: T } }))
@@ -502,7 +515,7 @@ test("rebuild with only subagents running maps them to their top-level sessions"
   const tracker = makeTracker(server.ctx)
   await run(tracker.rebuild(T))
   const state = tracker.derive(T, host).state
-  expect(state.counts).toEqual({ working: 2, question: 0, permission: 0, failed: 0, idle: 0 })
+  expect(state.counts).toEqual({ working: 2, question: 0, permission: 0, failed: 0, idle: 0, unread: 0 })
   expect(state.activeTotal).toBe(2)
   expect(state.sessions.map((row) => [row.sessionID, row.status])).toEqual([
     [ids.live, "working"],
@@ -554,4 +567,191 @@ test("each attention session maps to its oldest pending request of that kind, su
     [ids.cache, "permission"],
   ])
   expect(JSON.stringify(derived.state)).not.toContain("requestID")
+})
+
+test("an idle session with a background shell is working until the shell ends (rev. 2026-10-28)", async () => {
+  const tracker = makeTracker(world().ctx)
+  const view = (now: number) => tracker.derive(now, host).state
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(created(ids.live, T - 60 * minute), T)
+      yield* tracker.apply(execution("started", ids.live, T - 10 * minute), T)
+      yield* tracker.apply(shellStarted(ids.live, "sh_tests", T - 9 * minute, "bun test --filter oauth"), T)
+      // The turn that moved the command to the background ends; the job keeps running.
+      yield* tracker.apply(execution("succeeded", ids.live, T - 8 * minute), T)
+    }),
+  )
+  expect(view(T).counts).toEqual({ working: 1, question: 0, permission: 0, failed: 0, idle: 0, unread: 0 })
+  expect(view(T).focus).toMatchObject({
+    sessionID: ids.live,
+    startedAt: T - 10 * minute,
+    activity: "Rodando bun test --filter oauth",
+  })
+  // A background shell of a subagent rolls up the same way.
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(created(ids.cache, T - 60 * minute), T)
+      yield* tracker.apply(created("ses_cache_child", T - 30 * minute, ids.cache), T)
+      yield* tracker.apply(shellStarted("ses_cache_child", "sh_dev", T - 20 * minute, "bun run dev"), T)
+    }),
+  )
+  expect(view(T).counts.working).toBe(2)
+  expect(view(T).sessions.find((row) => row.sessionID === ids.cache)).toMatchObject({ status: "working" })
+  // The job ends: nothing runs, so the session is idle until its completion notice wakes it again.
+  await run(tracker.apply(shellExited("sh_tests", T - minute), T))
+  expect(view(T).sessions.find((row) => row.sessionID === ids.live)).toMatchObject({ status: "idle" })
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(shellNotice(ids.live, "sh_tests", T), T)
+      yield* tracker.apply(execution("started", ids.live, T), T)
+    }),
+  )
+  expect(view(T).sessions.find((row) => row.sessionID === ids.live)).toMatchObject({ status: "working" })
+  await run(tracker.apply(execution("succeeded", ids.live, T + minute), T))
+  expect(view(T + minute).sessions.find((row) => row.sessionID === ids.live)).toMatchObject({ status: "idle" })
+  // A completion notice alone also settles a shell whose exit was missed.
+  await run(tracker.apply(shellNotice("ses_cache_child", "sh_dev", T + minute), T))
+  expect(view(T + minute).counts.working).toBe(0)
+})
+
+test("rebuild finds unfinished background shells in the transcripts", async () => {
+  const server = world()
+  server.add(
+    session(ids.live, {
+      outcome: "succeeded",
+      time: { created: T - 3_600_000, updated: T - 5 * minute, idle: T - 5 * minute },
+    }),
+  )
+  server.prompts.set(ids.live, T - 12 * minute)
+  // Newest first, as `message.list` returns them: sh_old finished (its notice is there), sh_watch did not.
+  server.transcripts.set(ids.live, [
+    shellNoticeMessage("msg_notice", "sh_old", T - 6 * minute),
+    backgroundShellMessage("msg_watch", "sh_watch", T - 10 * minute, "bun test --watch"),
+    backgroundShellMessage("msg_old", "sh_old", T - 11 * minute, "bun run build"),
+  ])
+  server.add(
+    session(ids.nav, {
+      outcome: "succeeded",
+      time: { created: T - 3_600_000, updated: T - 5 * minute, idle: T - 5 * minute },
+    }),
+  )
+  server.transcripts.set(ids.nav, [
+    shellNoticeMessage("msg_nav_notice", "sh_nav", T - 6 * minute),
+    backgroundShellMessage("msg_nav", "sh_nav", T - 20 * minute, "bun run lint"),
+  ])
+  const tracker = makeTracker(server.ctx)
+  await run(tracker.rebuild(T))
+  const state = tracker.derive(T, host).state
+  expect(state.counts).toEqual({ working: 1, question: 0, permission: 0, failed: 0, idle: 1, unread: 1 })
+  // The waiting turn started at the latest prompt.
+  expect(state.focus).toMatchObject({
+    sessionID: ids.live,
+    startedAt: T - 12 * minute,
+    activity: "Rodando bun test --watch",
+  })
+  await run(tracker.apply(shellExited("sh_watch", T), T))
+  expect(tracker.derive(T, host).state.counts).toEqual({
+    working: 0,
+    question: 0,
+    permission: 0,
+    failed: 0,
+    idle: 2,
+    unread: 2,
+  })
+})
+
+test("unread follows the Sessões dot: newer output than the viewed watermark, muted excluded (rev. 2026-10-28)", async () => {
+  const server = world()
+  const tracker = makeTracker(server.ctx)
+  const view = (now = T) => tracker.derive(now, host).state
+  const rows = (now = T) => view(now).sessions.map((row) => [row.sessionID, row.status])
+  await run(
+    Effect.gen(function* () {
+      for (const [id, end] of [
+        [ids.live, T - 5 * minute],
+        [ids.nav, T - 3 * minute],
+        [ids.cache, T - 2 * 60 * minute],
+      ] as const) {
+        yield* tracker.apply(created(id, end - 30 * minute), T)
+        yield* tracker.apply(execution("started", id, end - 10 * minute), T)
+        yield* tracker.apply(execution("succeeded", id, end), T)
+      }
+      // Interrupted without a newer success: nothing new to read.
+      yield* tracker.apply(created(ids.deploy, T - 60 * minute), T)
+      yield* tracker.apply(execution("started", ids.deploy, T - 10 * minute), T)
+      yield* tracker.apply(interruptedEvent(ids.deploy), T)
+    }),
+  )
+  // Idle keeps its 30-minute meaning; unread has no window, and only unread sessions are rows, newest first.
+  expect(view().counts).toMatchObject({ idle: 2, unread: 3 })
+  expect(rows()).toEqual([
+    [ids.nav, "idle"],
+    [ids.live, "idle"],
+    [ids.cache, "idle"],
+  ])
+  await run(
+    Effect.gen(function* () {
+      // A stale view (an older idle watermark) leaves it unread; viewing the latest output reads it.
+      yield* tracker.apply(
+        { type: "session.viewed", created: T, data: { sessionID: ids.nav, idle: T - 10 * minute } },
+        T,
+      )
+      yield* tracker.apply(
+        { type: "session.viewed", created: T, data: { sessionID: ids.live, idle: T - 5 * minute } },
+        T,
+      )
+    }),
+  )
+  expect(view().counts).toMatchObject({ idle: 2, unread: 2 })
+  expect(rows()).toEqual([
+    [ids.nav, "idle"],
+    [ids.cache, "idle"],
+  ])
+  // Muting removes it from the unread count; the preferences event refreshes mutes.
+  server.muted.add(ids.cache)
+  await run(tracker.apply({ type: "preferences.updated" }, T))
+  expect(view().counts).toMatchObject({ unread: 1 })
+  expect(rows()).toEqual([[ids.nav, "idle"]])
+  // A new execution makes it working; its end is unread again even though it was viewed before.
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(execution("started", ids.live, T), T)
+      yield* tracker.apply(execution("succeeded", ids.live, T + minute), T)
+    }),
+  )
+  expect(view(T + minute).counts).toMatchObject({ unread: 2 })
+  // An interruption after an unread success keeps the session unread.
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(execution("started", ids.nav, T + minute), T)
+      yield* tracker.apply(
+        {
+          type: "session.execution.interrupted",
+          created: T + 2 * minute,
+          data: { sessionID: ids.nav, reason: "user" },
+        },
+        T,
+      )
+    }),
+  )
+  expect(view(T + 2 * minute).sessions.map((row) => row.sessionID)).toContain(ids.nav)
+  // Unread sessions do not keep the activity alive: nothing active, nothing failed.
+  expect(view(T + 2 * minute).activeTotal).toBe(0)
+})
+
+test("rebuild keeps unread sessions of any age and drops read ones", async () => {
+  const server = world()
+  const old = { created: T - 5 * 86_400_000, updated: T - 3 * 86_400_000, idle: T - 3 * 86_400_000 }
+  server.add(session(ids.live, { outcome: "succeeded", time: old }))
+  server.add(session(ids.nav, { outcome: "succeeded", time: { ...old, viewed: old.idle } }))
+  server.add(session(ids.cache, { outcome: "interrupted", time: old }))
+  server.add(session(ids.oauth, { outcome: "succeeded", time: old }))
+  server.muted.add(ids.oauth)
+  const tracker = makeTracker(server.ctx)
+  await run(tracker.rebuild(T))
+  const state = tracker.derive(T, host).state
+  expect(state.counts).toEqual({ working: 0, question: 0, permission: 0, failed: 0, idle: 0, unread: 1 })
+  expect(state.sessions.map((row) => [row.sessionID, row.status])).toEqual([[ids.live, "idle"]])
+  // The muted one stays in the model so unmuting shows it without a restart.
+  expect([...tracker.sessions.keys()]).toEqual([ids.live, ids.oauth])
 })

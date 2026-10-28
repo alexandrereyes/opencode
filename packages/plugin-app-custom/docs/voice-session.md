@@ -60,6 +60,13 @@ authenticated normal plugin transport, for example
 - **`info({})`** reports version `2`, `storage:"kv"`,
   `contextFormat:"initial_items"`, supported scopes and the history/compaction
   limits. It neither allocates storage nor invokes inference.
+- **`instructions({})`** returns `{instructions:string}` for both iPhone and Watch. It reads `voice.md`
+  from `OPENCODE_CONFIG_DIR` (otherwise `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`) on each request.
+  The entire file replaces the bundled `src/voice/voice.md` default; only a missing file uses that default.
+  An empty or unreadable file fails. Clients fetch before each new GPT Live call, so Markdown edits apply
+  without a restart or rebuild. This additive method is independent of memory; new iPhone builds require it
+  and do not start a provider call if instructions cannot be fetched. Updating the backend precedes the initial
+  iPhone migration. Existing calls keep the prompt they started with.
 - **`append({version:2, scope:"global", turns:[...]})`** atomically appends one or
   more finalized turns, first-write-wins by ID both within and across batches.
   Retries ignore changed payloads. The response reports `appended`, stored token

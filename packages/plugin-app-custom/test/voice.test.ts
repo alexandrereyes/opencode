@@ -19,6 +19,8 @@ import {
 } from "../src/voice"
 import type { VoiceContext } from "../src/voice"
 import { Preferences } from "../src/preferences/rpc"
+import { tmpdir } from "../../core/test/fixture/tmpdir"
+import { loadInstructions } from "../src/voice/instructions"
 
 const decode = Schema.decodeUnknownSync(Voice.Record)
 const encode = Schema.encodeSync(Voice.Record)
@@ -71,7 +73,7 @@ function fixture(initial?: Voice.Record) {
 
 test("KV protocol replaces the eco contract, validates batches and reserves future scopes", () => {
   expect(Voice.version).toBe(2)
-  expect(Object.keys(Voice.Definition.methods)).toEqual(["info", "append", "context", "end"])
+  expect(Object.keys(Voice.Definition.methods)).toEqual(["info", "instructions", "append", "context", "end"])
   expect(key("global")).toBe("voice/transcript/global")
   for (const input of [
     { version: 1, scope: "global", turns: [turn("id")] },
@@ -83,6 +85,20 @@ test("KV protocol replaces the eco contract, validates batches and reserves futu
     { version: 2, scope: "global", turns: [turn("id", "x".repeat(64_001))] },
   ])
     expect(() => Schema.decodeUnknownSync(Voice.Append)(input)).toThrow()
+})
+
+test("voice instructions reload the editable Markdown and reject empty or unreadable overrides", async () => {
+  await using dir = await tmpdir("opencode-voice-prompt-")
+  const file = `${dir.path}/voice.md`
+  const defaults = await Effect.runPromise(loadInstructions(file))
+  expect(defaults).toContain("Silêncio durante")
+  await Bun.write(file, "Primeiro prompt")
+  expect(await Effect.runPromise(loadInstructions(file))).toBe("Primeiro prompt")
+  await Bun.write(file, "Segundo prompt")
+  expect(await Effect.runPromise(loadInstructions(file))).toBe("Segundo prompt")
+  await Bun.write(file, " \n")
+  expect(await Effect.runPromise(loadInstructions(file).pipe(Effect.isFailure))).toBe(true)
+  expect(await Effect.runPromise(loadInstructions(dir.path).pipe(Effect.isFailure))).toBe(true)
 })
 
 test("Portuguese estimator counts UTF-8, item framing and interruption annotations", () => {

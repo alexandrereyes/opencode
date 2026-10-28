@@ -22,7 +22,6 @@ import WidgetKit
   @ObservationIgnored private let keychain = WatchKeychain()
   @ObservationIgnored private let cache = WatchStateCache()
   @ObservationIgnored private var refreshing: Task<Void, Never>?
-  @ObservationIgnored private var registeredToken: Data?
   @ObservationIgnored let fixture: Bool
 
   var state: AgentsState? { entry?.snapshot.state }
@@ -48,7 +47,6 @@ import WidgetKit
     guard pairing != self.pairing else { return }
     try? keychain.write(pairing)
     self.pairing = pairing
-    registeredToken = nil
     connection = .loading
     refresh()
   }
@@ -89,13 +87,12 @@ import WidgetKit
     }
   }
 
-  /// The complication extension registers too (push handler); the app covers launches before any push.
+  /// The complication extension saves its token in the shared Keychain (and tries to send it); the app sends the
+  /// saved or current one once there is a pairing the gateway lacks it for.
   private func registerWidgetToken(_ client: WatchGatewayClient) async {
-    guard let token = await Self.widgetPushToken(), token != registeredToken else { return }
-    do {
-      try await client.widgetToken(token, environment: WatchEnvironment.push)
-      registeredToken = token
-    } catch {}
+    let token = await Self.widgetPushToken()
+    await WatchWidgetToken(version: Self.version).sync(token: token, environment: WatchEnvironment.push,
+      pairing: client.pairing)
   }
 
   nonisolated private static func widgetPushToken() async -> Data? {
@@ -109,18 +106,5 @@ import WidgetKit
     entry = nil
     connection = .unpaired
     WidgetCenter.shared.reloadTimelines(ofKind: WatchShared.widgetKind)
-  }
-}
-
-enum WatchEnvironment {
-  /// Development-signed builds (installed from Xcode) use the APNs sandbox; TestFlight builds production.
-  static var push: PushEnvironment {
-    #if targetEnvironment(simulator)
-      PushEnvironment.resolve(profile: nil, simulator: true)
-    #else
-      PushEnvironment.resolve(
-        profile: Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision")
-          .flatMap { try? Data(contentsOf: $0) }, simulator: false)
-    #endif
   }
 }

@@ -2452,7 +2452,8 @@ address in the foreground, last known position in the background), `health` (rea
 384-pixel JPEG thumbnails returned as tool images). While the iPhone is locked HealthKit is unreadable; a 90-day daily
 summary protected until first unlock (`Application Support/OpenCode/DeviceData`) answers instead. In the
 conversation the tool reads **Consultou o iPhone · Saúde** with the `iphone` symbol; voice, which follows only the
-Sessão mestra, narrates **A mestra está consultando seu iPhone.** The footer and the iOS permission prompts say that
+Sessão mestra, shows **A mestra está consultando seu iPhone.** in its progress indicator without automatically
+narrating the tool activity. The footer and the iOS permission prompts say that
 the OpenCode agents read this data when Alexandre asks.
 
 Requirements: `OpenCode/OpenCode.entitlements` (HealthKit, no clinical records), the usage descriptions
@@ -3292,6 +3293,11 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   The system-updated `há N min.` keeps a fixed 64-point width and no `fixedSize`: grouped under one, the Lock Screen
   failed to archive the card and showed it empty. `AgentsActivityRenderTests` checks rendered heights equal the
   computed ones.
+- **Não lidas (rev. 28/10):** with `counts.unread` (newer backends), the ring's fifth arc is orange (`primary`) for
+  unread sessions, the counter reads `N não lida(s)` (orange dot) and `idle` rows read `Não lida` in the expanded
+  island, the Smart Stack card and the watch Painel; the watch complication and Painel ring use the same orange arc.
+  Without `unread` (older backends) everything keeps `idle`: gray arc, `concluídas há pouco`, `Concluída`
+  (`AgentsState.Counts.finished`, `AgentsState.statusLabel(_:)`).
 - **Apple Watch:** the Lock Screen closure branches on `activityFamily`; `.supplementalActivityFamilies([.small])`
   shows the mascot inside a segmented subagent ring (up to 8 segments, a continuous arc above), the minimal island's
   `!N`/`?N`/hand badge and the first two sessions, in fixed metrics for the smallest Smart Stack (152 × 69.5 points).
@@ -3368,8 +3374,11 @@ watch's own Wi-Fi or cellular. The contract with the backend is
 - **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
   mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
   state in the same Keychain group and refreshes every 15 minutes, when the app updates it, and on WidgetKit push. The
-  push token is registered with `/watch/v1/widget-token` by the extension's `WidgetPushHandler` and by the app
-  (`WidgetCenter.currentPushInfo`).
+  push token comes only to an extension with `aps-environment` (rev. 28/10: it was missing, so WidgetKit never issued
+  a token and no watch registered one). `WatchWidgetToken` saves it in the shared Keychain first, then posts it to
+  `/watch/v1/widget-token` when paired; the extension's `WidgetPushHandler` and every app refresh call it, so a token
+  that arrived before pairing or failed to send is delivered later, and a new token, environment or pairing sends
+  again. The environment follows each bundle's own signing profile (`WatchShared/WatchEnvironment.swift`).
 - **Voice** follows the proven path of the 27 October spike: CallKit outgoing call (no `contactIdentifier`), audio
   and UDP only after `didActivate`, one UDP flow per remote with system-chosen interface and port, ICE seeing the
   original IPv4 pair while the sockets carry the bytes (NAT64/CLAT on cellular). The gateway creates the call,

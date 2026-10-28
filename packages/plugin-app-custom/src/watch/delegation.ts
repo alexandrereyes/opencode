@@ -184,7 +184,11 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
     if (event.type === "form.created" || event.type === "permission.asked")
       return yield* say(itemID, "A mestra precisa da sua resposta. Abra a Sessão mestra para conferir.")
     const text = yield* progress(event)
-    if (text) yield* say(itemID, text)
+    if (!text) return
+    // Tool activity is useful on screen, but is not news worth interrupting the conversation for.
+    if (event.type === "session.tool.called" || event.type === "session.tool.progress")
+      return yield* output.master("running", text)
+    yield* say(itemID, text)
   })
 
   const progress = Effect.fn("Watch.masterProgress")(function* (event: MasterEvent) {

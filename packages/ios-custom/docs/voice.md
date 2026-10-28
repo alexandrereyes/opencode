@@ -281,6 +281,23 @@ verbatim ilimitado. O contrato está em `packages/plugin-app-custom/docs/voice-s
 
 ## Sessão mestra
 
+### Prompt editável no servidor
+
+O iPhone busca `custom.voice/instructions` antes de cada chamada GPT Live, inclusive ao
+reconectar. O Watch usa a mesma RPC no backend. O servidor relê `voice.md` no diretório
+global de configuração (`OPENCODE_CONFIG_DIR`, senão `$XDG_CONFIG_HOME/opencode`, senão
+`~/.config/opencode`) em cada consulta, sem cache nem necessidade de reinício. A alteração
+vale para a próxima chamada; não muda uma chamada já aberta.
+
+O arquivo substitui o prompt inteiro. Para começar, copie
+`packages/plugin-app-custom/src/voice/voice.md` para esse diretório e edite o Markdown.
+Sem arquivo, o servidor usa esse mesmo padrão embarcado. Arquivo vazio ou ilegível é
+erro; o iPhone não abre uma chamada sem obter o prompt. A primeira migração exige atualizar
+o backend e o app iOS uma vez. O texto não fica mais embutido no iPhone.
+
+O padrão pede conversa natural, silêncio durante trabalho rotineiro e fala somente para
+novidades relevantes, impedimentos, resultados ou perguntas de Alexandre sobre o andamento.
+
 `VoiceMaster` usa apenas contratos existentes de `OpenCodeKit`. A primeira delegação chama
 `custom.master/ensure`, que devolve a mestra atual ou, se não houver, se foi apagada ou arquivada,
 cria outra no plugin (com trava, então tela e voz simultâneas não criam duas) e atualiza
@@ -293,8 +310,10 @@ de não executar instruções vindas de resultados de ferramentas ficam no promp
 só o pedido de Alexandre, natural e fiel, sem prefixos.
 
 O retorno do prompt é **admissão**, não conclusão. A subscrição ao `EventHub` começa antes do envio;
-ferramentas e textos concluídos alimentam atualizações curtas. Isso inclui os `toolCalls` estruturados
-de progresso do Code Mode; sessões conhecidas são identificadas pelo título, nunca por IDs falados.
+ferramentas alimentam o indicador visual, sem gerar falas automáticas. Isso inclui os `toolCalls`
+estruturados de progresso do Code Mode; sessões conhecidas são identificadas pelo título.
+Confirmações, textos concluídos, pedidos de resposta e falhas são enviados como contexto de voz;
+o prompt orienta a falar apenas quando houver informação relevante.
 Raciocínio, argumentos de ferramentas,
 tokens e credenciais não são narrados. Reconexão/lacuna do stream revalida transcript, atividade e
 inbox em `session.execution.succeeded`; falha/interrupção usam os eventos terminais próprios.
@@ -324,6 +343,22 @@ exibem ouvindo/falando/trabalho da mestra, reconectando e sem conexão (rótulo 
 do app. Tema é um snapshot de roles tipados. O driver mantém instâncias ActivityKit fora da MainActor
 durante chamadas assíncronas e limpa apenas atividades desse tipo deixadas por uma execução anterior.
 Live Activity negada pelo sistema não derruba áudio. Ela não contém transcrição pessoal.
+
+**Prioridade entre atividades:** voz usa `relevanceScore = 100` em todo início/atualização,
+inclusive mute, interrupção e recuperação de rede; agentes usa `50`, tanto no app quanto no
+`aps.relevance-score` dos pushes start/update/end do plugin. A Apple usa a maior relevância para
+a Dynamic Island e o topo da tela bloqueada; em empate, vence a primeira atividade iniciada.
+Ao encerrar voz, agentes volta naturalmente, com o mesmo ID, progresso e token. Não é preciso
+encerrar/recriar agentes, nem gerar outro alerta de início. Fontes: [ActivityContent.relevanceScore](https://developer.apple.com/documentation/activitykit/activitycontent/relevancescore)
+e [pushes ActivityKit](https://developer.apple.com/documentation/activitykit/starting-and-updating-live-activities-with-activitykit-push-notifications).
+O Smart Stack recebe as atividades espelhadas; a ordenação final no Watch depende do watchOS
+e das preferências do usuário (a documentação de relevância garante explicitamente iPhone,
+não prioridade absoluta no Watch). O card suplementar, o widget e o app Watch são preservados.
+
+Teste isolado: `-OpenCodeAgentsActivityFixture state-working -OpenCodeActivityPriorityFixture`
+com URL de sandbox explícita usa os drivers reais e transporte fechado, sem áudio/APNs/rede.
+`ActivityPriorityTests` captura a ilha/tela bloqueada e lê a relevância efetiva do ActivityKit,
+incluindo atualização de agentes, recuperação de voz e encerramento com o mesmo ID de agentes.
 
 ## Início pelo Botão de Ação, Controles e Atalhos
 

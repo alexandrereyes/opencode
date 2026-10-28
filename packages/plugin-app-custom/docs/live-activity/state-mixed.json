@@ -7,7 +7,8 @@
     "question": 1,
     "permission": 1,
     "failed": 2,
-    "idle": 1
+    "idle": 1,
+    "unread": 1
   },
   "activeTotal": 3,
   "focus": {

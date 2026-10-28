@@ -74,6 +74,7 @@ export const registerWatch = Effect.fn("Watch.register")(function* (ctx: Plugin.
       permission: ctx.permission,
       message: ctx.message,
       event: ctx.event,
+      instructions: () => ctx.rpc(Voice.Definition).instructions({}).pipe(Effect.map((value) => value.instructions)),
       ensureMaster: () =>
         ctx
           .rpc(Master.Definition)

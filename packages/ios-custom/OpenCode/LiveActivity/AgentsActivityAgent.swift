@@ -198,12 +198,16 @@ actor AgentsActivityDriver {
     await enforceSingle()
     let live = activities(context.serverKey)
     if state.activeTotal == 0 { dismissed.remove(context.serverKey) }
-    let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(15 * 60))
+    let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(15 * 60),
+      relevanceScore: LiveActivityRelevance.agents)
     if live.isEmpty {
       guard !dismissed.contains(context.serverKey), state.activeTotal > 0 || state.counts.failed > 0 else { return }
       start(Attributes(serverKey: context.serverKey, theme: theme), content: content)
     } else {
-      for activity in live where activity.content.state != state { await Self.update(activity.id, content) }
+      for activity in live where activity.content.state != state
+        || activity.content.relevanceScore != LiveActivityRelevance.agents {
+        await Self.update(activity.id, content)
+      }
     }
     if state.activeTotal == 0 && state.counts.failed == 0 {
       scheduleEnding(after: max(0, 600 - Date.now.timeIntervalSince(state.updated)))
@@ -220,7 +224,7 @@ actor AgentsActivityDriver {
     for fixture in fixtures {
       do {
         let activity = try Activity.request(attributes: fixture.attributes,
-          content: ActivityContent(state: fixture.state, staleDate: nil), pushType: nil)
+          content: ActivityContent(state: fixture.state, staleDate: nil, relevanceScore: LiveActivityRelevance.agents), pushType: nil)
         AgentsActivityAgent.log.notice("fixture started \(fixture.attributes.serverKey, privacy: .public)")
         watch(activity)
       } catch { AgentsActivityAgent.log.error("fixture: \(error.localizedDescription, privacy: .public)") }

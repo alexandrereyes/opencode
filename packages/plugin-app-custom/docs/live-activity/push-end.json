@@ -2,6 +2,7 @@
   "aps": {
     "timestamp": 1793105460,
     "event": "end",
+    "relevance-score": 50,
     "content-state": {
       "v": 1,
       "updatedAt": 1793105460000,
@@ -11,7 +12,8 @@
         "question": 0,
         "permission": 0,
         "failed": 0,
-        "idle": 4
+        "idle": 4,
+        "unread": 4
       },
       "activeTotal": 0,
       "attention": [],
