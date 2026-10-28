@@ -7,7 +7,7 @@ import SwiftUI
   static var mode: String? {
     let args = ProcessInfo.processInfo.arguments
     guard let index = args.firstIndex(of: "-OpenCodeDictationFixture"), args.indices.contains(index + 1),
-      ["http://127.0.0.1:4177", "http://127.0.0.1:4183"].contains(ServerConfiguration.launch().url.absoluteString) else { return nil }
+      ServerConfiguration.launch().isolatedTestSandbox else { return nil }
     return args[index + 1]
   }
   nonisolated static let text = "Confira as sessões em andamento e prepare um resumo das alterações. Não envie esta mensagem antes da minha revisão."

@@ -118,6 +118,64 @@ import XCTest
     XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Confira as sessões em andamento'")).firstMatch.waitForExistence(timeout: 5))
     capture("comment-dictation-committed")
   }
+  /// Inside the comment sheet a hold on the microphone owns the upward lock drag: the sheet neither moves
+  /// nor closes. Elsewhere in the sheet a drag still moves and closes it.
+  func testCommentSheetMicrophoneDragUpLocksWithoutMovingTheSheet() {
+    open(extra: ["-OpenCodeDictationComment"])
+    let editor = app.textViews["comment-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 10))
+    // The offline fixture's own quote: no server, real or sandbox, is involved.
+    XCTAssertTrue(app.staticTexts["Trecho citado para ditar."].exists)
+    let title = app.navigationBars["Comentário"]
+    XCTAssertTrue(title.waitForExistence(timeout: 5))
+    func settled() -> CGFloat {
+      var previous = -1.0
+      for _ in 0..<20 {
+        let current = title.frame.minY
+        if abs(current - previous) < 0.5 { return current }
+        previous = current
+        Thread.sleep(forTimeInterval: 0.15)
+      }
+      return title.frame.minY
+    }
+    let top = settled()
+    capture("comment-sheet-before-" + theme)
+    let microphone = app.buttons.matching(identifier: "dictation-microphone").allElementsBoundByIndex.last(where: \.isHittable)
+    XCTAssertNotNil(microphone, app.debugDescription)
+    let center = microphone!.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    center.press(forDuration: 1.5, thenDragTo: center.withOffset(CGVector(dx: 0, dy: -160)))
+    XCTAssertTrue(app.buttons["dictation-stop"].waitForExistence(timeout: 5), app.debugDescription)
+    // Locked by the drag, still recording. When the sheet took the touch, UIKit cancelled it and the
+    // recording was kept as a paused draft, with its preview button.
+    XCTAssertFalse(app.buttons["dictation-preview"].exists, "The sheet must not take the microphone's touch")
+    XCTAssertTrue(editor.exists)
+    XCTAssertEqual(settled(), top, accuracy: 1, "The sheet must not move during the microphone's drag")
+    capture("comment-sheet-locked-" + theme)
+    app.buttons["dictation-stop"].tap()
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS 'Confira as sessões em andamento'"), evaluatedWith: editor)], timeout: 15), .completed)
+    // With text, the compact microphone beside Concluir uses the same touch target and gesture.
+    let compact = app.buttons.matching(identifier: "composer-microphone").allElementsBoundByIndex.last(where: \.isHittable)
+    XCTAssertNotNil(compact, app.debugDescription)
+    let beside = compact!.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    let before = settled()
+    beside.press(forDuration: 1.5, thenDragTo: beside.withOffset(CGVector(dx: 0, dy: -160)))
+    XCTAssertTrue(app.buttons["dictation-stop"].waitForExistence(timeout: 5), app.debugDescription)
+    XCTAssertFalse(app.buttons["dictation-preview"].exists, "The sheet must not take the compact microphone's touch")
+    XCTAssertEqual(settled(), before, accuracy: 1, "The compact microphone's drag must not move the sheet either")
+    capture("comment-sheet-compact-locked-" + theme)
+    app.buttons["dictation-discard"].tap()
+    XCTAssertTrue(app.buttons["comment-done"].waitForExistence(timeout: 5))
+    // Away from the microphone the sheet still follows the finger and closes.
+    let passage = app.staticTexts["Trecho citado para ditar."].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    // A first drag can be spent lowering the keyboard or the large detent.
+    for _ in 0..<3 where editor.exists {
+      passage.press(forDuration: 0.1, thenDragTo: passage.withOffset(CGVector(dx: 0, dy: 900)))
+      _ = editor.waitForNonExistence(timeout: 2)
+    }
+    XCTAssertTrue(editor.waitForNonExistence(timeout: 5), "A drag outside the microphone still closes the sheet")
+    capture("comment-sheet-dragged-away-" + theme)
+  }
+  private var theme: String { ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
   private let transcript = "Confira as sessões em andamento e prepare um resumo das alterações. Não envie esta mensagem antes da minha revisão."
   /// Option A: with text the big button sends and a compact microphone beside it records with the same gesture.
   func testCompactMicrophoneBesideSendInsertsAtTheCaret() {

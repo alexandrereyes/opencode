@@ -1360,6 +1360,16 @@ opening bracket. Tokens, quotes and attachments are untouched (the native increm
 review stays as before, also with earlier text: the message composer opens fullscreen with the caret after the
 inserted text, so the whole message is reread before sending; the comment sheet refocuses the comment.
 
+**Alexandre, 28/10: arrastar o microfone dentro da folha.** A touch that begins on either microphone belongs to it:
+`VoiceRecordingTouchTarget` adds a recognizer that recognizes at touch down, ends with the touch, never cancels or
+delays the view's own touches, and every other recognizer must wait for it to fail. The comment sheet's presentation
+pan and its scroll view therefore can no longer take the upward lock drag (which moved the sheet and cancelled the
+touch, leaving a paused draft); away from the microphone the sheet drags and closes as before. The comment sheet is
+the only sheet with this microphone (Nova sessão and the master are pushed, the fullscreen composer is a cover and
+the side question has none); the conversation composer behaves as before.
+`DictationUITests/testCommentSheetMicrophoneDragUpLocksWithoutMovingTheSheet` covers both microphones and a drag
+elsewhere; the offline dictation fixture now accepts any isolated loopback sandbox port.
+
 To make room, the agent (`build ⌄`, `agent-picker`; `child-agent` text for children and the master) left the control
 row for the line below the card (`ComposerFooter`): before the usage in a conversation, alone in Nova sessão, the
 empty master composer and the fullscreen composer. Tapping it (or `/agent`) opens the same sheet, now presented from

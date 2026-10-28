@@ -17,11 +17,41 @@ struct VoiceRecordingTouchTarget: UIViewRepresentable {
     view.accessibilityHint = available ? "Toque para gravar com as mãos livres. Ou segure: deslize para cima para travar, para a esquerda para cancelar e solte para transcrever. Nada é enviado automaticamente." : nil
   }
   static func dismantleUIView(_ view: TouchView, coordinator: ()) { view.cancelTouch() }
-  final class TouchView: UIView {
+  final class TouchView: UIView, UIGestureRecognizerDelegate {
     var available = false
     var event: ((VoiceRecordingGesture.Event) -> Void)?
     private var origin: CGPoint?
     private var holdTask: Task<Void, Never>?
+    /// A touch that starts here belongs to the microphone. Inside a sheet, its presentation pan (and a
+    /// scroll view's) would otherwise take the upward lock drag, move the sheet and cancel these touches.
+    private lazy var claim: Claim = {
+      let claim = Claim(target: nil, action: nil)
+      claim.delegate = self
+      return claim
+    }()
+    override init(frame: CGRect) {
+      super.init(frame: frame)
+      addGestureRecognizer(claim)
+    }
+    required init?(coder: NSCoder) { nil }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+      shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+      shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    /// Recognizes at touch down and ends with the touch, without cancelling or delaying the view's own touches;
+    /// recognizers waiting for it to fail (the sheet's) then fail, so the hold can never move the sheet.
+    final class Claim: UIGestureRecognizer {
+      override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+      }
+      override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) { state = .began }
+      override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) { state = .changed }
+      override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { state = .ended }
+      override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .cancelled }
+    }
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { available && super.point(inside: point, with: event) }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
       guard available, origin == nil, let touch = touches.first else { return }
