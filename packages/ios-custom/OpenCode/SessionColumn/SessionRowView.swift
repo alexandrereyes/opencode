@@ -9,6 +9,9 @@ struct SessionRowView: View {
   let row: SessionRow
   let preview: SessionPreview
   let directory: SessionDirectoryLabel?
+  @Environment(\.sessionRowsMixChats) private var mixChats
+  /// A chat beside repository sessions reads "Chats" where they read their path and branch.
+  private var line: SessionDirectoryLabel? { row.sharesChatAvatar(mixed: mixChats) ? .chats : directory }
   /// The colored state line of a "Precisa de você" row, shown instead of the preview.
   var detail: String? = nil
 
@@ -30,7 +33,7 @@ struct SessionRowView: View {
           Spacer(minLength: 0)
           SessionRowTime(at: row.interactionAt, unread: row.unread)
         }
-        SessionDirectoryLine(label: directory)
+        SessionDirectoryLine(label: line)
         HStack(spacing: 7) {
           if let status {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -59,7 +62,7 @@ struct SessionRowView: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(directory.map { ", " + $0.accessibilityLabel } ?? ""), \(status?.text ?? preview.text)\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
+      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(line.map { ", " + $0.accessibilityLabel } ?? ""), \(status?.text ?? preview.text)\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
     )
   }
 }
@@ -71,6 +74,9 @@ struct SessionCompactRowView: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let row: SessionRow
   let directory: SessionDirectoryLabel?
+  @Environment(\.sessionRowsMixChats) private var mixChats
+  /// A chat beside repository sessions reads "Chats" where they read their path and branch.
+  private var line: SessionDirectoryLabel? { row.sharesChatAvatar(mixed: mixChats) ? .chats : directory }
   /// Adds a "trabalhando" line under a running row (the session switcher, which has no Trabalhando section).
   var showsWorking = false
 
@@ -86,9 +92,9 @@ struct SessionCompactRowView: View {
           Spacer(minLength: 0)
           SessionRowTime(at: row.interactionAt, unread: row.unread)
         }
-        if directory != nil || row.muted || row.pinned || row.unread {
+        if line != nil || row.muted || row.pinned || row.unread {
           HStack(spacing: 7) {
-            SessionDirectoryLine(label: directory).frame(maxWidth: .infinity, alignment: .leading)
+            SessionDirectoryLine(label: line).frame(maxWidth: .infinity, alignment: .leading)
             SessionRowMarks(row: row)
           }
         }
@@ -104,7 +110,7 @@ struct SessionCompactRowView: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(directory.map { ", " + $0.accessibilityLabel } ?? "")\(showsWorking && row.state == .running ? ", trabalhando" : "")\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
+      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(line.map { ", " + $0.accessibilityLabel } ?? "")\(showsWorking && row.state == .running ? ", trabalhando" : "")\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
     )
   }
 }
@@ -143,14 +149,21 @@ extension SessionState {
 struct SessionAvatar: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var displayScale
+  @Environment(\.sessionRowsMixChats) private var mixChats
   let row: SessionRow
   let size: CGFloat
 
   var body: some View {
     let colors = theme.avatar(SessionList.avatarColor(row.project, fallback: row.session.projectID))
     ZStack {
-      // Chats keep the monogram; a project's own icon replaces it under the same arc and badges.
-      if !row.chat, let icon = ProjectIcon.of(row.project) {
+      // Beside repository sessions every chat shares one avatar: a conversation symbol on the theme's chat color.
+      // Under the Chats filter chats keep their monograms; a project's own icon replaces its monogram. All keep the
+      // same arc and badges.
+      if row.sharesChatAvatar(mixed: mixChats) {
+        Circle().fill(theme.color(.chatAvatar))
+        Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: size * 0.38, weight: .semibold))
+          .foregroundStyle(theme.color(.chatAvatarSymbol))
+      } else if !row.chat, let icon = ProjectIcon.of(row.project) {
         ProjectIconAvatar(icon: icon, size: size)
       } else {
         Circle().fill(colors.background)
@@ -205,5 +218,17 @@ struct RunningArc: View {
     }
     .frame(width: size, height: size)
     .onAppear { rotating = true }
+  }
+}
+
+private struct SessionRowsMixChatsKey: EnvironmentKey {
+  static let defaultValue = false
+}
+extension EnvironmentValues {
+  /// Rows listing chats beside repository sessions ("Todas", a state filter, the session switcher), not the Chats
+  /// filter.
+  var sessionRowsMixChats: Bool {
+    get { self[SessionRowsMixChatsKey.self] }
+    set { self[SessionRowsMixChatsKey.self] = newValue }
   }
 }

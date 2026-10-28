@@ -18,9 +18,10 @@ private func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Double {
 
 private func entry(
   _ id: String, message: Double, outcome: String? = nil, idle: Double? = nil, viewed: Double? = nil,
-  permission: Bool = false, question: Bool = false, directory: String = "/repo"
+  permission: Bool = false, question: Bool = false, directory: String = "/repo", archived: Double? = nil
 ) throws -> NavigationEntry {
   var time: [String: JSONValue] = ["created": .number(message), "updated": .number(message)]
+  if let archived { time["archived"] = .number(archived) }
   if let idle { time["idle"] = .number(idle) }
   if let viewed { time["viewed"] = .number(viewed) }
   var session: [String: JSONValue] = [
@@ -82,7 +83,7 @@ private func rows(
     try entry("ses_older", message: at(20, 23, 59)),
   ]
   let list = rows(entries, active: ["ses_running", "ses_running_pinned"], pins: ["ses_running_pinned", "ses_pinned"])
-  let sections = SessionSections.group(list, chats: false, now: now, calendar: calendar)
+  let sections = SessionSections.group(list, now: now, calendar: calendar)
   #expect(sections.map(\.kind) == [.attention, .running, .pinned, .today, .yesterday, .week, .older])
   #expect(
     sections[0].rows.map(\.id) == ["ses_permission", "ses_question", "ses_failed_new", "ses_failed_old"])
@@ -111,21 +112,38 @@ private func rows(
     try entry("ses_older", message: date(1, 0) - 3_600_000),
   ])
   let now = chile.date(from: DateComponents(year: 2026, month: 9, day: 7, hour: 9))!
-  let sections = SessionSections.group(list, chats: false, now: now, calendar: chile)
+  let sections = SessionSections.group(list, now: now, calendar: chile)
   #expect(sections.map(\.kind) == [.yesterday, .week, .older])
 }
 
-@Test func chatsOnlyJoinTheirFilterExceptWhenTheyNeedYou() throws {
+@Test func allMixesEveryChatWithRepositorySessionsUnderTheSameSections() throws {
   let entries = [
     try entry("ses_chat_ask", message: at(27, 9), permission: true, directory: "/chats/a"),
+    try entry("ses_chat_run", message: at(27, 9, 30), directory: "/chats/c"),
+    try entry("ses_chat_pin", message: at(20, 9), directory: "/chats/d"),
     try entry("ses_chat", message: at(27, 9), directory: "/chats/b"),
-    try entry("ses_repo", message: at(27, 9)),
+    try entry("ses_chat_old", message: at(26, 9), directory: "/chats/e"),
+    try entry("ses_repo", message: at(27, 8)),
+    // Archived chats stay out (the store also drops the Sessão mestra by ID before building rows).
+    try entry("ses_chat_archived", message: at(27, 9), directory: "/chats/f", archived: at(27, 9, 1)),
   ]
-  let list = rows(entries, chatRoot: "/chats")
-  let all = SessionSections.group(list, chats: false, now: now, calendar: calendar)
-  #expect(all.map { $0.rows.map(\.id) } == [["ses_chat_ask"], ["ses_repo"]])
-  let chats = SessionSections.group(list.filter(\.chat), chats: true, now: now, calendar: calendar)
-  #expect(chats.map { $0.rows.map(\.id) } == [["ses_chat_ask"], ["ses_chat"]])
+  let list = rows(entries, active: ["ses_chat_run"], pins: ["ses_chat_pin"], chatRoot: "/chats")
+  // "Todas": chats join every section like repository sessions.
+  let all = SessionSections.group(list, now: now, calendar: calendar)
+  #expect(all.map(\.kind) == [.attention, .running, .pinned, .today, .yesterday])
+  #expect(all.map { $0.rows.map(\.id) }
+    == [["ses_chat_ask"], ["ses_chat_run"], ["ses_chat_pin"], ["ses_chat", "ses_repo"], ["ses_chat_old"]])
+  // Mixed, every chat shares the chat avatar; under the Chats filter none does, and repositories never do.
+  #expect(list.filter { $0.sharesChatAvatar(mixed: true) }.map(\.id).sorted()
+    == ["ses_chat", "ses_chat_ask", "ses_chat_old", "ses_chat_pin", "ses_chat_run"])
+  #expect(!list.contains { $0.sharesChatAvatar(mixed: false) })
+  // The Chats chip passes only chats; a repository chip none (the store narrows the rows before grouping).
+  let chats = SessionSections.group(list.filter(\.chat), now: now, calendar: calendar)
+  #expect(chats.flatMap { $0.rows.map(\.id) }.sorted()
+    == ["ses_chat", "ses_chat_ask", "ses_chat_old", "ses_chat_pin", "ses_chat_run"])
+  #expect(SessionSections.group(list.filter { !$0.chat }, now: now, calendar: calendar)
+    .flatMap { $0.rows.map(\.id) } == ["ses_repo"])
+  #expect(SessionDirectoryLabel.chats.accessibilityLabel == "Chats")
 }
 
 @Test func attentionDetailsAndElapsedTime() throws {

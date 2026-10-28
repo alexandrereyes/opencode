@@ -24,6 +24,7 @@ for await (const file of new Bun.Glob("*-*.json").scan(root)) {
     ["onInfo", contrast(colors.onInfo!, colors.infoFill!)],
     ["onPrimary", contrast(colors.onPrimary!, colors.primary!)],
     ["onFilledButton", contrast(colors.onFilledButton!, colors.filledButton!)],
+    ["chatAvatarSymbol", contrast(colors.chatAvatarSymbol!, colors.chatAvatar!)],
     ["glassSecondary", contrast(colors.glassSecondary!, mix(colors.background!, colors.textStrong!, theme.dark ? 0.35 : 0.2))],
   ])
   results.push({ id: theme.id, ratios })

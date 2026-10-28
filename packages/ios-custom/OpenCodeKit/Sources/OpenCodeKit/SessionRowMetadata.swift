@@ -27,8 +27,11 @@ extension SessionList {
 public struct SessionDirectoryLabel: Sendable, Equatable {
   public let path: String
   public let branch: String?
+  /// The second line of a chat listed beside repository sessions.
+  public static let chats = SessionDirectoryLabel(path: "Chats", branch: nil)
   public var accessibilityLabel: String {
-    branch.map { "Diretório \(path), branch \($0)" } ?? "Diretório \(path)"
+    if self == .chats { return "Chats" }
+    return branch.map { "Diretório \(path), branch \($0)" } ?? "Diretório \(path)"
   }
   public static func abbreviate(_ directory: String, home: String?) -> String {
     if let home, !home.isEmpty {

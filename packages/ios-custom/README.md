@@ -51,10 +51,10 @@ app's sidebar, with a different presentation. The web app is the behavior refere
 (`packages/app-custom/src/shell/titlebar/sidebar-model.ts`, `sidebar-order.ts`, `sidebar-rows.ts`, and
 `packages/app-custom/src/shell/notifications/session-attention.ts`) and is not changed by this work.
 
-- **Rows:** only root sessions, without archived sessions or chats. Running state, permissions, and questions of
-  subagents roll up into their root session. Managed chats (`custom.chats`) are listed only under the **Chats** chip,
-  after the status chip and before repositories, like the web sidebar's separate Chats section; their requests still
-  count in **Precisa de você** and the tab badge. Pinned sessions come first, then the activity order. When a session has
+- **Rows:** only root sessions, without archived sessions or the Sessão mestra. Running state, permissions, and
+  questions of subagents roll up into their root session. Managed chats (`custom.chats`) appear under **Todas** (and a
+  state filter) mixed with repository sessions, in the same sections and rules, and alone under the **Chats** chip;
+  a repository chip lists none. Their requests count in **Precisa de você** and the tab badge. Pinned sessions come first, then the activity order. When a session has
   several states, the priority is permission > question > running > failed > unread > stopped. The rows are grouped
   into the sections described in [Layout D](#layout-d-precisa-de-você--27-october).
 - **Row metadata (wave 10):** the PWA sidebar's exact compact elapsed time (`0s`, `59s`, `1m`, `1h`, `1d`), floored
@@ -176,8 +176,18 @@ app, without the web's "Projetos" and "Worktrees" groups.
   | 4 | Hoje, Ontem, Esta semana (neutral) | the rest by local day of `interactionAt`; "Esta semana" is 2–6 days ago | `SessionList.rows` |
   | 5 | Anteriores (neutral, collapsed by default) | older than the seven local days (the web's `localDays`) | `SessionList.rows` |
 
-  The discreet **Arquivadas N** row closes the list and opens the archived sheet. Outside "Precisa de você", chats
-  appear only under the Chats chip, as before. Muted sessions stay in "Precisa de você"; the master stays out of the
+  The discreet **Arquivadas N** row closes the list and opens the archived sheet. Since 28 October every section
+  mixes chats with repository sessions under "Todas" (before, only "Precisa de você" did); the Chats chip still lists
+  only chats.
+- **Chat avatar when mixed:** wherever chats sit beside repository sessions ("Todas", a state filter, the session
+  switcher) a chat row shows one shared avatar instead of its title monogram: `bubble.left.and.bubble.right.fill`
+  (two speech bubbles, a conversation rather than a repository) on the theme role `chatAvatar`, with `chatAvatarSymbol`.
+  `generate-themes.ts` derives `chatAvatar` from each theme's `accent` hue at the project avatars' lightness (oklch
+  L 0.46 dark, 0.81 light) with more chroma (up to 0.1), so it follows every theme as a category color, and makes the
+  symbol legible on it (`check-theme-contrast.ts`, at least 4.5:1). Its second line reads **Chats** where projects read
+  `path · branch`. The running arc, `+N`, badges, unread dot and selection circle stay as on any row. Under the Chats
+  chip each chat keeps its own avatar and has no second line (`SessionRow.sharesChatAvatar(mixed:)`, environment
+  `sessionRowsMixChats`); it is a native symbol, with no generated image per row. Muted sessions stay in "Precisa de você"; the master stays out of the
   rows. The day sections follow the web only for the seven-day window; Alexandre chose four date sections instead
   of one per weekday.
 - **Rows:** swipe, long press, avatar, running ring and `+N` are unchanged in every section. "Precisa de você" rows
@@ -2075,8 +2085,8 @@ allocation) → `claim` with the draft's fixed Session ID → MCP intents on the
 creation keep the allocation in the protected draft, so a retry claims the same directory instead of allocating another.
 
 `NewSessionChatsTests` (UI) checks the Sessões `+` opens in Chats, Chats stays first in Projeto (also while searching
-"chat"), sends a Luna 6/low prompt, checks Recentes is unchanged and the Chats chip lists the new row and preselects
-Chats. Its second case checks the `+` per chip (repository → that project, Chats → Chats, Todas → Chats or restored
+"chat"), sends a Luna 6/low prompt, checks "Todas" lists a chat row (its second line reads "Chats") and the Chats chip lists
+the new row and preselects Chats. Its second case checks the `+` per chip (repository → that project, Chats → Chats, Todas → Chats or restored
 project work), switching projects and Chats in the selector, and an emptied draft. Run it against an isolated sandbox
 with two selected projects (`OPENCODE_TEST_CHATS_PROJECT`, default `demo`, and `OPENCODE_TEST_CHATS_OTHER_PROJECT`)
 and an empty or chat new-session draft; it creates one real chat per run. `script/test-new-session.py` accepts

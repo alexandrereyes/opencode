@@ -16,7 +16,7 @@ struct SessionColumnSections<Decorated: View>: View {
   @ViewBuilder let decorate: (SessionRow, SessionColumnRow) -> Decorated
 
   var body: some View {
-    let sections = SessionSections.group(store.filtered, chats: store.chatsSelected, now: now)
+    let sections = SessionSections.group(store.filtered, now: now)
     ForEach(sections) { section in
       let collapsed = collapse.collapsed(section.kind)
       SessionSectionHeader(section: section, collapsed: collapsed) {
@@ -54,6 +54,8 @@ struct SessionColumnSections<Decorated: View>: View {
         }
       }
     }
+    // The Chats filter lists only chats, each with its own avatar; every other filter mixes them with repositories.
+    .environment(\.sessionRowsMixChats, !store.chatsSelected)
     if sections.isEmpty {
       if store.entries.isEmpty && store.loading {
         HStack {

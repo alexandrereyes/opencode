@@ -27,6 +27,9 @@ public struct SessionRow: Sendable, Identifiable {
     if chat { return session.displayTitle }
     return project?.displayName ?? URL(fileURLWithPath: session.location.directory).lastPathComponent
   }
+  /// A chat listed beside repository sessions (every list but the Chats filter) shares one chat avatar and reads
+  /// "Chats" as its second line; under the Chats filter each chat keeps its own avatar.
+  public func sharesChatAvatar(mixed: Bool) -> Bool { chat && mixed }
 }
 
 public enum SessionFilter: String, CaseIterable, Identifiable, Sendable {

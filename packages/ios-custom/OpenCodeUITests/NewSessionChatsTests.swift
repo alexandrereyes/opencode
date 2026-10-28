@@ -25,6 +25,8 @@ import XCTest
       environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
     XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    // The first case creates a chat and sends a prompt: act only on the sandbox.
+    try app.requireSandbox()
     app.tabBars.buttons["Sessões"].tap()
     return app
   }
@@ -46,7 +48,6 @@ import XCTest
     let filter = app.buttons["filter-chats"]
     XCTAssertTrue(filter.waitForExistence(timeout: 20))
     let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'session-row-'"))
-    let recent = rows.count
 
     // The Sessões "+" starts in Chats instead of the last remembered project.
     openNewSession(app)
@@ -90,9 +91,13 @@ import XCTest
     shot("chats-sent")
 
     leave(app)
-    // Recentes keeps excluding chats; only the Chats filter lists them.
-    XCTAssertEqual(rows.count, recent)
-    shot("chats-recent-without-chat")
+    // "Todas" lists chats too, with the shared chat avatar and "Chats" as the second line.
+    let chat = rows.matching(NSPredicate(format: "label CONTAINS ', Chats'")).firstMatch
+    app.revealSessionRow(chat)
+    XCTAssertTrue(chat.exists)
+    shot("chats-recent-with-chat")
+    // The chips scroll away with the list.
+    for _ in 0..<8 where !filter.isHittable { app.swipeDown(velocity: .fast) }
     filter.tap()
     XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 20))
     shot("chats-filter")
