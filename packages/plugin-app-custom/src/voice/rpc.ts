@@ -61,6 +61,11 @@ export const Definition = Rpc.define({
         }),
       ),
     },
+    instructions: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({})),
+      output: Schema.toStandardSchemaV1(Schema.Struct({ instructions: Schema.String })),
+      errors,
+    },
     append: {
       input: Schema.toStandardSchemaV1(Append),
       output: Schema.toStandardSchemaV1(

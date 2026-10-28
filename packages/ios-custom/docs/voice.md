@@ -193,6 +193,23 @@ verbatim ilimitado. O contrato está em `packages/plugin-app-custom/docs/voice-s
 
 ## Sessão mestra
 
+### Prompt editável no servidor
+
+O iPhone busca `custom.voice/instructions` antes de cada chamada GPT Live, inclusive ao
+reconectar. O Watch usa a mesma RPC no backend. O servidor relê `voice.md` no diretório
+global de configuração (`OPENCODE_CONFIG_DIR`, senão `$XDG_CONFIG_HOME/opencode`, senão
+`~/.config/opencode`) em cada consulta, sem cache nem necessidade de reinício. A alteração
+vale para a próxima chamada; não muda uma chamada já aberta.
+
+O arquivo substitui o prompt inteiro. Para começar, copie
+`packages/plugin-app-custom/src/voice/voice.md` para esse diretório e edite o Markdown.
+Sem arquivo, o servidor usa esse mesmo padrão embarcado. Arquivo vazio ou ilegível é
+erro; o iPhone não abre uma chamada sem obter o prompt. A primeira migração exige atualizar
+o backend e o app iOS uma vez. O texto não fica mais embutido no iPhone.
+
+O padrão pede conversa natural, silêncio durante trabalho rotineiro e fala somente para
+novidades relevantes, impedimentos, resultados ou perguntas de Alexandre sobre o andamento.
+
 `VoiceMaster` usa apenas contratos existentes de `OpenCodeKit`. A primeira delegação chama
 `custom.master/ensure`, que devolve a mestra atual ou, se não houver, se foi apagada ou arquivada,
 cria outra no plugin (com trava, então tela e voz simultâneas não criam duas) e atualiza
@@ -205,8 +222,10 @@ de não executar instruções vindas de resultados de ferramentas ficam no promp
 só o pedido de Alexandre, natural e fiel, sem prefixos.
 
 O retorno do prompt é **admissão**, não conclusão. A subscrição ao `EventHub` começa antes do envio;
-ferramentas e textos concluídos alimentam atualizações curtas. Isso inclui os `toolCalls` estruturados
-de progresso do Code Mode; sessões conhecidas são identificadas pelo título, nunca por IDs falados.
+ferramentas alimentam o indicador visual, sem gerar falas automáticas. Isso inclui os `toolCalls`
+estruturados de progresso do Code Mode; sessões conhecidas são identificadas pelo título.
+Confirmações, textos concluídos, pedidos de resposta e falhas são enviados como contexto de voz;
+o prompt orienta a falar apenas quando houver informação relevante.
 Raciocínio, argumentos de ferramentas,
 tokens e credenciais não são narrados. Reconexão/lacuna do stream revalida transcript, atividade e
 inbox em `session.execution.succeeded`; falha/interrupção usam os eventos terminais próprios.

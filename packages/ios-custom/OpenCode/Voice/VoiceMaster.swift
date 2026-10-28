@@ -2,7 +2,7 @@ import Foundation
 import OpenCodeKit
 
 enum VoiceMasterUpdate: Sendable {
-  case progress(String), finished(String), failed(String), disconnected
+  case progress(String, narrate: Bool = true), finished(String), failed(String), disconnected
 }
 
 @MainActor protocol VoiceMasterServing: AnyObject {
@@ -86,8 +86,10 @@ enum VoiceMasterUpdate: Sendable {
     if let call = VoiceMasterProgress.call(event), ["session_read", "session_status", "session_wait"].contains(call.name),
       let id = call.sessionID,
       let title = sessions.entries.first(where: { $0.session.id == id })?.session.displayTitle {
-      update(.progress("A mestra está conferindo a sessão “" + String(title.prefix(120)) + "”."))
-    } else if let text = VoiceMasterProgress.describe(event) { update(.progress(text)) }
+      update(.progress("A mestra está conferindo a sessão “" + String(title.prefix(120)) + "”.", narrate: false))
+    } else if let text = VoiceMasterProgress.describe(event) {
+      update(.progress(text, narrate: VoiceMasterProgress.call(event) == nil))
+    }
     if event.type == "session.execution.succeeded" {
       terminalPending = true
       if admitted { await reconcile() }

@@ -7,7 +7,7 @@ import type { LiveActivity } from "../src/live-activity/rpc"
 import { devicesKey, makeDevices } from "../src/watch/devices"
 import { limits as widgetLimits, makeWidgetPush } from "../src/watch/widget"
 import { limits as gatewayLimits, redact } from "../src/watch/gateway"
-import { chunks, instructions, limits as voiceLimits, rejectsVoice } from "../src/watch/voice"
+import { chunks, limits as voiceLimits, rejectsVoice } from "../src/watch/voice"
 import { limits as delegationLimits, parse } from "../src/watch/delegation"
 import { Watch } from "../src/watch/rpc"
 import {
@@ -234,7 +234,7 @@ it.effect("a call reserves the lease, creates the call with memory and attaches 
       sdp: offerSDP,
       session: {
         model: "gpt-live-1-codex",
-        instructions,
+        instructions: server.voice.instructions,
         audio: { output: { voice: "viola" } },
         delegation: { type: "client" },
         initial_items: [
@@ -363,7 +363,22 @@ it.effect("events long-poll waits for the next event, at most 25 seconds", () =>
   }).pipe(Effect.map(() => undefined)),
 )
 
-it.effect("delegations go to the Sessão mestra; progress and the result return as speakable appends", () =>
+it.effect("new watch calls reload server instructions and fail before reserving when they cannot be read", () =>
+  Effect.gen(function* () {
+    const { proxy, server, json, call } = yield* setup()
+    yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    expect(proxy.log.at(-1)?.body).toMatchObject({ session: { instructions: server.voice.instructions } })
+    server.voice.instructions = "Prompt alterado sem reiniciar o servidor."
+    yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    expect(proxy.log.at(-1)?.body).toMatchObject({ session: { instructions: server.voice.instructions } })
+    server.ctx.instructions = () => Effect.fail(new Error("unreadable"))
+    const reservations = proxy.log.filter((entry) => entry.method === "POST").length
+    expect((yield* call("POST", "/voice/calls", { sdp: offerSDP })).status).toBe(503)
+    expect(proxy.log.filter((entry) => entry.method === "POST")).toHaveLength(reservations)
+  }).pipe(Effect.map(() => undefined)),
+)
+
+it.effect("delegations keep tool activity on screen and send only updates and results to speech", () =>
   Effect.gen(function* () {
     const { sidebands, server, json } = yield* setup()
     const created = yield* json("POST", "/voice/calls", { sdp: offerSDP })
@@ -390,7 +405,7 @@ it.effect("delegations go to the Sessão mestra; progress and the result return 
         content: [{ type: "input_text", text: "Pedido enviado à Sessão mestra." }],
       },
     ])
-    // Progress within 5 s of the last line waits for the narration slot, keeping only the latest.
+    // Routine tools update the screen, never the speech mailbox, even after its throttle expires.
     yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_master", "call_1", "opencode.sessions_list"))
     yield* PubSub.publish(server.bus, masterEvents.toolCalled("ses_master", "call_1", {}))
     yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_other", "call_x", "read"))
@@ -398,7 +413,10 @@ it.effect("delegations go to the Sessão mestra; progress and the result return 
     expect(appends()).toHaveLength(1)
     yield* TestClock.adjust(delegationLimits.narrationMs)
     yield* settled
-    expect(appends().at(-1)?.content[0].text).toBe("A mestra está consultando suas sessões.")
+    expect(appends()).toHaveLength(1)
+    yield* PubSub.publish(server.bus, masterEvents.text("ses_master", "Uma sessão precisa da sua resposta."))
+    yield* settled
+    expect(appends().at(-1)?.content[0].text).toBe("Atualização da mestra: Uma sessão precisa da sua resposta.")
     // The result follows the prompt in the Mestra's transcript; it skips the wait and is chunked.
     const reply = "Há três sessões rodando: " + "á".repeat(400)
     server.messages.set("ses_master", [assistant("msg_reply", reply), assistant("msg_prompt1", "")])
@@ -418,7 +436,7 @@ it.effect("delegations go to the Sessão mestra; progress and the result return 
       page.events
         .filter((event: Watch.VoiceEvent) => event.type === "master")
         .map((event: Watch.VoiceEvent) => event.type === "master" && event.state),
-    ).toEqual(["running", "running", "idle"])
+    ).toEqual(["running", "running", "running", "idle"])
     // Queue requests keep their delivery.
     delegation("item_d2", JSON.stringify({ text: "Depois veja os pedidos", delivery: "queue" }))
     yield* settled

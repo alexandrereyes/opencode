@@ -101,6 +101,14 @@ public struct VoiceMemoryInfo: Decodable, Sendable {
 public enum VoiceMemoryStatus: Sendable, Equatable { case available, unsupported, offline }
 
 extension OpenCodeClient {
+  public func voiceInstructions() async throws -> String {
+    struct Output: Decodable { let instructions: String }
+    let output: Output = try await rpc("custom.voice", "instructions", input: Empty(), timeout: 8)
+    guard !output.instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw ClientError.operation("O prompt de voz do servidor está vazio.")
+    }
+    return output.instructions
+  }
   public func voiceMemoryInfo() async throws -> VoiceMemoryInfo {
     try await rpc("custom.voice", "info", input: Empty(), timeout: 2)
   }

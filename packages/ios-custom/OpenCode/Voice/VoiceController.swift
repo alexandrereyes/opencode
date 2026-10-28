@@ -53,6 +53,7 @@ import OSLog
   @ObservationIgnored private var finalNarration = false
   @ObservationIgnored private var theme = AppTheme.selected
   @ObservationIgnored private let http: URLSession
+  @ObservationIgnored private var client: OpenCodeClient?
   @ObservationIgnored private var memory: VoiceMemoryStore?
   @ObservationIgnored private var memoryEvents: Task<Void, Never>?
   @ObservationIgnored private var inputItemID: String?
@@ -65,6 +66,7 @@ import OSLog
     let transport: (@escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) -> any VoiceTransporting
     let master: (@escaping @MainActor (VoiceMasterUpdate) -> Void) -> any VoiceMasterServing
     let request: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+    var instructions: @Sendable () async throws -> String = { "Instruções da fixture de voz." }
     var permission = true
     var memory: VoiceMemoryStore?
     var policy = VoiceRecoveryPolicy()
@@ -96,6 +98,7 @@ import OSLog
     guard !busy, !state.visible else { return }
     NotificationCenter.default.post(name: .audioCaptureWillStart, object: nil)
     callVoice = preferences.voice
+    client = sessions.client
     let token = UUID()
     epoch = token; sessionID = token; ready = false; mediaConnected = false
     recovery = VoiceRecovery(policy: policy); alert = nil
@@ -161,6 +164,8 @@ import OSLog
     let current = UUID()
     link = current; ready = false; mediaConnected = false; lease = VoiceLeaseClock()
     armWatchdog(token: token, seconds: timeout, message: message)
+    let instructions = try await instructions()
+    guard epoch == token, link == current, !Task.isCancelled else { throw CancellationError() }
     let events: @MainActor @Sendable (VoiceTransportEvent) -> Void = { [weak self] event in
       guard let self, self.epoch == token, self.link == current else { return }
       self.receive(event)
@@ -181,7 +186,7 @@ import OSLog
     try await renew(signal, method: "POST")
     guard epoch == token, link == current else { throw CancellationError() }
     beginRenewal(signal, token: token, link: current)
-    let answer = try await signal.createCall(sdp: await offer, voice: callVoice, history: await history,
+    let answer = try await signal.createCall(sdp: await offer, instructions: instructions, voice: callVoice, history: await history,
       request: { [self] in try await perform($0) })
     try Task.checkCancellation()
     guard epoch == token, link == current else { throw CancellationError() }
@@ -189,6 +194,13 @@ import OSLog
     try await transport.answer(answer.sdp)
     if let notice = answer.fallbackNotice { toast.show(notice, kind: .error) }
     VoiceTransport.log.notice("phase=answer-applied")
+  }
+  private func instructions() async throws -> String {
+    #if DEBUG
+    if let testing { return try await testing.instructions() }
+    #endif
+    guard let client else { throw ClientError.operation("Conecte ao OpenCode para carregar o prompt de voz.") }
+    return try await client.voiceInstructions()
   }
   private func permission() async -> Bool {
     #if DEBUG
@@ -359,7 +371,9 @@ import OSLog
   }
   private func receive(_ update: VoiceMasterUpdate) {
     switch update {
-    case .progress(let text): state.masterWorking = true; detail = text; masterProgressLine = text; narration.offer(text)
+    case .progress(let text, let narrate):
+      state.masterWorking = true; detail = text; masterProgressLine = text
+      if narrate { narration.offer(text) }
     case .finished(let text):
       state.masterWorking = false; detail = "A Sessão mestra concluiu"
       masterProgressLine = detail

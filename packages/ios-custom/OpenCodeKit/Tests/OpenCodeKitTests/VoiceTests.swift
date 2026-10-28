@@ -3,9 +3,23 @@ import Testing
 @testable import OpenCodeKit
 
 struct VoiceTests {
+  @Test func instructionsComeFromTheServerRPCAndRejectEmptyText() async throws {
+    for text in ["Prompt editado no servidor", "  \n"] {
+      let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!), transport: { request in
+        #expect(request.url?.path == "/api/rpc/custom.voice/instructions")
+        return (try JSONEncoder().encode(["output": ["instructions": text]]),
+          HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+      })
+      if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        await #expect(throws: ClientError.self) { try await client.voiceInstructions() }
+      } else {
+        #expect(try await client.voiceInstructions() == text)
+      }
+    }
+  }
   @Test func signalingDoesNotCarryCredentials() throws {
     let signal = VoiceSignaling()
-    let request = try signal.offerRequest(sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n")
+    let request = try signal.offerRequest(sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n", instructions: "Prompt do servidor")
     #expect(request.url?.host == "llm-proxy-svc")
     #expect(request.url?.path == "/backend-api/codex/realtime/calls")
     #expect(request.url?.query == "intent=quicksilver&architecture=avas")
@@ -13,6 +27,7 @@ struct VoiceTests {
     #expect(request.value(forHTTPHeaderField: "x-gpt-live-generation") == signal.generation.uuidString)
     let body = try JSONDecoder().decode(JSONValue.self, from: #require(request.httpBody))
     #expect(body.object?["session"]?.object?["model"]?.string == "gpt-live-1-codex")
+    #expect(body.object?["session"]?.object?["instructions"]?.string == "Prompt do servidor")
     #expect(body.object?["session"]?.object?["audio"]?.object?["output"]?.object?["voice"]?.string == "rio")
     #expect(body.object?["session"]?.object?["delegation"]?.object?["type"]?.string == "client")
   }

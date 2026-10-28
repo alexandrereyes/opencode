@@ -85,6 +85,11 @@ export const masterEvents = {
       ...envelope(sessionID, "session.execution.succeeded"),
       data: { sessionID },
     }),
+  text: (sessionID: string, text: string) =>
+    Schema.decodeUnknownSync(SessionEvent.Text.Ended)({
+      ...envelope(sessionID, "session.text.ended"),
+      data: { sessionID, assistantMessageID: "msg_step", ordinal: 0, text },
+    }),
 }
 
 /** An in-memory OpenCode server for the gateway: sessions, requests, the Mestra and voice memory. */
@@ -112,9 +117,11 @@ export function world() {
     },
   }
   const masters = { ensured: 0, id: "ses_master" }
+  const voice = { instructions: "Prompt de voz do servidor de teste." }
   const bus = Effect.runSync(PubSub.unbounded<ServerEvent>())
   const ctx: WatchContext = {
     app: { version: "2.0.0-test" },
+    instructions: () => Effect.sync(() => voice.instructions),
     storage: shared,
     request: {
       pending: () =>
@@ -193,6 +200,7 @@ export function world() {
     messages,
     memory,
     masters,
+    voice,
     bus,
   }
 }

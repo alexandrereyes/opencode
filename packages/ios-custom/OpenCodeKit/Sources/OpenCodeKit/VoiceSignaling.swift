@@ -29,7 +29,7 @@ public struct VoiceSignaling: Sendable {
     }
     return request
   }
-  public func offerRequest(sdp: String, voice: GPTLiveVoice = .defaultVoice, history: VoiceMemoryContext? = nil) throws -> URLRequest {
+  public func offerRequest(sdp: String, instructions: String, voice: GPTLiveVoice = .defaultVoice, history: VoiceMemoryContext? = nil) throws -> URLRequest {
     guard sdp.hasPrefix("v=0"), sdp.utf8.count <= 256 * 1024 else { throw VoiceWireError.invalidAnswer }
     var url = Self.baseURL.appending(path: "backend-api/codex/realtime/calls")
     url.append(queryItems: [URLQueryItem(name: "intent", value: "quicksilver"),
@@ -43,7 +43,7 @@ public struct VoiceSignaling: Sendable {
       "x-session-id": sessionID.uuidString, "x-gpt-live-generation": generation.uuidString
     ].forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
     var session: [String: JSONValue] = [
-        "model": .string("gpt-live-1-codex"), "instructions": .string(VoiceProtocol.instructions),
+        "model": .string("gpt-live-1-codex"), "instructions": .string(instructions),
         "audio": .object(["output": .object(["voice": .string(voice.rawValue)])]),
         "delegation": .object(["type": .string("client")]),
     ]
@@ -54,12 +54,12 @@ public struct VoiceSignaling: Sendable {
     request.httpBody = try JSONEncoder().encode(JSONValue.object(["sdp": .string(sdp), "session": .object(session)]))
     return request
   }
-  public func createCall(sdp: String, voice: GPTLiveVoice, history: VoiceMemoryContext? = nil,
+  public func createCall(sdp: String, instructions: String, voice: GPTLiveVoice, history: VoiceMemoryContext? = nil,
     request: @Sendable (URLRequest) async throws -> (Data, URLResponse)) async throws -> VoiceCallAnswer {
     let candidates = [voice] + [GPTLiveVoice.rio, .cove].filter { $0 != voice }
     for candidate in candidates {
       try Task.checkCancellation()
-      let (data, response) = try await request(offerRequest(sdp: sdp, voice: candidate, history: history))
+      let (data, response) = try await request(offerRequest(sdp: sdp, instructions: instructions, voice: candidate, history: history))
       try Task.checkCancellation()
       guard let response = response as? HTTPURLResponse else { throw VoiceWireError.invalidAnswer }
       // Only an explicit voice validation rejection proves creation did not happen.

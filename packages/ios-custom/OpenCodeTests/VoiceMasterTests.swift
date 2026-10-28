@@ -93,8 +93,15 @@ private actor VoiceMasterHTTP {
       {"type":"session.tool.called","data":{"sessionID":"\(firstID!)","name":"session_read"}}
       """.utf8))
     await master.receive(event)
-    guard case .progress(let message) = updates.last else { return XCTFail("Missing progress") }
+    guard case .progress(let message, let narrate) = updates.last else { return XCTFail("Missing progress") }
     XCTAssertEqual(message, "A mestra está conferindo uma sessão.")
+    XCTAssertFalse(narrate)
+    let attention = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
+      {"type":"permission.asked","data":{"sessionID":"\(firstID!)"}}
+      """.utf8))
+    await master.receive(attention)
+    guard case .progress(_, let narrateAttention) = updates.last else { return XCTFail("Missing attention") }
+    XCTAssertTrue(narrateAttention)
     let completed = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
       {"type":"session.execution.succeeded","data":{"sessionID":"\(firstID!)"}}
       """.utf8))

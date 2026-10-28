@@ -2,6 +2,18 @@
 
 ## Manual releases
 
+### Editable voice prompt
+
+GPT Live's shared iPhone/Watch prompt is read from `voice.md` in the global config directory
+(`OPENCODE_CONFIG_DIR`, otherwise `$XDG_CONFIG_HOME/opencode`, otherwise `~/.config/opencode`).
+Start with `packages/plugin-app-custom/src/voice/voice.md`. The authenticated `custom.voice/instructions`
+RPC rereads the complete file for every new call, so later edits require neither a server restart nor an app
+update. Existing calls keep their instructions. An absent file uses the bundled default; an empty or unreadable
+file fails explicitly. The initial migration requires a backend release and an iOS build with RPC loading.
+The editable file lives outside immutable releases and is not overwritten by `custom:update`.
+
+### Release commands
+
 Run these commands from a clean, committed `custom` checkout on macOS:
 
 ```sh
