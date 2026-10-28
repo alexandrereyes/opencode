@@ -128,7 +128,7 @@ operation must keep the call. Ending the call from the system call UI ends it on
 ## Complication and widget push
 
 - Families: `accessoryCircular` (approved ring: arcs proportional to `counts.working` green, `question` lavender,
-  `permission` amber, `failed` red, remaining gray; big `activeTotal` in the centre; mascot in the gap; when
+  `permission` amber, `failed` red, `unread` orange (rev. 2026-10-28; gray `idle` only as fallback); big `activeTotal` in the centre; mascot in the gap; when
   `activeTotal == 0`, the mascot alone with a gray ring), plus `accessoryCorner` and `accessoryRectangular`
   (one line: `N ativas · M precisam de você`). Tap opens the app on the dashboard.
 - Data: the widget timeline reads `/watch/v1/state` (high-level `URLSession`, allowed in widget extensions) and

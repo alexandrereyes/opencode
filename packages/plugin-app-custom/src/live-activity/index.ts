@@ -3,8 +3,14 @@ import { Cause, Clock, Deferred, Effect, Exit, Queue, Scope, Semaphore, Stream }
 import os from "node:os"
 import { load, type Client } from "./apns.js"
 import { fit, makeLifecycle, makeRegistry, stateKey, type Lifecycle, type Storage } from "./lifecycle.js"
+import { marksFrom } from "../master/inventory.js"
+import { Preferences } from "../preferences/rpc.js"
 import { LiveActivity } from "./rpc.js"
 import { eventTypes, makeTracker, type Event, type Tracker, type TrackerContext } from "./tracker.js"
+
+const preferencesUpdated: Event = { type: "preferences.updated" }
+const tracked = <A extends { readonly type: string }>(event: A): event is Extract<A, Event> =>
+  eventTypes.has(event.type)
 
 /** `changed` is coalesced to at most one event per this interval. */
 export const emitMs = 1000
@@ -225,9 +231,21 @@ export const registerLiveActivity = Effect.fn("LiveActivity.register")(function*
       message: ctx.message,
       request: ctx.request,
       storage: ctx.storage,
-      events: ctx.event
-        .subscribe()
-        .pipe(Stream.filter((event): event is Extract<typeof event, Event> => eventTypes.has(event.type))),
+      muted: () =>
+        ctx
+          .rpc(Preferences.Definition)
+          .get({})
+          .pipe(
+            Effect.map((profile) => marksFrom(profile).muted),
+            Effect.orElseSucceed(() => []),
+          ),
+      events: ctx.event.subscribe().pipe(
+        // A preferences change (mutes) arrives as an RPC event; the tracker only needs to know it happened.
+        Stream.map((event) =>
+          event.type === "rpc.custom.preferences.updated" ? preferencesUpdated : tracked(event) ? event : undefined,
+        ),
+        Stream.filter((event) => event !== undefined),
+      ),
     },
     emit: (state) => registration.events.emit("changed", { state }),
   })

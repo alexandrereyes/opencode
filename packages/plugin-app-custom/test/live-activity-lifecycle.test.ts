@@ -342,7 +342,7 @@ it.effect(
       yield* settled
       expect(first.emitted).toHaveLength(2)
       expect(second.emitted.map((state) => state?.counts)).toEqual([
-        { working: 1, question: 0, permission: 0, failed: 0, idle: 1 },
+        { working: 1, question: 0, permission: 0, failed: 0, idle: 1, unread: 1 },
       ])
       expect(hub.runtime.current).toBeDefined()
       yield* Scope.close(secondScope, Exit.void)
@@ -364,7 +364,7 @@ it.effect("a starting hub rebuilds running sessions and pending requests before 
     const hub = makeHub({ host: Effect.succeed(host), apns: Effect.succeed(undefined) })
     yield* hub.join(member(server, storage(), yield* Queue.unbounded<Event>()).value)
     const state = (yield* hub.handlers.snapshot()).state
-    expect(state?.counts).toEqual({ working: 1, question: 1, permission: 0, failed: 0, idle: 0 })
+    expect(state?.counts).toEqual({ working: 1, question: 1, permission: 0, failed: 0, idle: 0, unread: 0 })
     expect(state?.focus).toMatchObject({ sessionID: ids.live, startedAt: T - 5 * minute })
     expect(state?.attention[0]).toMatchObject({ sessionID: ids.cache, text: "Qual banco usar no cache?" })
   }),

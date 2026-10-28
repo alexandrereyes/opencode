@@ -96,6 +96,8 @@ export const Counts = Schema.Struct({
   permission: Schema.Int,
   failed: Schema.Int,
   idle: Schema.Int,
+  /** rev. 2026-10-28; optional so builds from before it keep decoding. */
+  unread: optional(Schema.Int),
 }).annotate({ identifier: "LiveActivity.Counts" })
 
 export interface AgentsState extends Schema.Schema.Type<typeof AgentsState> {}

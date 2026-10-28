@@ -12,7 +12,8 @@
         "question": 1,
         "permission": 0,
         "failed": 0,
-        "idle": 3
+        "idle": 3,
+        "unread": 3
       },
       "activeTotal": 4,
       "focus": {
