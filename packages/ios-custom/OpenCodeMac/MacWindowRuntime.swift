@@ -45,7 +45,7 @@ import SwiftUI
   var renameRequest: SessionRow?
   var deleteRequest: Session?
   var switcherVisible = false
-  let search = MacSearch()
+  let search: MacSearch
   var archiveRequest: SessionRow?
   @ObservationIgnored private var memories: [String: TranscriptMemory] = [:]
   @ObservationIgnored private var recent: [String] = []
@@ -54,6 +54,7 @@ import SwiftUI
   init(app: MacRuntime, id: UUID, selection: MacSelection? = nil) {
     self.app = app
     self.id = id
+    search = MacSearch { [weak app] in app?.store }
     let server = app.store!.client.configuration.url
     #if DEBUG
     let root = MacVoiceChecks.enabled ? MacFixture.value("-OpenCodeMacDraftRoot").map { URL(fileURLWithPath: $0) } : nil

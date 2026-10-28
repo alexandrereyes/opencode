@@ -2,6 +2,42 @@
 import AppKit
 import OpenCodeKit
 
+/// `-OpenCodeMacSearchTrace`: for each key the window receives, the time from the key event to the end of the
+/// main-thread pass that first renders the results or shows the panel after it (`abrir` for ⌘K, `filtrar` for the
+/// others). It also logs the selection, the chosen result and the session the window then shows.
+@MainActor enum MacSearchTrace {
+  static let enabled = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSearchTrace")
+  private static var monitor: Any?
+  private static var key: (label: String, at: TimeInterval)?
+
+  static func start() {
+    guard enabled, monitor == nil else { return }
+    monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+      let open = event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "k"
+      key = (open ? "abrir" : "filtrar", event.timestamp)
+      return event
+    }
+  }
+
+  static func log(_ message: String) {
+    guard enabled else { return }
+    print("MacSearchTrace " + message)
+    fflush(stdout)
+  }
+
+  /// The first results render, or the panel shown, after a key.
+  static func rendered() {
+    guard enabled, let key else { return }
+    self.key = nil
+    // After SwiftUI's update and Core Animation's commit, the last observers before the main thread sleeps.
+    let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, Int.max) { _, _ in
+      print(String(format: "MacSearchTrace %@ %.1f ms", key.label, (ProcessInfo.processInfo.systemUptime - key.at) * 1000))
+      fflush(stdout)
+    }
+    CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+  }
+}
+
 /// Hosted checks exercise the actual native field's delegate and the window-owned navigation, even locked.
 @MainActor enum MacSearchChecks {
   static func layout(_ runtime: MacWindowRuntime) async -> String? {
@@ -62,16 +98,16 @@ import OpenCodeKit
     try? await Task.sleep(for: .milliseconds(250))
     guard delegate.panel.isVisible, !other.search.visible else { return "busca não abriu só nesta janela" }
     command(#selector(NSResponder.moveDown(_:)))
-    guard runtime.search.selection(store) == "project:custom.chats" else { return "seta não selecionou Chats" }
+    guard runtime.search.selection == "project:custom.chats" else { return "seta não selecionou Chats" }
     command(#selector(NSResponder.insertNewline(_:)))
     guard store.chatsSelected, !runtime.search.visible else { return "Return não aplicou Chats" }
     runtime.search.open()
     runtime.search.query = "live"
-    let groups = runtime.search.groups(store)
+    let groups = runtime.search.groups
     guard groups.map(\.kind) == [.projects, .sessions, .archived] else { return "busca live sem os três grupos" }
     runtime.search.selectedID = groups.first?.results.last?.id
     command(#selector(NSResponder.moveDown(_:)))
-    guard runtime.search.selection(store) == groups[1].results.first?.id else { return "seta não atravessou grupos" }
+    guard runtime.search.selection == groups[1].results.first?.id else { return "seta não atravessou grupos" }
     command(#selector(NSResponder.insertNewline(_:)))
     guard runtime.selection.sessionID == "ses_mac_live", store.selectedProject == nil, store.filter == .all else {
       return "seleção não abriu sessão oculta em Todas"
@@ -80,6 +116,10 @@ import OpenCodeKit
     runtime.search.choose("session:ses_mac_archived", runtime: runtime)
     guard runtime.selection.sessionID == "ses_mac_archived" else { return "não abriu arquivada" }
     runtime.search.open()
+    command(#selector(NSResponder.cancelOperation(_:)))
+    guard runtime.search.visible, runtime.search.query.isEmpty, field.stringValue.isEmpty else {
+      return "Esc com texto não limpou o campo"
+    }
     command(#selector(NSResponder.cancelOperation(_:)))
     guard !runtime.search.visible, !delegate.panel.isVisible,
       runtime.drafts.draft("ses_mac_archived").focused else { return "Esc não fechou/devolveu foco" }

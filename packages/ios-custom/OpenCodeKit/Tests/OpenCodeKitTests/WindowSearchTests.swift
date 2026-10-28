@@ -79,6 +79,27 @@ private func searchRows(_ entries: [NavigationEntry]) throws -> [SessionRow] {
   #expect(expanded.allSatisfy { !$0.hasMore })
 }
 
+@Test func windowSearchIndexIsBuiltOnceAndServesEveryKeystroke() throws {
+  let projects = try searchProjects()
+  let entries = try [
+    searchEntry("word", "Uma líve", at: 100), searchEntry("prefix", "LIVE antigo", at: 1),
+    searchEntry("contains", "Deliver", at: 500), searchEntry("other", "Índice", at: 50),
+  ]
+  var labels = 0
+  let index = WindowSearch.Index(rows: try searchRows(entries), chips: [projects[0]], archived: [],
+    projects: projects, label: { labels += 1; return .init(path: $0.location.directory, branch: "main") })
+  #expect(labels == entries.count)
+  // "Índice" still matches l…live through its project, "Líve projeto", after the title matches.
+  for (query, expected) in [("l", ["prefix", "word", "contains", "other"]), ("li", ["prefix", "word", "contains", "other"]),
+    ("LÍV", ["prefix", "word", "contains", "other"]), ("live", ["prefix", "word", "contains", "other"]),
+    ("indi", ["other"]), ("ÍNDICE", ["other"])] {
+    let sessions = index.groups(query: query).first { $0.kind == .sessions }?.results.map(\.target)
+    #expect(sessions == expected.map { .session($0) }, "\(query)")
+  }
+  #expect(labels == entries.count)
+  #expect(index.groups(query: "LÍVE").first?.results.map(\.title) == ["Líve projeto"])
+}
+
 @Test func windowSearchTodasAndChatsHaveChipSemantics() throws {
   let all = WindowSearch.projectSelection(nil, current: "p", filter: .running)
   #expect(all.project == nil && all.filter == .all)

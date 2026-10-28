@@ -28,13 +28,12 @@ extension Notification.Name {
 
 /// Mounted behind chat + Contexto. The field lives in the unified title bar, outside its glass item wrappers.
 final class MacSearchPlacement: NSView {
-  let field = NSSearchField()
+  let field = MacSearchField()
   var reposition: (() -> Void)?
   private var scheduled = false
 
   override init(frame: NSRect) {
     super.init(frame: frame)
-    field.cell = MacSearchCell(textCell: "")
     field.isBezeled = true
     field.bezelStyle = .roundedBezel
     field.drawsBackground = true
@@ -104,6 +103,23 @@ final class MacSearchPlacement: NSView {
     reposition = nil
     field.removeFromSuperview()
     NotificationCenter.default.removeObserver(self)
+  }
+}
+
+/// The cell comes from `cellClass`, so NSTextField configures it as editable and selectable. A cell assigned
+/// afterwards (`field.cell = …`) starts as plain static text: the field then refuses first responder, clicks do
+/// nothing and ⌘K cannot focus it.
+final class MacSearchField: NSSearchField {
+  /// A click or ⌘K focusing the field opens the list.
+  var focused: (() -> Void)?
+  override class var cellClass: AnyClass? {
+    get { MacSearchCell.self }
+    set {}
+  }
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { focused?() }
+    return became
   }
 }
 
