@@ -59,8 +59,28 @@ import SwiftUI
         if window.minSize.width > area.width {
           return finish("mínimo \(Int(window.minSize.width)) pt maior que \(screen.localizedName)", status: 1)
         }
+        if let error = await MacSearchChecks.layout(runtime) { return finish(error, status: 1) }
       }
     }
+    for context in [false, true] {
+      for sidebar in [false, true] {
+        await step("busca com colunas recolhidas") {
+          runtime.contextVisible = context
+          runtime.columns = sidebar ? .all : .detailOnly
+        }
+        for width in [window.minSize.width, window.screen?.visibleFrame.width ?? 1600] {
+          await step("busca mínimo/máximo") {
+            window.setFrame(NSRect(x: start.minX, y: start.minY, width: width, height: start.height), display: true)
+          }
+          if let error = await MacSearchChecks.layout(runtime) { return finish(error, status: 1) }
+        }
+      }
+    }
+    for width in [400.0, 760.0] {
+      await step("busca com Contexto redimensionado") { runtime.contextWidth = width }
+      if let error = await MacSearchChecks.layout(runtime) { return finish(error, status: 1) }
+    }
+    runtime.contextWidth = original.contextWidth
     await step("tamanho inicial") { window.setFrame(start, display: true) }
     for _ in 0..<2 {
       await step("Sessões") { toggleSidebar(window) }

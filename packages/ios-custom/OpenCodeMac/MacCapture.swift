@@ -49,7 +49,17 @@ import SwiftUI
     do { try await MacVoiceChecks.run(runtime, openWindow: openWindow) }
     catch { print("MacVoiceChecks failed: \(error)"); exit(1) }
     let extra = await open(runtime: runtime, context: context, openWindow: openWindow, openSettings: openSettings)
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacHideContext")
+      || ProcessInfo.processInfo.arguments.contains("-OpenCodeMacHideSessions") {
+      // The requested narrow size may have been clamped by the three-column minimum before they collapsed.
+      window.setFrame(NSRect(x: -4000, y: 40, width: size?.first ?? 1600, height: size?.last ?? 1000), display: true)
+    }
     try? await Task.sleep(for: .seconds(2))
+    if runtime.search.visible, ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSearchFixture"),
+      let error = MacSearchChecks.geometry(runtime) {
+      print("MacCapture busca: \(error)")
+      exit(1)
+    }
     await MacDetailsFixture.verify(window: window, runtime: runtime, theme: theme, folder: folder)
     // `-OpenCodeMacCaptureEvery <s> -OpenCodeMacCaptureCount <n>`: a sequence (`<name>-01.png`…), a short video of
     // a live conversation, a stream or paging.
@@ -94,6 +104,8 @@ import SwiftUI
     }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacDetails") { context()?.detailsOpen = true }
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSwitcher") { runtime.switcherVisible = true }
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacHideContext") { runtime.contextVisible = false }
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacHideSessions") { runtime.columns = .detailOnly }
     if let query = MacFixture.value("-OpenCodeMacSearch") {
       runtime.search.query = query == "empty" ? "" : query
       runtime.search.open()

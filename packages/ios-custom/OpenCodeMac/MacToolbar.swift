@@ -136,6 +136,7 @@ struct MacChatTitle: View {
   @Bindable var runtime: MacWindowRuntime
   let title: String
   let usage: ContextUsage?
+  let width: CGFloat
   let running: Bool
 
   private var row: SessionRow? { store.rows.first { $0.id == runtime.selection.sessionID } }
@@ -155,8 +156,11 @@ struct MacChatTitle: View {
         ConversationTitle(
           title: master ? "Sessão mestra" : title, switches: true, subtitle: subtitle,
           status: running ? "trabalhando…" : "", waiting: row?.state == .permission || row?.state == .question)
-          .fixedSize()
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
+      .frame(width: width, alignment: .leading)
+      // Measure the label itself: the native toolbar host can retain its earlier, wider allocation.
+      .background(MacSearchAnchor(role: .title))
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain).fixedSize()

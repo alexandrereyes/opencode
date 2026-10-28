@@ -10,6 +10,7 @@ struct MacChatColumn: View {
   @Bindable var store: SessionStore
   @Bindable var runtime: MacWindowRuntime
   let context: ContextColumnStore?
+  let titleWidth: CGFloat
   @State private var renaming = false
   @State private var renameText = ""
   @State private var deleteCandidate: Session?
@@ -48,13 +49,14 @@ struct MacChatColumn: View {
           store: store, runtime: runtime,
           title: runtime.selection.master && runtime.selection.childID == nil ? "Sessão mestra"
             : conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode",
-          usage: conversation?.sessionUsage,
+          usage: conversation?.sessionUsage, width: titleWidth,
           running: conversation?.working ?? (row?.state == .running || shownID.map(store.active.contains) == true))
         .padding(.leading, 6)
       }
       MacToolbarFlexibleSpace()
-      MacPlainToolbarItem { MacSearchPresentation(runtime: runtime).frame(width: 240, height: 28) }
-      MacPlainToolbarItem { MacSessionActions(store: store, runtime: runtime) }
+      MacPlainToolbarItem {
+        MacSessionActions(store: store, runtime: runtime).background(MacSearchAnchor(role: .actions))
+      }
     }
     .onChange(of: runtime.renameRequest?.id) { _, id in
       guard id != nil, let request = runtime.renameRequest else { return }

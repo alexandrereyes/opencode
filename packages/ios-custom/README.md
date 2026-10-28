@@ -2559,7 +2559,8 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
   hover highlight (`MacToolbarIcon`). Left, over Sessões: voice (GPT Live; see below),
   Configurações and Nova sessão. Over the chat: `MacChatTitle`, the shared `ConversationAvatar` (now with a `size`,
   30 pt here) and `ConversationTitle` (`App Mac ⌄`, `<worktree> · trabalhando…`), which opens the quick switcher
-  (stage 4). Right, after a `ToolbarSpacer(.flexible)`: the native **Buscar · ⌘K** field over Contexto, then `…` (rename, pin, mute, delete, Arquivos,
+  (stage 4). The native **Buscar projetos e sessões · ⌘K** field centers over chat + Contexto (see below).
+  Right, after a `ToolbarSpacer(.flexible)`: `…` (rename, pin, mute, delete, Arquivos,
   Mostrar/Ocultar contexto) and Nova sessão (`MacSessionActions`). The system sidebar button is removed
   (`.toolbar(removing: .sidebarToggle)`; ⌃⌘S and Visualizar still collapse Sessões), and so is the old
   `sidebar.right` button. The same holds for the LLM proxy window.
@@ -2834,12 +2835,29 @@ separate track.
 
 ### Window search — 28 October
 
-The provisional **A** presentation is `OpenCodeMac/MacSearchPresentation.swift`: an `NSSearchField` in the title
-bar, to the left of `…` and Nova sessão, with a nonactivating suggestions panel below it. Typing keeps focus in
+The approved **centered search** presentation is `OpenCodeMac/MacSearchPresentation.swift`: an `NSSearchField`
+in the title bar, with a same-width nonactivating suggestions panel 4 pt below it. Typing keeps focus in
 the field. ↑/↓ traverse results across groups (including **Mostrar mais**), Return chooses, Esc closes and
-returns focus to the composer; clicking a result chooses it, and clicking outside dismisses. Each result's
+returns focus to the composer; clicking a result chooses it, clicking outside dismisses, and losing the key
+window closes its list. Each result's
 VoiceOver label includes its group. Matched title spans are bold, preserving the original accents.
 
+- **Placement:** `MacSearchPlacement.swift` measures the actual detail area (chat + Contexto) in the window's
+  frame view, and centers at `(detail.minX + detail.maxX) / 2`. The field is at most 520 pt; its half-width is
+  limited by the measured title and action bounds, with 12 pt of clearance on each side. Resizing either divider,
+  hiding either column and resizing the window all remeasure the field and its panel. The title truncates inside
+  a 100–230 pt allocation on narrow windows so it cannot cover the search. When Sessões is hidden, that allocation
+  also reserves 180 pt for the traffic lights/sidebar toolbar. With both side columns hidden, the chat's minimum
+  becomes 840 pt: the old 460 pt cannot fit those controls, the title and a centered search. No root minimum is added.
+  The field sits directly in the unified bar, outside the macOS 26 shared glass wrappers, like the other plain
+  toolbar content.
+- **Appearance:** native search and clear buttons, the full placeholder and a persistent trailing ⌘K hint;
+  a rounded translucent material panel with a hairline and native shadow. Uppercase PROJETOS, SESSÕES and
+  ARQUIVADAS; project avatars (grid for Todas, bubble for Chats), loaded root-session counts, path · branch,
+  the list's compact elapsed times and a green working marker. The first result is selected neutrally. A fixed
+  `↑↓ navegar · ↩ abrir · esc fechar` footer stays visible when the results scroll (panel capped at 560 pt and
+  the remaining window height). Below 320 pt the working marker keeps its green dot and accessible label while
+  omitting the word, leaving more room for the title. Colors follow the selected theme, including light themes.
 - **Order:** Projetos, Sessões, Sessões arquivadas. Project candidates are only the saved chips, plus **Todas**
   and **Chats**. Choosing one repeats the chip's exact `selectedProject`/`filter` semantics: Todas clears both;
   a repository or Chats toggles its selection while preserving the state filter. No shared preference is mutated.
@@ -2855,16 +2873,25 @@ VoiceOver label includes its group. Matched title spans are bold, preserving the
   debounce rather than adding an RPC.
 - **Separation:** pure ranking, groups, limits, highlights and chip semantics are in OpenCodeKit's
   `WindowSearch.swift`; `MacSearch.swift` owns query, keyboard selection and actions, one instance per
-  `MacWindowRuntime`. B or C replaces `MacSearchPresentation.swift` and its mount in `MacChatColumn.swift`
-  (C can mount the results in `MacWindow.swift`'s Contexto), keeping both logic files and the ⌘K menu action.
+  `MacWindowRuntime`. Presentation is isolated in `MacSearchPresentation.swift` / `MacSearchPlacement.swift`,
+  mounted behind `MacWindow.swift`'s detail with title/action geometry markers in `MacToolbar.swift` and
+  `MacChatColumn.swift`.
+  Neither the ranking nor the ⌘K menu action depends on that placement.
 
 Validation: `WindowSearchTests` covers groups, ranking, accents, metadata, limits, expansion, roots, empty query
 and Todas/Chats. `script/test-mac-window.sh` also exercises the native field, cross-group arrows, Return,
-hidden-session filters, archived navigation, Esc and isolation between two windows (`MacSearchChecks`).
+hidden-session filters, archived navigation, Esc, outside clicks and isolation between two windows (`MacSearchChecks`). It also
+asserts centering, title/action clearance and panel anchoring at minimum/maximum widths with each combination
+of visible/hidden Contexto and Sessões, and with the Contexto divider at both extremes.
 Search captures use `-OpenCodeMacSearchFixture -OpenCodeMacSearch empty|live` with the normal capture flags;
 the dedicated fixture adds a saved `ios-live-activity` chip and one archived Live Activity root. Captures for this
-change live at `$TMPDIR/opencode/mac-busca-prints/` (divider, empty search, and all three groups for `live`).
+centered presentation live at `$TMPDIR/opencode/mac-busca-prints/centralizada/` (idle, `live`, hidden Contexto,
+narrow window and `comparacao.png` beside both approved mocks). `-OpenCodeMacHideContext` and
+`-OpenCodeMacHideSessions` select collapsed-column captures.
 The checks use a closed in-memory fixture and the explicit launch URL `http://127.0.0.1:4207`.
+The centered-search verification ran all 590 Kit tests, a warning-free Mac build and an iOS/Watch Simulator build
+with the same 13 source warnings (the warning sites are byte-identical to `ba2a22276c`). The captures were drawn
+through AppKit with the screen locked; each open-search capture also asserts the real field/panel geometry.
 
 #### Ajustes
 

@@ -4,6 +4,37 @@ import OpenCodeKit
 
 /// Hosted checks exercise the actual native field's delegate and the window-owned navigation, even locked.
 @MainActor enum MacSearchChecks {
+  static func layout(_ runtime: MacWindowRuntime) async -> String? {
+    runtime.search.open()
+    defer { runtime.search.close(runtime: runtime, focusComposer: false) }
+    try? await Task.sleep(for: .milliseconds(250))
+    return geometry(runtime)
+  }
+
+  static func geometry(_ runtime: MacWindowRuntime) -> String? {
+    guard let window = runtime.window, let root = window.contentView?.superview else { return "busca sem janela" }
+    func placements(_ view: NSView) -> [MacSearchPlacement] {
+      ((view as? MacSearchPlacement).map { [$0] } ?? []) + view.subviews.flatMap(placements)
+    }
+    guard let placement = placements(root).first, let geometry = placement.geometry,
+      let delegate = placement.field.delegate as? MacSearchPresentation.Coordinator else {
+      return "geometria da busca ausente"
+    }
+    let field = placement.field.frame
+    guard field.width >= 100, field.width <= 520, abs(field.midX - geometry.detail.midX) < 1,
+      field.minX >= geometry.title.maxX + 11, field.maxX <= geometry.actions.minX - 11 else {
+      return "busca sobreposta/descentrada: campo=\(field), área=\(geometry.detail), título=\(geometry.title), ações=\(geometry.actions)"
+    }
+    let screen = window.convertToScreen(placement.field.convert(placement.field.bounds, to: nil))
+    guard delegate.panel.isVisible, abs(delegate.panel.frame.width - field.width) < 1,
+      abs(delegate.panel.frame.minX - screen.minX) < 1,
+      abs(delegate.panel.frame.maxY - (screen.minY - 4)) < 1 else {
+      return "lista não ancorada: lista=\(delegate.panel.frame), campo=\(screen)"
+    }
+    print("MacStress busca geometria: janela=\(Int(window.frame.width)) campo=\(Int(field.width)) centro=\(Int(field.midX)) contexto=\(runtime.contextVisible) sessões=\(runtime.state.sidebarVisible) ok")
+    return nil
+  }
+
   static func run(_ runtime: MacWindowRuntime, other: MacWindowRuntime) async -> String? {
     guard let store = runtime.store, let window = runtime.window, let root = window.contentView?.superview else {
       return "busca sem janela"
@@ -53,7 +84,19 @@ import OpenCodeKit
     guard !runtime.search.visible, !delegate.panel.isVisible,
       runtime.drafts.draft("ses_mac_archived").focused else { return "Esc não fechou/devolveu foco" }
     guard other.state == otherState else { return "busca alterou a seleção de outra janela" }
-    print("MacStress busca: campo, grupos, setas, Return, filtros, arquivada, Esc e isolamento ok")
+    runtime.search.open()
+    try? await Task.sleep(for: .milliseconds(250))
+    guard let click = NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 10, y: 10),
+      modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+      eventNumber: 0, clickCount: 1, pressure: 1) else { return "clique de teste indisponível" }
+    delegate.mouseDown(click)
+    guard !runtime.search.visible, !delegate.panel.isVisible else { return "clicar fora não fechou a busca" }
+    runtime.search.open()
+    try? await Task.sleep(for: .milliseconds(250))
+    // A locked screen cannot elect a key window; the actual notification adapter is still testable there.
+    NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+    guard !runtime.search.visible, !delegate.panel.isVisible else { return "trocar de janela não fechou a busca" }
+    print("MacStress busca: campo, grupos, setas, Return, filtros, arquivada, Esc, clique fora e isolamento ok")
     return nil
   }
 }

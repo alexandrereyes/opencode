@@ -12,6 +12,7 @@ struct MacWindow: View {
   @Bindable var runtime: MacWindowRuntime
   @State private var context: ContextColumnStore?
   @State private var restored = false
+  @State private var detailWidth: CGFloat = 860
 
   var body: some View {
     NavigationSplitView(columnVisibility: $runtime.columns) {
@@ -23,8 +24,12 @@ struct MacWindow: View {
       // own, empty part of the title bar, while the approved window has one strip with `…` and Nova sessão
       // over Contexto.
       HStack(spacing: 0) {
-        MacChatColumn(store: store, runtime: runtime, context: context)
-          .frame(minWidth: 460, maxWidth: .infinity)
+        // Reserve a useful search area before allowing a long session title to fill the bar.
+        MacChatColumn(store: store, runtime: runtime, context: context,
+          titleWidth: min(230, max(100, (detailWidth - 520) / 2 - 32 - (runtime.state.sidebarVisible ? 0 : 180))))
+          // With both columns hidden, traffic lights and the sidebar's toolbar still precede the title.
+          // Keep this minimum on the chat, never on the root (which causes AppKit constraint loops).
+          .frame(minWidth: !runtime.state.sidebarVisible && !runtime.contextVisible ? 840 : 460, maxWidth: .infinity)
         if runtime.contextVisible {
           MacColumnDivider(width: $runtime.contextWidth)
           // Offered the room first, up to the dragged width; a narrower window shrinks it to 400 pt before the
@@ -32,6 +37,8 @@ struct MacWindow: View {
           inspector.frame(minWidth: 400, maxWidth: min(max(runtime.contextWidth, 400), 760)).layoutPriority(1)
         }
       }
+      .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { detailWidth = $0 }
+      .background(MacSearchPresentation(runtime: runtime))
     }
     .background(theme.color(.background))
     .toastOverlay(store.toast)
