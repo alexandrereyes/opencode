@@ -58,6 +58,24 @@ test("project intents preserve close history and unknown references", () => {
   expect(closed.data.pinnedSessions).toEqual(["missing-session"])
 })
 
+test("sidebar.notify adds idempotently, removes, and leaves mutes and pins alone", () => {
+  const added = applyIntent(profile, { type: "sidebar.notify", session: "watched-session", notify: true })
+  const repeated = applyIntent(added, { type: "sidebar.notify", session: "watched-session", notify: true })
+  const removed = applyIntent(repeated, { type: "sidebar.notify", session: "watched-session", notify: false })
+  expect(added.data.notifySessions).toEqual(["watched-session"])
+  expect(repeated.data.notifySessions).toEqual(["watched-session"])
+  expect(removed.data.notifySessions).toEqual([])
+  expect([added.revision, repeated.revision, removed.revision]).toEqual([5, 6, 7])
+  expect(profile.data.notifySessions).toBeUndefined()
+  expect(added.data.mutedSessions).toBeUndefined()
+  expect(removed.data.pinnedSessions).toEqual(profile.data.pinnedSessions)
+  // Profiles stored before the field decode unchanged.
+  expect(Schema.decodeUnknownSync(Preferences.Profile)(Schema.encodeSync(Preferences.Profile)(profile)).data).not.toHaveProperty(
+    "notifySessions",
+  )
+})
+
+// Older app builds still send `sidebar.mute`: it keeps being stored (without effect) so they never fail.
 test("muted sessions add idempotently and remove without changing the original profile", () => {
   const added = applyIntent(profile, { type: "sidebar.mute", session: "quiet-session", muted: true })
   const repeated = applyIntent(added, { type: "sidebar.mute", session: "quiet-session", muted: true })

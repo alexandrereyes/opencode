@@ -43,7 +43,7 @@ type Preferences = {
   data: {
     projects: Record<string, { projects: { worktree: string }[] }>
     pinnedSessions: string[]
-    mutedSessions?: string[]
+    notifySessions?: string[]
   }
 }
 type Message = {
@@ -79,8 +79,8 @@ if (args.values.stop || args.values.reset) {
   for (const id of [...ids].reverse()) {
     for (const session of preferences.data.pinnedSessions.filter((key) => preferenceSession(key) === id))
       await rpc("custom.preferences", "mutate", { type: "sidebar.pin", session, pinned: false })
-    for (const session of (preferences.data.mutedSessions ?? []).filter((key) => preferenceSession(key) === id))
-      await rpc("custom.preferences", "mutate", { type: "sidebar.mute", session, muted: false })
+    for (const session of (preferences.data.notifySessions ?? []).filter((key) => preferenceSession(key) === id))
+      await rpc("custom.preferences", "mutate", { type: "sidebar.notify", session, notify: false })
     await api(`/api/session/${id}`, undefined, "DELETE", true)
   }
 }
@@ -113,14 +113,14 @@ await historical(
   "Podemos revisar o plano amanhã?",
   { userLast: true },
 )
-const muted = await historical(
+const notified = await historical(
   "UI opencode com imagem",
   opencode.branches.custom,
   now - 3 * day,
   "Temas OpenChamber revisados nos dois modos.",
 )
-await rpc("custom.preferences", "mutate", { type: "sidebar.mute", session: sessionKey(muted.id), muted: true })
-muted.state = "muted + read"
+await rpc("custom.preferences", "mutate", { type: "sidebar.notify", session: sessionKey(notified.id), notify: true })
+notified.state = "notify + read"
 await historical(
   "Ajustes na navegação",
   opencode.branches["quiet-nebula"],
@@ -222,10 +222,10 @@ if (!navigation.data.find((row) => row.session.id === migration.id)?.unreadAt)
   throw new Error("Unread verification failed")
 if (
   !preferences.data.pinnedSessions.includes(sessionKey(alternatives.id)) ||
-  !preferences.data.mutedSessions?.includes(sessionKey(muted.id))
+  !preferences.data.notifySessions?.includes(sessionKey(notified.id))
 )
   throw new Error("Preference verification failed")
-for (const item of sessions.filter((item) => ["read", "muted + read"].includes(item.state)))
+for (const item of sessions.filter((item) => ["read", "notify + read"].includes(item.state)))
   if (navigation.data.find((row) => row.session.id === item.id)?.unreadAt)
     throw new Error(`Unexpected unread: ${item.title}`)
 const forms = await api<{ data: unknown[] }>(`/api/session/${question.id}/form`)

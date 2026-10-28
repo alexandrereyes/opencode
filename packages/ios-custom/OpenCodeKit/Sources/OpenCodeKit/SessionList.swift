@@ -12,7 +12,8 @@ public struct SessionRow: Sendable, Identifiable {
   public let state: SessionState
   public let unread: Bool
   public let pinned: Bool
-  public let muted: Bool
+  /// "Avisar ao terminar" is on: the server pushes an alert when it finishes.
+  public let notify: Bool
   public let activeChildren: Int
   public let requestCount: Int
   public let rank: Double
@@ -38,7 +39,6 @@ public enum SessionFilter: String, CaseIterable, Identifiable, Sendable {
   case pinned = "Fixadas"
   case running = "Rodando"
   case attention = "Precisa de você"
-  case muted = "Silenciadas"
   public var id: Self { self }
   public func includes(_ row: SessionRow) -> Bool {
     switch self {
@@ -47,7 +47,6 @@ public enum SessionFilter: String, CaseIterable, Identifiable, Sendable {
     case .pinned: row.pinned
     case .running: row.state == .running
     case .attention: row.needsYou
-    case .muted: row.muted
     }
   }
 }
@@ -55,11 +54,11 @@ public enum SessionFilter: String, CaseIterable, Identifiable, Sendable {
 public enum SessionList {
   public static func rows(
     entries: [NavigationEntry], projects: [Project], active: Set<String>,
-    pins: [String], muted: [String], autoApprove: Bool,
+    pins: [String], notify: [String], autoApprove: Bool,
     ranks: [String: Double], chatRoot: String?
   ) -> [SessionRow] {
     let pinnedIDs = pins.compactMap(SessionPreferenceKey.sessionID)
-    let mutedIDs = Set(muted.compactMap(SessionPreferenceKey.sessionID))
+    let notifyIDs = Set(notify.compactMap(SessionPreferenceKey.sessionID))
     let index = Dictionary(uniqueKeysWithValues: entries.map { ($0.session.id, $0) })
     var families: [String: [NavigationEntry]] = [:]
     for entry in entries where entry.session.time.archived == nil {
@@ -99,7 +98,7 @@ public enum SessionList {
           : questions > 0
             ? .question : running ? .running : failed ? .failed : unread ? .unread : .stopped,
         unread: unread, pinned: pinnedIDs.contains(session.id),
-        muted: mutedIDs.contains(session.id),
+        notify: notifyIDs.contains(session.id),
         activeChildren: members.filter {
           $0.session.parentID != nil && active.contains($0.session.id)
         }.count,
@@ -120,14 +119,14 @@ public enum SessionList {
   /// One pass over the rows for the Sessões filter chips, ordered lexicographically: running chips first, then
   /// chips with unread rows, then the saved manual position, then the name (natural, case- and accent-insensitive,
   /// pt-BR). Chips without a manual position (Chats) follow every positioned chip of their state.
-  /// Unread follows the list's orange dot: a root row that is unread and not muted.
+  /// Unread follows the list's orange dot: a root row that is unread.
   public static func chipGroups(_ rows: [SessionRow], chips: [ChipEntry], chats: String) -> [ChipGroup] {
     var groups = Dictionary(uniqueKeysWithValues: chips.map { ($0.key, ChipGroup(key: $0.key)) })
     for row in rows {
       guard let key = row.chat ? chats : row.project?.id, groups[key] != nil else { continue }
       if row.state == .running { groups[key]?.running = true }
       if row.requestCount > 0 { groups[key]?.requests += 1 }
-      if row.unread && !row.muted { groups[key]?.unread = true }
+      if row.unread { groups[key]?.unread = true }
     }
     let locale = Locale(identifier: "pt_BR")
     return chips.sorted { left, right in

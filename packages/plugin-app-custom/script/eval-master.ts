@@ -198,12 +198,12 @@ async function seed() {
   })
   await say(sessions.broken, "Planeje a migração do banco.")
   await waitIdle(Object.values(sessions))
-  // Read sessions, and a muted and a pinned one shared with the app lists.
+  // Read sessions, and one with "Avisar ao terminar" and a pinned one shared with the app lists.
   for (const key of ["dark", "injection"]) {
     const info = (await get<{ data: Session }>(`/api/session/${sessions[key]}`)).data
     await post(`/api/session/${sessions[key]}/view`, { idle: info.time.idle })
   }
-  await rpc("custom.preferences/mutate", { type: "sidebar.mute", session: pinKey(sessions.deps), muted: true })
+  await rpc("custom.preferences/mutate", { type: "sidebar.notify", session: pinKey(sessions.deps), notify: true })
   await rpc("custom.preferences/mutate", { type: "sidebar.pin", session: pinKey(sessions.login), pinned: true })
   sessions.child = (
     await post<{ data: Session }>("/api/session", {
@@ -436,7 +436,7 @@ const scenarios: Array<Array<[string, ...string[]]>> = [
       "voice",
       "ô mestra, cria aí uma sessão no blog pra escrever um post curto sobre café, sem mexer nos outros arquivos, e depois me fala o título que ela escolheu",
     ],
-    ["mute", "tira o silêncio da sessão de dependências e me diz o que ela respondeu"],
+    ["notify", "desliga o aviso da sessão de dependências e liga o da sessão do dark mode"],
   ],
   [
     [

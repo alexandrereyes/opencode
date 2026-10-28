@@ -146,12 +146,8 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Onda 7 — conclusão"].waitForExistence(timeout: 15))
     screenshot("banner-opened-from-sheet")
   }
-  func testMuteAndForegroundDoNotReplay() async throws {
+  func testForegroundDoesNotReplay() async throws {
     let app = try launch("PARENT")
-    _ = try await api("/api/rpc/custom.preferences/mutate", body: ["input": ["type": "sidebar.mute", "session": try id("MUTED"), "muted": true]])
-    try await prompt("MUTED", "Responda apenas: Silenciada.")
-    try await waitForSuccess("MUTED")
-    XCTAssertFalse(app.buttons["session-alert-open"].exists)
     XCUIDevice.shared.press(.home)
     let previous = try await idle("SUCCESS")
     try await prompt("SUCCESS", "Responda apenas: Fora da tela.")
@@ -160,7 +156,6 @@ import XCTest
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 15))
     XCTAssertFalse(app.buttons["session-alert-open"].waitForExistence(timeout: 5))
     screenshot("reconnected-without-replay")
-    _ = try await api("/api/rpc/custom.preferences/mutate", body: ["input": ["type": "sidebar.mute", "session": try id("MUTED"), "muted": false]])
   }
   func testMissingDirectoryResolvesModelNameFromDefaultCatalog() throws {
     let app = try launch("MISSING")

@@ -58,9 +58,9 @@ import XCTest
     // Renaming last: the server may treat it as activity and move the row above the anchor.
     row.swipeLeft()
     XCTAssertTrue(app.buttons["Renomear"].waitForExistence(timeout: 5))
-    for action in ["Silenciar", "Arquivar", "Excluir"] { XCTAssertTrue(app.buttons[action].exists, action) }
-    for action in ["Mais", "Abrir sessão", "Fixar", "Desafixar"] { XCTAssertFalse(app.buttons[action].exists, action) }
-    let order = ["Silenciar", "Arquivar", "Renomear", "Excluir"].map { app.buttons[$0].frame.minX }
+    for action in ["Avisar ao terminar", "Arquivar", "Excluir"] { XCTAssertTrue(app.buttons[action].exists, action) }
+    for action in ["Mais", "Abrir sessão", "Fixar", "Desafixar", "Silenciar"] { XCTAssertFalse(app.buttons[action].exists, action) }
+    let order = ["Avisar ao terminar", "Arquivar", "Renomear", "Excluir"].map { app.buttons[$0].frame.minX }
     XCTAssertEqual(order, order.sorted())
     shot("trailing-actions")
     app.buttons["Renomear"].tap()

@@ -30,6 +30,9 @@
       "mutedSessions": [
         "[\"local\",\"ses_ios_a2512dc0581247f6ac5f707b625da0ee\"]"
       ],
+      "notifySessions": [
+        "[\"http://localhost:4096\",\"ses_ea1b2e243ffe5c1CfApic7bCxm\"]"
+      ],
       "models": {
         "user": [],
         "variant": {}

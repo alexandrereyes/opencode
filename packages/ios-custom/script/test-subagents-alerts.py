@@ -60,7 +60,7 @@ def tools(session):
 
 try:
     now = int(time.time() * 1000)
-    for role, title in [("PARENT", "sessão principal"), ("SUCCESS", "conclusão"), ("FAILURE", "falha"), ("PERMISSION", "permissão"), ("PERMISSION2", "outra permissão"), ("QUESTION", "pergunta"), ("MUTED", "silenciada"), ("MISSING", "diretório ausente"), ("ORCHESTRATOR", "orquestradora"), ("TASKS", "tarefa em segundo plano")]:
+    for role, title in [("PARENT", "sessão principal"), ("SUCCESS", "conclusão"), ("FAILURE", "falha"), ("PERMISSION", "permissão"), ("PERMISSION2", "outra permissão"), ("QUESTION", "pergunta"), ("MISSING", "diretório ausente"), ("ORCHESTRATOR", "orquestradora"), ("TASKS", "tarefa em segundo plano")]:
         session = "ses_" + uuid.uuid4().hex
         own[role] = session
         location = {"directory": directory + "/onda7-ausente-" + token if role == "MISSING" else directory}
@@ -119,8 +119,6 @@ try:
     sys.exit(status)
 finally:
     configuration.unlink(missing_ok=True)
-    if "MUTED" in own:
-        api("/api/rpc/custom.preferences/mutate", {"input": {"type": "sidebar.mute", "session": own["MUTED"], "muted": False}})
     for role in ["ORCHESTRATOR", "TASKS"]:
         if role in own:
             children += [session["id"] for session in api("/api/rpc/custom.session-family/page", {"input": {"sessionID": own[role], "limit": 100}})["output"]["data"]]

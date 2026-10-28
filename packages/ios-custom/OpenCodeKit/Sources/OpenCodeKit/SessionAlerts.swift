@@ -111,23 +111,23 @@ public struct SessionAlertPolicy: Sendable {
   }
   public mutating func admit(
     _ signal: SessionAlertSignal, server: String, session: Session, root: Session,
-    current: String?, muted: [String], autoApprove: Bool = false
+    current: String?, notified: [String] = [], autoApprove: Bool = false
   ) -> Bool {
     guard let connectedAt, signal.created >= connectedAt else { return false }
     let key = [server, signal.sessionID, signal.kind.rawValue, signal.watermark].joined(
       separator: "\u{0}")
     guard !claims.contains(key) else { return false }
-    // Claim suppressed signals too: leaving the screen or unmuting must not replay them.
+    // Claim suppressed signals too: leaving the screen or turning a bell off must not replay them.
     claims.append(key)
     claims = Array(claims.suffix(500))
     guard session.id == signal.sessionID, root.parentID == nil,
       session.time.archived == nil, root.time.archived == nil,
       current != session.id, current != root.id
     else { return false }
-    let silenced = Set(muted.compactMap(SessionPreferenceKey.sessionID))
-    guard !silenced.contains(root.id), !silenced.contains(session.id) else { return false }
     switch signal.kind {
-    case .succeeded, .failed: return session.parentID == nil
+    case .succeeded, .failed:
+      // A bell session's finish arrives as a system notification instead (`notified` only while this server pushes).
+      return session.parentID == nil && !notified.compactMap(SessionPreferenceKey.sessionID).contains(root.id)
     case .permission: return !autoApprove
     case .question: return true
     }

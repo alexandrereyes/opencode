@@ -26,7 +26,7 @@ import XCTest
         """.utf8))
     return try XCTUnwrap(
       SessionList.rows(
-        entries: [entry], projects: [], active: [], pins: [], muted: [], autoApprove: false,
+        entries: [entry], projects: [], active: [], pins: [], notify: [], autoApprove: false,
         ranks: [:], chatRoot: nil
       ).first)
   }

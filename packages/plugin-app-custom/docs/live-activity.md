@@ -117,7 +117,8 @@ Row = SessionRef & {
   2026-10-28), and its latest execution succeeded within the last 30 minutes.
 - **Unread (rev. 2026-10-28):** a top-level session that is not working, has no pending request and is not failed,
   whose latest assistant output is newer than its viewed watermark (`time.viewed`) — the same rule as the orange
-  unread dot in Sessões — and that is **not muted** (`custom.preferences` `mutedSessions`). No time window: it stays
+  unread dot in Sessões. Muting is gone (2026-10-28: "Avisar ao terminar" replaced it, see
+  [session-notifications.md](session-notifications.md)), so `mutedSessions` no longer hides anything. No time window: it stays
   unread until the session is viewed (`session.viewed`), archived or deleted. Chats and the current Sessão mestra
   follow the same rule as other top-level sessions. Unread sessions never keep a Live Activity alive (the end rule
   is unchanged).
@@ -330,10 +331,10 @@ background process (a dev server) keeps its session working until it exits.
 nonarchived top-level session whose `time.idle` is newer than `time.viewed`, either after a success or failure newer
 than `time.viewed` (the scan's `completionAt`; live, the execution end) or with a `succeeded`/`failed` outcome. The
 tracker keeps `idleAt`, `viewedAt` (monotone, from `session.viewed`) and `completionAt` per session; an interruption
-moves `idleAt` like the projection (not a shutdown) but is no completion. Mutes come from `custom.preferences`
-(`mutedSessions`, server-qualified keys decoded like the Mestra inventory) at rebuild and on every
-`rpc.custom.preferences.updated`, which the hub maps to an internal `preferences.updated` event. A rebuild keeps every
-unseen top-level session whatever its age, muted ones included, so unmuting shows them at once; read sessions older
+moves `idleAt` like the projection (not a shutdown) but is no completion. "Avisar ao terminar" sessions come from
+`custom.preferences` (`notifySessions`, server-qualified keys decoded like the Mestra inventory) at rebuild and on every
+`rpc.custom.preferences.updated`, which the hub maps to an internal `preferences.updated` event; they only feed the
+session alerts, never the state. A rebuild keeps every unseen top-level session whatever its age; read sessions older
 than a day are dropped. `counts.idle` keeps its meaning (succeeded in the last 30 minutes, read or not) and still
 drives the 30-minute wake-up; idle rows are only the unread ones, ordered by their unread time.
 
@@ -369,7 +370,9 @@ the next 10 s slot retries; a failed start is retried after the 5-minute window.
 `OPENCODE_APNS_TEAM_ID` and `OPENCODE_APNS_BUNDLE_ID`. They are read once when the hub starts; an unreadable key logs a
 warning and keeps pushes off (`unconfigured`). Pushes run in their own fibers with a 10 s request timeout; the HTTP/2
 connection per host is unreferenced so it never keeps the process alive. `makeClient` accepts an `origin` override,
-used only by the tests' local HTTP/2 server.
+used only by the tests' local HTTP/2 server; `OPENCODE_APNS_ORIGIN` sets it from the environment (with a warning in the
+log) so a sandbox can exercise delivery against a local stand-in without reaching Apple or any device. The same client
+also sends the session alerts of [session-notifications.md](session-notifications.md).
 
 **Size.** When a body still exceeds 4096 bytes after the contract's trimming (titles are shortened down to 6
 characters), it is sent as is and APNs rejects it; only very long directories can cause that.

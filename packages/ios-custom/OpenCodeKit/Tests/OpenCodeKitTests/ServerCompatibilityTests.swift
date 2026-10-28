@@ -137,7 +137,7 @@ private actor TranscriptProbe {
   }
 }
 
-@Test func olderPreferencesDecodeAndUnsupportedMuteExplainsRequiredUpdate() async throws {
+@Test func olderPreferencesDecodeAndUnsupportedBellExplainsRequiredUpdate() async throws {
   let client = OpenCodeClient(configuration: ServerConfiguration(url: URL(string: "http://localhost:4177")!)) { request in
     let mutation = request.url?.path.hasSuffix("/mutate") == true
     let body = mutation
@@ -145,10 +145,10 @@ private actor TranscriptProbe {
       : #"{"output":{"revision":1,"data":{"projects":{},"pinnedSessions":[],"settings":{"autoApprove":false}}}}"#
     return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: mutation ? 400 : 200, httpVersion: nil, headerFields: nil)!)
   }
-  #expect(try await client.preferences().data.mutedSessions == nil)
+  #expect(try await client.preferences().data.notifySessions == nil)
   do {
-    _ = try await client.mutate(.mute(session: "ses_test", muted: true))
-    Issue.record("Silenciar não pode aparentar sucesso em um servidor antigo")
+    _ = try await client.mutate(.notify(session: "ses_test", notify: true))
+    Issue.record("O aviso ao terminar não pode aparentar sucesso em um servidor antigo")
   } catch ClientError.operation(let message) {
     #expect(message.contains("Atualize o servidor"))
   }
@@ -160,14 +160,14 @@ private actor TranscriptProbe {
   }
 }
 
-@Test func optionalMuteFieldDoesNotDisableNewerServerMutations() async throws {
+@Test func optionalBellFieldDoesNotDisableNewerServerMutations() async throws {
   let client = OpenCodeClient(configuration: ServerConfiguration(url: URL(string: "http://localhost:4177")!)) { request in
     #expect(request.url?.path == "/api/rpc/custom.preferences/mutate")
     let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody!).object?["input"]?.object
-    #expect(input?["type"]?.string == "sidebar.mute")
-    #expect(input?["muted"] == .bool(true))
-    let body = #"{"output":{"revision":2,"data":{"projects":{},"pinnedSessions":[],"mutedSessions":["ses_test"],"settings":{"autoApprove":false}}}}"#
+    #expect(input?["type"]?.string == "sidebar.notify")
+    #expect(input?["notify"] == .bool(true))
+    let body = #"{"output":{"revision":2,"data":{"projects":{},"pinnedSessions":[],"notifySessions":["ses_test"],"settings":{"autoApprove":false}}}}"#
     return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
   }
-  #expect(try await client.mutate(.mute(session: "ses_test", muted: true)).data.mutedSessions == ["ses_test"])
+  #expect(try await client.mutate(.notify(session: "ses_test", notify: true)).data.notifySessions == ["ses_test"])
 }

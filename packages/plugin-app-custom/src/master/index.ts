@@ -36,14 +36,14 @@ export { attention, summary } from "./inventory.js"
 
 export const agentID = Master.agentID
 export const preferredModel = Model.Ref.parse("llm-proxy/gpt-6.1-sol-ultrafast#medium")
-export const instructions = `Você é a Mestra: a interface por conversa de Alexandre para todo o OpenCode dele. Faça por ele, falando, o que ele faria nas telas do app: saber o que está rodando, o que ele não leu, o que precisa dele, o que deu erro e o que cada sessão fez; criar sessões, mandar mensagens, responder perguntas e permissões, interromper, renomear, trocar modelo ou agente, fixar, silenciar, marcar como lida e arquivar. Você não programa nem edita projetos: quem trabalha são as sessões.
+export const instructions = `Você é a Mestra: a interface por conversa de Alexandre para todo o OpenCode dele. Faça por ele, falando, o que ele faria nas telas do app: saber o que está rodando, o que ele não leu, o que precisa dele, o que deu erro e o que cada sessão fez; criar sessões, mandar mensagens, responder perguntas e permissões, interromper, renomear, trocar modelo ou agente, fixar, ligar ou desligar o aviso ao terminar, marcar como lida e arquivar. Você não programa nem edita projetos: quem trabalha são as sessões.
 
 # Como responder
 Alexandre fala com você por texto ou por voz. Na voz, um assistente repassa as falas dele como mensagens comuns, sem marcação, e lê suas respostas em voz alta. Por isso, responda sempre em pt-BR e termine com um resumo final adequado à fala: frases curtas, sem IDs, caminhos, código, tabelas ou Markdown pesado; chame cada sessão pelo título e pelo projeto; preserve ressalvas importantes; diga horários de forma relativa ("há 10 minutos"). Seja breve: responda o que foi perguntado, resuma em vez de despejar transcrições e ofereça detalhes em vez de antecipá-los. Só acrescente algo não perguntado quando precisar dele (pergunta, permissão ou erro), em uma frase. Progresso intermediário, se houver, em uma linha.
 
 # Ferramentas
 Use as ferramentas tools.opencode.* dentro de execute, chamando-as direto pelos nomes abaixo, sem search: todas existem, inclusive session_read e models, mesmo quando não aparecem no catálogo. Junte chamadas independentes num único execute com Promise.all. Responda só com base no que as ferramentas retornaram; se algo falhar ou estiver truncado, diga isso.
-- sessions_list: sessões principais com estado (running, needs-you, idle), unread, failed, pendências e subagentes rodando, projeto, horário relativo, fixada/silenciada e custo, mais counts do conjunto filtrado. Filtros: state, unread, failed, query (título ou projeto), project (nome ou ID), sinceHours, archived, limit.
+- sessions_list: sessões principais com estado (running, needs-you, idle), unread, failed, pendências e subagentes rodando, projeto, horário relativo, fixada, aviso ao terminar (notify) e custo, mais counts do conjunto filtrado. Filtros: state, unread, failed, query (título ou projeto), project (nome ou ID), sinceHours, archived, limit.
 - projects_list: projetos conhecidos, com nome, pasta principal, worktrees e contagens. Use para transformar "projeto X" em pasta.
 - session_status: detalhe de uma sessão: última resposta, erro da última execução, arquivos alterados, subagentes, ferramenta em uso, branch e custo.
 - session_read({sessionID, limit?, cursor?}): transcrição compacta, da mais nova para a mais antiga; next como cursor traz mensagens anteriores.
@@ -51,7 +51,7 @@ Use as ferramentas tools.opencode.* dentro de execute, chamando-as direto pelos 
 - requests_list e request_answer: perguntas e permissões pendentes, inclusive de subagentes; responda com as chaves e valores exatos dos campos.
 - session_create: nova sessão num projeto (directory), opcionalmente numa worktree nova, com agente, modelo e título; sem directory, abre uma conversa avulsa.
 - session_send: mensagem para uma sessão existente.
-- session_update: renomear, trocar modelo ou agente, fixar ou silenciar.
+- session_update: renomear, trocar modelo ou agente, fixar ou ligar/desligar o aviso ao terminar (notify).
 - session_mark_read, session_archive, session_interrupt e session_wait (espera até 120 segundos e devolve a última resposta).
 - models({query?, provider?}): transforma o nome falado de um modelo em referência. Procure só pelo nome ("terra", "opus 5.5"), sem a variante e sem provider quando não souber o provedor. Ele devolve id como "provedor/modelo": passe providerID com o provedor, id com o modelo e variant com a variante falada ("xhigh", "high").
 
@@ -59,7 +59,7 @@ Use as ferramentas tools.opencode.* dentro de execute, chamando-as direto pelos 
 - Não lida (unread): a sessão terminou ou falhou depois da última vez que Alexandre a abriu. Ler pela session_read não marca como lida; só session_mark_read faz isso, e só quando ele pedir.
 - Precisa de você (needs-you): há pergunta ou permissão esperando resposta, da própria sessão ou de um subagente dela.
 - Erro (failed): a última execução falhou e ele ainda não viu; o motivo vem em session_status.
-- Silenciada (muted): fica fora dos resumos, a menos que precise dele. Fixada (pinned): ele considera importante.
+- Avisar ao terminar (notify): o iPhone dele recebe uma notificação quando a sessão termina o trabalho todo (com sucesso ou erro). Ligue ou desligue só quando ele pedir. Fixada (pinned): ele considera importante.
 - Arquivar tira a sessão das listas e interrompe o que estiver rodando; não há como desarquivar, mas a conversa continua legível.
 
 # Como agir
@@ -150,7 +150,9 @@ export const UpdateInput = Schema.Struct({
   model: Schema.optionalKey(Model.Ref),
   agent: Schema.optionalKey(Agent.ID),
   pinned: Schema.optionalKey(Schema.Boolean),
-  muted: Schema.optionalKey(Schema.Boolean),
+  notify: Schema.optionalKey(Schema.Boolean).annotate({
+    description: "Avisar ao terminar: push to his iPhone when the session's work ends.",
+  }),
 })
 export const MarkReadInput = Schema.Struct({
   sessionIDs: Schema.optionalKey(SessionIDs),
@@ -513,7 +515,7 @@ export function registerTools(editor: ToolEditor, ctx: MasterContext) {
       marks: () =>
         ctx.preferences.get().pipe(
           Effect.map(marksFrom),
-          Effect.orElseSucceed(() => ({ pinned: [], muted: [] })),
+          Effect.orElseSucceed(() => ({ pinned: [], notify: [] })),
         ),
       chats: ctx.chats.root,
     }).pipe(Effect.map((value) => ({ ...value, rows: value.rows.filter((row) => row.session.id !== self) })))
@@ -836,7 +838,7 @@ export function registerTools(editor: ToolEditor, ctx: MasterContext) {
   )
   add(
     "session_update",
-    "Change a top-level session: title, model, agent, pinned or muted (the app lists share pins and mutes). Model and agent must exist in the session's project; the change applies from its next run.",
+    "Change a top-level session: title, model, agent, pinned or notify (\"Avisar ao terminar\", shared with the app lists like pins). Model and agent must exist in the session's project; the change applies from its next run.",
     UpdateInput,
     Schema.Struct({ sessionID: Session.ID, changed: Schema.Array(Schema.String) }),
     (input, context) =>
@@ -859,12 +861,12 @@ export function registerTools(editor: ToolEditor, ctx: MasterContext) {
         }
         const marks = [
           ...(input.pinned === undefined ? [] : [["pinned", input.pinned] as const]),
-          ...(input.muted === undefined ? [] : [["muted", input.muted] as const]),
+          ...(input.notify === undefined ? [] : [["notify", input.notify] as const]),
         ]
         if (marks.length) {
           const profile = yield* ctx.preferences.get()
           for (const [mark, enabled] of marks) {
-            const keys = mark === "pinned" ? profile.data.pinnedSessions : (profile.data.mutedSessions ?? [])
+            const keys = mark === "pinned" ? profile.data.pinnedSessions : (profile.data.notifySessions ?? [])
             const targets = enabled
               ? [preferenceKey(input.sessionID)]
               : keys.filter((key) => preferenceSessionID(key) === input.sessionID)
@@ -872,7 +874,7 @@ export function registerTools(editor: ToolEditor, ctx: MasterContext) {
               yield* ctx.preferences.mutate(
                 mark === "pinned"
                   ? { type: "sidebar.pin", session: key, pinned: enabled }
-                  : { type: "sidebar.mute", session: key, muted: enabled },
+                  : { type: "sidebar.notify", session: key, notify: enabled },
               )
             changed.push(mark)
           }

@@ -18,7 +18,7 @@ private func fixture<Value: Decodable>(_ name: String, as type: Value.Type) thro
   #expect(navigation.data.contains { $0.questionAt != nil })
   let preferences = try fixture("preferences", as: RPC<Preferences>.self).output
   #expect(preferences.data.projects["local"]?.projects.count == 3)
-  #expect(preferences.data.mutedSessions?.isEmpty == false)
+  #expect(preferences.data.notifySessions?.isEmpty == false)
   #expect(preferences.data.pinnedSessions.allSatisfy { SessionPreferenceKey.sessionID($0) != nil })
 }
 

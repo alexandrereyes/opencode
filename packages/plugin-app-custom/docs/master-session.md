@@ -49,13 +49,13 @@ root's state and pending counts include its whole family, exactly like the app l
 
 | Tool | Input / result |
 | --- | --- |
-| `sessions_list` | Optional `state`, `unread`, `failed`, `query` (title/project words, accent-insensitive), `project` (name or ID), absolute `directory` (and below), `sinceHours`, `archived`, `limit` ≤ 50. Rows carry project, state, unread/failed/outcome, family pending counts, `subagentsRunning`, pinned/muted, relative time and cost (USD, descendants included); `counts` cover every match. |
+| `sessions_list` | Optional `state`, `unread`, `failed`, `query` (title/project words, accent-insensitive), `project` (name or ID), absolute `directory` (and below), `sinceHours`, `archived`, `limit` ≤ 50. Rows carry project, state, unread/failed/outcome, family pending counts, `subagentsRunning`, pinned/notify ("Avisar ao terminar"), relative time and cost (USD, descendants included); `counts` cover every match. |
 | `projects_list` | Optional `query`, `limit`. Name, main directory, other worktree directories, session/needs-you/running/unread counts, relative last activity. |
 | `session_status` | `sessionID`; the list row plus total cost, tokens, branch, unfinished step/tool, last reply text (tail, 1,500 characters), last run error, files changed by edit/write/patch tools in the last 100 messages and running subagents. |
 | `sessions_search` | `query` (all words, accent-insensitive), optional `project`, `sinceHours`, `archived`, `limit` ≤ 20. Matches title/project and the latest 200 user/assistant messages of up to 150 recent sessions, with snippets. |
 | `session_send` | `sessionID`, text ≤ 12,000 characters, optional `delivery` (`steer` default / `queue`). Returns durable admission ID, not completion. |
 | `session_create` | `text`, optional absolute `directory` (omitted: a new managed chat, allocated/claimed/confirmed like the apps), `worktree` (`branch`, `name`, `from`), agent/model/title. Model and agent are validated against the target Location (a `provider/model` ID from the `models` tool is accepted). A worktree is created with the native strategy from the session's project, named `<repository>-<branch>` by default, then `git switch -c <branch>`; the session moves there before its first message. Any failure removes the empty session (and the worktree when the branch fails), so nothing is half-created. |
-| `session_update` | `sessionID` plus any of `title`, `model`, `agent`, `pinned`, `muted`. Pins/mutes use the shared `sidebar.pin`/`sidebar.mute` intents; unpinning removes every server key of that session. |
+| `session_update` | `sessionID` plus any of `title`, `model`, `agent`, `pinned`, `notify`. Pins and "Avisar ao terminar" use the shared `sidebar.pin`/`sidebar.notify` intents; turning either off removes every server key of that session. Muting is gone (see `session-notifications.md`). |
 | `session_interrupt` | `sessionID`; interrupts without resuming. |
 | `session_mark_read` | `sessionIDs` or `all: true` (every unread or failed session). Native `session.view` at the session's `time.idle`, the same call the apps make when a session is opened. Already-read or uncontrollable sessions are reported as `skipped`. |
 | `session_archive` | `sessionIDs`; the app's recursive archive (`archive/index.ts`: interrupt, wait, children, archive). Per-session failures are `skipped`. |
@@ -131,7 +131,7 @@ production. It requires actual tool calls (not just catalog search) before recor
 
 `script/eval-master.ts` is the conversational evaluation used to tune the prompt and tools. Against an owned sandbox
 (`custom-sandbox.ts up --port 4183`; 4096/4178 are refused) `prepare` keeps worktrees inside the sandbox home, creates
-three fake repositories and real Terra sessions in every attention state (unread, read, failed, muted, pinned, pending
+three fake repositories and real Terra sessions in every attention state (unread, read, failed, notify, pinned, pending
 question, subagent permission, running) and snapshots them; `suite <prefix> [--model=…]` drives fresh Mestra sessions
 through realistic requests in batches that do not interfere and saves each transcript, with every Code Mode call and
 result, under `<home>/eval/runs`; `reset` rebuilds from the worktree and restores the snapshot, repositories and the

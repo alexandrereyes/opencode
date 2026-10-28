@@ -35,7 +35,7 @@ private func switcherEntry(
   ]
   // The master is removed by the store before the rows are built, as in the Sessões tab.
   let rows = SessionList.rows(
-    entries: entries, projects: projects, active: ["ses_mid"], pins: [entries[0].session.key], muted: [],
+    entries: entries, projects: projects, active: ["ses_mid"], pins: [entries[0].session.key], notify: [],
     autoApprove: false, ranks: [:], chatRoot: "/chats")
   let branches = ["/oc-w/custom": "custom", "/oc-w/transcript-rewrite": "transcript-rewrite", "/av": "main"]
   func label(_ session: Session) -> SessionDirectoryLabel? {

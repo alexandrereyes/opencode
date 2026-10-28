@@ -39,7 +39,7 @@ private func rows(
   _ entries: [NavigationEntry], active: Set<String> = [], pins: [String] = [], chatRoot: String? = nil
 ) -> [SessionRow] {
   SessionList.rows(
-    entries: entries, projects: [], active: active, pins: pins.map(SessionPreferenceKey.encode), muted: [],
+    entries: entries, projects: [], active: active, pins: pins.map(SessionPreferenceKey.encode), notify: [],
     autoApprove: false, ranks: [:], chatRoot: chatRoot)
 }
 

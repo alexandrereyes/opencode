@@ -18,8 +18,8 @@ const agentID = Master.agentID
 export type InventoryContext = {
   session: Pick<Plugin.Context["session"], "get" | "scan" | "active">
   request: Pick<Plugin.Context["request"], "pending">
-  /** Pinned and muted sessions shared by the iOS and web lists; absent in tests without preferences. */
-  marks?: () => Effect.Effect<{ pinned: readonly string[]; muted: readonly string[] }>
+  /** Pinned and "Avisar ao terminar" sessions shared by the app lists; absent in tests without preferences. */
+  marks?: () => Effect.Effect<{ pinned: readonly string[]; notify: readonly string[] }>
   /** Root of the managed chats, whose sessions have no project of their own. */
   chats?: () => Effect.Effect<string | undefined>
 }
@@ -41,7 +41,7 @@ export const Summary = Schema.Struct({
   pending: Schema.Struct({ questions: Schema.Number, permissions: Schema.Number }),
   subagentsRunning: Schema.optionalKey(Schema.Number),
   pinned: Schema.optionalKey(Schema.Literal(true)),
-  muted: Schema.optionalKey(Schema.Literal(true)),
+  notify: Schema.optionalKey(Schema.Literal(true)),
   archived: Schema.optionalKey(Schema.Literal(true)),
   agent: Schema.optionalKey(Agent.ID),
   model: Schema.optionalKey(Model.Ref),
@@ -55,7 +55,7 @@ export type Inventory = {
   pending: readonly PendingSnapshot[]
   /** Owner session (root or descendant) of every running session and pending request → its root. */
   roots: Map<string, Session.ID>
-  marks: { pinned: Set<string>; muted: Set<string> }
+  marks: { pinned: Set<string>; notify: Set<string> }
   projects: Map<string, ProjectInfo>
 }
 
@@ -131,14 +131,14 @@ export const inventory = Effect.fn("Master.inventory")(function* (ctx: Inventory
     const root = yield* rootOf(ctx, owner, known)
     if (root) roots.set(owner, root)
   }
-  const marks = ctx.marks ? yield* ctx.marks() : { pinned: [], muted: [] }
+  const marks = ctx.marks ? yield* ctx.marks() : { pinned: [], notify: [] }
   const chatsRoot = ctx.chats ? yield* ctx.chats() : undefined
   return {
     rows,
     active,
     pending,
     roots,
-    marks: { pinned: new Set(marks.pinned), muted: new Set(marks.muted) },
+    marks: { pinned: new Set(marks.pinned), notify: new Set(marks.notify) },
     projects: yield* projects(rows, chatsRoot),
   } satisfies Inventory
 })
@@ -253,7 +253,7 @@ export function summary(inventory: Inventory, row: SessionScan.Info): Summary {
     pending: { questions: counts.questions, permissions: counts.permissions },
     ...(counts.subagentsRunning ? { subagentsRunning: counts.subagentsRunning } : {}),
     ...(inventory.marks.pinned.has(row.session.id) ? { pinned: true as const } : {}),
-    ...(inventory.marks.muted.has(row.session.id) ? { muted: true as const } : {}),
+    ...(inventory.marks.notify.has(row.session.id) ? { notify: true as const } : {}),
     ...(row.session.time.archived ? { archived: true as const } : {}),
     ...(row.session.agent ? { agent: row.session.agent } : {}),
     ...(row.session.model ? { model: row.session.model } : {}),
@@ -279,7 +279,7 @@ export function preferenceSessionID(key: string) {
   return decoded._tag === "Some" ? decoded.value[1] : undefined
 }
 
-/** The server key the iOS and web lists share for pins and mutes. */
+/** The server key the iOS and web lists share for pins and "Avisar ao terminar". */
 export const preferenceServer = "http://localhost:4096"
 
 export function preferenceKey(sessionID: string) {
@@ -289,6 +289,6 @@ export function preferenceKey(sessionID: string) {
 export function marksFrom(profile: typeof Preferences.Profile.Type) {
   return {
     pinned: profile.data.pinnedSessions.flatMap((key) => preferenceSessionID(key) ?? []),
-    muted: (profile.data.mutedSessions ?? []).flatMap((key) => preferenceSessionID(key) ?? []),
+    notify: (profile.data.notifySessions ?? []).flatMap((key) => preferenceSessionID(key) ?? []),
   }
 }

@@ -62,7 +62,7 @@ struct SessionRowView: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(line.map { ", " + $0.accessibilityLabel } ?? ""), \(status?.text ?? preview.text)\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
+      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(line.map { ", " + $0.accessibilityLabel } ?? ""), \(status?.text ?? preview.text)\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.notify ? ", avisa ao terminar" : "")"
     )
   }
 }
@@ -92,7 +92,7 @@ struct SessionCompactRowView: View {
           Spacer(minLength: 0)
           SessionRowTime(at: row.interactionAt, unread: row.unread)
         }
-        if line != nil || row.muted || row.pinned || row.unread {
+        if line != nil || row.notify || row.pinned || row.unread {
           HStack(spacing: 7) {
             SessionDirectoryLine(label: line).frame(maxWidth: .infinity, alignment: .leading)
             SessionRowMarks(row: row)
@@ -110,26 +110,27 @@ struct SessionCompactRowView: View {
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)
     .accessibilityLabel(
-      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(line.map { ", " + $0.accessibilityLabel } ?? "")\(showsWorking && row.state == .running ? ", trabalhando" : "")\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.muted ? ", silenciada" : "")"
+      "\(row.session.displayTitle), \(SessionList.relativeTime(row.interactionAt, now: now).accessibilityLabel)\(line.map { ", " + $0.accessibilityLabel } ?? "")\(showsWorking && row.state == .running ? ", trabalhando" : "")\(row.unread ? ", não lida" : "")\(row.pinned ? ", fixada" : "")\(row.notify ? ", avisa ao terminar" : "")"
     )
   }
 }
 
-/// Muted and pinned icons and the unread dot, trailing a row's last line.
+/// "Avisar ao terminar" and pinned icons and the unread dot, trailing a row's last line.
 private struct SessionRowMarks: View {
   @Environment(\.appTheme) private var theme
   let row: SessionRow
   var dot = true
 
   var body: some View {
-    if row.muted {
-      Image(systemName: "bell.slash.fill").appSymbol(.inline).foregroundStyle(theme.color(.icon))
+    if row.notify {
+      Image(systemName: "bell.fill").appSymbol(.inline).foregroundStyle(theme.color(.icon))
+        .accessibilityIdentifier("session-row-bell")
     }
     if row.pinned {
       Image(systemName: "pin.fill").appSymbol(.inline).foregroundStyle(theme.color(.icon))
     }
     if row.unread && dot {
-      Circle().fill(theme.color(row.muted ? .textWeak : .primary)).frame(width: 8, height: 8)
+      Circle().fill(theme.color(.primary)).frame(width: 8, height: 8)
     }
   }
 }

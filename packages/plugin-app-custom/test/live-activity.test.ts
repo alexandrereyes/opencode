@@ -660,7 +660,7 @@ test("rebuild finds unfinished background shells in the transcripts", async () =
   })
 })
 
-test("unread follows the Sessões dot: newer output than the viewed watermark, muted excluded (rev. 2026-10-28)", async () => {
+test("unread follows the Sessões dot: newer output than the viewed watermark (rev. 2026-10-28)", async () => {
   const server = world()
   const tracker = makeTracker(server.ctx)
   const view = (now = T) => tracker.derive(now, host).state
@@ -707,11 +707,14 @@ test("unread follows the Sessões dot: newer output than the viewed watermark, m
     [ids.nav, "idle"],
     [ids.cache, "idle"],
   ])
-  // Muting removes it from the unread count; the preferences event refreshes mutes.
-  server.muted.add(ids.cache)
+  // "Avisar ao terminar" (which replaced muting) never hides an unread session.
+  server.watched.add(ids.cache)
   await run(tracker.apply({ type: "preferences.updated" }, T))
-  expect(view().counts).toMatchObject({ unread: 1 })
-  expect(rows()).toEqual([[ids.nav, "idle"]])
+  expect(view().counts).toMatchObject({ unread: 2 })
+  expect(rows()).toEqual([
+    [ids.nav, "idle"],
+    [ids.cache, "idle"],
+  ])
   // A new execution makes it working; its end is unread again even though it was viewed before.
   await run(
     Effect.gen(function* () {
@@ -719,7 +722,7 @@ test("unread follows the Sessões dot: newer output than the viewed watermark, m
       yield* tracker.apply(execution("succeeded", ids.live, T + minute), T)
     }),
   )
-  expect(view(T + minute).counts).toMatchObject({ unread: 2 })
+  expect(view(T + minute).counts).toMatchObject({ unread: 3 })
   // An interruption after an unread success keeps the session unread.
   await run(
     Effect.gen(function* () {
@@ -746,12 +749,10 @@ test("rebuild keeps unread sessions of any age and drops read ones", async () =>
   server.add(session(ids.nav, { outcome: "succeeded", time: { ...old, viewed: old.idle } }))
   server.add(session(ids.cache, { outcome: "interrupted", time: old }))
   server.add(session(ids.oauth, { outcome: "succeeded", time: old }))
-  server.muted.add(ids.oauth)
   const tracker = makeTracker(server.ctx)
   await run(tracker.rebuild(T))
   const state = tracker.derive(T, host).state
-  expect(state.counts).toEqual({ working: 0, question: 0, permission: 0, failed: 0, idle: 0, unread: 1 })
-  expect(state.sessions.map((row) => [row.sessionID, row.status])).toEqual([[ids.live, "idle"]])
-  // The muted one stays in the model so unmuting shows it without a restart.
+  expect(state.counts).toEqual({ working: 0, question: 0, permission: 0, failed: 0, idle: 0, unread: 2 })
+  expect(state.sessions.map((row) => row.sessionID).toSorted()).toEqual([ids.live, ids.oauth].toSorted())
   expect([...tracker.sessions.keys()]).toEqual([ids.live, ids.oauth])
 })

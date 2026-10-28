@@ -289,9 +289,9 @@ struct SessionsView: View {
     }
     .tint(theme.color(.primary))
     Button {
-      Task { await store.mute(row) }
+      Task { await store.toggleNotify(row) }
     } label: {
-      Label(row.muted ? "Reativar" : "Silenciar", systemImage: row.muted ? "bell" : "bell.slash")
+      Label(row.notify ? "Não avisar" : "Avisar ao terminar", systemImage: row.notify ? "bell.slash" : "bell")
     }.tint(theme.color(.icon))
   }
 
@@ -321,8 +321,8 @@ struct SessionsView: View {
     Button(row.pinned ? "Desafixar" : "Fixar", systemImage: row.pinned ? "pin.slash" : "pin") {
       Task { await store.pin(row) }
     }
-    Button(row.muted ? "Reativar" : "Silenciar", systemImage: row.muted ? "bell" : "bell.slash") {
-      Task { await store.mute(row) }
+    Button(row.notify ? "Não avisar ao terminar" : "Avisar ao terminar", systemImage: row.notify ? "bell.slash" : "bell") {
+      Task { await store.toggleNotify(row) }
     }
     if row.unread {
       Button("Marcar como lida", systemImage: "envelope.open") {
