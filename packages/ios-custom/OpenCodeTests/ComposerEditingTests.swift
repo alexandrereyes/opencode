@@ -229,18 +229,25 @@ import XCTest
     XCTAssertEqual(draft.document.validTokens.count, 3)
   }
 
-  func testBangOpensFilesOnlyAtABoundaryAndInsertsTheFileTokenWithUndo() async throws {
+  func testAmpersandOpensFilesOnlyAtABoundaryAndInsertsTheFileTokenWithUndo() async throws {
     let (draft, window) = try mount(.init())
     defer { window.isHidden = true }
     try await settle()
     let input = try XCTUnwrap(draft.input)
-    for prose in ["Pode arrumar!", " ok!", " 😀!", " (!", " Olá !!"] {
+    for prose in ["R&D", " AT&T", " a &&", " b", " 😀&", " (&", " ?a=1&b=2", " !RE", " Pode arrumar!"] {
       input.insertText(prose)
       XCTAssertNil(draft.trigger, prose)
     }
+    // A lone `&` opens; the space after it closes the panel and inserts nothing.
+    input.insertText(" Tom &")
+    XCTAssertEqual(draft.trigger?.character, "&")
+    input.insertText(" Jerry")
+    XCTAssertNil(draft.trigger)
+    XCTAssertTrue(draft.document.text.hasSuffix(" Tom & Jerry"))
+    XCTAssertTrue(draft.document.validTokens.isEmpty)
     // A paste on a new line starts a word, like typing.
-    input.insertText("\n!RE")
-    XCTAssertEqual(draft.trigger?.character, "!")
+    input.insertText("\n&RE")
+    XCTAssertEqual(draft.trigger?.character, "&")
     XCTAssertEqual(draft.trigger?.query, "RE")
     try await settle()
     let file = ComposerToken(kind: .file, id: "README.md", text: "@README.md", value: "/repo/README.md")
@@ -251,15 +258,15 @@ import XCTest
     XCTAssertNil(draft.trigger)
     input.undoManager?.undo()
     try await settle()
-    XCTAssertTrue(draft.document.text.hasSuffix("\n!RE"), draft.document.text)
+    XCTAssertTrue(draft.document.text.hasSuffix("\n&RE"), draft.document.text)
     XCTAssertTrue(draft.document.validTokens.isEmpty)
     input.undoManager?.redo()
     try await settle()
     XCTAssertEqual(draft.document.validTokens.map(\.token), [file])
     input.deleteBackward()
-    input.insertText("!")
-    XCTAssertNil(draft.trigger, "`!` right after a token is prose")
-    XCTAssertTrue(draft.document.text.hasSuffix("\n@README.md!"), draft.document.text)
+    input.insertText("&")
+    XCTAssertNil(draft.trigger, "`&` right after a token is prose")
+    XCTAssertTrue(draft.document.text.hasSuffix("\n@README.md&"), draft.document.text)
   }
 
   func testTypingPublishesDerivedComposerStateOnlyWhenItChanges() async throws {

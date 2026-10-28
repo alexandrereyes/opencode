@@ -93,16 +93,20 @@ try:
     with (evidence / (label + ".log")).open("w") as log:
         result = subprocess.run(command_line, stdout=log, stderr=subprocess.STDOUT)
     report["result"] = result.returncode
-    # The `!` case sends one prompt; its file reference must be the one `@` used to send.
+    # The `&` case sends one prompt; its file reference must be the one `@` used to send.
     sent = [m for m in api("/api/session/" + conversation + "/message?limit=20&order=desc")["data"]
             if m["type"] == "user" and "@README.md" in json.dumps(m)]
     if sent:
-        report["bangMessage"] = sent[0]
-        uris = [f.get("source", {}).get("uri") or f.get("uri") for f in sent[0].get("files", [])]
-        report["bangFileURIs"] = uris
-        if ("file://" + str(directory / "README.md")) not in uris and ("file://" + str(directory.resolve() / "README.md")) not in uris:
+        report["ampersandMessage"] = sent[0]
+        files = sent[0].get("files", [])
+        uris = [f.get("source", {}).get("uri") or f.get("uri") for f in files]
+        report["ampersandFileURIs"] = uris
+        expected = {"file://" + str(directory / "README.md"), "file://" + str(directory.resolve() / "README.md")}
+        mention = files[0].get("mention") if files else None
+        if not expected & set(uris) or mention != {"start": 5, "end": 15, "text": "@README.md"} \
+                or sent[0].get("text") != "Leia @README.md e responda ok!":
             report["result"] = 1
-            print("The sent `!` message lacks the README.md file reference")
+            print("The sent `&` message lacks the expected README.md file reference")
     print("Result:", report["result"], "Log:", evidence / (label + ".log"))
 finally:
     configured.unlink(missing_ok=True)

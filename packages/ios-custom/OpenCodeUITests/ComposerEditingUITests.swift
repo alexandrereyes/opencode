@@ -67,15 +67,15 @@ import XCTest
     editor.typeText("\n")
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "#nada\n"), evaluatedWith: editor)], timeout: 5), .completed)
     // Still loading (the panel waits 180 ms): Return keeps the line break.
-    editor.typeText("!REA\n")
-    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "!REA\n"), evaluatedWith: editor)], timeout: 5), .completed)
+    editor.typeText("&REA\n")
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "&REA\n"), evaluatedWith: editor)], timeout: 5), .completed)
     XCTAssertEqual(app.staticTexts["fixture-tokens"].label, "1 tokens")
     let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
     shot.name = "composer-return-suggestion"
     shot.lifetime = .keepAlways
     add(shot)
   }
-  func testBangListsFilesAndAtDoesNot() throws {
+  func testAmpersandListsFilesAndAtDoesNot() throws {
     let app = try launch()
     defer { app.terminate() }
     app.buttons["Limpar"].tap()
@@ -92,24 +92,37 @@ import XCTest
     XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 5))
     XCTAssertFalse(file.exists)
     editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
-    // `!` lists files and inserts the same `@path` token.
-    editor.typeText("Veja !REA")
+    // `!` is prose again.
+    editor.typeText("!REA")
+    XCTAssertFalse(app.staticTexts["Arquivos"].waitForExistence(timeout: 1.5))
+    XCTAssertFalse(app.staticTexts["Nenhum item correspondente"].exists)
+    editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
+    // `&` lists files and inserts the same `@path` token.
+    editor.typeText("Veja &REA")
     XCTAssertTrue(file.waitForExistence(timeout: 5))
     XCTAssertTrue(app.staticTexts["Arquivos"].exists)
     XCTAssertFalse(app.buttons["suggestion-explore"].exists)
-    shot("composer-bang-files")
+    shot("composer-ampersand-files")
     file.tap()
     XCTAssertTrue(file.waitForNonExistence(timeout: 5))
     expect("Veja @README.md ", app: app)
     XCTAssertEqual(app.staticTexts["fixture-tokens"].label, "1 tokens")
-    // `!` after a letter, punctuation or an emoji is prose.
-    for prose in ["ok!", " Pode arrumar!", " Sério?!", " 👍!"] {
+    // `&` glued to a word, doubled or after punctuation or an emoji is prose.
+    for prose in ["R&D", " AT&T", " a && b", " ?a=1&b=2", " 👍&", " ok!"] {
       editor.typeText(prose)
       XCTAssertFalse(app.staticTexts["Arquivos"].waitForExistence(timeout: 1.5), prose)
       XCTAssertFalse(app.staticTexts["Nenhum item correspondente"].exists, prose)
     }
-    expect("Veja @README.md ok! Pode arrumar! Sério?! 👍!", app: app)
-    shot("composer-bang-prose")
+    // A lone `&` opens the list; the next space closes it without inserting anything.
+    editor.typeText(" Tom &")
+    XCTAssertTrue(file.waitForExistence(timeout: 5))
+    shot("composer-ampersand-lone")
+    editor.typeText(" Jerry")
+    XCTAssertTrue(file.waitForNonExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["Arquivos"].waitForExistence(timeout: 1.5))
+    expect("Veja @README.md R&D AT&T a && b ?a=1&b=2 👍& ok! Tom & Jerry", app: app)
+    XCTAssertEqual(app.staticTexts["fixture-tokens"].label, "1 tokens")
+    shot("composer-ampersand-prose")
   }
   private func shot(_ name: String) {
     let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

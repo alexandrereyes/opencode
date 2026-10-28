@@ -360,10 +360,10 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   capsule as the compact `MCP · N/M` pill, a flexible space and a round button:
   microphone when the field is empty (WhatsApp style); with text, send plus a compact microphone at its left
   ([Microphone beside Send](#microphone-beside-send--25-october)). The agent (`build ⌄`) opens the line below the card.
-- **Triggers:** `@` context (sessions, apps, agents, references), `!` files, `/` commands, `$` skills, and `#`
+- **Triggers:** `@` context (sessions, apps, agents, references), `&` files, `/` commands, `$` skills, and `#`
   snippets open a suggestion panel above the composer; the chosen item becomes a colored token in the field. Return
   picks the panel's first (highlighted) item (see [Quote comment composer](#quote-comment-composer--24-october) and
-  [Files on `!`](#files-on---26-october)).
+  [Files on `&`](#files-on---28-october)).
 - **Selection:** selecting text in a response shows the native edit menu with `Copiar`, `Comentar`, and `Pergunta
 paralela`. A comment attaches the quoted passage above the composer (`Citações · 1`) and is sent with the message.
   The side question (`/btw`) opens in a sheet that is not saved to the conversation.
@@ -549,7 +549,7 @@ marks retained after relaunch. No physical device, production mutation or new ba
 **Alexandre, 24/10: o comentário usa o mesmo compositor.** The **Comentário** sheet hosts the message composer's own
 `ComposerEditor`, configured by `ComposerComment` (placeholder, the message draft's other attachment bytes for the
 shared 25 MiB limit, and the commit action), instead of a separate text field. It keeps the same card, `ComposerTextView`
-(label **Comentário**, identifier `comment-composer`), `@`/`!`/`$`/`#` suggestions and tokens, focus, dictation (hold, lock,
+(label **Comentário**, identifier `comment-composer`), `@`/`&`/`$`/`#` suggestions and tokens, focus, dictation (hold, lock,
 pending download; a finished transcription refocuses the comment) and the **+** menu with **Fotos** and **Arquivos**.
 It omits the model/effort, MCP and agent selectors (they belong to the message, as on the web, whose comment editor has
 none), `/` commands (they only run at the start of the message itself; the web's comment editor has no commands either)
@@ -583,7 +583,7 @@ suggestions 9.3/12.6 → 9.2/13.2 ms, one hitch each. An earlier batch varied by
 Captures are in `$TMPDIR/opencode/ios-comment-composer/prints/`.
 
 **Return in suggestions (Alexandre, 24/10).** In both composers (message and comment), Return on the software or a
-hardware keyboard picks the suggestion panel's first, highlighted item for `@`, `!`, `$`, `#` and `/` exactly as a tap
+hardware keyboard picks the suggestion panel's first, highlighted item for `@`, `&`, `$`, `#` and `/` exactly as a tap
 does, instead of a line break. `ComposerSuggestions` records that item in a non-observed `ComposerSuggestionReturn`
 once its results for the current trigger have loaded, so typing still does not re-render the composer.
 `ComposerReturn.selectsSuggestion` gates it: no marked text (composition keeps Return), panel open, and an item loaded
@@ -592,7 +592,7 @@ Return keeps its previous meaning (line break; Shift+Return still sends). The we
 (`app-custom/src/composer/suggestions/machine.ts`) selects its active item on Enter/Tab too, but swallows Enter while its
 list is empty or loading; iOS deliberately keeps the line break there. Dictation inserts through the draft, not Return,
 and is unaffected. Covered by the Kit truth table, `ComposerEditingUITests/testReturnPicksTheLoadedFirstSuggestionAndOtherwiseBreaksTheLine`
-(`$` picked, line break without a panel, empty `#` list and an unloaded `!` query) and the comment/message checks in
+(`$` picked, line break without a panel, empty `#` list and an unloaded `&` query) and the comment/message checks in
 `testCommentUsesTheComposerWithoutSelectorsAndCancelKeepsNothing`. Interleaved profiles stayed flat (plain busy p50
 7.1 → 6.0 ms, suggestions 8.1 → 8.5 ms, mentions 8.3 → 8.0 ms).
 
@@ -660,37 +660,39 @@ controlled and nothing is sent), restores the MCP state and deletes the Session.
 ### Case-insensitive suggestions — 24 October
 
 Every trigger ignores case. `$`, `#`, `/`, agents, references and apps rank locally with case- and
-diacritic-insensitive folding; files (`!`) come from `/api/fs/find`, whose fuzzy search ignores case too. Session titles
+diacritic-insensitive folding; files (`&`) come from `/api/fs/find`, whose fuzzy search ignores case too. Session titles
 are searched by the server with SQLite `LIKE`, which ignores case only for ASCII letters, so a query with other
 cased letters (Ã, Í, Ç…) is also sent lowered, uppercased and capitalized (`ComposerSources.caseVariants`) and the
 results are merged by recency; accents are still matched as typed there ("sessao" does not find "Sessão"). The web
 composer does the same in `composer/session-search.ts`.
 
 After `build-for-testing`, `script/test-composer-case.py` (same environment variables as `test-app-mentions.py`)
-creates a fake repository, two disposable Sessions and one snippet, runs `ComposerCaseUITests` (`!`, `@`, `$`, `#`,
+creates a fake repository, two disposable Sessions and one snippet, runs `ComposerCaseUITests` (`&`, `@`, `$`, `#`,
 `/` in several cases, then Return on `#COMMIT`) and removes them.
 
-### Files on `!` — 26 October
+### Files on `&` — 28 October
 
-**Alexandre, 26/10: arquivos saem do `@` e vão para o `!`.** `@` keeps sessions, apps, agents and references and no
-longer lists files or calls `/api/fs/find`. `!` lists only files, with the same panel, icons, path styling, ranking
-and 20-result server search the `@` file section had. Choosing a file inserts the same `@path` token as before
-(`ComposerTokenKind.file`, absolute `value`), so the sent prompt is unchanged: `@path` in the text, and a
-`files:[{uri:"file:///…", mention}]` entry with the same UTF-16 range.
+**Alexandre, 26/10: arquivos saem do `@`; 28/10: o gatilho de arquivos passa de `!` para `&`.** `@` keeps sessions,
+apps, agents and references and does not list files or call `/api/fs/find`. `&` lists only files, with the same
+panel, icons, path styling, ranking and 20-result server search the `@` file section had. Choosing a file inserts the
+same `@path` token as before (`ComposerTokenKind.file`, absolute `value`), so the sent prompt is unchanged: `@path` in
+the text, and a `files:[{uri:"file:///…", mention}]` entry with the same UTF-16 range. `!` is plain text again.
 
-`!` opens the panel only at the start of the text or right after whitespace or a line break (including a paste or a
-restored draft that puts the caret there). After a letter, a digit, punctuation, a bracket or quote, an emoji or a
-token, it is prose: "Pode arrumar!", "ok!", "Sério?!", "👍!" and dictation never open anything. `!!` and `!=` stay
-prose as well, so "Olá !!" and "a != b" do not open a list. Space, Escape and a tap outside dismiss it as for `@`.
+`&` opens the panel only at the start of the text or right after whitespace or a line break (including a paste or a
+restored draft that puts the caret there). Glued to a letter, digit, punctuation, a bracket or quote, an emoji or a
+token, it is prose: `R&D`, `P&G`, `AT&T`, `?a=1&b=2`, `texto&amp;`, `👍&` and dictation never open anything. `&&` and
+`&=` stay prose too, so `a && b` does not open a list. A lone `&` followed by a space (`Tom & Jerry`, `arroz & feijão`)
+behaves like a lone `@`: the space ends the query, so the panel closes without inserting anything and the text stays
+as typed. Typed continuously, the 180 ms debounce means the list never even appears; after a pause it shows briefly
+and closes on the space. Space, Escape and a tap outside dismiss it as for `@`.
 
-The iOS app has no shell mode (the web's `!` on an empty composer, `app-custom/src/composer/suggestions/machine.ts`,
-is not ported and the TUI's is its own), so `!` at the start opens files. The trigger lives in OpenCodeKit's
+The iOS app has no shell mode, and `&` has no other meaning in the composer. The trigger lives in OpenCodeKit's
 `ComposerTrigger`/`ComposerSources`, which only this app uses; the web, TUI and server are unchanged. A typed but
-unchosen `!text` is sent as plain text, as before.
+unchosen `&text` is sent as plain text.
 
-`ComposerEditingUITests/testBangListsFilesAndAtDoesNot` (fixture) and
-`ComposerCaseUITests/testBangSendsTheFileReferenceAtNoLongerLists` (live; `test-composer-case.py` then checks the
-sent message's `file://…/README.md` reference on the server) cover it in both themes.
+`ComposerEditingUITests/testAmpersandListsFilesAndAtDoesNot` (fixture) and
+`ComposerCaseUITests/testAmpersandSendsTheFileReferenceAtNoLongerLists` (live; `test-composer-case.py` then checks the
+sent message's `file://…/README.md` reference, mention range and text on the server) cover it in both themes.
 
 ### Composer editing stability — 23 October
 
@@ -3226,12 +3228,12 @@ the intended two tasks. The root shell, queue, B's permission and D's question a
 - `ComposerDocument` / `ComposerSpan` model the plain display text plus typed token ranges in UTF-16. The TextKit 2
   editor retains encoded token attributes, snaps the caret out of tokens and deletes an intersected token as a unit.
   Raw trigger text remains plain text. `ComposerTrigger` recognizes word boundaries; `/` is only active at offset 0,
-  and `!` only at offset 0 or after whitespace.
+  and `&` only at offset 0 or after whitespace.
   Space, Escape and a tap in the transcript dismiss suggestions. Trigger queries disable autocorrection,
   autocapitalization and predictive suggestions; prose restores the keyboard defaults. Unselected correction
   ranges cannot replace a token.
 - `ComposerSources` merges recent root sessions, mentionable agents and visible references for `@` (files moved to
-  `!` on 26/10); supported
+  `&` on 26–28/10); supported
   local commands plus backend commands and noncolliding slash skills for `/`; skills for `$`; project-over-global
   case-insensitive snippets (including aliases) for `#`. File/session searches debounce 180 ms and cancel stale reads.
   The glass panel highlights the first result, groups by source and has explicit empty/error states. Catalog
@@ -3294,7 +3296,7 @@ Token backgrounds use attributed text highlights rather than a separately drawn 
   Both TextKit subclasses use the designated initializer: UIKit's `textViewUsingTextLayoutManager` factory bypasses
   Swift subclass property defaults. The designated initializer retains the platform's TextKit 2 default.
 - **Comentar** presents a native sheet with a read-only passage, token-capable comment editor, Concluir and Remover.
-  In comments, `@`, `!`, `$`, and `#` work as in the main composer; `/` does not, as in the web.
+  In comments, `@`, `&`, `$`, and `#` work as in the main composer; `/` does not, as in the web.
   A sandbox UI/server check selects a file, Explore, the fixture skill and `#resumo` in the real comment editor,
   concludes, relaunches, then sends with a short main text/file mention. The comment's file/agent/skill arrive in
   structured arrays without main-text ranges; the main file keeps UTF-16 range 33–47. The model-facing `User comment:`
@@ -3304,7 +3306,7 @@ Token backgrounds use attributed text highlights rather than a separately drawn 
   `Citações · N` is collapsed by default above the composer card and expands to edit/remove individual quotes.
   Quotes survive relaunch through `DraftSnapshot` (old wave-3 snapshots decode with an empty quote array), restore
   from queued messages, count as sendable content on their own, and clear only after successful submission.
-  Comments support the existing `@`, `!`, `$` and `#` suggestions; there is no separate binary-attachment picker in a comment.
+  Comments support the existing `@`, `&`, `$` and `#` suggestions; there is no separate binary-attachment picker in a comment.
 - `PromptRequest(document:…quotes:)` emits the web's `metadata.quotes` and `commentPrompt` ComposerPart shapes, keeps
   `displayText`/`comments:[]`, and appends `Comments on earlier assistant messages:` after the main text/context.
   Comment file/agent/skill tokens travel without `mention` ranges; main offsets remain untouched. Snippets expand

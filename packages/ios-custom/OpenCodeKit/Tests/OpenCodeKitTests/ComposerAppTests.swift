@@ -15,7 +15,7 @@ private let notes = ComposerApp(
   let trigger = try #require(ComposerTrigger.detect(in: .init(text: "@Saf"), cursor: 4))
   let items = ComposerSources().suggestions(
     trigger, files: [.init(path: "safe.md", type: "file")], apps: [devTools, safari, notes])
-  // Files moved to `!`; `@` lists apps without them.
+  // Files moved to `&`; `@` lists apps without them.
   #expect(items.map(\.title) == ["Safari DevTools", "Safari"])
   #expect(items.filter { $0.token.kind == .app }.map(\.subtitle) == ["Safari MCP", "Computer use"])
   #expect(items.last?.token.text == "@Safari")
