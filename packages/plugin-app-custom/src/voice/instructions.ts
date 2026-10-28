@@ -1,3 +1,5 @@
+/// <reference path="../markdown.d.ts" />
+
 import { Effect } from "effect"
 import os from "node:os"
 import path from "node:path"
