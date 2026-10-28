@@ -431,20 +431,26 @@ private struct ContextMCPs: View {
 
   private func row(_ server: MCPServer) -> some View {
     let state = server.status.status
+    // Switch first: the state reads at the start of the row, where the eye lands.
     return HStack(spacing: 10) {
-      Image(systemName: "puzzlepiece.extension").font(.system(size: 13)).foregroundStyle(theme.color(.icon))
-        .frame(width: 18).accessibilityHidden(true)
-      Text(server.name).appFont(.caption).foregroundStyle(theme.color(.text)).lineLimit(1).truncationMode(.middle)
-      Spacer(minLength: 8)
-      if state == .pending {
-        ProgressView().controlSize(.mini)
-      } else if let label = label(server) {
-        Text(label).appFont(.caption).foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
-          .truncationMode(.tail).help(server.status.error ?? label)
+      ZStack {
+        if state == .pending {
+          ProgressView().controlSize(.mini)
+        } else {
+          Toggle(server.name, isOn: Binding(get: { state == .connected }, set: { _ in Task { await store.toggle(server) } }))
+            .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            .disabled(state == .unknown)
+        }
       }
-      Toggle(server.name, isOn: Binding(get: { state == .connected }, set: { _ in Task { await store.toggle(server) } }))
-        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-        .disabled(state == .pending || state == .unknown)
+      .frame(width: 30)
+      Text(server.name).appFont(.caption)
+        .foregroundStyle(theme.color(state == .connected ? .textStrong : .textSecondary))
+        .lineLimit(1).truncationMode(.middle)
+      Spacer(minLength: 8)
+      if let label = label(server) {
+        Text(label).appFont(.caption).foregroundStyle(theme.color(state == .failed ? .error : .textSecondary))
+          .lineLimit(1).truncationMode(.tail).help(server.status.error ?? label)
+      }
     }
     .padding(.vertical, 6)
     .accessibilityElement(children: .combine)
