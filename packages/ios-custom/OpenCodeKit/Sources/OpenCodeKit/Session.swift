@@ -47,6 +47,10 @@ public struct NavigationEntry: Codable, Sendable {
   public let questionAt: Double?
   public let permissionCount: Int?
   public let questionCount: Int?
+  /// Background work other than subagents (shell commands) still running for this session; absent on older servers.
+  public let backgroundCount: Int?
+  /// The newest such work's command.
+  public let backgroundTitle: String?
 }
 
 public struct NavigationPage: Codable, Sendable {

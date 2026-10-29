@@ -445,6 +445,9 @@ export function fromPromise(plugin: Plugin) {
               status: (input) => run(host.integration.connection.status(input)),
             },
           },
+          job: {
+            background: () => run(host.job.background()),
+          },
           message: {
             list: adaptApiMethod(MessageEndpoints["session.messages"], host.message.list),
           },

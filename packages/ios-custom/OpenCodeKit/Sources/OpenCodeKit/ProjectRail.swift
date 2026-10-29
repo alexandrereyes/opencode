@@ -15,7 +15,7 @@ public enum ProjectRail {
       var group = $0
       let members = counts[group.key] ?? []
       // Pending requests take precedence in row.state, but the working indicator must coexist with them.
-      group.running = group.running || members.contains { !$0.memberIDs.isDisjoint(with: active) }
+      group.running = group.running || members.contains { $0.working || !$0.memberIDs.isDisjoint(with: active) }
       return Item(group: group, count: members.count)
     }
   }

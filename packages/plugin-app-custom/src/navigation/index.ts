@@ -8,14 +8,16 @@ const encodeSession = Schema.encodeSync(Session.Info)
 interface NavigationContext {
   readonly scan: Plugin.Context["session"]["scan"]
   readonly pending: Plugin.Context["request"]["pending"]
+  readonly background: Plugin.Context["job"]["background"]
 }
 
 export const registerNavigation = Effect.fn("Navigation.register")(function* (ctx: Plugin.Context) {
   const sessions = ctx.session
   const requests = ctx.request
+  const jobs = ctx.job
   yield* ctx.rpc
     .register(Navigation.Definition, {
-      list: (input) => list({ scan: sessions.scan, pending: requests.pending }, input),
+      list: (input) => list({ scan: sessions.scan, pending: requests.pending, background: jobs.background }, input),
     })
     .pipe(Effect.orDie)
 })
@@ -36,6 +38,11 @@ export const list = Effect.fn("Navigation.list")(function* (
       .filter((form) => form.metadata?.kind === "question" || form.metadata?.kind === "websearch.provider"),
     (form) => form.sessionID,
   )
+  // A running subagent keeps its own child Session active; other background work (shells) has no Session state.
+  const background = Map.groupBy(
+    (yield* ctx.background()).filter((job) => job.type !== "subagent").toSorted((a, b) => b.started - a.started),
+    (job) => job.sessionID,
+  )
   return {
     ...(page.next === undefined ? {} : { next: page.next }),
     data: page.data.map((row) => {
@@ -51,6 +58,8 @@ export const list = Effect.fn("Navigation.list")(function* (
           : undefined
       const sessionPermissions = permissions.get(row.session.id) ?? []
       const sessionQuestions = questions.get(row.session.id) ?? []
+      const sessionBackground = background.get(row.session.id) ?? []
+      const newest = sessionBackground[0]
       return {
         session: encodeSession(row.session),
         ...(row.messageAt === undefined ? {} : { messageAt: row.messageAt }),
@@ -65,6 +74,12 @@ export const list = Effect.fn("Navigation.list")(function* (
           ? {
               questionAt: Math.max(...sessionQuestions.map((form) => form.created ?? 0)),
               questionCount: sessionQuestions.length,
+            }
+          : {}),
+        ...(newest
+          ? {
+              backgroundCount: sessionBackground.length,
+              ...(newest.title ? { backgroundTitle: newest.title } : {}),
             }
           : {}),
       }

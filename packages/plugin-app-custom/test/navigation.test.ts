@@ -85,6 +85,7 @@ test("preserves unread precedence, root policy, pending classification, and wire
       {
         scan: (input) => Effect.succeed({ data: rows, next: input?.after }),
         pending: () => Effect.succeed(pending),
+        background: () => Effect.succeed([]),
       },
       {},
     ),
@@ -97,10 +98,42 @@ test("preserves unread precedence, root policy, pending classification, and wire
 
   pending = []
   const cleared = await Effect.runPromise(
-    list({ scan: () => Effect.succeed({ data: [rows[0]] }), pending: () => Effect.succeed(pending) }, {}),
+    list(
+      {
+        scan: () => Effect.succeed({ data: [rows[0]] }),
+        pending: () => Effect.succeed(pending),
+        background: () => Effect.succeed([]),
+      },
+      {},
+    ),
   )
   expect(cleared.data[0].permissionAt).toBeUndefined()
   expect(cleared.data[0].questionAt).toBeUndefined()
   expect(cleared.data[0].permissionCount).toBeUndefined()
   expect(cleared.data[0].questionCount).toBeUndefined()
+  expect(cleared.data[0].backgroundCount).toBeUndefined()
+})
+
+test("counts background work other than subagents and names the newest", async () => {
+  const rows = [{ session: session("ses_shells", { idle: 30, outcome: "succeeded" }) }, { session: session("ses_agent", {}) }]
+  const result = await Effect.runPromise(
+    list(
+      {
+        scan: () => Effect.succeed({ data: rows }),
+        pending: () => Effect.succeed([]),
+        background: () =>
+          Effect.succeed([
+            { id: "sh_old", type: "shell", sessionID: rows[0].session.id, title: "bun run dev", started: 10 },
+            { id: "sh_new", type: "shell", sessionID: rows[0].session.id, title: "bun test", started: 20 },
+            { id: "ses_child", type: "subagent", sessionID: rows[1].session.id, title: "Explorar", started: 30 },
+          ]),
+      },
+      {},
+    ),
+  )
+
+  expect(result.data[0]).toMatchObject({ backgroundCount: 2, backgroundTitle: "bun test" })
+  expect(result.data[1].backgroundCount).toBeUndefined()
+  expect(result.data[1].backgroundTitle).toBeUndefined()
+  expect(Schema.decodeUnknownSync(Navigation.Page)(result).data[0].backgroundCount).toBe(2)
 })

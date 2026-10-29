@@ -15,6 +15,7 @@ import { Command } from "../command.js"
 import { Credential } from "../credential.js"
 import { Bus } from "../bus.js"
 import { Integration } from "../integration.js"
+import { Job } from "../job.js"
 import { KV } from "../kv.js"
 import { Location } from "../location.js"
 import { LocationServiceMap } from "../location-service-map.js"
@@ -60,6 +61,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
   const commands = yield* Command.Service
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
+  const jobs = yield* Job.Service
   const kv = yield* KV.Service
   const mcp = yield* Mcp.Service
   const location = yield* Location.Service
@@ -386,6 +388,31 @@ export const make = Effect.fn("PluginHost.make")(function* (
           })
         }),
     },
+    job: {
+      background: () =>
+        jobs.backgrounded.pipe(
+          Effect.map((running) =>
+            running.flatMap((job) => {
+              const sessionID =
+                job.recovery?.kind === "shell"
+                  ? job.recovery.sessionID
+                  : job.recovery?.kind === "subagent"
+                    ? job.recovery.parentSessionID
+                    : undefined
+              if (!sessionID) return []
+              return [
+                {
+                  id: job.id,
+                  type: job.type,
+                  sessionID,
+                  ...(job.title === undefined ? {} : { title: job.title }),
+                  started: job.started_at,
+                },
+              ]
+            }),
+          ),
+        ),
+    },
     message: {
       list: (input) =>
         Effect.gen(function* () {
@@ -705,6 +732,7 @@ export const requirements = LayerNode.group([
   Command.node,
   Bus.node,
   Integration.node,
+  Job.node,
   KV.node,
   Mcp.node,
   Location.node,
