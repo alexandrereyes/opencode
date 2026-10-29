@@ -2893,6 +2893,33 @@ after integrating the parallel search fix. The exact trace is `mac-escolhas-prin
 Comparisons are `comparacao-paleta.png`, `comparacao-trilho.png` and `comparacao-subagente.png`; the latter compares
 the combined banner/tree against both approved subagent references. `nova-sessao-paleta.png` captures the second host.
 
+### Espaço em disco — 29 October
+
+Approved mocks: `.agent-artifacts/mac-app/disco-indicador-opcoes.png` (option B) and `disco-tela-a-folha.png`
+(screen A) of the `mac-disco` worktree. Rules in OpenCodeKit's `DiskCleanup` (`DiskCleanupTests`); the Mac side
+is `MacDiskSpace.swift` (`MacDiskStore`, app-wide), `MacDiskScan.swift` (git, processes, `fts` sizes, off the main
+thread), `MacDiskCleaner.swift` and `MacDiskSheet.swift`.
+
+- **Rail bar** above Atalhos do teclado: used share, free space below, green above 25% free, neutral to 15%,
+  orange below 15%, red below 5% (`volumeAvailableCapacityForImportantUsage`, every 3 min, on opening the sheet
+  and after cleaning). A click, ⇧⌘D or Janela ▸ Espaço em disco opens the sheet.
+- **Worktrees**: linked worktrees of the projects' repositories (`git worktree list`) plus every folder of
+  `~/Worktrees`. Live (unarchived) sessions whose `location.directory` is inside, a process working there (`lsof`
+  cwd, `ps` arguments), a remote server (its `/api/info` `paths.tmp` is not in this user's temporary folder), clones
+  and plain folders lock a row. Archived sessions do not hold a worktree ("Só sessões arquivadas"). Uncommitted
+  files or commits on no remote need a confirmation and are never marked by default; changes within 24 h are not
+  marked either. Removal is `git worktree remove` (`--force` only for confirmed uncommitted files) and `prune`;
+  branches stay.
+- **Sujeira dos agentes** (`$TMPDIR/opencode`): DerivedData (up to three levels down, with its `WorkspacePath`),
+  `.xcresult`, copied `.app` and logs are removable when no process uses them and nothing changed for 24 h.
+  Captures, uploads, other temporary items, simulators (except `simctl delete unavailable`), AVDs, OpenCode
+  snapshots, Xcode's DerivedData and caches only show their size and a Finder button.
+- Limpar shows a preview, checks each item again (sessions reloaded, processes, git, recent changes), and logs
+  every result to `~/Library/Logs/OpenCode/limpeza-de-disco.log`. Sizes are cached in `disk-sizes.json`.
+- **Checks**: `script/test-mac-disk.sh` builds a throwaway fixture (fake repositories, worktrees, sessions and
+  temporary folder, two `sleep` processes), runs `MacDiskChecks` against it and deletes it. DEBUG
+  `-OpenCodeMacDiskSurvey <folder>` reads this Mac's real folders with `clean` disabled.
+
 ### Chat (polish 1) — 27 October
 
 Briefing: `.agent-artifacts/mac-app/POLIMENTO-CHAT.md` of the `mac-polish-chat` worktree. The chat column is the

@@ -68,6 +68,9 @@ struct MacWindow: View {
       MacNewSession(store: store, runtime: runtime, request: request)
     }
     .sheet(isPresented: $runtime.shortcutsVisible) { MacShortcutsSheet() }
+    .sheet(isPresented: $runtime.diskVisible) {
+      MacDiskSheet(disk: runtime.app.disk, sessions: store, window: CGSize(width: windowWidth, height: windowHeight))
+    }
     .sheet(isPresented: $runtime.proxyVisible) {
       MacProxySheet(runtime: runtime.app, window: CGSize(width: windowWidth, height: windowHeight))
     }
@@ -122,6 +125,7 @@ struct MacWindow: View {
         openSettings: openSettings)
     }
     .task { await MacStress.run(runtime: runtime, openWindow: openWindow) }
+    .task { await MacDiskChecks.run(runtime: runtime, store: store) }
     .task { await MacPerf.run(runtime: runtime) }
     #endif
   }
