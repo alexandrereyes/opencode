@@ -47,6 +47,12 @@ Watch ══UDP (Opus, DTLS/ICE-lite)══▶ OpenAI GPT Live  (media never cro
    revoked or malformed tokens get `401` with no detail.
 5. `custom.watch` → `devices()` returns `{ devices: [{ deviceID, name, createdAt, lastSeenAt }] }`; `revoke({ deviceID })` removes one. The iOS app shows them in
    Você → Apple Watch with "Parear Apple Watch" and "Remover".
+6. `custom.watch` → `stats()` (diagnostics, rev. 2026-10-29) returns in-memory counters since the server started:
+   `{ at, devices: [{ deviceID, day: Usage, hours: [{ hour } & Usage] }] }`, `day` summing the last 24 hours and
+   `hours` listing those with activity, newest first. `Usage = { state: { app, background, widget, unknown },
+   pushes: { urgent, coalesced, failed }, capped }`: `/state` reads by reader (each `widget` read is one complication
+   reload, which WidgetKit budgets), WidgetKit pushes sent by reason, failed pushes, and how often a push waited for
+   the daily cap.
 
 ## Gateway HTTP API (`/watch/v1`)
 
@@ -57,7 +63,7 @@ JSON bodies, camelCase, times in **epoch milliseconds**, optional fields omitted
 | Method | Path | Body | Response |
 | --- | --- | --- | --- |
 | GET | `/watch/v1/ping` | — | `{ ok: true, server: string, version: string }` |
-| GET | `/watch/v1/state` | — | `{ state: AgentsState \| null, host: string }` — the same `AgentsState` as the Live Activity contract (`docs/live-activity.md`, schema and rollup rules), from the same hub, **plus `requestID` on every `attention` item** (the oldest pending request of that kind for that session; watch-only, never in APNs payloads) |
+| GET | `/watch/v1/state` | — (header `X-Watch-Client: app \| background \| widget`) | `{ state: AgentsState \| null, host: string }` — the same `AgentsState` as the Live Activity contract (`docs/live-activity.md`, schema and rollup rules), from the same hub, **plus `requestID` on every `attention` item** (the oldest pending request of that kind for that session; watch-only, never in APNs payloads) |
 | GET | `/watch/v1/requests/:requestID` | — | `WatchRequest` (below), `404` when no longer pending |
 | POST | `/watch/v1/requests/:requestID/reply` | `WatchReply` | `{ ok: true }`, `409` when already answered |
 | POST | `/watch/v1/widget-token` | `{ token: string (hex), environment: "sandbox" \| "production" }` | `{ ok: true }` |
@@ -132,13 +138,34 @@ operation must keep the call. Ending the call from the system call UI ends it on
   `activeTotal == 0`, the mascot alone with a gray ring), plus `accessoryCorner` and `accessoryRectangular`
   (one line: `N ativas · M precisam de você`). Tap opens the app on the dashboard.
 - Data: the widget timeline reads `/watch/v1/state` (high-level `URLSession`, allowed in widget extensions) and
-  caches the last good state in the App Group; it refreshes when the app runs, on WidgetKit push, and on its own
-  budgeted timeline (about every 15 minutes).
-- **WidgetKit push (backend):** when `activeTotal`, `attentionTotal` or `counts.failed` changes, at most once per
-  2 minutes per device (immediately when attention or failures increase), send APNs
-  `apns-push-type: widgets`, topic `br.com.alexandrem.opencode.watchkitapp.push-type.widgets`, priority 5, body
-  `{"aps":{"content-changed":true}}`, reusing the existing APNs key (`OPENCODE_APNS_KEY_*`). If WidgetKit push turns
-  out to be unsupported for watch complications on watchOS 27, keep the timeline path and record it.
+  caches the last good state in the shared Keychain group; it refreshes when the app runs, on WidgetKit push, on the
+  app's background refresh, and on its own timeline (rev. 2026-10-29: every 60 minutes, as a fallback).
+- **Budget (rev. 2026-10-29).** WidgetKit counts every reload of the complication outside the foreground app,
+  pushed, scheduled or requested by a background app, against one daily budget: Apple quotes 40 to 70 reloads a
+  day for a widget that is looked at often. On 2026-10-28 the server sent 150 pushes in about 20 hours (up to 18 an
+  hour) on top of a 15-minute timeline, so WidgetKit ignored most of them and only opening the app updated the
+  complication. The sources now split the budget:
+  - **Urgent WidgetKit pushes, at once:** a new question or permission (`attentionTotal` rises), a new failure
+    (`counts.failed` rises), or `activeTotal` reaching or leaving 0. About 20–25 a day in the observed use.
+  - **Any other change of what the complication draws** (`activeTotal`, `attentionTotal`, the ring's counts
+    `working`, `question`, `permission`, `failed` and `unread`, or `idle` from older backends): one folded push at
+    most every **30 minutes** after the device's previous push, with the state current at that moment, so the
+    final state is never lost. 30 minutes caps folded pushes at 2 an hour, about 28 over a 14-hour working day.
+  - **Daily cap:** at most **40 pushes per device in any 24 hours**; folded ones stop at **30**, keeping the last
+    10 for urgent changes. A held change goes out when a slot frees (the oldest push leaves the 24 hours); until
+    then the watch's own refreshes cover it.
+  - **Nothing for a state the watch already has:** every `/state` read (app, background refresh or widget) tells the
+    server what the watch cached, and pushes compare against that, not against the last push.
+  - **Watch side:** the background refresh (about every 30 minutes) fetches the state into the cache and reloads the
+    complication only when what it draws changed; the timeline policy is 60 minutes; the app in front reloads freely
+    (not budgeted). Worst case on a busy day: about 25 urgent + 28 folded or refreshed + about 10 idle-time timeline
+    reloads, near 63, inside the 40–70; a quiet day stays far below.
+- **Data age (rev. 2026-10-29):** the rectangular complication and the Painel show how old the state is: `agora`
+  during its first minute, then the live relative text (`há 3 min.`), from the cache's fetch time. The circular and
+  corner families have no room for it.
+- **WidgetKit push (backend):** APNs `apns-push-type: widgets`, topic
+  `br.com.alexandrem.opencode.watchkitapp.push-type.widgets`, priority 5, body `{"aps":{"content-changed":true}}`,
+  reusing the existing APNs key (`OPENCODE_APNS_KEY_*`), following the rules above.
 
 ## Watch app (screens)
 
@@ -251,7 +278,19 @@ and `ended`. That call did not receive the final result line, which led to the s
 **WidgetKit push.** Supported: `WidgetPushHandler` and `pushHandler(_:)` are available on watchOS 26.0+ in the
 watchOS 27.0 SDK (Xcode), and Apple documents the `widgets` push type for "widgets and watch complications". The
 watch posts its token to `/widget-token`; pushes use the APNs client of the Live Activity with type `widgets`, topic
-`<OPENCODE_APNS_BUNDLE_ID>.watchkitapp.push-type.widgets`, priority 5, `apns-expiration` now + 15 min. They follow the
-Live Activity `changed` events: the first state after start is only recorded; then a change of `activeTotal`,
-`attentionTotal` or `counts.failed` pushes at most once per 2 minutes per device, at once when attention or failures
-increase. An invalid token is dropped. WidgetKit still budgets these pushes, so the timeline stays the base path.
+`<OPENCODE_APNS_BUNDLE_ID>.watchkitapp.push-type.widgets`, priority 5, `apns-expiration` now + 15 min. They follow
+the Live Activity `changed` events and `/state` reads (rev. 2026-10-29, `widget.ts`): per device the planner keeps
+what the watch has (`known`, from its last push or its last `/state` read), the time of the last push and the push
+times of the last 24 hours. The first state after start is only recorded. A state equal to `known` sends nothing; an
+urgent one (see "Budget") goes at once while under 40 pushes in 24 hours; any other waits until 30 minutes after the
+last push and under 30 pushes in 24 hours, then sends the state current at that moment. Every push schedules a look
+one window later, so a failed push (which neither counts nor changes `known`) is retried without a new change. An
+invalid token is dropped. The memo and counters are in memory: a restart starts them over and records the current
+state as known. WidgetKit still budgets these pushes, so the watch's background refresh and timeline remain.
+
+**Diagnostics.** `/state` reads carry `X-Watch-Client` (`app` in front, `background` refresh, `widget` reload; older
+builds send none and count as `unknown`). `stats.ts` keeps counters per device and hour (48 hours) and logs each
+finished hour once, on the first count of the next one, as `Watch hourly usage` (`deviceID`, `hour`, the four
+readers, `urgent`, `coalesced`, `failed`, `capped`); pushes are logged as `Watch widget push sent` with `reason`, and
+the start of each wait for the cap as `Watch widget push capped`. To check the budget: the daily `widget` reads
+should stay within about 40–70, and pushes within the cap.

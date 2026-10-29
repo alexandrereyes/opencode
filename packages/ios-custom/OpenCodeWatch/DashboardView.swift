@@ -1,8 +1,9 @@
 import OpenCodeKit
 import SwiftUI
 
-/// Painel (`app-1-painel.png`): ring and counts, pending requests first, then the sessions; the microphone
-/// starts voice. Refreshes every 10 s while visible and on pull.
+/// Painel (`app-1-painel.png`): ring and counts with the age of the state, pending requests first, then the
+/// sessions; the microphone starts voice. Refreshes on coming to the front, every 10 s while visible and on pull;
+/// in the background the app refresh keeps the cache current (`BackgroundRefresh`).
 struct DashboardView: View {
   @Environment(\.scenePhase) private var scenePhase
   let model: WatchModel
@@ -22,7 +23,7 @@ struct DashboardView: View {
         }
     }
     .task(id: scenePhase) {
-      // While visible: refresh now and every 10 s. Background refresh belongs to the complication.
+      // While visible: refresh now and every 10 s. In the background, `BackgroundRefresh` takes over.
       guard scenePhase == .active else { return }
       while !Task.isCancelled {
         await model.refreshNow()
@@ -95,30 +96,38 @@ struct DashboardView: View {
   }
 
   private var header: some View {
-    HStack(spacing: 10) {
-      WatchRingView(state: model.state, lineWidth: 6, numberSize: 26).frame(width: 62, height: 62)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(model.state?.activeLabel ?? "0 ativas").font(.system(size: 19, weight: .semibold))
-          .foregroundStyle(Color.watch(.textStrong))
-        if let attention = model.state?.attentionLabel {
-          Text(attention).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.watch(.accent))
-            .lineLimit(2).minimumScaleFactor(0.8)
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 10) {
+        WatchRingView(state: model.state, lineWidth: 6, numberSize: 26).frame(width: 62, height: 62)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(model.state?.activeLabel ?? "0 ativas").font(.system(size: 19, weight: .semibold))
+            .foregroundStyle(Color.watch(.textStrong))
+          if let attention = model.state?.attentionLabel {
+            Text(attention).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.watch(.accent))
+              .lineLimit(2).minimumScaleFactor(0.8).fixedSize(horizontal: false, vertical: true)
+          }
         }
+      }
+      if let fetched = model.entry?.fetched {
+        // Below the ring, across the width; re-rendered when `agora` turns into the relative age.
+        TimelineView(.periodic(from: fetched, by: WatchAge.fresh)) { context in
+          HStack(spacing: 3) {
+            Text("Atualizado")
+            WatchAgeText(fetched: fetched, now: context.date)
+          }
+          .font(.system(size: 12)).monospacedDigit().foregroundStyle(Color.watch(.textSecondary)).lineLimit(1)
+        }
+        .accessibilityIdentifier("watch-age")
       }
     }
     .padding(.vertical, 2)
     .accessibilityElement(children: .combine)
   }
 
+  /// The header already says how old the state is.
   private var offline: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Label("Mac indisponível", systemImage: "wifi.slash").font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(Color.watch(.warning))
-      if let fetched = model.entry?.fetched {
-        Text("Atualizado \(Text(.currentDate, format: AgentsText.ago(since: fetched)))").font(.system(size: 12))
-          .foregroundStyle(Color.watch(.textSecondary))
-      }
-    }
+    Label("Mac indisponível", systemImage: "wifi.slash").font(.system(size: 14, weight: .semibold))
+      .foregroundStyle(Color.watch(.warning))
   }
 }
 

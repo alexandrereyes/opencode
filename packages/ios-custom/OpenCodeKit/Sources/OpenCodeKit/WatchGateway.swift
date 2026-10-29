@@ -1,14 +1,24 @@
 import Foundation
 
+/// Who reads the gateway, sent as `X-Watch-Client` so the server can count complication reloads (each `widget`
+/// read is one) against the WidgetKit budget.
+public enum WatchReader: String, Sendable {
+  case app, background, widget
+}
+
 /// HTTP client of the watch gateway (`/watch/v1`). High-level `URLSession` only, so it also runs in the widget
 /// extension and needs no audio session on watchOS (TN3135).
 public struct WatchGatewayClient: Sendable {
   public let pairing: WatchPairing
+  public let reader: WatchReader
   private let session: URLSession
   private let userAgent: String
 
-  public init(pairing: WatchPairing, session: URLSession = WatchGatewayClient.makeSession(), version: String = "1") {
+  public init(pairing: WatchPairing, session: URLSession = WatchGatewayClient.makeSession(), version: String = "1",
+    reader: WatchReader = .app)
+  {
     self.pairing = pairing
+    self.reader = reader
     self.session = session
     // Cloudflare rejects some default agents with error 1010; the contract fixes a non-default one.
     userAgent = "OpenCodeWatch/\(version)"
@@ -27,7 +37,10 @@ public struct WatchGatewayClient: Sendable {
 
   public func ping() async throws -> WatchPing { try await send("GET", "ping", timeout: 8) }
 
-  public func state() async throws -> WatchStateSnapshot { try await send("GET", "state", timeout: 15) }
+  /// A background refresh has only a few seconds, so it passes a shorter `timeout`.
+  public func state(timeout: TimeInterval = 15) async throws -> WatchStateSnapshot {
+    try await send("GET", "state", timeout: timeout)
+  }
 
   public func request(_ requestID: String) async throws -> WatchRequest {
     try await send("GET", "requests/\(Self.escape(requestID))", timeout: 15)
@@ -120,6 +133,7 @@ public struct WatchGatewayClient: Sendable {
     request.setValue(pairing.access.clientId, forHTTPHeaderField: "CF-Access-Client-Id")
     request.setValue(pairing.access.clientSecret, forHTTPHeaderField: "CF-Access-Client-Secret")
     request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+    request.setValue(reader.rawValue, forHTTPHeaderField: "X-Watch-Client")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let body {
       request.httpBody = body

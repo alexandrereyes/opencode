@@ -63,6 +63,7 @@ export const registerWatch = Effect.fn("Watch.register")(function* (ctx: Plugin.
         ),
       devices: () => gateway.handlers.devices(),
       revoke: (input) => gateway.handlers.revoke(input),
+      stats: () => gateway.handlers.stats(),
     })
     .pipe(Effect.orDie)
   yield* gateway.join({

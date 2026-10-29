@@ -37,6 +37,7 @@ import WidgetKit
       connection = fixture.connection
       return
     }
+    if let injected = WatchFixture.injectedPairing { try? keychain.write(injected) }
     pairing = try? keychain.read()
     entry = cache.read()
     connection = pairing == nil ? .unpaired : .loading
@@ -58,31 +59,39 @@ import WidgetKit
   }
 
   func refresh() {
-    guard !fixture, let client else { return }
+    guard !fixture, client != nil else { return }
     refreshing?.cancel()
-    refreshing = Task { await self.load(client) }
+    refreshing = Task { await self.load(.app) }
   }
 
   func refreshNow() async {
-    guard !fixture, let client else { return }
-    await load(client)
+    guard !fixture, client != nil else { return }
+    await load(.app)
   }
 
-  private func load(_ client: WatchGatewayClient) async {
-    do {
-      let snapshot = try await client.state()
-      let changed = snapshot != entry?.snapshot
-      let entry = WatchStateCache.Entry(snapshot: snapshot, fetched: Date())
+  /// The background app refresh: the same read, with a short timeout, reloading the complication only when what it
+  /// draws changed (background reloads count against the WidgetKit budget; the app in front does not).
+  func refreshInBackground() async {
+    guard !fixture, client != nil else { return }
+    await load(.background)
+  }
+
+  private func load(_ reader: WatchReader) async {
+    guard let pairing else { return }
+    let client = WatchGatewayClient(pairing: pairing, version: Self.version, reader: reader)
+    let timeout = reader == .background ? WatchBackgroundRefresh.timeout : 15
+    switch await WatchStateSync(client: client, cache: cache, timeout: timeout).run() {
+    case .fetched(let entry, let changed, let redraw):
       self.entry = entry
-      cache.write(entry)
       connection = .online
-      if changed { WidgetCenter.shared.reloadTimelines(ofKind: WatchShared.widgetKind) }
+      if reader == .background ? redraw : changed { WidgetCenter.shared.reloadTimelines(ofKind: WatchShared.widgetKind) }
       await registerWidgetToken(client)
-    } catch is CancellationError {
-    } catch WatchGatewayError.unauthorized {
+    case .unauthorized:
       forget()
       connection = .unauthorized
-    } catch {
+    case .unreachable:
+      // A cancelled foreground refresh also lands here; the entry and the cache stay as they were.
+      guard !Task.isCancelled else { return }
       connection = .unreachable
     }
   }

@@ -3939,11 +3939,32 @@ watch's own Wi-Fi or cellular. The contract with the backend is
 - **Screens** (`OpenCodeWatch/`): Painel (ring, counts, pending requests first, sessions, Liquid Glass microphone,
   refresh every 10 s while visible and on pull), Responder (options with the recommended one first, dictation through
   `TextFieldLink`, permission decisions), Voz (CallKit call, live levels around the mascot, Sessão mestra line, last
-  two captions, mute and end), plus "Sem pareamento" and "Mac indisponível" with the last update. Colors are
-  `openchamber-dark` (`WatchPalette`, checked against the theme JSON by `WatchPaletteTests`).
+  two captions, mute and end), plus "Sem pareamento" and "Mac indisponível". Below the ring, `Atualizado agora` /
+  `Atualizado há N min.` says how old the state is (rev. 29/10). Colors are `openchamber-dark` (`WatchPalette`, checked
+  against the theme JSON by `WatchPaletteTests`).
 - **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
   mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
-  state in the same Keychain group and refreshes every 15 minutes, when the app updates it, and on WidgetKit push. The
+  state in the same Keychain group and reloads on WidgetKit push, when the app updates it, and otherwise every hour.
+- **Sync within the WidgetKit budget (rev. 29/10).** WidgetKit counts every complication reload outside the app in
+  front (push, timeline or background request) against one daily budget, 40 to 70 for a widget looked at often; the
+  server's 150 pushes a day plus a 15-minute timeline exhausted it, so only opening the app updated the complication.
+  Now `WatchStateSync` (OpenCodeKit) is the one read for the app, the background refresh and the complication: it
+  writes the shared cache and says whether anything changed and whether what the complication draws changed
+  (`WatchComplicationKey`: the ring's counts and the two totals). The app in front reloads on any change (not
+  budgeted); the **background app refresh** (`BackgroundRefresh` and `WatchAppDelegate` in `OpenCodeWatchApp.swift`,
+  `WatchBackgroundRefresh`: about every 30 minutes, an 8 s read, rescheduled after each run and whenever the app leaves
+  the screen) reloads only when the drawing changed; the timeline policy is 60 minutes. watchOS crashes the app on
+  `scheduleBackgroundRefresh` unless the application delegate implements `handle(_:)` (seen in the simulator: SwiftUI's
+  `.backgroundTask` alone is not enough), so a `WKApplicationDelegateAdaptor` receives every background task, completing
+  WatchConnectivity's only once nothing is pending. Every read sends `X-Watch-Client: app|background|widget`, which the gateway counts (`custom.watch` →
+  `stats`) and uses to skip pushes for a state the watch already read; the server pushes at once only for a new
+  question, permission or failure or for the active total reaching or leaving zero, folds the rest into one push per
+  30 minutes, and caps pushes at 40 a day ([`watch.md`](../plugin-app-custom/docs/watch.md), "Budget"). The
+  rectangular complication shows the age of the state next to `OpenCode` (`agora`, then `há N min.`; a second timeline
+  entry makes the switch without a reload); the circular and corner families have no room. DEBUG builds accept
+  `-OpenCodeWatchRefreshSeconds N` (a shorter refresh) and the `OpenCodeWatchPairing` default (base64 JSON pairing,
+  written with `simctl spawn … defaults write`) to watch a background refresh happen in the simulator; it needs a build
+  signed to run locally (`CODE_SIGN_IDENTITY=-`), since an unsigned one has no keychain entitlement. The
   push token comes only to an extension with `aps-environment` (rev. 28/10: it was missing, so WidgetKit never issued
   a token and no watch registered one). `WatchWidgetToken` saves it in the shared Keychain first, then posts it to
   `/watch/v1/widget-token` when paired; the extension's `WidgetPushHandler` and every app refresh call it, so a token

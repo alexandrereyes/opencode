@@ -5,7 +5,8 @@ import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
 import type { LiveActivity } from "../src/live-activity/rpc"
 import { devicesKey, makeDevices } from "../src/watch/devices"
-import { limits as widgetLimits, makeWidgetPush } from "../src/watch/widget"
+import { key, limits as widgetLimits, makeWidgetPush } from "../src/watch/widget"
+import { makeStats } from "../src/watch/stats"
 import { limits as gatewayLimits, redact } from "../src/watch/gateway"
 import { chunks, limits as voiceLimits, rejectsVoice } from "../src/watch/voice"
 import { limits as delegationLimits, parse } from "../src/watch/delegation"
@@ -481,32 +482,41 @@ const agents = (active: number, attention: number, failed: number): LiveActivity
   sessions: [],
 })
 
-it.effect("WidgetKit pushes: at most one per 2 minutes, at once when attention or failures rise", () =>
+/** A widget push planner for one paired watch with a widget token, recording what it hands to APNs. */
+const widgetSetup = Effect.fn("test.widgetSetup")(function* () {
+  const devices = makeDevices(storage())
+  const paired = yield* devices.pair("Apple Watch")
+  yield* devices.widget(paired.deviceID, { token: "ab12", environment: "production" })
+  const sent: Push[] = []
+  const answer: { value: Result } = { value: { status: "sent" } }
+  const stats = makeStats()
+  const widget = makeWidgetPush({
+    devices,
+    bundleID: "br.com.alexandrem.opencode.watchkitapp",
+    stats,
+    send: (push) =>
+      Effect.sync(() => {
+        sent.push(push)
+        return answer.value
+      }),
+  })
+  const run = (state: LiveActivity.AgentsState | null, now: number) =>
+    widget.evaluate(state, now).pipe(
+      Effect.tap((plan) => plan.deliver),
+      Effect.map((plan) => plan.wakeAt),
+    )
+  return { devices, paired, sent, answer, stats, widget, run }
+})
+
+it.effect("WidgetKit pushes: urgent changes at once, the rest folded into one per window, the final state kept", () =>
   Effect.gen(function* () {
-    const shared = storage()
-    const devices = makeDevices(shared)
-    const paired = yield* devices.pair("Apple Watch")
-    yield* devices.widget(paired.deviceID, { token: "ab12", environment: "production" })
-    const sent: Push[] = []
-    const answer: { value: Result } = { value: { status: "sent" } }
-    const widget = makeWidgetPush({
-      devices,
-      bundleID: "br.com.alexandrem.opencode.watchkitapp",
-      send: (push) =>
-        Effect.sync(() => {
-          sent.push(push)
-          return answer.value
-        }),
-    })
-    const run = (state: LiveActivity.AgentsState | null, now: number) =>
-      widget.evaluate(state, now).pipe(
-        Effect.tap((plan) => plan.deliver),
-        Effect.map((plan) => plan.wakeAt),
-      )
+    const { sent, run, stats, paired } = yield* widgetSetup()
+    const window = widgetLimits.coalesceMs
     // The first state after start is only recorded.
     yield* run(agents(1, 0, 0), T)
     expect(sent).toEqual([])
-    yield* run(agents(2, 1, 0), T + 1000)
+    // Nothing pushed yet, so a routine change goes at once.
+    yield* run(agents(2, 0, 0), T + 1000)
     expect(sent).toEqual([
       {
         token: "ab12",
@@ -518,18 +528,180 @@ it.effect("WidgetKit pushes: at most one per 2 minutes, at once when attention o
         bundleID: "br.com.alexandrem.opencode.watchkitapp",
       },
     ])
-    // Fewer or more active sessions inside the window wait for it.
-    expect(yield* run(agents(3, 1, 0), T + 2000)).toBe(T + 1000 + widgetLimits.spacingMs)
+    // More or fewer sessions inside the window wait for it.
+    expect(yield* run(agents(3, 0, 0), T + 2000)).toBe(T + 1000 + window)
     expect(sent).toHaveLength(1)
-    yield* run(agents(3, 1, 0), T + 1000 + widgetLimits.spacingMs)
+    // A new question goes at once, whatever the window.
+    yield* run(agents(3, 1, 0), T + 3000)
     expect(sent).toHaveLength(2)
-    yield* run(agents(3, 1, 1), T + 1000 + widgetLimits.spacingMs + 10)
+    // Answering it and a session ending are routine: they wait for one push a window after the last one.
+    expect(yield* run(agents(3, 0, 0), T + 4000)).toBe(T + 3000 + window)
+    expect(yield* run(agents(2, 0, 0), T + 5000)).toBe(T + 3000 + window)
+    expect(sent).toHaveLength(2)
+    // The wake-up delivers the final state, not each step.
+    yield* run(agents(2, 0, 0), T + 3000 + window)
     expect(sent).toHaveLength(3)
-    yield* run(agents(3, 1, 1), T + 10 * widgetLimits.spacingMs)
+    yield* run(agents(2, 0, 0), T + 3000 + 2 * window)
     expect(sent).toHaveLength(3)
+    // Reaching zero active sessions, and leaving zero, go at once.
+    yield* run(agents(0, 0, 0), T + 3000 + window + 1000)
+    expect(sent).toHaveLength(4)
+    yield* run(agents(1, 0, 0), T + 3000 + window + 2000)
+    expect(sent).toHaveLength(5)
+    // So does a new failure; its clearing waits.
+    yield* run(agents(1, 0, 1), T + 3000 + window + 3000)
+    expect(sent).toHaveLength(6)
+    yield* run(agents(1, 0, 0), T + 3000 + window + 4000)
+    expect(sent).toHaveLength(6)
+    expect(stats.snapshot(T + 3000 + window + 5000).devices).toEqual([
+      expect.objectContaining({
+        deviceID: paired.deviceID,
+        day: expect.objectContaining({ pushes: { urgent: 4, coalesced: 2, failed: 0 }, capped: 0 }),
+      }),
+    ])
+  }),
+)
+
+it.effect(
+  "WidgetKit pushes: a change the ring shows is routine, and a state the watch already read is not pushed",
+  () =>
+    Effect.gen(function* () {
+      const { sent, run, widget, paired } = yield* widgetSetup()
+      const window = widgetLimits.coalesceMs
+      yield* run(agents(2, 0, 0), T)
+      yield* run(agents(2, 1, 0), T + 1000)
+      expect(sent).toHaveLength(1)
+      // A session that finishes unread moves the ring's arcs without changing the totals.
+      const unread = { ...agents(2, 1, 0), counts: { ...agents(2, 1, 0).counts, working: 0, unread: 1 } }
+      expect(yield* run(unread, T + 2000)).toBe(T + 1000 + window)
+      // The watch reads it (background refresh or the app) before the window ends: nothing left to push.
+      widget.seen(paired.deviceID, unread)
+      expect(yield* run(unread, T + 1000 + window)).toBeUndefined()
+      expect(sent).toHaveLength(1)
+      // What the watch read is also the base of the next urgent check: no rise, no urgent push.
+      widget.seen(paired.deviceID, agents(2, 2, 0))
+      yield* run(agents(2, 2, 0), T + 1000 + window + 1000)
+      expect(sent).toHaveLength(1)
+      yield* run(agents(2, 3, 0), T + 1000 + window + 2000)
+      expect(sent).toHaveLength(2)
+    }),
+)
+
+it.effect(
+  "WidgetKit pushes: 40 a day, the last 10 kept for urgent changes, resumed when the day's first push leaves",
+  () =>
+    Effect.gen(function* () {
+      const { sent, run, stats } = yield* widgetSetup()
+      const window = widgetLimits.coalesceMs
+      yield* run(agents(1, 0, 0), T)
+      // 30 routine pushes, one per window.
+      for (let index = 0; index < widgetLimits.coalescedCap; index++)
+        yield* run(agents(2 + (index % 2), 0, 0), T + 1000 + index * window)
+      expect(sent).toHaveLength(widgetLimits.coalescedCap)
+      const first = T + 1000
+      const after = first + widgetLimits.coalescedCap * window
+      // The 31st routine change waits for the day's first push to leave the window…
+      expect(yield* run(agents(1, 0, 0), after)).toBe(first + widgetLimits.dayMs)
+      expect(sent).toHaveLength(widgetLimits.coalescedCap)
+      // …while urgent ones still go, up to 40.
+      for (let attention = 1; attention <= widgetLimits.dailyCap - widgetLimits.coalescedCap; attention++)
+        yield* run(agents(20, attention, 0), after + attention)
+      expect(sent).toHaveLength(widgetLimits.dailyCap)
+      expect(yield* run(agents(20, 11, 0), after + 100)).toBe(first + widgetLimits.dayMs)
+      yield* run(agents(20, 12, 0), after + 200)
+      expect(sent).toHaveLength(widgetLimits.dailyCap)
+      // Once the first push is a day old, the final state goes.
+      yield* run(agents(20, 12, 0), first + widgetLimits.dayMs)
+      expect(sent).toHaveLength(widgetLimits.dailyCap + 1)
+      expect(stats.snapshot(after + 300).devices[0]?.day.capped).toBe(2)
+    }),
+)
+
+it.effect("WidgetKit pushes: a failed push does not count and is retried; an invalid token is dropped", () =>
+  Effect.gen(function* () {
+    const { sent, run, answer, devices, stats } = yield* widgetSetup()
+    yield* run(agents(1, 0, 0), T)
+    answer.value = { status: "failed", reason: "HTTP 500" }
+    // Retried one window later even when nothing else changes.
+    expect(yield* run(agents(1, 1, 0), T + 1000)).toBe(T + 1000 + widgetLimits.coalesceMs)
+    expect(sent).toHaveLength(1)
+    answer.value = { status: "sent" }
+    yield* run(agents(1, 1, 0), T + 1000 + widgetLimits.coalesceMs)
+    expect(sent).toHaveLength(2)
+    expect(stats.snapshot(T + 1000 + widgetLimits.coalesceMs).devices[0]?.day.pushes).toEqual({
+      urgent: 1,
+      coalesced: 0,
+      failed: 1,
+    })
     answer.value = { status: "invalid", reason: "BadDeviceToken" }
-    yield* run(null, T + 20 * widgetLimits.spacingMs)
+    yield* run(null, T + 10 * widgetLimits.coalesceMs)
     expect((yield* devices.list())[0]?.widget).toBeUndefined()
+  }),
+)
+
+it.effect("/state counts each reader and tells the widget pushes what the watch has", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(T)
+    const sent: Push[] = []
+    const server = world()
+    const fixture = gateway({
+      server,
+      options: {
+        apns: Effect.succeed({
+          send: (push: Push) =>
+            Effect.sync((): Result => {
+              sent.push(push)
+              return { status: "sent" }
+            }),
+          close: Effect.void,
+        }),
+      },
+    })
+    fixture.state.value = agents(1, 0, 0)
+    yield* fixture.gateway.join({ ctx: server.ctx })
+    const paired = yield* fixture.gateway.handlers.pair({ deviceName: "Apple Watch" })
+    const read = (client?: string) =>
+      fixture.gateway.handle(
+        new Request("http://127.0.0.1/watch/v1/state", {
+          headers: {
+            authorization: `Bearer ${paired.deviceToken}`,
+            ...(client ? { "x-watch-client": client } : {}),
+          },
+        }),
+      )
+    const register = fixture.gateway.handle(
+      request("POST", "/widget-token", paired.deviceToken, { token: "abcd01", environment: "sandbox" }),
+    )
+    yield* register
+    yield* settled
+    // A new question the widget already read when it reloaded on its own: no push for it.
+    fixture.state.value = agents(2, 1, 0)
+    expect((yield* read("widget")).status).toBe(200)
+    yield* register
+    yield* settled
+    expect(sent).toEqual([])
+    expect(fixture.gateway.runtime.current?.widget?.memo.get(paired.deviceID)?.known).toEqual(key(agents(2, 1, 0)))
+    for (const client of ["app", "app", "background", undefined, "other"]) yield* read(client)
+    const stats = yield* fixture.gateway.handlers.stats()
+    expect(Schema.decodeUnknownSync(Watch.Stats)(stats)).toEqual(stats)
+    expect(stats.devices).toEqual([
+      {
+        deviceID: paired.deviceID,
+        day: {
+          state: { app: 2, background: 1, widget: 1, unknown: 2 },
+          pushes: { urgent: 0, coalesced: 0, failed: 0 },
+          capped: 0,
+        },
+        hours: [
+          {
+            hour: Math.floor(T / 3_600_000) * 3_600_000,
+            state: { app: 2, background: 1, widget: 1, unknown: 2 },
+            pushes: { urgent: 0, coalesced: 0, failed: 0 },
+            capped: 0,
+          },
+        ],
+      },
+    ])
   }),
 )
 
