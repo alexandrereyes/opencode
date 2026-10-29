@@ -8,7 +8,9 @@ struct SideQuestionLaunch: Identifiable {
   var submit = false
 }
 
-@MainActor @Observable private final class SideQuestionState {
+/// One side-question thread, shared by the iPhone sheet and the Mac's (`MacSideQuestionSheet`): local only,
+/// discarded on close, never part of the conversation.
+@MainActor @Observable final class SideQuestionState {
   var text: String
   var entries: [SideQuestionEntry] = []
   var pending: UUID?
@@ -62,6 +64,7 @@ struct SideQuestionLaunch: Identifiable {
   private enum SideQuestionError: Error { case empty }
 }
 
+#if os(iOS)
 struct SideQuestionSheet: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
@@ -208,8 +211,9 @@ struct SideQuestionSheet: View {
     state.ask(store: store)
   }
 }
+#endif
 
-private struct SideQuestionBubble: View {
+struct SideQuestionBubble: View {
   let text: String
   private var lines: [String] { text.components(separatedBy: "\n") }
   var body: some View {

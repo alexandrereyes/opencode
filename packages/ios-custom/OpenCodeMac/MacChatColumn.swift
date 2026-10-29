@@ -192,7 +192,13 @@ struct MacConversationView: View {
         .macCancelable()
       }
     }
-    .sheet(item: $conversation.sideQuestion) { launch in MacSideQuestionSheet(store: conversation, launch: launch) }
+    .sheet(item: $runtime.sideQuestion) { launch in MacSideQuestionSheet(store: conversation, launch: launch) }
+    .onChange(of: conversation.sideQuestion?.id, initial: true) { _, _ in
+      // `/btw` sets the conversation, which every window showing it shares: the window it was typed in asks.
+      guard let launch = conversation.sideQuestion, runtime.window?.isKeyWindow != false else { return }
+      conversation.sideQuestion = nil
+      runtime.askSideQuestion(text: launch.text, submit: launch.submit)
+    }
     .onChange(of: conversation.reversion.boundary(conversation.session)) { _, _ in conversation.updateActivity() }
     .onChange(of: search.query) { _, _ in
       search.cancelPaging()
@@ -290,6 +296,7 @@ struct MacConversationView: View {
       context.openPath = { path in openFile(path) }
       context.revert = { message in revertCandidate = message }
       context.comment = { quote in commenting = quote }
+      context.sideQuestion = { text in runtime.askSideQuestion(quote: text) }
       context.openImage = { image, name, source in
         let directory = conversation.session?.location.directory
         MacImageWindow.show(MacViewedImage(image: image, name: name, original: { [client = sessions.client] in
@@ -616,68 +623,5 @@ struct MacQuoteCommentSheet: View {
       draft.focused = true
     }
     dismiss()
-  }
-}
-
-/// `/btw`: a side question about the conversation, answered without saving it there.
-private struct MacSideQuestionSheet: View {
-  @Environment(\.appTheme) private var theme
-  @Environment(\.dismiss) private var dismiss
-  let store: ConversationStore
-  let launch: SideQuestionLaunch
-  @State private var question = ""
-  @State private var entries: [SideQuestionEntry] = []
-  @State private var asking = false
-  @State private var error: String?
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        Text("Pergunta paralela").appFont(.heading, weight: .semibold)
-        Spacer()
-        Button("Fechar") { dismiss() }.keyboardShortcut(.cancelAction)
-      }
-      Text("Não fica salva na conversa.").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-      ScrollView {
-        VStack(alignment: .leading, spacing: 14) {
-          ForEach(entries) { entry in
-            Text(entry.question).appFont(.secondary, weight: .medium)
-            Text((try? AttributedString(markdown: entry.answer,
-              options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(entry.answer))
-              .textSelection(.enabled)
-          }
-          if asking { ProgressView().controlSize(.small) }
-          if let error { Text(error).foregroundStyle(theme.color(.error)).appFont(.caption) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      HStack {
-        TextField("Pergunte algo sem interromper a conversa…", text: $question).textFieldStyle(.roundedBorder).autocorrectionDisabled()
-          .onSubmit(ask)
-        Button("Perguntar", action: ask).disabled(asking || question.trimmingCharacters(in: .whitespaces).isEmpty)
-      }
-    }
-    .padding(20).frame(width: 560, height: 480)
-    .onAppear {
-      question = launch.text
-      if launch.submit { ask() }
-    }
-  }
-
-  private func ask() {
-    let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty, !asking else { return }
-    asking = true
-    error = nil
-    question = ""
-    Task {
-      defer { asking = false }
-      do {
-        let answer = try await store.askSideQuestion(SideQuestionRequest(question: text, history: entries))
-        entries.append(SideQuestionEntry(question: text, answer: answer))
-      } catch {
-        self.error = "Não foi possível responder. \(error.localizedDescription)"
-        question = text
-      }
-    }
   }
 }

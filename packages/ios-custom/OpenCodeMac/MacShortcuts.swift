@@ -64,6 +64,7 @@ struct MacShortcut: Identifiable {
   // Conversa
   static let find = MacShortcut(.conversation, "Buscar na conversa", "f")
   static let model = MacShortcut(.conversation, "Trocar modelo e esforço", "m", [.option, .command])
+  static let sideQuestion = MacShortcut(.conversation, "Pergunta paralela", "b", [.option, .command])
   // MacComposerText: Return sends, Shift+Return breaks the line, ⌃⌥Space dictates; MacDictationKey: right Option.
   static let send = MacShortcut(.conversation, "Enviar", caps: ["↩"])
   static let newline = MacShortcut(.conversation, "Nova linha", caps: ["⇧", "↩"])
@@ -84,7 +85,7 @@ struct MacShortcut: Identifiable {
   static let all: [MacShortcut] = [
     search, newSession, newWindow, reload, compose, settings, shortcuts, searchNext, searchPrevious,
     numbered, previous, next, back, master, fromThis, rename, pin, archive, delete, selectAll,
-    find, model, send, newline, dictationKey, dictationEditor, createSession, copyImage,
+    find, model, sideQuestion, send, newline, dictationKey, dictationEditor, createSession, copyImage,
     context, files, previousFile, nextFile, sidebar, proxy,
   ]
 

@@ -49,13 +49,6 @@ typealias TranscriptViewController = MacTranscriptController
   func removeAll() { entries.removeAll() }
 }
 
-/// `/btw` asks a side question that is not saved to the conversation.
-struct SideQuestionLaunch: Identifiable {
-  let id = UUID()
-  let text: String
-  var submit = false
-}
-
 #if DEBUG
 /// The iPhone's opening probe measures UIKit frames; the Mac records nothing.
 enum ConversationOpeningMetrics {
