@@ -80,12 +80,13 @@ public struct ComposerSources: Sendable {
   public func suggestions(
     _ trigger: ComposerTrigger, agents: [AgentInfo] = [],
     files: [ComposerFile] = [], sessions: [Session] = [], apps: [ComposerApp] = [],
-    current: String = "", server: String = "", directory: String = "", project: String? = nil
+    current: String = "", server: String = "", directory: String = "", project: String? = nil,
+    master: String? = nil, now: Date = .now
   ) -> [ComposerSuggestion] {
     let query = normalize(trigger.query)
     let items = candidates(
       trigger.character, agents: agents, files: files, sessions: sessions, apps: apps,
-      current: current, server: server, directory: directory, project: project
+      current: current, server: server, directory: directory, project: project, master: master, now: now
     )
     let ranked = items.enumerated().compactMap { index, item in
       rank(item, query: query).map { (item: item, rank: $0, index: index) }
@@ -109,7 +110,8 @@ public struct ComposerSources: Sendable {
   private func normalize(_ value: String) -> String { TextFolding.fold(value) }
   private func candidates(
     _ character: String, agents: [AgentInfo], files: [ComposerFile], sessions: [Session],
-    apps: [ComposerApp], current: String, server: String, directory: String, project: String?
+    apps: [ComposerApp], current: String, server: String, directory: String, project: String?,
+    master: String?, now: Date
   ) -> [ComposerSuggestion] {
     switch character {
     case "&":
@@ -122,12 +124,14 @@ public struct ComposerSources: Sendable {
             value: (directory.hasSuffix("/") ? directory : directory + "/") + $0.path))
       }
     case "@":
-      return sessions.filter {
-          $0.id != current && $0.parentID == nil
-        }.map {
+      let roots = sessions.filter { $0.id != current && $0.parentID == nil }
+      let titles = Dictionary(grouping: roots) { normalize($0.title ?? $0.id) }.mapValues(\.count)
+      return roots.map {
           let title = $0.title ?? $0.id
           return .init(
-            section: "Sessões", title: title, icon: "bubble",
+            section: "Sessões", title: title,
+            subtitle: sessionDetail($0, master: master, repeated: titles[normalize(title), default: 0] > 1, now: now),
+            icon: "bubble",
             token:
               .init(
                 kind: .session, id: $0.id, text: "@\(title)",
@@ -201,6 +205,14 @@ public struct ComposerSources: Sendable {
     default: return []
     }
   }
+  /// Marks the current master and tells apart sessions sharing a title, like the Sessões rows: directory and age.
+  private func sessionDetail(_ session: Session, master: String?, repeated: Bool, now: Date) -> String {
+    let directory = session.location.directory.split(separator: "/").last.map(String.init) ?? session.location.directory
+    return [
+      session.id == master ? "Mestra atual" : nil,
+      repeated ? directory + " · " + SessionList.relativeTime(session.time.updated, now: now).label : nil,
+    ].compactMap { $0 }.joined(separator: " · ")
+  }
   private func skill(_ item: ComposerSkill, prefix: String) -> ComposerSuggestion {
     .init(
       section: "Skills", title: "\(prefix)\(item.name)", subtitle: item.description ?? "",
@@ -238,16 +250,7 @@ extension OpenCodeClient {
     let variants = ComposerSources.caseVariants(search)
     let lists = try await withThrowingTaskGroup(of: (Int, [Session]).self) { group in
       for (index, variant) in variants.enumerated() {
-        group.addTask {
-          let response: DataResponse<[Session]> = try await self.get(
-            "/api/session",
-            query: [
-              .init(name: "parentID", value: "null"), .init(name: "order", value: "desc"),
-              .init(name: "limit", value: variant.isEmpty ? "10" : "30"),
-            ]
-              + (variant.isEmpty ? [] : [.init(name: "search", value: variant)]))
-          return (index, response.data)
-        }
+        group.addTask { (index, try await self.liveRootSessions(variant)) }
       }
       return try await group.reduce(into: [[Session]](repeating: [], count: variants.count)) {
         $0[$1.0] = $1.1
@@ -257,5 +260,31 @@ extension OpenCodeClient {
     var seen = Set<String>()
     return lists.flatMap { $0 }.filter { seen.insert($0.id).inserted }
       .sorted { $0.time.updated > $1.time.updated }
+  }
+  /// The session list has no archive filter, so archived roots are dropped here and further full pages are read
+  /// (at most four) until enough live sessions arrive: archived masters would otherwise fill the page.
+  func liveRootSessions(_ search: String) async throws -> [Session] {
+    struct Page: Decodable {
+      let data: [Session]
+      let cursor: Cursor
+      struct Cursor: Decodable { let next: String? }
+    }
+    let wanted = search.isEmpty ? 10 : 30
+    var live: [Session] = []
+    var cursor: String?
+    for _ in 0..<4 {
+      let page: Page = try await get(
+        "/api/session",
+        query: [
+          .init(name: "parentID", value: "null"), .init(name: "order", value: "desc"), .init(name: "limit", value: "50"),
+        ]
+          + (search.isEmpty ? [] : [.init(name: "search", value: search)])
+          + (cursor.map { [.init(name: "cursor", value: $0)] } ?? []))
+      live += page.data.filter { $0.time.archived == nil }
+      // The server returns a next cursor even after a short, final page.
+      guard live.count < wanted, page.data.count >= 50, let next = page.cursor.next, next != cursor else { break }
+      cursor = next
+    }
+    return Array(live.prefix(wanted))
   }
 }

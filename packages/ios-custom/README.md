@@ -708,8 +708,22 @@ results are merged by recency; accents are still matched as typed there ("sessao
 composer does the same in `composer/session-search.ts`.
 
 After `build-for-testing`, `script/test-composer-case.py` (same environment variables as `test-app-mentions.py`)
-creates a fake repository, two disposable Sessions and one snippet, runs `ComposerCaseUITests` (`&`, `@`, `$`, `#`,
+creates a fake repository, five disposable Sessions and one snippet, runs `ComposerCaseUITests` (`&`, `@`, `$`, `#`,
 `/` in several cases, then Return on `#COMMIT`) and removes them.
+
+### Session mentions — 29 October
+
+**Alexandre, 29/10: o `@` listava cinco "Sessão mestra" iguais (a atual, três mestras e uma sessão arquivadas).**
+Session suggestions now skip archived sessions, on iOS and on the Mac (both use `ConversationStore.suggestions`).
+`GET /api/session` has no archive filter, so `composerSessions` reads root pages of 50 newest first, drops archived
+ones and reads up to four pages until 10 recent (30 when searching) live sessions remain; each case variant pages on
+its own. The current master (`masterSessions.local`) stays mentionable, because another session may need what was
+decided there, and shows "Mestra atual"; inside the master it is the current session and is hidden as before.
+Sessions sharing a title (case- and accent-folded) show the directory's last component and the compact age of their
+last update, as in the Sessões rows (`opencode2 · 3h`); unique titles show nothing extra. The session switcher and
+the Mac search read the navigation list and the archive separately, and are unchanged.
+`ComposerCaseUITests/testSessionMentionsSkipArchivedAndTellRepeatedTitlesApart` covers it with an archived session
+and two "Gemea Repetida" in different directories.
 
 ### Files on `&` — 28 October
 
