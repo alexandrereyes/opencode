@@ -42,9 +42,16 @@ scenarios = {
     "granted": {"text": "Olha essa página", "screen": "front"},
     "display": {"text": "Olha minha tela toda", "screen": "display"},
     "missing": {"text": "Olha o simulador", "screen": "app", "screen_app": "Simulator"},
+    # The two phrases of 29/10, delegated by GPT Live as plain text without "screen".
+    "question": "Você está vendo a minha tela aí?",
+    "follow": "Não, vai lá na Mestra que você consegue",
 }
+# The fake system each scenario runs against (front app, windows, permission) and what Alexandre said first.
+systems = {"question": "granted", "follow": "own"}
+speech = {"question": " Você está vendo a minha tela aí?",
+    "follow": " Você está vendo a minha tela aí? Não, vai lá na Mestra que você consegue"}
 expected = {"own": "sent:", "first": "sent:", "denied": "sent:", "granted": "sent:", "display": "sent:",
-    "missing": "refused:appNotRunning"}
+    "missing": "refused:appNotRunning", "question": "sent:", "follow": "sent:"}
 
 
 def api(path, body=None, method="POST"):
@@ -115,8 +122,10 @@ with tempfile.TemporaryDirectory(prefix="mac-voice-screen-", dir=evidence) as te
             command = ["open", "-g", "-n", "--env", "OPENCODE_SERVER_PASSWORD=" + password,
                 "--stdout", str(log), "--stderr", str(log), str(copy), "--args",
                 "-OpenCodeServerURL", server, "-OpenCodeVoiceScreenFixture",
-                "-OpenCodeVoiceScreenDelay", "2", "-OpenCodeVoiceScreenJSON", json.dumps(scenarios[name], ensure_ascii=False),
-                "-OpenCodeMacVoiceScreenCheck", name, "-OpenCodeMacVoiceScreenSession", session,
+                "-OpenCodeVoiceScreenDelay", "2", "-OpenCodeVoiceScreenJSON",
+                scenarios[name] if isinstance(scenarios[name], str) else json.dumps(scenarios[name], ensure_ascii=False),
+                *(["-OpenCodeVoiceScreenSpeech", speech[name]] if name in speech else []),
+                "-OpenCodeMacVoiceScreenCheck", systems.get(name, name), "-OpenCodeMacVoiceScreenSession", session,
                 "-OpenCodeMacVoiceScreenEvidence", str(evidence)]
             subprocess.run(command, check=True)
             executable = str(copy / "Contents/MacOS/OpenCodeMac")

@@ -67,8 +67,13 @@ import UIKit
     let id: String
     let request: VoiceMasterRequest
     let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>?
+    /// The app added the capture because Alexandre talked about the screen; a failed capture still sends the text.
+    let inferred: Bool
   }
   @ObservationIgnored private var delegationQueue: [Delegation] = []
+  /// Transcript pieces of what Alexandre said since the previous delegation (at most 45 s), to recognize a request about the screen
+  /// that GPT Live delegated without `"screen"`.
+  @ObservationIgnored private var recentSpeech: [(at: Double, text: String)] = []
   @ObservationIgnored private weak var sessions: SessionStore?
   /// The target GPT Live asked for and the conversation open on the iPhone (the Mac reads its own window's).
   @ObservationIgnored private var captureScreen: @MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal)
@@ -141,7 +146,7 @@ import UIKit
     epoch = token; sessionID = token; ready = false; mediaConnected = false
     recovery = VoiceRecovery(policy: policy); alert = nil
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
-    handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false
+    handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false; recentSpeech = []
     state.apply(.start); detail = "Preparando o microfone"; publish()
     inputItemID = nil; outputItemID = nil; interruptedAssistant = false; interruptedUser = false; capturedTurns = []
     #if DEBUG
@@ -180,6 +185,14 @@ import UIKit
         defer { UIApplication.shared.endBackgroundTask(background) }
         #endif
         guard let self, epoch == token else { return }
+        // What Alexandre said before GPT Live delegated, as the transcript pieces the real call sends.
+        if let speech = arguments.firstIndex(of: "-OpenCodeVoiceScreenSpeech").flatMap({
+          arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
+        }), let data = try? JSONEncoder().encode(JSONValue.object(["type": .string("input_transcript.added"),
+          "item": .object(["id": .string("fixture-speech"), "text": .string(speech)])])),
+          let event = try? VoiceProtocol.decode(data) {
+          handle(event)
+        }
         handle(.delegation(id: "fixture-screen-" + UUID().uuidString,
           text: arguments.firstIndex(of: "-OpenCodeVoiceScreenJSON").flatMap {
             arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
@@ -404,6 +417,7 @@ import UIKit
     case .ready: ready = true; if mediaConnected { connected() }
     case .input(let piece):
       inputItemID = piece.id ?? inputItemID
+      recentSpeech.append((ProcessInfo.processInfo.systemUptime, piece.text))
       if state.phase == .speaking { interruptedAssistant = true }
       VoiceTransport.log.notice("phase=input-transcript")
       state.apply(.bargeIn); userUntil = ProcessInfo.processInfo.systemUptime + 2
@@ -426,11 +440,18 @@ import UIKit
         Task { await fail("Há pedidos demais nesta chamada. Reconecte para continuar.") }; return
       }
       handled.insert(id)
-      let request = VoiceMasterRequest(text)
+      let asked = VoiceMasterRequest(text)
+      let now = ProcessInfo.processInfo.systemUptime
+      // Transcript pieces carry their own spacing; they arrive while he speaks, before the delegation.
+      let heard = recentSpeech.filter { now - $0.at <= 45 }.map(\.text).joined() + " " + asked.text
+      recentSpeech = []
+      // GPT Live sometimes delegates a question about the screen as plain text; the app attaches it anyway.
+      let inferred = asked.screen == nil && VoiceScreenIntent.mentionsScreen(heard)
+      let request = inferred ? VoiceMasterRequest(text: asked.text, delivery: asked.delivery, screen: .front) : asked
       // Captured now, before awaiting earlier delegations: the screen GPT Live was asked about.
       let current = sessions?.currentSessionID
       let screen = request.screen.map { target in screenTask(target, sessionID: current) }
-      delegationQueue.append(Delegation(id: id, request: request, screen: screen))
+      delegationQueue.append(Delegation(id: id, request: request, screen: screen, inferred: inferred))
       if delegationTask == nil { delegationTask = Task { await pumpDelegations() } }
     case .ignored: break
     }
@@ -457,9 +478,14 @@ import UIKit
       let delegation = delegationQueue.removeFirst()
       currentDelegation = delegation.id
       var screen: VoiceScreenShot?
+      var request = delegation.request
       if let capture = delegation.screen {
         switch await capture.value {
         case .success(let shot): screen = shot
+        case .failure(let refusal) where delegation.inferred:
+          // Not asked explicitly: the request still goes, and the master learns why there is no picture.
+          request = VoiceMasterRequest(text: request.text + "\n\n[O app tentou anexar a tela, mas não conseguiu: "
+            + refusal.reason + "]", delivery: request.delivery, screen: nil)
         case .failure(let refusal):
           guard epoch == token else { return }
           refuseScreen(refusal)
@@ -469,7 +495,7 @@ import UIKit
       }
       state.masterWorking = true; detail = "Enviando à Sessão mestra…"; publish()
       do {
-        try await master?.ask(delegation.request, screen: screen)
+        try await master?.ask(request, screen: screen)
         if let notice = screen?.notice { announceScreen(notice) }
         #if DEBUG
         if let screen { screenOutcome = "sent:\(screen.jpeg.count):\(screen.sessionID ?? "-")" + (screen.notice == nil ? "" : ":notice") }

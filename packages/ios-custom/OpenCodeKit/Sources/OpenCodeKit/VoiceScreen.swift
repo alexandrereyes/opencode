@@ -64,6 +64,31 @@ public enum VoiceScreenRefusal: Error, Equatable, Sendable, LocalizedError {
   }
 }
 
+extension VoiceScreenRefusal {
+  /// The reason alone, for a note to the master when an inferred capture failed and the text went anyway.
+  public var reason: String {
+    (errorDescription ?? "").replacingOccurrences(of: " Nada foi enviado à Sessão mestra.", with: "")
+  }
+}
+
+/// Whether Alexandre is talking about what is on screen, so a delegation GPT Live sent without `"screen"` still
+/// carries the capture. Speech since the previous delegation counts too: "Pergunta pra Mestra" right after
+/// "tá vendo minha tela?" is about the screen.
+public enum VoiceScreenIntent {
+  private static let patterns = [
+    #"\btelas?\b"#, #"\bscreen(shot)?s?\b"#, #"\bprints?\b"#, #"\bcaptura(r)?\b"#, #"\bjanelas?\b"#,
+    #"\bpaginas?\b"#, #"\bisso aqui\b"#, #"\bisto aqui\b"#, #"\bolha (aqui|isso|isto|so|essa|esse|ai|la)\b"#,
+    #"\b(ve|ver|vendo|veja|vejo|enxerga|enxergando) (isso|isto|aqui|essa|esse|o que)\b"#,
+    #"\bo que (voce |vc |ce )?acha diss[oa]\b"#, #"\bque erro e esse\b"#, #"\bo que (ta|esta) aparecendo\b"#,
+  ].map { try! NSRegularExpression(pattern: $0) }
+
+  public static func mentionsScreen(_ text: String) -> Bool {
+    let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "pt_BR"))
+    let range = NSRange(folded.startIndex..., in: folded)
+    return patterns.contains { $0.firstMatch(in: folded, range: range) != nil }
+  }
+}
+
 public enum VoiceScreenAccess {
   /// Only the app's own window, while it is in front and unlocked; never another app.
   public static func refusal(appActive: Bool, protectedDataAvailable: Bool) -> VoiceScreenRefusal? {

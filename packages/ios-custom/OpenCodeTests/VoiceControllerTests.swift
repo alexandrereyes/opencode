@@ -468,6 +468,67 @@ private actor LiveMemoryHTTP {
     await controller.end()
   }
 
+  /// The two phrases of 29/10: GPT Live delegated without `"screen"`. The app still sends the capture.
+  func testScreenQuestionsDelegatedAsPlainTextStillCarryTheCapture() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    var targets: [VoiceScreenTarget] = []
+    let controller = screenController(transport, master, http) { target, id throws(VoiceScreenRefusal) in
+      targets.append(target); return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 5]), sessionID: id)
+    }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    func say(_ text: String) {
+      let piece = try! JSONEncoder().encode(JSONValue.object(["type": .string("input_transcript.added"),
+        "item": .object(["id": .string(UUID().uuidString), "text": .string(text)])]))
+      transport.event?(.data(piece))
+    }
+    func delegate(_ id: String, _ text: String) async {
+      let asked = expectation(description: id)
+      master.asked = { asked.fulfill() }
+      let event = try! JSONEncoder().encode(JSONValue.object(["type": .string("delegation.created"), "item": .object([
+        "type": .string("delegation"), "target": .string("client"), "id": .string(id),
+        "content": .array([.object(["type": .string("input_text"), "text": .string(text)])])])]))
+      transport.event?(.data(event))
+      await fulfillment(of: [asked], timeout: 3)
+    }
+    // A question about the screen, delegated as it was said.
+    say(" Você está vendo a minha tela aí?")
+    await delegate("q1", "Você está vendo a minha tela aí?")
+    // A question GPT Live answered itself, then a follow-up that does not name the screen.
+    say(" Você está vendo a minha tela aí?")
+    say(" Não, vai lá na Mestra que você consegue")
+    await delegate("q2", "Não, vai lá na Mestra que você consegue")
+    // Unrelated: no capture.
+    say(" Cria uma sessão no abacato")
+    await delegate("q3", "Cria uma sessão no abacato")
+    XCTAssertEqual(targets, [.front, .front])
+    XCTAssertEqual(master.requests.map(\.screen), [.front, .front, nil])
+    XCTAssertEqual(master.requests.map(\.text), ["Você está vendo a minha tela aí?",
+      "Não, vai lá na Mestra que você consegue", "Cria uma sessão no abacato"])
+    XCTAssertEqual(master.screens.map { $0 != nil }, [true, true, false])
+    await controller.end()
+  }
+
+  func testInferredCaptureThatFailsStillSendsTheTextWithTheReason() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    let controller = screenController(transport, master, http) { _, _ throws(VoiceScreenRefusal) in throw .background }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    let asked = expectation(description: "asked")
+    master.asked = { asked.fulfill() }
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"q4","content":[{"type":"input_text","text":"Tá conseguindo ver minha tela"}]}}"#.utf8)))
+    await fulfillment(of: [asked], timeout: 3)
+    XCTAssertEqual(master.requests.first?.text,
+      "Tá conseguindo ver minha tela\n\n[O app tentou anexar a tela, mas não conseguiu: " + VoiceScreenRefusal.background.reason + "]")
+    XCTAssertNil(master.requests.first?.screen)
+    XCTAssertNil(master.screens.first!)
+    await controller.end()
+  }
+
   func testRefusedScreenReachesOnlyGPTLiveWithAClearReason() async throws {
     let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
     let controller = screenController(transport, master, http) { _, _ throws(VoiceScreenRefusal) in throw .background }
