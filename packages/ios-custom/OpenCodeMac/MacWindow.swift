@@ -180,7 +180,7 @@ private struct MacColumnDivider: View {
   var body: some View {
     Rectangle().fill(theme.color(.border)).frame(width: 1)
       .overlay {
-        MacColumnGrip { translation in
+        MacColumnGrip(highlight: theme.nsColor(.primary)) { translation in
           // A width remembered from a wider window starts the drag from what is shown.
           let origin = start ?? min(max(width, range.lowerBound), range.upperBound)
           start = origin
@@ -189,7 +189,9 @@ private struct MacColumnDivider: View {
           start = nil
           ended(width)
         }
-        .frame(width: 13)
+        .frame(width: 15)
+        // The hosting view sets the pointer over its content; this keeps it a resize pointer over the grip.
+        .pointerStyle(.columnResize)
       }
       // Above Contexto, which the grip's right half overlaps.
       .zIndex(1)
@@ -199,7 +201,9 @@ private struct MacColumnDivider: View {
 
 /// The divider's grab area, in AppKit: the transcript and Contexto's scroll views are AppKit views, which win hit
 /// testing and cursor updates over a SwiftUI shape, so a SwiftUI grab area beside them was mostly unreachable.
+/// Hovering or dragging it shows a 3-pt line in the theme's primary color, so the grab area is visible.
 private struct MacColumnGrip: NSViewRepresentable {
+  let highlight: NSColor
   let changed: (Double) -> Void
   let ended: () -> Void
 
@@ -207,34 +211,76 @@ private struct MacColumnGrip: NSViewRepresentable {
   func updateNSView(_ view: Grip, context: Context) {
     view.changed = changed
     view.ended = ended
+    view.line.layer?.backgroundColor = highlight.cgColor
+  }
+
+  final class Line: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
   }
 
   final class Grip: NSView {
     var changed: (Double) -> Void = { _ in }
     var ended: () -> Void = {}
+    let line = Line()
     private var origin: CGFloat?
+    private var hovered = false
+
+    override init(frame: NSRect) {
+      super.init(frame: frame)
+      line.wantsLayer = true
+      line.alphaValue = 0
+      addSubview(line)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+      line.frame = NSRect(x: bounds.midX - 1.5, y: 0, width: 3, height: bounds.height)
+    }
 
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func updateTrackingAreas() {
       super.updateTrackingAreas()
       trackingAreas.forEach(removeTrackingArea)
-      addTrackingArea(NSTrackingArea(rect: .zero, options: [.cursorUpdate, .activeInActiveApp, .inVisibleRect],
-        owner: self))
+      addTrackingArea(NSTrackingArea(rect: .zero,
+        options: [.cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect], owner: self))
     }
     override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
-    override func mouseDown(with event: NSEvent) { origin = event.locationInWindow.x }
+    override func mouseEntered(with event: NSEvent) {
+      hovered = true
+      NSCursor.resizeLeftRight.set()
+      refresh()
+    }
+    // Views around the grip set their own pointer as the mouse moves.
+    override func mouseMoved(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func mouseExited(with event: NSEvent) {
+      hovered = false
+      if origin == nil { NSCursor.arrow.set() }
+      refresh()
+    }
+    override func mouseDown(with event: NSEvent) {
+      origin = event.locationInWindow.x
+      refresh()
+    }
     override func mouseDragged(with event: NSEvent) {
       guard let origin else { return }
-      // Views the pointer crosses while dragging would set their own cursor.
       NSCursor.resizeLeftRight.set()
       changed(event.locationInWindow.x - origin)
     }
     override func mouseUp(with event: NSEvent) {
       guard origin != nil else { return }
       origin = nil
+      if !hovered { NSCursor.arrow.set() }
+      refresh()
       ended()
+    }
+
+    private func refresh() {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.12
+        line.animator().alphaValue = hovered || origin != nil ? 1 : 0
+      }
     }
   }
 }

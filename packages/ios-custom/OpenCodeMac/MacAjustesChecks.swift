@@ -282,19 +282,21 @@ import SwiftUI
     }
   }
 
-  /// The chat | Contexto divider: the pointer 6 pt either side of the hairline reaches its grip, over the
-  /// transcript and over Contexto, and dragging it 80 pt left widens Contexto by 80 pt.
+  /// The chat | Contexto divider: the pointer 7 pt either side of the hairline reaches its grip at every height,
+  /// over the transcript, the composer and Contexto, and dragging it 80 pt left widens Contexto by 80 pt.
   private static func divider(window: NSWindow, runtime: MacWindowRuntime) async throws {
     let grip = try await wait("a alça do divisor") {
       views(window).first { String(describing: type(of: $0)) == "Grip" && $0.window != nil && $0.bounds.width > 0 }
     }
     let root = try require(window.contentView?.superview, "a raiz da janela")
-    let center = grip.convert(CGPoint(x: grip.bounds.midX, y: grip.bounds.midY), to: nil)
-    for offset in [-6.0, -3, 0, 3, 6] {
-      let point = CGPoint(x: center.x + offset, y: center.y)
-      let hit = root.hitTest(root.convert(point, from: nil))
-      guard hit === grip else {
-        throw Failure(description: "a \(Int(offset)) pt da linha o clique vai para \(hit.map { type(of: $0) }.map(String.init(describing:)) ?? "nada")")
+    let frame = grip.convert(grip.bounds, to: nil)
+    let center = CGPoint(x: frame.midX, y: frame.midY)
+    for y in stride(from: frame.minY + 4, to: frame.maxY - 4, by: 30) {
+      for offset in [-7.0, -3, 0, 3, 7] {
+        let hit = root.hitTest(root.convert(CGPoint(x: center.x + offset, y: y), from: nil))
+        guard hit === grip else {
+          throw Failure(description: "a \(Int(offset)) pt da linha, na altura \(Int(y)), o clique vai para \(hit.map { type(of: $0) }.map(String.init(describing:)) ?? "nada")")
+        }
       }
     }
     let before = runtime.contextWidth
