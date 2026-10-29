@@ -1,5 +1,5 @@
-import { hexToOklch, oklchToHex } from "../../ui-custom/src/theme/color"
-import type { HexColor } from "../../ui-custom/src/theme/types"
+import { hexToOklch, oklchToHex } from "./theme/color"
+import type { HexColor } from "./theme/types"
 
 export function luminance(hex: string) {
   const components = [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255)

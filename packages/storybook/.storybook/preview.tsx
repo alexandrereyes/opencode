@@ -1,4 +1,4 @@
-import "../../app-custom/src/index.css"
+import "../../app/src/index.css"
 
 import { createEffect, onCleanup, onMount } from "solid-js"
 import addonA11y from "@storybook/addon-a11y"
@@ -7,11 +7,12 @@ import { MetaProvider } from "@solidjs/meta"
 import { addons } from "storybook/preview-api"
 import { GLOBALS_UPDATED } from "storybook/internal/core-events"
 import { createJSXDecorator, definePreview } from "storybook-solidjs-vite"
-import { DialogProvider } from "@opencode/ui-custom/context/dialog"
-import { MarkedProvider } from "@opencode/ui-custom/context/marked"
-import { ThemeProvider, useTheme, type ColorScheme } from "@opencode/ui-custom/theme"
-import { Font } from "@opencode/ui-custom/font"
+import { DialogProvider } from "@opencode/ui/context/dialog"
+import { MarkedProvider } from "@opencode/ui/context/marked"
+import { ThemeProvider, useTheme, type ColorScheme } from "@opencode/ui/theme"
+import { Font } from "@opencode/ui/font"
 import { LanguageProvider, UiI18nBridge, useLanguage } from "@/runtime/i18n/language"
+import { ExtensionStory } from "./extension"
 
 function resolveScheme(value: unknown): ColorScheme {
   if (value === "light" || value === "dark" || value === "system") return value
@@ -86,7 +87,9 @@ const frame = createJSXDecorator((Story, context) => {
                     color: "var(--text-base)",
                   }}
                 >
-                  <Story />
+                  <ExtensionStory file={context.parameters?.fileName}>
+                    <Story />
+                  </ExtensionStory>
                 </div>
               </MarkedProvider>
             </DialogProvider>

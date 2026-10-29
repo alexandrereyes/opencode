@@ -6,8 +6,9 @@ description: Use when the user asks to update, deploy, activate, check, roll bac
 # Update Custom App
 
 Use this skill for the installed macOS custom OpenCode instance built from the
-`custom` branch of `~/Dev/opencode2`. Backend, custom web app, custom plugin, and
-TUI must always come from the same immutable release commit.
+`custom` branch of `~/Dev/opencode2`. Backend, embedded web app (upstream's
+`packages/app`), custom plugin, and TUI must always come from the same immutable
+release commit.
 
 ## Routine Update
 

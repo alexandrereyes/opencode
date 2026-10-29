@@ -43,11 +43,9 @@ const client = {
 }
 
 const api = {
-  session: {
-    form: {
-      reply: async () => ({ data: true }),
-      cancel: async () => ({ data: true }),
-    },
+  form: {
+    reply: async () => ({ data: true }),
+    cancel: async () => ({ data: true }),
   },
 }
 
@@ -58,9 +56,5 @@ export function useServerSDK() {
     api,
     client,
   }
-}
-
-export function createServerSdkContext() {
-  return useServerSDK()
 }
 import { ServerScope } from "@/runtime/server/scope"

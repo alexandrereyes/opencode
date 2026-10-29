@@ -5,9 +5,9 @@ import { brotliCompress, constants } from "node:zlib"
 import { AppArchive } from "../src/app-archive"
 import { collectFiles } from "./files"
 
-export async function buildAppArchive(channel: string, options?: { skipBuild?: boolean; custom?: boolean }) {
+export async function buildAppArchive(channel: string, options?: { skipBuild?: boolean }) {
   if (options?.skipBuild) return AppArchive.encode([])
-  const root = path.resolve(import.meta.dirname, options?.custom ? "../../app-custom" : "../../app")
+  const root = path.resolve(import.meta.dirname, "../../app")
   await $`bun run build`
     .cwd(root)
     .env({ ...process.env, OPENCODE_CHANNEL: channel, VITE_OPENCODE_SERVER_MODE: "origin" })

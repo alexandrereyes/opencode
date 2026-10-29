@@ -9,8 +9,8 @@
   },
   "devDependencies": {
     "@opencode/client": "workspace:*",
-    "@opencode/session-ui-custom": "workspace:*",
-    "@opencode/ui-custom": "workspace:*",
+    "@opencode/session-ui": "workspace:*",
+    "@opencode/ui": "workspace:*",
     "@playwright/test": "catalog:",
     "@solidjs/meta": "catalog:",
     "@storybook/addon-a11y": "10.4.4",

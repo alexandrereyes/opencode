@@ -1,6 +1,6 @@
 # Chat quotes on the server
 
-`custom.quotes` stores the **pending** chat quotes of a Session (text selected in an assistant answer plus the user's comment) on the server, so the web app and the iOS app show and edit the same drafts: start commenting on the Mac, finish and send on the iPhone. Code: `src/quotes/rpc.ts` (contract and limits), `src/quotes/index.ts` (policy and storage). This file is the contract both clients follow.
+`custom.quotes` stores the **pending** chat quotes of a Session (text selected in an assistant answer plus the user's comment) on the server, so the iOS and Mac apps show and edit the same drafts: start commenting on the Mac, finish and send on the iPhone. The custom web app that also used it was removed on 2026-10-29 (tag `web-custom-final`); the standard web app the server now serves does not know `custom.quotes`. Code: `src/quotes/rpc.ts` (contract and limits), `src/quotes/index.ts` (policy and storage). This file is the contract both clients follow.
 
 ## What moves to the server, and what does not
 
@@ -182,7 +182,7 @@ Plugin KV (`ctx.storage`, SQLite `kv`, namespaced by plugin): `quotes:session:<s
 
 ## Phase 2 checklist
 
-**Web (`packages/app-custom`): done.** `src/composer/quote-sync.ts` binds every Session composer to its server: `info` probe (again on reconnect, focus and visibility), one-time import of the IndexedDB drafts, `list` mirrored into the composer, `rpc.custom.quotes.updated` read from the app's shared event stream, comment saves debounced by 400 ms and flushed on Done, trash and page hide, images uploaded before the save, `clear` with `reason: "sent"` only after admission. Without `custom.quotes` the composer keeps its IndexedDB drafts. History browsing and editing a queued prompt show their quotes as a local preview that is never published. Quotes restored from a sent message (revert, an undone queued prompt) are saved under new IDs when the server reports `already_sent`; a stale edit of a quote sent elsewhere is dropped.
+**Web (`packages/app-custom`, removed; tag `web-custom-final`): done.** `src/composer/quote-sync.ts` bound every Session composer to its server: `info` probe (again on reconnect, focus and visibility), one-time import of the IndexedDB drafts, `list` mirrored into the composer, `rpc.custom.quotes.updated` read from the app's shared event stream, comment saves debounced by 400 ms and flushed on Done, trash and page hide, images uploaded before the save, `clear` with `reason: "sent"` only after admission. Without `custom.quotes` the composer keeps its IndexedDB drafts. History browsing and editing a queued prompt show their quotes as a local preview that is never published. Quotes restored from a sent message (revert, an undone queued prompt) are saved under new IDs when the server reports `already_sent`; a stale edit of a quote sent elsewhere is dropped.
 
 **iOS (`packages/ios-custom`)**
 

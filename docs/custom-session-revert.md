@@ -104,7 +104,7 @@ not provider/MCP equivalence with production. Production sessions and processes
 are not used for mutation tests.
 
 The canonical root `bun run check` passes. The optional broader
-`app-custom` `typecheck:e2e` still reports the same 13 errors as the clean feature
+`app-custom` (removed since; tag `web-custom-final`) `typecheck:e2e` still reports the same 13 errors as the clean feature
 base (markdown lifetime globals, terminal/timeline performance types, readonly
 quote/mention test fields, and the older subagent event fixture). The complete
 base and feature diagnostic outputs match; these unrelated E2E typing errors are

@@ -8,9 +8,10 @@ import { playgroundCss } from "./playground-css-plugin.ts"
 // Storybook strips string literals from this file before comments, so an apostrophe in a comment opens a string that
 // never closes and its regex backtracks for minutes on Node. Keep comments here free of apostrophes.
 const here = path.dirname(fileURLToPath(import.meta.url))
-const ui = path.resolve(here, "../../ui-custom")
-const sessionUi = path.resolve(here, "../../session-ui-custom")
-const app = path.resolve(here, "../../app-custom/src")
+const ui = path.resolve(here, "../../ui")
+const sessionUi = path.resolve(here, "../../session-ui")
+const app = path.resolve(here, "../../app/src")
+const extensions = path.resolve(here, "../../gui-extensions/src")
 const mocks = path.resolve(here, "./mocks")
 
 // Component tests import real modules by URL (`source("../src/…")`, `new URL("./x.fixture.tsx", import.meta.url)`),
@@ -41,11 +42,12 @@ export default defineMain({
     "@storybook/addon-a11y",
     "@storybook/addon-vitest",
   ],
-  staticDirs: [path.resolve(here, "../../app-custom/public")],
+  staticDirs: [path.resolve(here, "../../app/public")],
   stories: [
-    "../../ui-custom/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
-    "../../session-ui-custom/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
-    "../../app-custom/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
+    "../../ui/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
+    "../../session-ui/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
+    "../../app/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
+    "../../gui-extensions/src/**/*.stories.@(js|jsx|mjs|ts|tsx)",
   ],
   async viteFinal(config) {
     const { mergeConfig, searchForWorkspaceRoot } = await import("vite")
@@ -98,7 +100,7 @@ export default defineMain({
       },
       server: {
         fs: {
-          allow: [searchForWorkspaceRoot(process.cwd()), ui, sessionUi, app, mocks],
+          allow: [searchForWorkspaceRoot(process.cwd()), ui, sessionUi, app, extensions, mocks],
         },
       },
     })

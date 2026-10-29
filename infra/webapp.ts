@@ -1,7 +1,7 @@
 export function createWebApp(domain: string) {
   return new sst.cloudflare.StaticSite("WebApp", {
     domain,
-    path: "packages/app-custom",
+    path: "packages/app",
     environment:
       $app.stage === "beta"
         ? {
