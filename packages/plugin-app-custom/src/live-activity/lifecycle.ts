@@ -349,6 +349,7 @@ export function fit(input: BodyInput) {
       ...(state.focus ? { focus: { ...state.focus, title: clip(state.focus.title, max) } } : {}),
       attention: state.attention.map((item) => ({ ...item, title: clip(item.title, max) })),
       sessions: state.sessions.map((item) => ({ ...item, title: clip(item.title, max) })),
+      ...(state.needs ? { needs: state.needs.map((item) => ({ ...item, title: clip(item.title, max) })) } : {}),
     })
   const steps: ((state: LiveActivity.AgentsState) => LiveActivity.AgentsState)[] = [
     ...input.state.attention
@@ -361,6 +362,8 @@ export function fit(input: BodyInput) {
         }),
       }))
       .toReversed(),
+    // The card and the island show two of them.
+    (state: LiveActivity.AgentsState) => (state.needs ? { ...state, needs: state.needs.slice(0, 2) } : state),
     (state: LiveActivity.AgentsState) => ({ ...state, sessions: state.sessions.slice(0, 3) }),
     (state: LiveActivity.AgentsState) => ({ ...state, attention: state.attention.slice(0, 2) }),
     ...[48, 32, 20, 12, 6].map(titles),

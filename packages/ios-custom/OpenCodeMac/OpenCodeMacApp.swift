@@ -246,7 +246,7 @@ private struct MacCommands: Commands {
           }
           // ⌘1…⌘9: the first sessions in the order Sessões shows them, with its filter and collapsed sections.
           let rows = SessionNavigation.numbered(
-            SessionSections.group(store.filtered, now: .now), collapse: collapse)
+            SessionSections.group(store.filtered, now: .now, held: store.attentionHold), collapse: collapse)
           if !rows.isEmpty {
             Divider()
             Section("Sessões da lista") {

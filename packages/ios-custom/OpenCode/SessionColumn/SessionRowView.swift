@@ -14,10 +14,12 @@ struct SessionRowView: View {
   private var line: SessionDirectoryLabel? { row.sharesChatAvatar(mixed: mixChats) ? .chats : directory }
   /// The colored state line of a "Precisa de você" row, shown instead of the preview.
   var detail: String? = nil
+  /// Its color, from the row's reason there (an unread answer, or a row held open, has no state color).
+  var detailTint: ThemeRole? = nil
 
   private var status: (text: String, tint: ThemeRole)? {
     if row.state == .running { return (row.workingStatus(activity: preview.activity), .success) }
-    if let detail, let tint = row.state.tint { return (detail, tint) }
+    if let detail, let tint = detailTint ?? row.state.tint { return (detail, tint) }
     return nil
   }
 
@@ -53,8 +55,8 @@ struct SessionRowView: View {
             .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
             .frame(maxWidth: .infinity, alignment: .leading)
           }
-          // The tinted state line already flags a "Precisa de você" row.
-          SessionRowMarks(row: row, dot: detail == nil)
+          // The tinted state line already flags a request or failure; an unread answer keeps its dot.
+          SessionRowMarks(row: row, dot: detail == nil || row.state.tint == nil)
         }.padding(.top, 1)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -143,6 +145,18 @@ extension SessionState {
     case .question: .accent
     case .failed: .error
     default: nil
+    }
+  }
+}
+
+extension SessionAttention.Reason {
+  /// The color of a "Precisa de você" line; an unread answer uses the unread dot's orange.
+  var tint: ThemeRole {
+    switch self {
+    case .permission: .warning
+    case .question: .accent
+    case .failed: .error
+    case .replied: .primary
     }
   }
 }

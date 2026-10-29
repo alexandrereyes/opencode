@@ -29,9 +29,9 @@ public enum AgentsLayout {
 
   public static func island(_ state: AgentsState) -> Island {
     let fitting = Int((islandCeiling - islandHeader - islandGap) / islandRow)
-    let rows = min(state.sessions.count, islandMaxRows, fitting)
+    let rows = min(state.islandRows.count, islandMaxRows, fitting)
     let base = islandHeader + (rows > 0 ? islandGap + CGFloat(rows) * islandRow : 0)
-    let hidden = state.sessions.count - rows
+    let hidden = state.islandTotal - rows
     let more = hidden > 0 && base + islandMore <= islandCeiling ? hidden : nil
     return Island(rows: rows, more: more, height: base + (more == nil ? 0 : islandMore))
   }
@@ -54,7 +54,8 @@ public enum AgentsLayout {
   /// Width of `há N min.` in the attention line, enough for "há 59 min." at 12 points.
   public static let lockAgo: CGFloat = 64
 
-  /// Header, rule, ring and counters, plus a rule and the attention line when a request is pending: 121 or 150 points.
+  /// Header, rule, ring and counters, plus a rule and the attention line when something needs Alexandre: 121 or 150
+  /// points.
   public static func lockHeight(_ state: AgentsState) -> CGFloat {
     let body = lockHeader + 2 * lockGap + lockRule + lockRing
     return 2 * lockPadding + body + (state.attentionLine == nil ? 0 : 2 * lockGap + lockRule + lockAttention)

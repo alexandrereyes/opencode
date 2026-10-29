@@ -47,6 +47,32 @@
           "directory": "/Users/alexandremartins/Dev/opencode2",
           "status": "idle"
         }
+      ],
+      "needs": [
+        {
+          "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+          "title": "Live Activity no iOS",
+          "project": "ios-custom",
+          "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+          "kind": "unread",
+          "since": 1793104800000
+        },
+        {
+          "sessionID": "ses_01JZCACHEDATABASE000000002",
+          "title": "Escolher banco do cache",
+          "project": "core",
+          "directory": "/Users/alexandremartins/Dev/opencode2",
+          "kind": "unread",
+          "since": 1793104740000
+        },
+        {
+          "sessionID": "ses_01JZOAUTHLOGIN000000000003",
+          "title": "Corrigir login OAuth",
+          "project": "app-custom",
+          "directory": "/Users/alexandremartins/Worktrees/opencode2-oauth-login",
+          "kind": "unread",
+          "since": 1793104680000
+        }
       ]
     },
     "stale-date": 1793106360,

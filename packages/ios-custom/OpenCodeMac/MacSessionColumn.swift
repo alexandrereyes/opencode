@@ -256,7 +256,7 @@ struct MacSessionColumn: View {
 
   /// Rows of the expanded sections, in display order; "Selecionar todas" and the selection use only these.
   private var visibleIDs: [String] {
-    SessionSections.group(store.filtered, now: .now)
+    SessionSections.group(store.filtered, now: .now, held: store.attentionHold)
       .filter { !collapse.collapsed($0.kind) }.flatMap(\.rows).map(\.id)
   }
 
@@ -374,7 +374,7 @@ private struct MacMasterAccessory: View {
         Text("Sessão mestra").fontWeight(.medium).foregroundStyle(theme.color(.textStrong))
         Spacer(minLength: 4)
         Text(store.masterAvailability == .available
-          ? (store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
+          ? (store.attentionCount > 0 ? "\(store.attentionCount) \(store.attentionCount == 1 ? "precisa" : "precisam") de você" : "Tudo em dia")
           : store.masterAvailability.label)
           .foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
         Image(systemName: "arrow.right").font(.system(size: 10, weight: .semibold))

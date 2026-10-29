@@ -3,11 +3,12 @@ import Observation
 import OpenCodeKit
 import SwiftUI
 
-/// The bell shows the same state as Sessões. Its count and "Não lidas" are the rows with the orange dot
-/// (`SessionRow.unread`, read against the server's `viewed`) or a pending permission or question, one line per session,
-/// so reading a conversation anywhere (Mac, iPhone, web) clears its line. "Anteriores" are recent answers already
-/// read; Limpar hides them up to now. Only three things are local: which lines arrived during this run (`fresh`,
-/// highlighted until read), the latest alert text per session and the Limpar mark.
+/// The bell shows the same state as Sessões. Its count and "Não lidas" are the rows of "Precisa de você"
+/// (`SessionAttention`: permissions, questions, failures and unread answers of sessions that are not working, read
+/// against the server's `viewed`), one line per session in the section's order, so reading a conversation anywhere
+/// (Mac, iPhone, web) clears its line. "Anteriores" are recent answers already read; Limpar hides them up to now. Only
+/// three things are local: which lines arrived during this run (`fresh`, highlighted until read), the latest alert
+/// text per session and the Limpar mark.
 @MainActor @Observable final class MacAlertInbox {
   enum Kind {
     case permission(PermissionRequest)
@@ -44,14 +45,9 @@ import SwiftUI
     if latest.count > 60, let oldest = latest.min(by: { $0.value.date < $1.value.date })?.key { latest[oldest] = nil }
   }
 
-  /// Requests first, then the newest.
+  /// "Precisa de você" in its order: permissions, questions, failures, then unread answers, newest first.
   func unread(_ rows: [SessionRow], store: SessionStore) -> [Item] {
-    rows.filter { $0.unread || $0.requestCount > 0 }
-      .sorted { left, right in
-        if (left.requestCount > 0) != (right.requestCount > 0) { return left.requestCount > 0 }
-        return left.interactionAt > right.interactionAt
-      }
-      .map { Item(row: $0, kind: kind($0, store: store)) }
+    SessionAttention.ordered(rows).map { Item(row: $0, kind: kind($0, store: store)) }
   }
 
   func earlier(_ rows: [SessionRow], excluding unread: [Item], store: SessionStore) -> [Item] {

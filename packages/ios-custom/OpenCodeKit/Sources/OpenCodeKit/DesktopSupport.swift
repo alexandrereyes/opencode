@@ -29,7 +29,7 @@ public struct SessionAlertNotification: Sendable, Equatable {
     body = [content.label, content.preview].compactMap { $0 }.joined(separator: "\n")
   }
 
-  /// The Dock badge: the number of permissions and questions waiting, or none.
+  /// The Dock badge: the count of "Precisa de você" (`SessionAttention`), or none.
   public static func badge(_ count: Int) -> String? { count > 0 ? String(count) : nil }
 }
 

@@ -383,7 +383,7 @@ private struct SessionMasterBar: View {
           .lineLimit(1).minimumScaleFactor(0.45)
         Spacer(minLength: 4)
         Text(store.masterAvailability == .available
-          ? (store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
+          ? (store.attentionCount > 0 ? "\(store.attentionCount) \(store.attentionCount == 1 ? "precisa" : "precisam") de você" : "Tudo em dia")
           : store.masterAvailability.label)
           .foregroundStyle(theme.color(.glassSecondary))
           .lineLimit(1).minimumScaleFactor(0.45)

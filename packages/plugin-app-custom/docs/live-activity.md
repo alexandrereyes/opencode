@@ -69,6 +69,7 @@ AgentsState {
   attention: Attention[]            // pending questions/permissions, oldest first, at most 3
   attentionTotal: number            // question + permission (may exceed attention.length)
   sessions: Row[]                   // rows for the expanded Dynamic Island, at most 4, ordered (see below)
+  needs?: Need[]                    // rev. 2026-10-29: what needs Alexandre, at most 3, ordered (see "Needs")
 }
 
 SessionRef { sessionID: string, title: string /* ≤ 80 */, project: string /* ≤ 40 */, directory: string }
@@ -91,6 +92,11 @@ Row = SessionRef & {
   status: "question" | "permission" | "failed" | "working" | "idle"
   progress?: Progress               // only for working rows
 }
+
+Need = SessionRef & {
+  kind: "question" | "permission" | "failed" | "unread"
+  since: number                     // asked (oldest pending request), failed (execution end) or answered (unread time)
+}
 ```
 
 `unit` is an enum so a future task list can add `"tasks"`; iOS renders unknown units as a bare `done/total`.
@@ -109,7 +115,9 @@ Row = SessionRef & {
   executes. It stops counting when the task ends; the completion notice then wakes the session as a new execution.
   Without any known turn of the top-level session, `startedAt` falls back to the earliest start among executing
   descendants and unfinished tasks. With only tasks pending, `activity` describes the newest one (`Rodando <command>`).
-- **Status precedence per session:** question > permission > failed > working > idle.
+- **Status precedence per session:** question > permission > working > failed > idle (rev. 2026-10-29: working
+  outranked by failed before; now a failure whose family still works, such as a background shell, is working, like
+  its Sessões row).
 - **Failed:** the session's latest execution ended with `session.execution.failed` (a user interruption is not a
   failure). It stays failed until a new execution starts, the session is viewed (`session.viewed`), archived or
   deleted, or 24 hours pass.
@@ -119,9 +127,15 @@ Row = SessionRef & {
   whose latest assistant output is newer than its viewed watermark (`time.viewed`) — the same rule as the orange
   unread dot in Sessões. Muting is gone (2026-10-28: "Avisar ao terminar" replaced it, see
   [session-notifications.md](session-notifications.md)), so `mutedSessions` no longer hides anything. No time window: it stays
-  unread until the session is viewed (`session.viewed`), archived or deleted. Chats and the current Sessão mestra
-  follow the same rule as other top-level sessions. Unread sessions never keep a Live Activity alive (the end rule
-  is unchanged).
+  unread until the session is viewed (`session.viewed`), archived or deleted. Chats follow the same rule as other
+  top-level sessions; the current Sessão mestra (`masterSessions.local`), which Sessões never lists, is never unread
+  (rev. 2026-10-29). Unread sessions never keep a Live Activity alive (the end rule is unchanged).
+- **Needs (rev. 2026-10-29):** every session that needs Alexandre, the rows of the Sessões "Precisa de você" section
+  and the iOS `counts.forYou` = question + permission + failed + unread (one per session, by the precedence above):
+  question, permission (oldest `since` first), failed (most recent first), unread (most recent first); cut to 3.
+  `attention` keeps only requests, so older apps (and the watch's Responder, which needs a request) are unchanged.
+  The watch gateway's `/state` also answers while only unread sessions wait; `snapshot` and `changed` stay `null`
+  then.
 - **Focus:** among working sessions, keep the current focus while it is still working; otherwise pick the one whose
   execution started most recently. Absent when `counts.working == 0`.
 - **activity** (from the latest step activity of the most recently active **executing** session in the focus
@@ -136,7 +150,7 @@ Row = SessionRef & {
   unread sessions** (rev. 2026-10-28; read sessions no longer appear as rows). The status string stays `idle` so older
   builds keep decoding it; newer builds label it `Não lida`.
 - **Size:** the whole APNs body must stay ≤ 4096 bytes. Trim in this order until it fits: `attention[].text`, then
-  `sessions` beyond 3, then `attention` beyond 2, then shorten titles.
+  `needs` beyond 2, then `sessions` beyond 3, then `attention` beyond 2, then shorten titles.
 
 ## RPC `custom.live-activity`
 
@@ -235,6 +249,14 @@ singles one out as "the" session; `focus` is no longer rendered here (it stays i
 - **Failed only** (`activeTotal == 0`, `failed > 0`): ring with the red and gray arcs, centre `0` / `ativas`, counters
   `com erro` and `não lidas`, no attention line.
 - Fixed metrics; the card must fit the 160 pt Lock Screen limit in every state without vertical `ViewThatFits`.
+
+**Attention first (rev. 2026-10-29, Option A of `.agent-artifacts/atencao/live-atencao.png`).** While `forYou`
+(question + permission + failed + unread) is above zero, the ring draws only those arcs (same colors, same order)
+with `forYou` / `para você` in the centre; the counters list them first and `N trabalhando` last in `textSecondary`,
+dropped first beyond four lines; the attention line shows the first `needs` item with its kind (`pergunta`,
+`permissão`, `erro`, `respondeu`) and `+K` = `forYou` − 1. Compact: `forYou` in a `primary` pill. Expanded: `forYou
+para você · N trabalhando` over the first two `needs`. Card taps open the first `needs` session. With `forYou` zero
+the rules below apply unchanged. Without `needs` (older backends) the app uses `attention`, then failed and idle rows.
 
 **Dynamic Island** (from `opcao-3-painel-cotas.png`):
 

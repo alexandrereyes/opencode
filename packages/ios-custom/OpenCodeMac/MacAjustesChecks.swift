@@ -459,7 +459,7 @@ import SwiftUI
   private static func numbers(window: NSWindow, runtime: MacWindowRuntime) async throws {
     let store = try require(runtime.store, "sessões")
     let expected = SessionNavigation.numbered(
-      SessionSections.group(store.filtered, now: .now),
+      SessionSections.group(store.filtered, now: .now, held: store.attentionHold),
       collapse: SessionSectionCollapse(rawValue: UserDefaults.standard.string(forKey: "OpenCodeSessionSections") ?? "")
         ?? SessionSectionCollapse())
     guard expected.count >= 2 else { throw Failure(description: "poucas sessões") }

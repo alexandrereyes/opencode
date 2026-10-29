@@ -32,7 +32,8 @@ private let stateJSON = """
     let state = try #require(snapshot.state)
     #expect(snapshot.host == "MacBook Pro")
     #expect(state.attention.map(\.requestID) == ["req_q", nil])
-    #expect(state.complicationLine == "4 ativas · 2 precisam de você")
+    #expect(state.complicationLine == "2 para você")
+    #expect(state.complicationDetail == "1 pergunta · 1 permissão · 2 trabalhando")
   }
 
   @Test func decodesNullState() throws {
@@ -121,17 +122,17 @@ private let stateJSON = """
   }
 
   @Test func ringArcsAreProportional() {
-    let ring = WatchRing(counts: .init(working: 3, question: 1, permission: 0, failed: 0, idle: 1))
-    #expect(ring.arcs.map(\.role) == [.success, .accent, .border])
-    #expect(ring.arcs.map(\.start) == [0, 0.6, 0.8])
-    #expect(ring.arcs.map { ($0.end * 100).rounded() / 100 } == [0.6, 0.8, 1])
+    let ring = WatchRing(counts: .init(working: 3, question: 0, permission: 0, failed: 0, idle: 2))
+    #expect(ring.arcs.map(\.role) == [.success, .border])
+    #expect(ring.arcs.map(\.start) == [0, 0.6])
+    #expect(ring.arcs.map { ($0.end * 100).rounded() / 100 } == [0.6, 1])
     #expect(!ring.idle)
   }
 
-  @Test func ringOrderCoversEveryKind() {
-    let ring = WatchRing(counts: .init(working: 1, question: 1, permission: 1, failed: 1, idle: 0))
-    #expect(ring.arcs.map(\.role) == [.success, .accent, .warning, .error])
-    #expect(ring.arcs.last?.end == 1)
+  @Test func ringOrderCoversEveryKindThatNeedsAlexandre() {
+    let ring = WatchRing(counts: .init(working: 1, question: 1, permission: 1, failed: 1, idle: 0, unread: 1))
+    #expect(ring.arcs.map(\.role) == [.accent, .warning, .error, .primary])
+    #expect(ring.arcs.last?.end == 1 && ring.number == 4)
   }
 
   @Test func emptyRingIsGray() {
@@ -139,28 +140,46 @@ private let stateJSON = """
     #expect(WatchRing(counts: nil).arcs == [.init(role: .border, start: 0, end: 1)])
   }
 
-  @Test func attentionRowsComeFirstWithoutDuplicates() throws {
-    let rows = try state.dashboardRows
-    #expect(rows.map(\.id) == [
-      "attention-question-s2", "attention-permission-s3", "session-s1", "session-s4",
+  @Test func needsComeFirstThenTheCollapsedWork() throws {
+    let state = try self.state
+    #expect(state.dashboardRows().map(\.id) == ["attention-question-s2", "attention-permission-s3", "working"])
+    #expect(state.dashboardRows(working: true).map(\.id) == [
+      "attention-question-s2", "attention-permission-s3", "working", "session-s1", "session-s4",
     ])
   }
 
-  @Test func sessionWithOtherPendingKindStays() throws {
+  @Test func requestWithoutItsAttentionItemStaysAsANeed() throws {
     var state = try self.state
     state.attention = [state.attention[0]]
-    #expect(state.dashboardRows.map(\.id) == [
-      "attention-question-s2", "session-s1", "session-s3", "session-s4",
-    ])
+    #expect(state.dashboardRows().map(\.id) == ["attention-question-s2", "need-permission-s3", "working"])
+  }
+
+  @Test func unreadAndFailedNeedsKeepTheirTime() throws {
+    var state = try self.state
+    state.counts = .init(working: 2, question: 1, permission: 0, failed: 1, idle: 0, unread: 2)
+    state.needs = [
+      .init(sessionID: "s2", title: "Escolher banco do cache", project: "core", directory: "/r/core", kind: .question,
+        since: 1_793_111_820_000),
+      .init(sessionID: "s5", title: "QA Reaberto", project: "qa", directory: "/r/qa", kind: .unread,
+        since: 1_793_111_000_000),
+    ]
+    let rows = state.dashboardRows()
+    #expect(rows.map(\.id) == ["attention-question-s2", "need-unread-s5", "working"])
+    guard case .need(let need) = rows[1] else { Issue.record("not a need"); return }
+    #expect(need.kind.label == "respondeu" && need.date == Date(timeIntervalSince1970: 1_793_111_000))
+    #expect(state.complicationLine == "4 para você")
+    #expect(state.complicationDetail == "1 pergunta · 1 com erro · 2 não lidas · 2 trabalhando")
   }
 
   @Test func labelsUseSingularAndPlural() throws {
     var state = try self.state
-    state.activeTotal = 1
-    state.attentionTotal = 1
-    #expect(state.complicationLine == "1 ativa · 1 precisa de você")
-    state.attentionTotal = 0
-    #expect(state.complicationLine == "1 ativa")
+    state.counts = .init(working: 1, question: 1, permission: 0, failed: 0, idle: 0, unread: 0)
+    #expect(state.complicationLine == "1 para você" && state.complicationDetail == "1 pergunta · 1 trabalhando")
+    state.counts.question = 0
+    state.attention = []
+    state.sessions = state.sessions.filter { $0.status == .working }
+    #expect(state.complicationLine == "1 trabalhando · nada para você" && state.complicationDetail == nil)
+    #expect(state.dashboardRows().map(\.id) == ["working"])
   }
 
   @Test func captionsMergeOpenLinesAndKeepTwo() {
