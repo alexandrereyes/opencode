@@ -87,7 +87,7 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Conversa · mensagem expandida | Mensagem recolhida → Mostrar mensagem completa | [PNG](conversation-user-expanded-dark.png) | [PNG](conversation-user-expanded-light.png) |
 | Conversa · resposta e rodapé | Rolar a conversa; copiar/play, contexto/cache e prompt fixo | [PNG](conversation-answer-footer-dark.png) | [PNG](conversation-answer-footer-light.png) |
 | Conversa · pendente | Primeira conversa com admissão sintética ainda não entregue | [PNG](conversation-user-pending-dark.png) | — |
-| Troca rápida · folha | Conversa → avatar/título com ⌄; mesmos chips, grupos e linhas da aba, atual com ✓ e Nova sessão no cabeçalho | [PNG](session-switcher-open-dark.png) | [PNG](session-switcher-open-light.png) |
+| Troca rápida · folha | Conversa → avatar/título com ⌄; mesmos chips, grupos e linhas da raiz, atual com ✓ e Nova sessão no cabeçalho | [PNG](session-switcher-open-dark.png) | [PNG](session-switcher-open-light.png) |
 | Troca rápida · busca | Folha Sessões → buscar “contraste”; busca combinada com o chip e resultado agrupado | [PNG](session-switcher-search-dark.png) | [PNG](session-switcher-search-light.png) |
 | Conversa · atividade e fila | Conversa em execução: cartão Atividade aberto (Ler, Shell, Agente, Editar), bandeja trabalhando + duas mensagens na fila e composer vazio | [PNG](conversation-activity-open-dark.png) | [PNG](conversation-activity-open-light.png) |
 | Cabeçalho do chat no Mac | Variante do Mac do avatar com anel, título e subtítulo compartilhados, com `…` e + | [PNG](conversation-title-bar-mac-dark.png) | — |
@@ -113,6 +113,13 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Pergunta paralela | Conversa → enviar `/btw Qual deve ser o primeiro passo?` | [PNG](conversation-side-question-dark.png) | — |
 
 ## Revisão da navegação
+
+Revisão da margem da mestra e do transcript (base `eb29f1f92c`): a faixa usa **21 pt** de
+margem horizontal, alinhada à faixa de voz (`eb29f1f92c`). As referências de Sessões, conversa
+e troca rápida foram regeneradas após a reescrita do transcript e a estabilização das listas
+(`affa405fd9`), com as mesmas fixtures sintéticas e sem executar ações destrutivas. A captura
+usa sempre um simulador novo por execução; a porta de loopback é apenas identidade da fixture offline.
+As imagens de troca rápida dessa revisão voltam ao padrão 2× e à mesma compressão do catálogo.
 
 Revisão sem abas (base `b304370d13`): Sessões passa a ser a raiz, com voz, + e avatar AR que abre
 Você como folha. Foram removidos os seis PNGs `dashboard-tab-*`, `requests-tab-*` e `projects-tab-*`.
