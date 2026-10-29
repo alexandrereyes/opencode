@@ -3312,8 +3312,14 @@ adds the same model download, progress, retry, deletion and licenses. Dados do i
   (on by default) pauses the now-playing media while recording and plays it again on stop or pause, only if this
   app paused it and it is still the paused now-playing player. MediaRemote answers only Apple-signed processes
   since macOS 15.4, so `osascript` (JXA) loads it and sends explicit pause/play commands, never a toggle (VoiceInk
-  uses a Perl-hosted adapter framework for the same reason). GPT Live keeps WebRTC's default devices: the macOS
-  WebRTC build exposes no input-device selection.
+  uses a Perl-hosted adapter framework for the same reason).
+- **GPT Live microphone:** when the input chosen in Ajustes → Voz is not the default one (Automático with a Bluetooth
+  default), the call's `RTCPeerConnectionFactory` gets `MacVoiceAudioDevice`, an `RTCAudioDevice` (the ObjC ADM bridge
+  the macOS binary already contains; `prepare-mac-webrtc.py` now also exposes `RTCAudioDevice.h`). One
+  `AVAudioEngine` records that input through an `AVAudioSinkNode` and another plays to the default output through an
+  `AVAudioSourceNode`, as 16-bit mono PCM; an engine stopped by a device change is rebuilt on WebRTC's audio thread.
+  WebRTC's AEC3 keeps cancelling echo with this playout as reference; Apple's voice processing is not used, since it
+  drives the default devices and ducks other audio. Otherwise WebRTC's own Mac ADM follows the default devices.
 - **Read aloud:** response footers and Markdown files use `custom.speech`, the same `ReadAloudPlayer`, pill/full
   controls, seeking, speed and server bookmarks. The voice comes from the speech server (separate from GPT Live's
   voice choice). Starting a call or dictation pauses it; reading cannot start while either owns the microphone.
