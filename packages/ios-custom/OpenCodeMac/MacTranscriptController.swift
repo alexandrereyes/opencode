@@ -728,21 +728,18 @@ import SwiftUI
     return true
   }
 
-  /// After a send, the new prompt rises to the top; the trailing space lets it get there.
+  /// After a send the view stays at the end, like a chat: the new prompt appears at the bottom and the answer
+  /// follows it. Unlike the iPhone, the prompt does not rise to the top, so there is no trailing space and no
+  /// long animated scroll.
   private func revealSentPrompt() {
     guard let since = awaitingPrompt, revealed else { return }
     guard since.duration(to: .now) < .seconds(10) else { awaitingPrompt = nil; return }
-    guard let last = items.lastIndex(where: \.sticky), memory.spacerPrompt != items[last].id,
+    guard let last = items.lastIndex(where: \.sticky),
       store.pendingInbox.contains(where: { "prompt:" + $0.id == items[last].id })
         || store.messages.last(where: { $0.type == "user" }).map({ "prompt:" + $0.id == items[last].id }) == true
     else { return }
     awaitingPrompt = nil
-    memory.spacerPrompt = items[last].id
-    geometry.spacerPrompt = items[last].id
-    tile()
-    follow.navigated(toLatest: true)
-    let id = items[last].id
-    scroll(to: { [unowned self] in CGFloat(geometry.index(of: id).map { geometry.tops[$0] } ?? 0) }, animated: true)
+    scrollToLatest(animated: false)
   }
 
   /// The destination is laid out first, in this pass, until its rows are measured and it stops moving; a
