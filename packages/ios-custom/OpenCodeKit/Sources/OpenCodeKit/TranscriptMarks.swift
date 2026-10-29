@@ -9,11 +9,16 @@ public struct TranscriptMarks: Sendable, Equatable {
   public private(set) var footers: Set<String> = []
 
   public init(_ messages: [ConversationMessage], working: Bool, calendar: Calendar = .current) {
+    // The previous message's day, found once per day instead of asking the calendar about every message.
+    var day: (start: Date, end: Date)?
     var previous: Date?
     for message in messages {
       let date = Date(timeIntervalSince1970: message.time.created / 1000)
-      if previous.map({ !calendar.isDate(date, inSameDayAs: $0) }) ?? true { days.insert(message.id) }
-      previous = date
+      defer { previous = date }
+      if let day, date >= day.start, date < day.end { continue }
+      if day == nil, let previous, calendar.isDate(date, inSameDayAs: previous) { continue }
+      days.insert(message.id)
+      day = calendar.dateInterval(of: .day, for: date).map { ($0.start, $0.end) }
     }
     var textAfter = false
     var promptAfter = false
@@ -24,8 +29,16 @@ public struct TranscriptMarks: Sendable, Equatable {
         continue
       }
       if !textAfter && (promptAfter || !working) { footers.insert(message.id) }
-      let texts = (message.content ?? []).filter { $0.type == "text" }.compactMap(\.text)
-      if texts.count > 1 || texts.first?.isEmpty == false { textAfter = true }
+      // More than one text, or a first one with content.
+      var texts = 0
+      for part in message.content ?? [] where part.type == "text" {
+        guard let text = part.text else { continue }
+        texts += 1
+        if texts > 1 || !text.isEmpty {
+          textAfter = true
+          break
+        }
+      }
     }
   }
 }

@@ -212,12 +212,15 @@ struct ConversationQuestionCard: View {
 struct ConversationTray: View {
   let store: ConversationStore
   @Bindable var draft: ConversationDraft
+  /// The execution's start when the host reads it itself (the Mac samples it, so streamed deltas do not re-evaluate
+  /// the tray); otherwise it is read from the messages here.
+  var started: Double?? = nil
   var body: some View {
     ConversationRunTray(
       run: store.executing && !store.waiting
         ? ConversationRunTrayRun(
           model: store.modelLabel(store.session?.model).components(separatedBy: " · ").first ?? "Agente",
-          started: ConversationProjection.executionStarted(store.messages, complete: !store.hasOlder),
+          started: started ?? ConversationProjection.executionStarted(store.messages, complete: !store.hasOlder),
           background: store.canBackground ? { Task { await store.background() } } : nil,
           backgroundBusy: store.acting.contains("background"),
           stop: { Task { await store.stop() } }, stopping: store.acting.contains("stop"))

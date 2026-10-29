@@ -364,7 +364,7 @@ struct MacConversationView: View {
     VStack(spacing: 8) {
       FloatingVoiceHost(sessions: sessions)
       if conversation.session?.revert != nil, !conversation.isChild { revertBar }
-      ConversationTray(store: conversation, draft: draft)
+      ConversationTray(store: conversation, draft: draft, started: .some(input.executionStarted.value))
       // Without a margin wide enough beside the column, ↓ sits on the composer card's top right corner.
       MacComposer(store: conversation, draft: draft,
         corner: memory.state.jumpToLatest && jumpMargin == nil
@@ -434,7 +434,11 @@ private struct MacSearchFollower: View {
   let conversation: ConversationStore
 
   var body: some View {
-    Color.clear.onChange(of: conversation.revision) { _, _ in if search.open { search.update(conversation) } }
+    // Only an open search observes the revision: any change this view observes lays the whole window out again,
+    // and the revision changes with every streamed delta.
+    if search.open {
+      Color.clear.onChange(of: conversation.revision) { _, _ in search.update(conversation) }
+    }
   }
 }
 

@@ -291,6 +291,9 @@ private struct MacSessionRowCell<Menu: View>: View {
   @ViewBuilder let menu: () -> Menu
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacSessionRowCell")
+    #endif
     VStack(spacing: 0) {
       content
         .background {

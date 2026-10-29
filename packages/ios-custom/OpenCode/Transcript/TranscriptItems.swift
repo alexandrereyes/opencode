@@ -75,6 +75,30 @@ enum TranscriptProjection {
     var bubbles: (String) -> Bool
     /// The part's latest landed parse, as sections, and the text it came from.
     var blocks: (TranscriptPart) -> (source: String, sections: [MarkdownSection])?
+    /// Items of earlier projections, reused for the responses whose inputs did not change.
+    var cache: Cache? = nil
+  }
+
+  /// A response's items depend only on its activity entry, its day and footer marks, the gap above it, each text's
+  /// completion, divider and parse, and the disclosure choices. While an answer streams only its own key changes,
+  /// so a long conversation is not projected again message by message.
+  final class Cache {
+    fileprivate struct Text: Equatable {
+      let completed: Bool
+      let divider: Bool
+      let source: String?
+      let sections: [MarkdownSection]?
+    }
+    fileprivate struct Key: Equatable {
+      let entry: ConversationActivityMessage
+      let day: Bool
+      let footer: Bool
+      let trailing: CGFloat
+      let texts: [Text]
+    }
+    fileprivate var entries: [String: (key: Key, content: [TranscriptItem])] = [:]
+    fileprivate var expansion: [String: Bool] = [:]
+    init() {}
   }
 
   /// Message rows keep the old List geometry: 10 points of padding above and below each message, 16 between
@@ -84,6 +108,12 @@ enum TranscriptProjection {
     // Padding the previous message left below it, folded into the next gap.
     var trailing: CGFloat = 0
     if input.hasOlder { items.append(.init(id: "older", kind: .older(loading: input.paging), gap: 0, message: nil)) }
+    if let cache = input.cache, cache.expansion != input.expansion {
+      cache.expansion = input.expansion
+      cache.entries.removeAll()
+    }
+    var cached: [String: (key: Cache.Key, content: [TranscriptItem])] = [:]
+    defer { if let cache = input.cache { cache.entries = cached } }
     for entry in input.messages {
       let message = entry.message
       if message.type == "user" {
@@ -97,6 +127,25 @@ enum TranscriptProjection {
         trailing = 0
         continue
       }
+      // Every text's parse is looked up first: the lookup requests the parses of newer text.
+      let key = input.cache.map { _ in
+        Cache.Key(entry: entry, day: input.marks.days.contains(message.id), footer: input.marks.footers.contains(message.id),
+          trailing: trailing, texts: entry.rows.compactMap { row in
+            guard row.kind == .text, let text = row.parts.first else { return nil }
+            let parsed = input.blocks(part(text, of: message, input: input))
+            return Cache.Text(completed: completed(text, of: message, input: input), divider: input.dividers.contains(text.id),
+              source: parsed?.source, sections: parsed?.sections)
+          })
+      }
+      if let key, let hit = input.cache?.entries[message.id], hit.key == key {
+        cached[message.id] = hit
+        if hit.content.isEmpty { continue }
+        trailing = hit.content.last.map { if case .footer = $0.kind { 0 } else { 10 } } ?? 10
+        items += hit.content
+        continue
+      }
+      // A miss builds from the parses the key just looked up, in the same order.
+      var looked = key?.texts.makeIterator()
       var content: [TranscriptItem] = []
       let gap: CGFloat = trailing + 10
       // A day chip carries 6 points of padding on each side, inside its frame.
@@ -115,17 +164,15 @@ enum TranscriptProjection {
           switch row.kind {
           case .text:
             guard let text = row.parts.first else { continue }
-            let completed = text.messageID == message.id
-              ? message.time.completed != nil
-              : input.messages.first { $0.message.id == text.messageID }?.message.time.completed != nil
-            let part = TranscriptPart(
-              messageID: text.messageID, partID: text.id, source: text.part.text ?? "", stable: completed)
+            let part = part(text, of: message, input: input)
             var spacing: CGFloat = 16
             if input.dividers.contains(text.id) {
               add("rule:" + text.id, .rule)
               spacing = 12
             }
-            guard let parsed = input.blocks(part) else {
+            let found: (source: String, sections: [MarkdownSection])? = looked == nil ? input.blocks(part)
+              : looked?.next().flatMap { text in text.source.map { ($0, text.sections ?? []) } }
+            guard let parsed = found else {
               add("text:" + text.id, .unparsed(part), spacing: spacing)
               continue
             }
@@ -175,6 +222,7 @@ enum TranscriptProjection {
       } else if message.type != "idle" || message.outcome == "interrupted" || message.outcome == "failed" {
         add("notice:" + message.id, .notice(message))
       }
+      if let key { cached[message.id] = (key, content) }
       if content.isEmpty { continue }
       trailing = content.last.map { if case .footer = $0.kind { 0 } else { 10 } } ?? 10
       items += content
@@ -194,6 +242,18 @@ enum TranscriptProjection {
       trailing = 10
     }
     return items
+  }
+
+  private static func completed(_ text: ConversationActivityPart, of message: ConversationMessage, input: Input) -> Bool {
+    text.messageID == message.id
+      ? message.time.completed != nil
+      : input.messages.first { $0.message.id == text.messageID }?.message.time.completed != nil
+  }
+
+  private static func part(_ text: ConversationActivityPart, of message: ConversationMessage, input: Input) -> TranscriptPart {
+    TranscriptPart(
+      messageID: text.messageID, partID: text.id, source: text.part.text ?? "",
+      stable: completed(text, of: message, input: input))
   }
 
   private static func footnote(_ block: MarkdownBlock) -> Bool {

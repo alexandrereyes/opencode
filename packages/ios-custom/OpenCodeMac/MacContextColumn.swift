@@ -229,6 +229,9 @@ private struct ContextSubagents: View {
   @State private var expanded = false
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("ContextSubagents")
+    #endif
     let subagents = store.subagents
     VStack(alignment: .leading, spacing: 0) {
       ContextSectionLabel(title: "Subagentes", count: "\(subagents.active)/\(subagents.total)") {
@@ -287,6 +290,9 @@ private struct SubagentLine: View {
   let open: () -> Void
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("SubagentLine")
+    #endif
     HStack(alignment: .firstTextBaseline, spacing: 5) {
       glyph.frame(width: SubagentColumns.gutter, alignment: .leading)
       VStack(alignment: .leading, spacing: 3) {
