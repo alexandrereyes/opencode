@@ -105,8 +105,8 @@
     },
     "stale-date": 1793105760,
     "alert": {
-      "title": "Pergunta pendente",
-      "body": "Escolher banco do cache · core"
+      "title": "Escolher banco do cache",
+      "body": "Pergunta: Qual banco usar no cache?"
     }
   }
 }

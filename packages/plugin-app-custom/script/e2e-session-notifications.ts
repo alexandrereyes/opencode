@@ -9,7 +9,8 @@
  * Scenarios (docs/session-notifications.md): success with and without the bell; a real question; a permission left
  * pending and one answered at once; a failure without retries (unknown model) and with them (a local provider that
  * answers 503 until the retries run out), plus a run that recovers after two 503s; and, for a bell session that fails,
- * one alert only, with the Live Activity update for the same device carrying no `alert`. Its own sessions, repository,
+ * one alert per device: through its live activity, or a notification once the activity ended or its token is refused
+ * (`--only dedupe` runs just those). Its own sessions, repository,
  * preference keys and devices are removed at the end.
  */
 import { mkdir, rm } from "node:fs/promises"
@@ -18,7 +19,13 @@ import { parseArgs } from "node:util"
 
 const args = parseArgs({
   args: Bun.argv.slice(2),
-  options: { url: { type: "string" }, home: { type: "string" }, "apns-log": { type: "string" } },
+  options: {
+    url: { type: "string" },
+    home: { type: "string" },
+    "apns-log": { type: "string" },
+    /** `dedupe`: only the one-alert-per-device scenarios (4 and 6). */
+    only: { type: "string" },
+  },
 })
 const url = args.values.url ?? ""
 const home = args.values.home ?? ""
@@ -45,7 +52,8 @@ async function call<T>(route: string, body?: unknown, method = body === undefine
   const text = await response.text()
   return (text ? JSON.parse(text) : undefined) as T
 }
-const rpc = <T>(route: string, input: unknown) => call<{ output: T }>(`/api/rpc/${route}`, { input }).then((r) => r.output)
+const rpc = <T>(route: string, input: unknown) =>
+  call<{ output: T }>(`/api/rpc/${route}`, { input }).then((r) => r.output)
 
 type Entry = {
   at: number
@@ -78,7 +86,8 @@ async function until<T>(read: () => Promise<T | undefined>, timeout: number, wha
 }
 const idle = (sessionID: string, timeout = 240_000) =>
   until(
-    async () => (!(await call<{ data: Record<string, unknown> }>("/api/session/active")).data[sessionID] ? true : undefined),
+    async () =>
+      !(await call<{ data: Record<string, unknown> }>("/api/session/active")).data[sessionID] ? true : undefined,
     timeout,
     `${sessionID} to stop`,
   )
@@ -96,10 +105,9 @@ const provider = Bun.serve({
       return Response.json({ error: { message: "Serviço indisponível (teste)" } }, { status: 503 })
     const chunk = (delta: object, finish: string | null) =>
       `data: ${JSON.stringify({ id: "e2e", object: "chat.completion.chunk", created: 0, model: body.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`
-    return new Response(
-      chunk({ role: "assistant", content: "ok" }, null) + chunk({}, "stop") + "data: [DONE]\n\n",
-      { headers: { "content-type": "text/event-stream" } },
-    )
+    return new Response(chunk({ role: "assistant", content: "ok" }, null) + chunk({}, "stop") + "data: [DONE]\n\n", {
+      headers: { "content-type": "text/event-stream" },
+    })
   },
 })
 
@@ -140,143 +148,205 @@ try {
     owned.push(session.id)
     return session.id
   }
-  const bell = (id: string) => rpc("custom.preferences/mutate", { type: "sidebar.notify", session: key(id), notify: true })
+  const bell = (id: string) =>
+    rpc("custom.preferences/mutate", { type: "sidebar.notify", session: key(id), notify: true })
   expect(
-    (await rpc<{ push: string }>("custom.notifications/register", { deviceID, serverKey: "e2e", environment: "sandbox", token }))
-      .push,
+    (
+      await rpc<{ push: string }>("custom.notifications/register", {
+        deviceID,
+        serverKey: "e2e",
+        environment: "sandbox",
+        token,
+      })
+    ).push,
     "configured",
   )
 
-  // 1. Success: with the bell one "Terminou", without it nothing.
-  const done = await create("Aviso — sucesso com sino")
-  const quiet = await create("Aviso — sucesso sem sino")
-  await bell(done)
-  await call(`/api/session/${done}/prompt`, { text: "Responda apenas: ok" })
-  await call(`/api/session/${quiet}/prompt`, { text: "Responda apenas: ok" })
-  await idle(done)
-  await idle(quiet)
-  await Bun.sleep(8_000)
-  const finished = await alerts(done)
-  expect(finished.length, 1)
-  expect(finished[0]?.body.opencode?.kind, "session.finished")
-  expect(finished[0]?.body.aps["interruption-level"], "active")
-  expect((await alerts(quiet)).length, 0)
-  results.success = { bell: finished[0]?.body.aps.alert, withoutBell: "no alert" }
+  const full = args.values.only !== "dedupe"
+  const theme = {
+    background: "#120f0eff",
+    surface: "#161313ff",
+    border: "#2e2e2dff",
+    textStrong: "#e4e0d6ff",
+    text: "#c9c5baff",
+    textSecondary: "#a29f94ff",
+    textWeak: "#6b6861ff",
+    primary: "#da7c47ff",
+    success: "#83b35fff",
+    warning: "#c67f13ff",
+    error: "#dc6e5eff",
+    accent: "#9988e5ff",
+  }
+  // The same device's Live Activity, as `custom.live-activity` stores it.
+  const activityOn = async (pushToken: string) => {
+    await rpc("custom.live-activity/register", { deviceID, serverKey: "e2e", environment: "sandbox", theme })
+    await rpc("custom.live-activity/activity", { deviceID, activityID: `act-${pushToken.slice(0, 8)}`, pushToken })
+  }
+  /** Live Activity updates that carried an alert titled `title`, to `pushToken`. */
+  const activityAlerts = async (pushToken: string, title: string) =>
+    (await log()).filter((entry) => entry.path === `/3/device/${pushToken}` && entry.body.aps.alert?.title === title)
+  const ask = async (title: string, text: string) => {
+    const id = await create(title)
+    await call(`/api/session/${id}/prompt`, {
+      text: `Use a ferramenta question para me perguntar exatamente "${text}", com as opções sim e não. Depois espere a resposta.`,
+    })
+    const form = await until(
+      async () => (await call<{ data: { id: string }[] }>(`/api/session/${id}/form`)).data[0],
+      180_000,
+      `the question of ${title}`,
+    )
+    await Bun.sleep(10_000)
+    return { id, form }
+  }
 
-  // 2. A real question: one alert at once, with its request; the interruption that ends it alerts nothing.
-  const asks = await create("Aviso — pergunta")
-  await call(`/api/session/${asks}/prompt`, {
-    text: 'Use a ferramenta question para me perguntar exatamente "Prefere azul ou verde?", com as opções azul e verde. Depois espere a resposta.',
-  })
-  const form = await until(
-    async () => (await call<{ data: { id: string }[] }>(`/api/session/${asks}/form`)).data[0],
-    180_000,
-    "the question",
-  )
-  const askedAt = Date.now()
-  const asked = await until(async () => (await alerts(asks))[0], 15_000, "the question alert")
-  expect(asked.body.opencode?.attention, "question")
-  expect(asked.body.opencode?.requestID, form.id)
-  await Bun.sleep(5_000)
-  await call(`/api/session/${asks}/interrupt?resume=false`, {})
-  await idle(asks)
-  await Bun.sleep(8_000)
-  expect((await alerts(asks)).length, 1)
-  results.question = { afterMs: asked.at - askedAt, alert: asked.body.aps.alert, requestID: form.id }
+  if (full) {
+    // 1. Success: with the bell one "Terminou", without it nothing.
+    const done = await create("Aviso — sucesso com sino")
+    const quiet = await create("Aviso — sucesso sem sino")
+    await bell(done)
+    await call(`/api/session/${done}/prompt`, { text: "Responda apenas: ok" })
+    await call(`/api/session/${quiet}/prompt`, { text: "Responda apenas: ok" })
+    await idle(done)
+    await idle(quiet)
+    await Bun.sleep(8_000)
+    const finished = await alerts(done)
+    expect(finished.length, 1)
+    expect(finished[0]?.body.opencode?.kind, "session.finished")
+    expect(finished[0]?.body.aps["interruption-level"], "active")
+    expect((await alerts(quiet)).length, 0)
+    results.success = { bell: finished[0]?.body.aps.alert, withoutBell: "no alert" }
 
-  // 3. Permissions: one left pending alerts after 3 s; one answered at once alerts nothing.
-  const ask = { permissions: [{ action: "shell", resource: "*", effect: "ask" }] }
-  const slow = await create("Aviso — permissão pendente", ask)
-  const quick = await create("Aviso — permissão respondida", ask)
-  await call(`/api/session/${quick}/prompt`, { text: "Use a ferramenta shell para rodar exatamente: echo rapido" })
-  const fast = await until(
-    async () => (await call<{ data: { id: string }[] }>(`/api/session/${quick}/permission`)).data[0],
-    180_000,
-    "the quick permission",
-  )
-  await call(`/api/session/${quick}/permission/${fast.id}/reply`, { decision: "once" })
-  await call(`/api/session/${slow}/prompt`, { text: "Use a ferramenta shell para rodar exatamente: echo devagar" })
-  const pending = await until(
-    async () => (await call<{ data: { id: string }[] }>(`/api/session/${slow}/permission`)).data[0],
-    180_000,
-    "the pending permission",
-  )
-  const pendingAt = Date.now()
-  const permitted = await until(async () => (await alerts(slow))[0], 15_000, "the permission alert")
-  expect(permitted.body.opencode?.attention, "permission")
-  expect(permitted.body.opencode?.requestID, pending.id)
-  if (permitted.at - pendingAt < 2_000) throw new Error("The permission alert did not wait")
-  await call(`/api/session/${slow}/permission/${pending.id}/reply`, { decision: "reject" })
-  await idle(slow)
-  await idle(quick)
-  await Bun.sleep(8_000)
-  expect((await alerts(quick)).length, 0)
-  expect((await alerts(slow)).length, 1)
-  results.permission = { afterMs: permitted.at - pendingAt, alert: permitted.body.aps.alert, answeredAtOnce: "no alert" }
+    // 2. A real question: one alert at once, with its request; the interruption that ends it alerts nothing.
+    const asks = await create("Aviso — pergunta")
+    await call(`/api/session/${asks}/prompt`, {
+      text: 'Use a ferramenta question para me perguntar exatamente "Prefere azul ou verde?", com as opções azul e verde. Depois espere a resposta.',
+    })
+    const form = await until(
+      async () => (await call<{ data: { id: string }[] }>(`/api/session/${asks}/form`)).data[0],
+      180_000,
+      "the question",
+    )
+    const askedAt = Date.now()
+    const asked = await until(async () => (await alerts(asks))[0], 15_000, "the question alert")
+    expect(asked.body.opencode?.attention, "question")
+    expect(asked.body.opencode?.requestID, form.id)
+    await Bun.sleep(5_000)
+    await call(`/api/session/${asks}/interrupt?resume=false`, {})
+    await idle(asks)
+    await Bun.sleep(8_000)
+    expect((await alerts(asks)).length, 1)
+    results.question = { afterMs: asked.at - askedAt, alert: asked.body.aps.alert, requestID: form.id }
 
-  // 4. A bell session that fails without retries (unknown model): one alert, and its device's Live Activity update
-  //    for the failure carries no alert.
-  await rpc("custom.live-activity/register", {
-    deviceID,
-    serverKey: "e2e",
-    environment: "sandbox",
-    theme: {
-      background: "#120f0eff",
-      surface: "#161313ff",
-      border: "#2e2e2dff",
-      textStrong: "#e4e0d6ff",
-      text: "#c9c5baff",
-      textSecondary: "#a29f94ff",
-      textWeak: "#6b6861ff",
-      primary: "#da7c47ff",
-      success: "#83b35fff",
-      warning: "#c67f13ff",
-      error: "#dc6e5eff",
-      accent: "#9988e5ff",
-    },
-  })
-  await rpc("custom.live-activity/activity", { deviceID, activityID: `act-${token.slice(0, 8)}`, pushToken: activityToken })
+    // 3. Permissions: one left pending alerts after 3 s; one answered at once alerts nothing.
+    const ask = { permissions: [{ action: "shell", resource: "*", effect: "ask" }] }
+    const slow = await create("Aviso — permissão pendente", ask)
+    const quick = await create("Aviso — permissão respondida", ask)
+    await call(`/api/session/${quick}/prompt`, { text: "Use a ferramenta shell para rodar exatamente: echo rapido" })
+    const fast = await until(
+      async () => (await call<{ data: { id: string }[] }>(`/api/session/${quick}/permission`)).data[0],
+      180_000,
+      "the quick permission",
+    )
+    await call(`/api/session/${quick}/permission/${fast.id}/reply`, { decision: "once" })
+    await call(`/api/session/${slow}/prompt`, { text: "Use a ferramenta shell para rodar exatamente: echo devagar" })
+    const pending = await until(
+      async () => (await call<{ data: { id: string }[] }>(`/api/session/${slow}/permission`)).data[0],
+      180_000,
+      "the pending permission",
+    )
+    const pendingAt = Date.now()
+    const permitted = await until(async () => (await alerts(slow))[0], 15_000, "the permission alert")
+    expect(permitted.body.opencode?.attention, "permission")
+    expect(permitted.body.opencode?.requestID, pending.id)
+    if (permitted.at - pendingAt < 2_000) throw new Error("The permission alert did not wait")
+    await call(`/api/session/${slow}/permission/${pending.id}/reply`, { decision: "reject" })
+    await idle(slow)
+    await idle(quick)
+    await Bun.sleep(8_000)
+    expect((await alerts(quick)).length, 0)
+    expect((await alerts(slow)).length, 1)
+    results.permission = {
+      afterMs: permitted.at - pendingAt,
+      alert: permitted.body.aps.alert,
+      answeredAtOnce: "no alert",
+    }
+  }
+
+  // 4. A bell session that fails without retries (unknown model) while the device has a live activity: one alert,
+  //    through the activity, and no notification.
+  await activityOn(activityToken)
   const broken = await create("Aviso — falha sem retry")
   await bell(broken)
-  const before = (await log()).length
   await call(`/api/session/${broken}/model`, { model: { providerID: "llm-proxy", id: "modelo-inexistente-e2e" } })
   await call(`/api/session/${broken}/prompt`, { text: "Responda apenas: ok" })
   await idle(broken)
   await Bun.sleep(12_000)
-  const failed = await alerts(broken)
-  expect(failed.length, 1)
-  expect(failed[0]?.body.opencode?.attention, "failed")
-  const activity = (await log()).slice(before).filter((entry) => entry.path === `/3/device/${activityToken}`)
-  if (activity.length === 0) throw new Error("No Live Activity update reached the fake APNs")
-  if (activity.some((entry) => entry.body.aps.alert)) throw new Error("A Live Activity update carried an alert")
-  await rpc("custom.live-activity/unregister", { deviceID })
-  results.failure = { alert: failed[0]?.body.aps.alert, liveActivityUpdates: activity.length, liveActivityAlerts: 0 }
+  const failedThroughActivity = await activityAlerts(activityToken, "Aviso — falha sem retry")
+  expect(failedThroughActivity.length, 1)
+  expect(failedThroughActivity[0]?.body.aps.alert?.body.startsWith("Parou com erro · "), true)
+  expect((await alerts(broken)).length, 0)
+  results.failure = { activityAlerts: 1, notifications: 0, alert: failedThroughActivity[0]?.body.aps.alert }
 
-  // 5. Retries: 503 until the retries run out alerts once, only at the end; two 503s then success is a "Terminou".
-  const retried = await create("Aviso — falha com retry", { model: { providerID: "flaky", id: "always-503" } })
-  const recovers = await create("Aviso — retry que se recupera", { model: { providerID: "flaky", id: "twice-503" } })
-  await bell(recovers)
-  const started = Date.now()
-  await call(`/api/session/${retried}/prompt`, { text: "Responda apenas: ok" })
-  await call(`/api/session/${recovers}/prompt`, { text: "Responda apenas: ok" })
-  await Bun.sleep(30_000)
-  expect((await alerts(retried)).length, 0)
-  const midway = attempts.get("always-503") ?? 0
-  if (midway < 3) throw new Error(`Expected retries in flight, saw ${midway} attempts`)
-  await idle(recovers)
-  await idle(retried, 300_000)
+  // 6. A real question, once per device: through the live activity; once it ended, as a notification; with its token
+  //    refused at that moment, the notification as fallback. A bell success is a notification only.
+  const first = await ask("Aviso — pergunta com atividade", "Primeira pergunta?")
+  expect((await activityAlerts(activityToken, "Aviso — pergunta com atividade")).length, 1)
+  expect((await alerts(first.id)).length, 0)
+  await rpc("custom.live-activity/ended", { deviceID, activityID: `act-${activityToken.slice(0, 8)}`, reason: "ended" })
+  const second = await ask("Aviso — pergunta sem atividade", "Segunda pergunta?")
+  expect((await activityAlerts(activityToken, "Aviso — pergunta sem atividade")).length, 0)
+  expect((await alerts(second.id)).length, 1)
+  const refused = `dead${activityToken.slice(4)}`
+  await activityOn(refused)
+  const third = await ask("Aviso — atividade recusada", "Terceira pergunta?")
+  // The lifecycle's first update to the new activity is usually refused before the question, which then goes straight
+  // to the notification; either way exactly one alert is delivered (the unit tests cover the refusal at that moment).
+  const tried = await activityAlerts(refused, "Aviso — atividade recusada")
+  expect((await alerts(third.id)).length, 1)
+  await activityOn(activityToken)
+  const finish = await create("Aviso — sucesso com atividade")
+  await bell(finish)
+  await call(`/api/session/${finish}/prompt`, { text: "Responda apenas: ok" })
+  await idle(finish)
   await Bun.sleep(8_000)
-  const gaveUp = await alerts(retried)
-  expect(gaveUp.length, 1)
-  expect(gaveUp[0]?.body.opencode?.attention, "failed")
-  const recovered = await alerts(recovers)
-  expect(recovered.length, 1)
-  expect(recovered[0]?.body.opencode?.kind, "session.finished")
-  results.retry = {
-    attempts: attempts.get("always-503"),
-    alertAfterMs: (gaveUp[0]?.at ?? 0) - started,
-    noAlertAt30s: true,
-    recovered: { attempts: attempts.get("twice-503"), alert: recovered[0]?.body.aps.alert },
+  expect((await alerts(finish)).length, 1)
+  expect((await activityAlerts(activityToken, "Aviso — sucesso com atividade")).length, 0)
+  for (const item of [first, second, third]) await call(`/api/session/${item.id}/interrupt?resume=false`, {})
+  await rpc("custom.live-activity/unregister", { deviceID })
+  results.perDevice = {
+    withActivity: { activityAlerts: 1, notifications: 0 },
+    activityEnded: { activityAlerts: 0, notifications: 1 },
+    tokenRefused: { activityAttempts: tried.length, notifications: 1 },
+    bellSuccess: { activityAlerts: 0, notifications: 1 },
+  }
+
+  if (full) {
+    // 5. Retries: 503 until the retries run out alerts once, only at the end; two 503s then success is a "Terminou".
+    const retried = await create("Aviso — falha com retry", { model: { providerID: "flaky", id: "always-503" } })
+    const recovers = await create("Aviso — retry que se recupera", { model: { providerID: "flaky", id: "twice-503" } })
+    await bell(recovers)
+    const started = Date.now()
+    await call(`/api/session/${retried}/prompt`, { text: "Responda apenas: ok" })
+    await call(`/api/session/${recovers}/prompt`, { text: "Responda apenas: ok" })
+    await Bun.sleep(30_000)
+    expect((await alerts(retried)).length, 0)
+    const midway = attempts.get("always-503") ?? 0
+    if (midway < 3) throw new Error(`Expected retries in flight, saw ${midway} attempts`)
+    await idle(recovers)
+    await idle(retried, 300_000)
+    await Bun.sleep(8_000)
+    const gaveUp = await alerts(retried)
+    expect(gaveUp.length, 1)
+    expect(gaveUp[0]?.body.opencode?.attention, "failed")
+    const recovered = await alerts(recovers)
+    expect(recovered.length, 1)
+    expect(recovered[0]?.body.opencode?.kind, "session.finished")
+    results.retry = {
+      attempts: attempts.get("always-503"),
+      alertAfterMs: (gaveUp[0]?.at ?? 0) - started,
+      noAlertAt30s: true,
+      recovered: { attempts: attempts.get("twice-503"), alert: recovered[0]?.body.aps.alert },
+    }
   }
   console.log(JSON.stringify({ ok: true, results }, null, 2))
 } finally {
@@ -284,7 +354,9 @@ try {
   await rpc("custom.notifications/unregister", { deviceID }).catch(() => undefined)
   await rpc("custom.live-activity/unregister", { deviceID }).catch(() => undefined)
   for (const id of owned) {
-    await rpc("custom.preferences/mutate", { type: "sidebar.notify", session: key(id), notify: false }).catch(() => undefined)
+    await rpc("custom.preferences/mutate", { type: "sidebar.notify", session: key(id), notify: false }).catch(
+      () => undefined,
+    )
     await call(`/api/session/${id}/interrupt?resume=false`, {}).catch(() => undefined)
     await call(`/api/session/${id}`, undefined, "DELETE").catch(() => undefined)
   }

@@ -86,16 +86,12 @@ export function makeHub(options: HubOptions) {
         host,
         client
           ? {
-              lifecycle: makeLifecycle({
-                registry: running.registry,
+              lifecycle: makeLifecycle({ registry: running.registry, send: client.send }),
+              notifier: makeNotifier({
+                registry: running.notifications,
+                activities: running.registry,
                 send: client.send,
-                // Devices that receive the session alerts themselves: their activity updates stay silent.
-                alerted: (now) =>
-                  running.notifications
-                    .list(now)
-                    .pipe(Effect.map((devices) => new Set(devices.map((device) => device.deviceID)))),
               }),
-              notifier: makeNotifier({ registry: running.notifications, send: client.send }),
             }
           : undefined,
       )
@@ -131,7 +127,7 @@ export function makeHub(options: HubOptions) {
           Effect.catchCause((cause) => Effect.logWarning("Live Activity push delivery failed", { cause })),
           Effect.forkIn(running.scope),
         )
-        const alerts = yield* push.notifier.evaluate(derived, now)
+        const alerts = yield* push.notifier.evaluate(derived, now, state)
         if (alerts.wakeAt !== undefined) wakes.push(alerts.wakeAt)
         yield* alerts.deliver.pipe(
           Effect.catchCause((cause) => Effect.logWarning("Session notification delivery failed", { cause })),

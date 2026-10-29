@@ -4044,8 +4044,10 @@ session (provider retries do not count); a success only with "Avisar ao terminar
    and the APNs environment go to `custom.notifications/register` on every event-stream connection (several devices
    are supported; APNs-invalid tokens are dropped by the server).
 3. **Delivery (plugin):** through the Live Activity APNs client and credentials, `thread-id` = session,
-   `apns-collapse-id` = `attention:<session>` for attention alerts. The Agentes Live Activity update for a device
-   registered here carries no `alert`, so nothing buzzes twice; unregistered devices keep it as the fallback.
+   `apns-collapse-id` = `attention:<session>` for attention alerts. One alert per device (rev. 30/10): with a live
+   Agentes activity, a question, permission or failure goes as that activity's update carrying the `alert` (the watch
+   mirrors it) and no notification is sent; without one, or if that update is refused, the notification. A bell
+   success is always a notification.
 4. **Presentation (`willPresent`):** hidden only with the app in the foreground and that session open on the same
    server (`SessionPushAlert.presents`); otherwise banner, list and sound. While the server pushes, the in-app banner
    skips what arrives by push (questions, permissions, failures, bell finishes).

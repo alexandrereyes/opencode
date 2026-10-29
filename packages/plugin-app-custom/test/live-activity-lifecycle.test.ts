@@ -64,15 +64,11 @@ const iphone: LiveActivity.RegisterInput = {
   pushToStartToken: "aa11",
 }
 
-function setup(answer?: (push: Push) => Result, alerted?: ReadonlySet<string>) {
+function setup(answer?: (push: Push) => Result) {
   const shared = storage()
   const registry = makeRegistry(shared)
   const fake = apns(answer)
-  const lifecycle = makeLifecycle({
-    registry,
-    send: fake.client.send,
-    ...(alerted ? { alerted: () => Effect.succeed(alerted) } : {}),
-  })
+  const lifecycle = makeLifecycle({ registry, send: fake.client.send })
   const evaluate = (tracker: Tracker, now: number) =>
     lifecycle.evaluate(tracker.derive(now, host), now).pipe(
       Effect.tap((plan) => plan.deliver),
@@ -152,7 +148,10 @@ it.effect("attention changes push at priority 10 with push-update.json; other ch
     yield* tracker.refreshPending(T)
     yield* evaluate(tracker, T)
     expect(pushes.map((push) => push.priority)).toEqual([5, 10])
-    expect(pushes[1]?.body).toEqual(yield* Effect.promise(() => fixture("push-update")))
+    // The fixture's alert comes from the session alerts (`notifications/index.ts`); the lifecycle's own update is silent.
+    const update = yield* Effect.promise(() => fixture("push-update"))
+    delete update.aps.alert
+    expect(pushes[1]?.body).toEqual(update)
     // A routine change right after waits for the 10-second slot.
     yield* tracker.apply({ type: "session.text.started", created: T + 1000, data: { sessionID: ids.live } }, T + 1000)
     expect(yield* evaluate(tracker, T + 1000)).toBe(T + limits.coalesceMs)
@@ -175,7 +174,7 @@ it.effect("attention changes push at priority 10 with push-update.json; other ch
   }),
 )
 
-it.effect("a new failed session alerts; the end comes after 10 calm minutes with push-end.json", () =>
+it.effect("a new failed session is urgent; the end comes after 10 calm minutes with push-end.json", () =>
   Effect.gen(function* () {
     const { registry, pushes, evaluate } = setup()
     const tracker = yield* scene("working")
@@ -185,10 +184,7 @@ it.effect("a new failed session alerts; the end comes after 10 calm minutes with
     yield* tracker.apply(execution("failed", ids.deploy, T), T)
     yield* evaluate(tracker, T)
     expect(pushes.at(-1)).toMatchObject({ priority: 10 })
-    expect(pushes.at(-1)?.body).toHaveProperty("aps.alert", {
-      title: "Sessão parou com erro",
-      body: "Deploy no Swarm · core-infra",
-    })
+    expect(pushes.at(-1)?.body).not.toHaveProperty("aps.alert")
     const { registry: endRegistry, pushes: endPushes, evaluate: endEvaluate } = setup()
     const calm = yield* scene("calm")
     yield* endRegistry.register(iphone, T - 2 * minute)
@@ -210,24 +206,17 @@ it.effect("a new failed session alerts; the end comes after 10 calm minutes with
   }),
 )
 
-it.effect("a device registered for session alerts gets urgent updates without an alert; others keep it", () =>
+it.effect("attention updates are urgent but silent: the session alerts carry the buzz", () =>
   Effect.gen(function* () {
-    for (const [alerted, expected] of [
-      [new Set([iphone.deviceID]), undefined],
-      [new Set(["outro-aparelho"]), { title: "Sessão parou com erro", body: "Deploy no Swarm · core-infra" }],
-      [undefined, { title: "Sessão parou com erro", body: "Deploy no Swarm · core-infra" }],
-    ] as const) {
-      const { registry, pushes, evaluate } = setup(undefined, alerted)
-      const tracker = yield* scene("working")
-      yield* registry.register(iphone, T - 2 * minute)
-      yield* registry.activity({ deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" }, T - minute)
-      yield* evaluate(tracker, T - 30_000)
-      yield* tracker.apply(execution("failed", ids.deploy, T), T)
-      yield* evaluate(tracker, T)
-      expect(pushes.at(-1)).toMatchObject({ token: "bb22", priority: 10 })
-      if (expected) expect(pushes.at(-1)?.body).toHaveProperty("aps.alert", expected)
-      else expect(pushes.at(-1)?.body).not.toHaveProperty("aps.alert")
-    }
+    const { registry, pushes, evaluate } = setup()
+    const tracker = yield* scene("working")
+    yield* registry.register(iphone, T - 2 * minute)
+    yield* registry.activity({ deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" }, T - minute)
+    yield* evaluate(tracker, T - 30_000)
+    yield* tracker.apply(execution("failed", ids.deploy, T), T)
+    yield* evaluate(tracker, T)
+    expect(pushes.at(-1)).toMatchObject({ token: "bb22", priority: 10 })
+    expect(pushes.at(-1)?.body).not.toHaveProperty("aps.alert")
   }),
 )
 

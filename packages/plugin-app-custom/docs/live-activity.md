@@ -194,9 +194,11 @@ device showed an ended card lingering above a new one). Ended activities never s
 
 **Update.** The backend pushes `update` to every registered activity token:
 
-- Immediately with `apns-priority: 10` when the set of attention items or failed sessions changes. Only additions
-  carry an `alert`: `Pergunta pendente` / `Permissão pendente` / `Sessão parou com erro`, body
-  `<title> · <project>`.
+- Immediately with `apns-priority: 10` when the set of attention items or failed sessions changes, without an
+  `alert` (rev. 2026-10-30). The buzz is the session alert of
+  [session-notifications.md](session-notifications.md#live-activity-alerts), which goes through this activity as one
+  more priority-10 update carrying `alert` (`<session title>` / `Pergunta: …`, `Permissão: …` or `Parou com erro ·
+  <project>`), as in `push-update.json`.
 - Otherwise coalesced, `apns-priority: 5`, at most one every 10 seconds per activity.
 - A heartbeat update every 10 minutes while active. Every push sets `stale-date` = now + 15 minutes.
 
@@ -382,15 +384,15 @@ push-to-start requires an observed `activeTotal` of 0 after the device's last st
 registered activity covered active work, so work already running at boot or registration does not start one, while an
 activity that ended during the calm (the backend's own `end`, sent with `dismissal-date` = now) leaves the device
 armed for the next rise. Push-to-start is only sent while no activity is registered: a failed `end` keeps the
-activity registered and is retried, so no new card starts beside it. Alerts: when several items are added at once, the
-first in the order question, permission, failed. An activity registered with `activity` gets a routine update within
+activity registered and is retried, so no new card starts beside it. An activity registered with `activity` gets a routine update within
 10 s. `end` is sent with priority 10 and also respects the 10 s per-activity spacing; after it is delivered (or the
 token is invalid) the activity is removed from the registration. A failed update clears the "already sent" marker so
 the next 10 s slot retries; a failed start is retried after the 5-minute window.
 
-**Alerts with session notifications (rev. 2026-10-29).** A device also registered in `custom.notifications` gets
-its urgent updates without `alert`, since the session alert already buzzes; others keep the alert as the fallback (see
-[session-notifications.md](session-notifications.md#live-activity-alerts)).
+**One alert per device (rev. 2026-10-30).** Questions, permissions and failures alert once per device, decided by the
+session alerts: through the live activity when the device has one (iPhone, and the watch mirrors it), otherwise as a
+notification (see [session-notifications.md](session-notifications.md#live-activity-alerts)). The updates this
+lifecycle sends never carry an `alert`; push-to-start keeps its own.
 
 **Expiry (rev. 2026-10-29).** ActivityKit ends an activity after 8 hours. Its token then fails (APNs 410/invalid):
 the registry drops it, remembers the activity as `expired` and sets `rearm`, which arms push-to-start while work goes

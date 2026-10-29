@@ -5,7 +5,7 @@ registered iPhone. There are no switches besides the per-session bell (rev. 2026
 
 | What | Alerts | Rule |
 | --- | --- | --- |
-| Question | always, any top-level session (subagents roll up) | at once, once per request |
+| Question | always, any top-level session (subagents roll up) | at once, once per request and device |
 | Permission | always, any top-level session | only if still pending after 3 s and auto-approval is off |
 | Failure that stops the session | always | once per stop; provider retries do not alert |
 | Success | only with "Avisar ao terminar" | once per finish |
@@ -104,10 +104,18 @@ Watch mirrors them.
 
 ## Live Activity alerts
 
-The Agentes Live Activity update that adds a question, permission or failure is still sent at priority 10, but a
-device registered here (same `deviceID`) gets it **without** `alert`: the session alert above is the one that buzzes.
-A device without a registration (notifications never allowed) keeps the activity's alert as the fallback.
-Push-to-start keeps its alert.
+One alert per question, permission or failure and device (rev. 2026-10-30), preferring the Agentes Live Activity:
+
+- **The device has a live activity** (a `custom.live-activity` registration with an activity token, same `deviceID`)
+  and the card has something to show: the alert goes as that activity's update, priority 10, carrying `alert`
+  (`title` = session title, `body` as above). No notification is sent. The iPhone shows it on the card and the Dynamic
+  Island and the watch mirrors it, so each buzzes once.
+- **Otherwise** (no activity: expired, dismissed, never started, or the device has none): the notification above.
+- **The activity update fails:** APNs refusing the token (the activity just ended) drops it, rearms push-to-start and
+  sends the notification instead; any other failure sends the notification too. Nothing is left without an alert.
+- A bell **success** always goes as a notification: the activity only shows work and attention.
+- The lifecycle's own updates (state changes, heartbeats) never carry an `alert`, and the watch complication's
+  widget pushes (`content-changed`) are silent.
 
 ## App behavior
 

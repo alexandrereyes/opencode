@@ -147,16 +147,7 @@ export type Registry = ReturnType<typeof makeRegistry>
  * Start, update and end decisions for every registered device. `evaluate` runs whenever the state may have changed or
  * a deadline it returned passes; it returns the pushes to deliver separately so APNs never delays the caller.
  */
-export function makeLifecycle(input: {
-  readonly registry: Registry
-  readonly send: Client["send"]
-  /**
-   * Devices registered for the session alerts (`custom.notifications`), which announce questions, permissions and
-   * failures themselves: their activity updates stay urgent but carry no `alert`, so nothing buzzes twice. Without
-   * it every device keeps the alert as the fallback.
-   */
-  readonly alerted?: (now: number) => Effect.Effect<ReadonlySet<string>>
-}) {
+export function makeLifecycle(input: { readonly registry: Registry; readonly send: Client["send"] }) {
   const activities = new Map<string, { lastPushAt: number; sent: string; marks: ReadonlySet<string> }>()
   // Push-to-start needs a rise of activeTotal from 0 observed after the device's last start push or activity.
   const seen = { zeroAt: -Infinity, activity: new Map<string, number>(), retry: new Set<string>() }
@@ -200,9 +191,7 @@ export function makeLifecycle(input: {
         }),
         Effect.flatMap(after),
       )
-    const devices = yield* input.registry.list(now)
-    const alerted = devices.length > 0 && input.alerted ? yield* input.alerted(now) : new Set<string>()
-    for (const device of devices) {
+    for (const device of yield* input.registry.list(now)) {
       const activity = device.activity
       if (!activity) {
         const last = device.startPushedAt ?? -Infinity
@@ -274,9 +263,6 @@ export function makeLifecycle(input: {
         wakes.push(memo.lastPushAt + (key === memo.sent ? limits.heartbeatMs : limits.coalesceMs))
         continue
       }
-      const alert = alerted.has(device.deviceID)
-        ? undefined
-        : added.map((mark) => derived.marks.get(mark)).find((item) => item !== undefined)
       memo.lastPushAt = now
       memo.sent = key
       memo.marks = marks
@@ -285,12 +271,9 @@ export function makeLifecycle(input: {
         deliver(
           device,
           "update",
-          push(activity.pushToken, device.environment, urgent ? 10 : 5, {
-            event: "update",
-            state,
-            now,
-            ...(alert ? { alert } : {}),
-          }),
+          // Urgent but silent: the session alerts (`notifications/index.ts`) buzz once per question, permission or
+          // failure, through this activity when it is live.
+          push(activity.pushToken, device.environment, urgent ? 10 : 5, { event: "update", state, now }),
           (result) =>
             result.status === "failed"
               ? Effect.sync(() => {

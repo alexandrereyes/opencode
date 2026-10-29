@@ -1,6 +1,6 @@
 import { Effect, Option, Schema } from "effect"
 import type { Client, Push } from "../live-activity/apns.js"
-import type { Storage } from "../live-activity/lifecycle.js"
+import { push, type Registry, type Storage } from "../live-activity/lifecycle.js"
 import { LiveActivity } from "../live-activity/rpc.js"
 import type { Derived, Root } from "../live-activity/tracker.js"
 import type { Notifications } from "./rpc.js"
@@ -84,7 +84,16 @@ export type Alert =
  * - with "Avisar ao terminar", the same stop after a success, when the work is newer than the bell.
  * Only work this process saw counts. A user or shutdown interruption alerts nothing.
  */
-export function makeNotifier(input: { readonly registry: NotificationRegistry; readonly send: Client["send"] }) {
+export function makeNotifier(input: {
+  readonly registry: NotificationRegistry
+  /**
+   * The Live Activity registrations. A device with a live activity gets its question, permission and failure alerts
+   * as that activity's update (on the iPhone and mirrored on the watch) instead of a notification, so each buzzes
+   * once; a refused or failed update falls back to the notification.
+   */
+  readonly activities?: Registry
+  readonly send: Client["send"]
+}) {
   const state = { primedAt: undefined as number | undefined }
   /**
    * Per top-level family: `handled`, the `workedAt` already reported (or present when first seen idle); `pending` and
@@ -99,6 +108,8 @@ export function makeNotifier(input: { readonly registry: NotificationRegistry; r
   const evaluate = Effect.fn("Notifications.evaluate")(function* (
     derived: Pick<Derived, "roots" | "pending" | "autoApprove">,
     now: number,
+    /** The Live Activity state as pushed (`null` while it has nothing to show, so it cannot carry an alert). */
+    card: LiveActivity.AgentsState | null = null,
   ) {
     const priming = state.primedAt === undefined
     const primedAt = state.primedAt ?? now
@@ -160,24 +171,64 @@ export function makeNotifier(input: { readonly registry: NotificationRegistry; r
       })
     }
     const devices = alerts.length > 0 ? yield* input.registry.list(now) : []
+    const activities =
+      alerts.length > 0 && input.activities
+        ? (yield* input.activities.list(now)).flatMap((device) =>
+            device.activity ? [{ device, activity: device.activity }] : [],
+          )
+        : []
+    const notify = (device: Device, alert: Alert) =>
+      input.send(notification(device, alert, now)).pipe(
+        Effect.flatMap((result) => {
+          if (result.status === "sent")
+            return Effect.logInfo("Session notification sent", {
+              sessionID: alert.ref.sessionID,
+              kind: alert.kind,
+              environment: device.environment,
+            })
+          if (result.status === "invalid")
+            return input.registry
+              .drop(device.deviceID, device.token, now)
+              .pipe(Effect.andThen(Effect.logInfo("Session notification token dropped", { reason: result.reason })))
+          return Effect.logWarning("Session notification failed", { reason: result.reason })
+        }),
+      )
+    const deviceIDs = [...new Set([...devices, ...activities.map((item) => item.device)].map((item) => item.deviceID))]
     const jobs = alerts.flatMap((alert) =>
-      devices.map((device) =>
-        input.send(push(device, alert, now)).pipe(
-          Effect.flatMap((result) => {
-            if (result.status === "sent")
-              return Effect.logInfo("Session notification sent", {
-                sessionID: alert.ref.sessionID,
-                kind: alert.kind,
-                environment: device.environment,
-              })
-            if (result.status === "invalid")
-              return input.registry
-                .drop(device.deviceID, device.token, now)
-                .pipe(Effect.andThen(Effect.logInfo("Session notification token dropped", { reason: result.reason })))
-            return Effect.logWarning("Session notification failed", { reason: result.reason })
-          }),
-        ),
-      ),
+      deviceIDs.map((deviceID) => {
+        const device = devices.find((item) => item.deviceID === deviceID)
+        const fallback = device ? notify(device, alert) : Effect.void
+        const live = activities.find((item) => item.device.deviceID === deviceID)
+        // A success never alerts through the activity, which only shows work and attention.
+        if (alert.kind === "finished" || !live || !card || !input.activities) return fallback
+        const registry = input.activities
+        const token = live.activity.pushToken
+        return input
+          .send(
+            push(token, live.device.environment, 10, {
+              event: "update",
+              state: card,
+              now,
+              alert: { title: alert.ref.title, body: text(alert) },
+            }),
+          )
+          .pipe(
+            Effect.flatMap((result) => {
+              if (result.status === "sent")
+                return Effect.logInfo("Session alert sent through the Live Activity", {
+                  sessionID: alert.ref.sessionID,
+                  kind: alert.kind,
+                })
+              // The activity just ended (its token was refused) or APNs failed: the notification is the fallback.
+              return (result.status === "invalid" ? registry.drop(deviceID, token, now) : Effect.void).pipe(
+                Effect.andThen(
+                  Effect.logInfo("Session alert falls back to a notification", { kind: alert.kind, reason: result.reason }),
+                ),
+                Effect.andThen(fallback),
+              )
+            }),
+          )
+      }),
     )
     return {
       wakeAt: wakes.length > 0 ? Math.min(...wakes) : undefined,
@@ -222,7 +273,7 @@ function text(alert: Alert) {
   return `Permissão: ${alert.text ?? "aprove ou negue na sessão"}`
 }
 
-function push(device: Device, alert: Alert, now: number): Push {
+function notification(device: Device, alert: Alert, now: number): Push {
   return {
     token: device.token,
     environment: device.environment,
