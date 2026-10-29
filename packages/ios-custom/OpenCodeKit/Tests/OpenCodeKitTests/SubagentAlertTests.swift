@@ -214,14 +214,25 @@ private actor ChildActions: ConversationActions {
 
 @Test func bellSessionsFinishThroughTheSystemNotificationInstead() throws {
   let root = try alertSession()
-  for type in ["session.execution.succeeded", "session.execution.failed"] {
-    let signal = try #require(SessionAlertSignal(alertEvent(type)))
-    var policy = SessionAlertPolicy()
-    policy.connect(at: 10)
-    #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil,
-      notified: [SessionPreferenceKey.encode(root.id)]) == false)
-    var plain = SessionAlertPolicy()
-    plain.connect(at: 10)
-    #expect(plain.admit(signal, server: "a", session: root, root: root, current: nil, notified: ["ses_other"]) == true)
+  let signal = try #require(SessionAlertSignal(alertEvent("session.execution.succeeded")))
+  var policy = SessionAlertPolicy()
+  policy.connect(at: 10)
+  #expect(policy.admit(signal, server: "a", session: root, root: root, current: nil,
+    notified: [SessionPreferenceKey.encode(root.id)], pushes: true) == false)
+  var plain = SessionAlertPolicy()
+  plain.connect(at: 10)
+  #expect(plain.admit(signal, server: "a", session: root, root: root, current: nil, notified: ["ses_other"], pushes: true) == true)
+}
+
+@Test func pushedAttentionIsNotRepeatedByTheBanner() throws {
+  let root = try alertSession()
+  let child = try alertSession("ses_child", parent: root.id)
+  for (type, owner) in [("session.execution.failed", root), ("permission.asked", child), ("form.created", child)] {
+    for pushes in [true, false] {
+      let signal = try #require(SessionAlertSignal(alertEvent(type, owner: owner.id)))
+      var policy = SessionAlertPolicy()
+      policy.connect(at: 10)
+      #expect(policy.admit(signal, server: "a", session: owner, root: root, current: nil, pushes: pushes) == !pushes)
+    }
   }
 }

@@ -271,3 +271,22 @@ import Testing
   #expect(decide("https://example.com/", link: true, touch: true) == .openExternally(URL(string: "https://example.com/")!))
   #expect(decide("https://example.com/") == .cancel)
 }
+
+@Test func fileViewerArrowsAppearOnlyTowardAnExistingSibling() {
+  #expect(FileSiblings.arrows(position: nil, count: 3) == (false, false))
+  #expect(FileSiblings.arrows(position: 0, count: 1) == (false, false))
+  #expect(FileSiblings.arrows(position: 0, count: 3) == (false, true))
+  #expect(FileSiblings.arrows(position: 1, count: 3) == (true, true))
+  #expect(FileSiblings.arrows(position: 2, count: 3) == (true, false))
+  #expect(FileSiblings.arrows(position: 3, count: 3) == (false, false))
+  #expect(FileSiblings.arrows(position: 0, count: 0) == (false, false))
+}
+
+@Test func videosWithoutAudioMixWithOtherAppsUnlessTheAppIsUsingAudio() {
+  #expect(VideoAudioPolicy.decide(hasAudioTrack: false, appAudioActive: false) == .mixWithOthers)
+  #expect(VideoAudioPolicy.decide(hasAudioTrack: true, appAudioActive: false) == .unchanged)
+  #expect(VideoAudioPolicy.decide(hasAudioTrack: false, appAudioActive: true) == .unchanged)
+  #expect(VideoAudioPolicy.decide(hasAudioTrack: true, appAudioActive: true) == .unchanged)
+  #expect(VideoAudioPolicy.deactivatesOnExit(appAudioActive: false))
+  #expect(!VideoAudioPolicy.deactivatesOnExit(appAudioActive: true))
+}

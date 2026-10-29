@@ -55,7 +55,7 @@ import SwiftUI
       let admitted = policy.admit(
         signal, server: server, session: session, root: root,
         current: store.currentSessionID,
-        notified: pushes(store) ? latest?.data.notifySessions ?? [] : [],
+        notified: pushes(store) ? latest?.data.notifySessions ?? [] : [], pushes: pushes(store),
         autoApprove: latest?.data.settings.autoApprove ?? false)
       UserDefaults.standard.set(policy.claims, forKey: storageKey)
       guard admitted else { return }
@@ -84,7 +84,7 @@ import SwiftUI
       // A missing session/ancestry or failed preferences read cannot safely produce an alert.
     }
   }
-  /// Whether this server pushes bell finishes to this device. The Mac has no APNs: its bell list keeps them and
+  /// Whether this server pushes session alerts (attention and bell finishes) to this device. The Mac has no APNs: its bell list keeps them and
   /// `MacSessionFinish` posts the system notification.
   private func pushes(_ store: SessionStore) -> Bool {
     #if os(iOS)

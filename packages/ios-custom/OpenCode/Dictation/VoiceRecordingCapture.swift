@@ -60,6 +60,15 @@ enum DictationAudioSession {
       }
     }
   }
+  /// Any other session change, in the same order as activations and deactivations, off the main thread.
+  static func perform(_ change: @escaping @Sendable (AVAudioSession) -> Void) async {
+    await withCheckedContinuation { continuation in
+      queue.async {
+        change(AVAudioSession.sharedInstance())
+        continuation.resume()
+      }
+    }
+  }
   static func deactivate() {
     queue.async { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
   }

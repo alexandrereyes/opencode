@@ -14,6 +14,8 @@ export const limits = {
   /** `activeTotal` and `counts.failed` must stay 0 this long before the activity ends. */
   endMs: 10 * 60_000,
   staleMs: 15 * 60_000,
+  /** ActivityKit ends a Live Activity after 8 hours; a little earlier counts, as clocks and reports drift. */
+  activityMs: 8 * 3_600_000 - 15 * 60_000,
   bodyBytes: 4096,
 }
 
@@ -29,9 +31,14 @@ const Device = Schema.Struct({
   /** The user dismissed the last activity; no push-to-start until `activeTotal` returns to 0. */
   dismissed: Schema.Boolean,
   startPushedAt: optional(Schema.Number),
+  /** `registeredAt` is when this server first heard of the activity, kept across token re-reports. */
   activity: optional(
     Schema.Struct({ activityID: Schema.String, pushToken: Schema.String, registeredAt: Schema.Number }),
   ),
+  /** The activity whose token APNs refused (it expired): clearing its card later is no dismissal. */
+  expired: optional(Schema.String),
+  /** The last activity ended without the user refusing it: push-to-start may start a new one while work goes on. */
+  rearm: optional(Schema.Boolean),
 })
 export type Device = typeof Device.Type
 const Devices = Schema.Array(Device)
@@ -85,31 +92,50 @@ export function makeRegistry(storage: Storage) {
     activity: (input: LiveActivity.ActivityInput, now: number) =>
       edit(now, input.deviceID, (device) => ({
         ...device,
-        activity: { activityID: input.activityID, pushToken: input.pushToken, registeredAt: now },
+        activity: {
+          activityID: input.activityID,
+          pushToken: input.pushToken,
+          registeredAt: device.activity?.activityID === input.activityID ? device.activity.registeredAt : now,
+        },
       })),
     ended: (input: LiveActivity.EndedInput, now: number) =>
       edit(now, input.deviceID, (device) => {
         // A duplicate the app ended while a newer activity stays registered changes nothing.
         if (device.activity && device.activity.activityID !== input.activityID) return device
-        const { activity: _, ...rest } = device
-        return { ...rest, dismissed: device.dismissed || input.reason === "dismissed" }
+        // After 8 hours ActivityKit ends the activity itself; the card the user then clears reports "dismissed"
+        // too, but that is no refusal of new activities.
+        const expired =
+          device.expired === input.activityID ||
+          (device.activity !== undefined && now - device.activity.registeredAt >= limits.activityMs)
+        const refused = input.reason === "dismissed" && !expired
+        const { activity: _, expired: __, rearm: ___, ...rest } = device
+        return { ...rest, dismissed: device.dismissed || refused, ...(refused ? {} : { rearm: true }) }
       }),
     unregister: (deviceID: string, now: number) => edit(now, deviceID, () => undefined),
-    started: (deviceID: string, now: number) => edit(now, deviceID, (device) => ({ ...device, startPushedAt: now })),
+    started: (deviceID: string, now: number) =>
+      edit(now, deviceID, (device) => {
+        const { rearm: _, ...rest } = device
+        return { ...rest, startPushedAt: now }
+      }),
     rearm: (now: number) =>
       change(now, (devices) =>
         devices.some((device) => device.dismissed)
           ? devices.map((device) => ({ ...device, dismissed: false }))
           : devices,
       ),
-    /** Drops a token APNs reported invalid: the activity it updates, or the push-to-start token. */
+    /**
+     * Drops a token APNs reported invalid: the push-to-start token, or the activity it updates. An activity token
+     * dies with its activity (ActivityKit ends one after 8 hours), so push-to-start is rearmed for work still going.
+     */
     drop: (deviceID: string, token: string, now: number) =>
       edit(now, deviceID, (device) => {
         const { activity, pushToStartToken, ...rest } = device
+        const lost = activity !== undefined && activity.pushToken === token
         return {
           ...rest,
           ...(pushToStartToken && pushToStartToken !== token ? { pushToStartToken } : {}),
-          ...(activity && activity.pushToken !== token ? { activity } : {}),
+          ...(activity && !lost ? { activity } : {}),
+          ...(lost ? { expired: activity.activityID, rearm: true } : {}),
         }
       }),
   }
@@ -121,7 +147,16 @@ export type Registry = ReturnType<typeof makeRegistry>
  * Start, update and end decisions for every registered device. `evaluate` runs whenever the state may have changed or
  * a deadline it returned passes; it returns the pushes to deliver separately so APNs never delays the caller.
  */
-export function makeLifecycle(input: { readonly registry: Registry; readonly send: Client["send"] }) {
+export function makeLifecycle(input: {
+  readonly registry: Registry
+  readonly send: Client["send"]
+  /**
+   * Devices registered for the session alerts (`custom.notifications`), which announce questions, permissions and
+   * failures themselves: their activity updates stay urgent but carry no `alert`, so nothing buzzes twice. Without
+   * it every device keeps the alert as the fallback.
+   */
+  readonly alerted?: (now: number) => Effect.Effect<ReadonlySet<string>>
+}) {
   const activities = new Map<string, { lastPushAt: number; sent: string; marks: ReadonlySet<string> }>()
   // Push-to-start needs a rise of activeTotal from 0 observed after the device's last start push or activity.
   const seen = { zeroAt: -Infinity, activity: new Map<string, number>(), retry: new Set<string>() }
@@ -165,13 +200,16 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
         }),
         Effect.flatMap(after),
       )
-    for (const device of yield* input.registry.list(now)) {
+    const devices = yield* input.registry.list(now)
+    const alerted = devices.length > 0 && input.alerted ? yield* input.alerted(now) : new Set<string>()
+    for (const device of devices) {
       const activity = device.activity
       if (!activity) {
         const last = device.startPushedAt ?? -Infinity
         const armed =
           seen.zeroAt > Math.max(last, seen.activity.get(device.deviceID) ?? -Infinity) ||
-          seen.retry.has(device.deviceID)
+          seen.retry.has(device.deviceID) ||
+          device.rearm === true
         if (state.activeTotal === 0 || !device.pushToStartToken || device.dismissed || !armed) continue
         if (now - last < limits.startMs) {
           wakes.push(last + limits.startMs)
@@ -236,7 +274,9 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
         wakes.push(memo.lastPushAt + (key === memo.sent ? limits.heartbeatMs : limits.coalesceMs))
         continue
       }
-      const alert = added.map((mark) => derived.marks.get(mark)).find((item) => item !== undefined)
+      const alert = alerted.has(device.deviceID)
+        ? undefined
+        : added.map((mark) => derived.marks.get(mark)).find((item) => item !== undefined)
       memo.lastPushAt = now
       memo.sent = key
       memo.marks = marks

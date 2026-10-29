@@ -23,6 +23,8 @@ struct ConversationView: View {
   @State private var deleteCandidate: Session?
   @State private var search = ConversationSearchState()
   @State private var requestedTool: String?
+  /// Opened from a question or permission alert: the pending requests sit at the end of the transcript.
+  @State private var requestedEnd: Bool
   /// Unknown until measured; a retained transcript keeps the last known size meanwhile.
   @State private var size: CGSize?
   @State private var note: TranscriptNote?
@@ -41,11 +43,15 @@ struct ConversationView: View {
   let parentOnStack: String?
   let master: Bool
 
-  init(id: String, sessions: SessionStore, parentOnStack: String? = nil, toolID: String? = nil, master: Bool = false) {
+  init(
+    id: String, sessions: SessionStore, parentOnStack: String? = nil, toolID: String? = nil, master: Bool = false,
+    atRequest: Bool = false
+  ) {
     self.sessions = sessions
     self.master = master
     self.parentOnStack = parentOnStack
     _requestedTool = State(initialValue: toolID)
+    _requestedEnd = State(initialValue: atRequest)
     _conversation = State(initialValue: sessions.conversation(id, master: master))
   }
   /// The mounted transcript that scrolls for this screen.
@@ -524,6 +530,11 @@ struct ConversationView: View {
       transcript?.reveal(messageID: request.messageID, offset: request.offset, persist: request.persist) { _ in
         if screenVisible { validateQuoteTarget() }
       }
+    }
+    .task(id: "\(conversation.hasTranscript):\(requestedEnd)") {
+      guard conversation.hasTranscript, requestedEnd else { return }
+      requestedEnd = false
+      transcript?.scrollToLatest(animated: false)
     }
     .task(id: "\(conversation.hasTranscript):\(requestedTool ?? "")") {
       guard conversation.hasTranscript, let tool = requestedTool else { return }

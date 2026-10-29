@@ -1,28 +1,39 @@
 import Foundation
 
-/// The `opencode` part of a "Avisar ao terminar" alert. Contract: `plugin-app-custom/docs/session-notifications.md`.
-public struct SessionFinishedAlert: Equatable, Sendable {
-  public enum Outcome: String, Sendable { case succeeded, failed }
+/// The `opencode` part of a session alert the server pushes: a bell session's success (`session.finished`), or a
+/// question, permission or failure of any top-level session (`session.attention`).
+/// Contract: `plugin-app-custom/docs/session-notifications.md`.
+public struct SessionPushAlert: Equatable, Sendable {
+  public enum Kind: String, Sendable { case finished, question, permission, failed }
+  public let kind: Kind
   public let serverKey: String
   public let sessionID: String
   public let directory: String
-  public let outcome: Outcome
+  /// The pending question or permission, for opening the session at it.
+  public let requestID: String?
 
-  public init(serverKey: String, sessionID: String, directory: String, outcome: Outcome) {
+  public init(kind: Kind, serverKey: String, sessionID: String, directory: String, requestID: String? = nil) {
+    self.kind = kind
     self.serverKey = serverKey
     self.sessionID = sessionID
     self.directory = directory
-    self.outcome = outcome
+    self.requestID = requestID
   }
 
   /// `nil` for any other notification.
   public init?(userInfo: [AnyHashable: Any]) {
-    guard let payload = userInfo["opencode"] as? [String: Any], payload["kind"] as? String == "session.finished",
-      let serverKey = payload["serverKey"] as? String, let sessionID = payload["sessionID"] as? String,
-      let outcome = (payload["outcome"] as? String).flatMap(Outcome.init(rawValue:))
+    guard let payload = userInfo["opencode"] as? [String: Any], let serverKey = payload["serverKey"] as? String,
+      let sessionID = payload["sessionID"] as? String
     else { return nil }
-    self.init(serverKey: serverKey, sessionID: sessionID, directory: payload["directory"] as? String ?? "",
-      outcome: outcome)
+    let kind: Kind? = switch payload["kind"] as? String {
+    // Servers before the attention alerts also sent a bell session's failure as a finish.
+    case "session.finished": payload["outcome"] as? String == "failed" ? .failed : .finished
+    case "session.attention": (payload["attention"] as? String).flatMap(Kind.init(rawValue:))
+    default: nil
+    }
+    guard let kind, kind != .finished || payload["outcome"] as? String == "succeeded" else { return nil }
+    self.init(kind: kind, serverKey: serverKey, sessionID: sessionID, directory: payload["directory"] as? String ?? "",
+      requestID: payload["requestID"] as? String)
   }
 
   /// The deep link a tap follows: the session, on the server that sent it.

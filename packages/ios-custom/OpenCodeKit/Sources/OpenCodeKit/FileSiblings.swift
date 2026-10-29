@@ -19,3 +19,12 @@ extension OpenCodeClient {
       location: location), current: path)
   }
 }
+
+extension FileSiblings {
+  /// Which paging arrows the viewer shows for the open file at `position` of `count` siblings: none for a single
+  /// file or one not in the list, no "previous" on the first and no "next" on the last.
+  public static func arrows(position: Int?, count: Int) -> (previous: Bool, next: Bool) {
+    guard let position, count > 1, (0..<count).contains(position) else { return (false, false) }
+    return (position > 0, position < count - 1)
+  }
+}

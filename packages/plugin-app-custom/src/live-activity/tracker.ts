@@ -112,7 +112,7 @@ export type Event =
       readonly created: number
       readonly data: { readonly sessionID: string; readonly metadata?: Readonly<Record<string, unknown>> }
     }
-  /** Mapped by the hub from `rpc.custom.preferences.updated`: "Avisar ao terminar" sessions may have changed. */
+  /** Mapped by the hub from `rpc.custom.preferences.updated`: bells or auto-approval may have changed. */
   | { readonly type: "preferences.updated" }
   /** Published before the request leaves `ctx.request.pending()`, so the settled ID is excluded from that read. */
   | { readonly type: "form.replied" | "form.cancelled"; readonly data: { readonly id: string } }
@@ -146,8 +146,8 @@ export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
 
 export type TrackerContext = {
   session: Pick<Plugin.Context["session"], "get" | "scan" | "active" | "family">
-  /** "Avisar ao terminar" session IDs from `custom.preferences` (`notifySessions`). */
-  watched: () => Effect.Effect<readonly string[]>
+  /** From `custom.preferences`: "Avisar ao terminar" session IDs (`notifySessions`) and `settings.autoApprove`. */
+  marks: () => Effect.Effect<{ readonly notify: readonly string[]; readonly autoApprove: boolean }>
   message: Pick<Plugin.Context["message"], "list">
   request: Pick<Plugin.Context["request"], "pending">
 }
@@ -197,14 +197,25 @@ type Request = {
 /** Push alert of one attention item or failed session; keyed by `<status>:<sessionID>`. */
 export type Mark = { readonly title: string; readonly body: string }
 
-/** A top-level session with "Avisar ao terminar": whether its family still works and how its own last run ended. */
-export type Watch = {
+/** A known top-level session: whether its family still works and how its own last run ended. */
+export type Root = {
   readonly ref: ReturnType<typeof ref>
   /** The same roll-up as a "working" row: its execution, any descendant's, or an unfinished background shell. */
   readonly working: boolean
   readonly outcome?: "succeeded" | "failed" | "interrupted"
   /** See `Entry.workedAt`; absent when this process never saw the family work. */
   readonly workedAt?: number
+  /** "Avisar ao terminar" is on. */
+  readonly watched: boolean
+}
+
+/** A pending question or permission, rolled up to its top-level session (`ref`); `since` is when it was first seen. */
+export type Pending = {
+  readonly id: string
+  readonly kind: LiveActivity.AttentionKind
+  readonly ref: ReturnType<typeof ref>
+  readonly since: number
+  readonly text?: string
 }
 
 export type Derived = {
@@ -215,8 +226,11 @@ export type Derived = {
   readonly wakeAt?: number
   /** Top-level session → its oldest pending request of the attention kind (subagents included); watch-only. */
   readonly requests: ReadonlyMap<string, string>
-  /** Known, unarchived top-level sessions with "Avisar ao terminar". */
-  readonly watched: ReadonlyMap<string, Watch>
+  /** Known, unarchived top-level sessions. */
+  readonly roots: ReadonlyMap<string, Root>
+  /** Every pending question and permission of an unarchived top-level session or its descendants. */
+  readonly pending: readonly Pending[]
+  readonly autoApprove: boolean
 }
 
 /**
@@ -229,10 +243,12 @@ export function makeTracker(ctx: TrackerContext) {
   const shells = new Map<string, Shell>()
   const firstSeen = new Map<string, number>()
   const watched = new Set<string>()
-  const refreshWatched = Effect.fn("LiveActivity.refreshWatched")(function* () {
-    const ids = yield* ctx.watched()
+  const settings = { autoApprove: false }
+  const refreshMarks = Effect.fn("LiveActivity.refreshMarks")(function* () {
+    const marks = yield* ctx.marks()
     watched.clear()
-    for (const id of ids) watched.add(id)
+    for (const id of marks.notify) watched.add(id)
+    settings.autoApprove = marks.autoApprove
   })
   const state = { requests: [] as Request[], focus: undefined as string | undefined }
 
@@ -297,7 +313,7 @@ export function makeTracker(ctx: TrackerContext) {
   /** Reconstructs running, waiting, failed and recently idle sessions, e.g. after a restart. */
   const rebuild = Effect.fn("LiveActivity.rebuild")(function* (now: number) {
     const active = yield* ctx.session.active()
-    yield* refreshWatched()
+    yield* refreshMarks()
     const scan = (after?: Session.ID): Effect.Effect<readonly SessionScan.Info[]> =>
       ctx.session
         .scan({ parentID: null, archived: false, limit: 500, after })
@@ -418,7 +434,7 @@ export function makeTracker(ctx: TrackerContext) {
       case "permission.replied":
         return yield* refreshPending(now, event.data.requestID)
       case "preferences.updated":
-        return yield* refreshWatched()
+        return yield* refreshMarks()
       case "shell.created": {
         const owner = event.data.info.metadata.sessionID
         if (event.data.info.status !== "running" || typeof owner !== "string") return
@@ -725,19 +741,32 @@ export function makeTracker(ctx: TrackerContext) {
       marks,
       ...(expiries.length > 0 ? { wakeAt: Math.min(...expiries) } : {}),
       requests: new Map(waiting.flatMap((row) => (row.oldest ? [[row.entry.id, row.oldest.id] as const] : []))),
-      watched: new Map(
-        [...watched].flatMap((id) => {
-          const entry = sessions.get(id)
-          if (!entry || entry.parentID || entry.archived) return []
-          const watch: Watch = {
-            ref: ref(entry),
-            working: family(entry).running,
-            ...(entry.ended ? { outcome: entry.ended.outcome } : {}),
-            ...(entry.workedAt === undefined ? {} : { workedAt: entry.workedAt }),
-          }
-          return [[id, watch] as const]
-        }),
+      roots: new Map(
+        [...sessions.values()]
+          .filter((entry) => !entry.parentID && !entry.archived)
+          .map((entry) => {
+            const root: Root = {
+              ref: ref(entry),
+              working: family(entry).running,
+              ...(entry.ended ? { outcome: entry.ended.outcome } : {}),
+              ...(entry.workedAt === undefined ? {} : { workedAt: entry.workedAt }),
+              watched: watched.has(entry.id),
+            }
+            return [entry.id, root] as const
+          }),
       ),
+      pending: [...owned.entries()].flatMap(([id, requests]) => {
+        const top = sessions.get(id)
+        if (!top) return []
+        return requests.map((request) => ({
+          id: request.id,
+          kind: request.kind,
+          ref: ref(top),
+          since: request.since,
+          ...(request.text ? { text: clip(request.text, limits.text) } : {}),
+        }))
+      }),
+      autoApprove: settings.autoApprove,
     }
   }
 

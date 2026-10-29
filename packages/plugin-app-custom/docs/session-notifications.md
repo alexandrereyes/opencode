@@ -1,9 +1,18 @@
-# Session notifications ("Avisar ao terminar")
+# Session notifications
 
-Contract between the plugin and the iOS app (`packages/ios-custom`) for the per-session bell that replaced
-"Silenciar" on 2026-10-28. When a session with the bell on finishes its work, the server sends an APNs alert to every
-registered iPhone. Permission and question requests are out of scope: they stay with the Live Activity and the in-app
-alerts.
+Contract between the plugin and the iOS app (`packages/ios-custom`) for the APNs alerts the server sends to every
+registered iPhone. There are no switches besides the per-session bell (rev. 2026-10-29):
+
+| What | Alerts | Rule |
+| --- | --- | --- |
+| Question | always, any top-level session (subagents roll up) | at once, once per request |
+| Permission | always, any top-level session | only if still pending after 3 s and auto-approval is off |
+| Failure that stops the session | always | once per stop; provider retries do not alert |
+| Success | only with "Avisar ao terminar" | once per finish |
+| Interruption (by Alexandre or a shutdown) | never | — |
+
+Everything is `interruption-level: active`: the iPhone's Focus / Do Not Disturb decides, nothing is time-sensitive
+(no Time Sensitive entitlement).
 
 ## Preference
 
@@ -32,70 +41,97 @@ Every call is `POST /api/rpc/custom.notifications/<method>` with `{"input":{…}
 - An APNs `410` or `400 BadDeviceToken`/`Unregistered` drops that device's token; other failures are logged and not
   retried (the next finish tries again).
 
-## When a session finishes
+## When a session stops
 
 The Live Activity hub's tracker is the source of truth, with its "working" roll-up (rev. 2026-10-28): a top-level
 session works while its own execution, any descendant's execution, or an unfinished background shell of the family
-runs. For each known, unarchived top-level session in `notifySessions`:
+runs. For each known, unarchived top-level session:
 
-1. It must be seen working by this process (a finish that happened while the server was down, or before the bell
-   was turned on, alerts nothing).
+1. The work must be seen by this process (a stop that happened while the server was down alerts nothing). A session
+   first seen idle after startup that worked meanwhile (it started and failed between two evaluations) counts.
 2. When the family stops working it must stay quiet for **5 seconds** (`limits.graceMs`): a background shell or
    subagent that ends wakes its parent a moment later, and that gap is not the end of the work. Working again inside
    the window cancels it.
-3. Then the outcome of the root's own latest execution decides: `succeeded` → "Terminou", `failed` → "Terminou com
-   erro". `interrupted` (Alexandre stopped it, or a shutdown) alerts nothing: he caused it, so there is nothing to
-   learn from a notification.
+3. Then the outcome of the root's own latest execution decides: `failed` → "Parou com erro · projeto" (any
+   session); `succeeded` → "Terminou · projeto", only with the bell and only for work newer than the bell (a run that
+   ended before it was turned on is not reported); `interrupted` alerts nothing.
 
-One alert per finish and device; nothing more until the family works again. Turning the bell off before the end
-cancels it.
+**Retries.** A retryable provider error (rate limit, 5xx, timeout) schedules `session.retry.scheduled` and keeps the
+execution running through the backoff (2, 4, 8, then 10 s gaps, up to 10 retries, about 84 s), so nothing alerts; only
+`session.execution.failed`, after the retries are exhausted or for a non-retryable error, does.
+
+One alert per stop and device; nothing more until the family works again.
+
+## Questions and permissions
+
+Pending requests come from `ctx.request.pending()` (refreshed on every `form.*`/`permission.*` event), rolled up to
+their top-level session. A question alerts at once ("Pergunta: <text>"); a permission ("Permissão: <action ·
+resources>") only after it has been pending for 3 s (`limits.permissionMs`) with `settings.autoApprove` off, so
+auto-approved or quickly answered ones stay silent. One alert per `requestID`; requests already pending when the
+server starts count as notified, so a restart repeats nothing.
 
 ## Payload
 
 `apns-push-type: alert`, topic = the bundle ID (`OPENCODE_APNS_BUNDLE_ID`, default `br.com.alexandrem.opencode`),
-priority 10, expiration 24 hours. Each device's own APNs environment and `serverKey` are used.
+priority 10, expiration 24 hours. Each device's own APNs environment and `serverKey` are used. Attention alerts also
+send `apns-collapse-id: attention:<sessionID>`, so a newer request or failure of a session replaces the older one.
 
 ```json
 {
   "aps": {
-    "alert": { "title": "Corrigir login OAuth", "body": "Terminou · app-custom" },
+    "alert": { "title": "Corrigir login OAuth", "body": "Pergunta: Manter o refresh token no Keychain?" },
     "sound": "default",
-    "thread-id": "ses_01JZOAUTHLOGIN000000000003"
+    "thread-id": "ses_01JZOAUTHLOGIN000000000003",
+    "interruption-level": "active"
   },
   "opencode": {
-    "kind": "session.finished",
+    "kind": "session.attention",
     "serverKey": "mac-principal",
     "sessionID": "ses_01JZOAUTHLOGIN000000000003",
     "directory": "/Users/alexandremartins/Worktrees/opencode2-oauth-login",
-    "outcome": "succeeded"
+    "attention": "question",
+    "requestID": "frm_…"
   }
 }
 ```
+
+`attention` is `question`, `permission` (both with `requestID`) or `failed`. A bell success is
+`{"kind":"session.finished", …, "outcome":"succeeded"}` without a collapse ID.
 
 The title is the session title clipped to 80 characters ("Sem título" when empty); the body names the project like
 the Live Activity rows (last segment of the directory and subpath). `thread-id` groups a session's alerts; the Apple
 Watch mirrors them.
 
+## Live Activity alerts
+
+The Agentes Live Activity update that adds a question, permission or failure is still sent at priority 10, but a
+device registered here (same `deviceID`) gets it **without** `alert`: the session alert above is the one that buzzes.
+A device without a registration (notifications never allowed) keeps the activity's alert as the fallback.
+Push-to-start keeps its alert.
+
 ## App behavior
 
-- The bell is off for every session. The first time Alexandre turns one on, the app asks for notification permission
-  (never at launch); with permission it registers for remote notifications and sends the token to the connected
-  server, then again on every connection.
+- Permission is asked never at launch: the first time a bell is turned on, or once when a question or permission
+  first waits ("Avisar quando precisarem de você?", answered once). With it the app registers for remote
+  notifications and sends the token to the connected server, then again on every connection.
 - Presentation (`willPresent`): with the app in the foreground and that session's conversation open on the same
   server, the alert is not shown; otherwise it shows (banner, list, sound). Tapping it opens the session, switching
-  servers through `serverKey` like a Live Activity link.
-- The in-app banner skips completions of sessions with the bell on while this server pushes, so a finish is not
-  announced twice.
+  servers through `serverKey` like a Live Activity link; with a `requestID` it opens at the end of the transcript,
+  where pending requests sit.
+- While this server pushes to the device, the in-app banner skips questions, permissions, failures and bell
+  finishes, so nothing is announced twice.
 
 ## Compatibility
 
 - **New app, old server:** `sidebar.notify` is rejected (`rpc.invalid_input`) and the app shows "Atualize o servidor
   para usar o aviso ao terminar"; no local-only bell is fabricated. A missing `custom.notifications` RPC only stops
   the token registration.
-- **Old app, new server:** "Silenciar" keeps writing `mutedSessions`, which is accepted and ignored.
+- **Old app, new server:** "Silenciar" keeps writing `mutedSessions`, which is accepted and ignored. Builds before the
+  attention alerts show `session.attention` alerts as plain notifications (a tap only opens the app).
 - **Order:** both work in either order; the bell needs the server (`custom:update`) and the app (TestFlight).
 
 ## Testing without Apple
 
 `OPENCODE_APNS_ORIGIN` (tests only) sends every APNs request to a local cleartext HTTP/2 stand-in instead of Apple's
-hosts; the log warns when it is set. `test/notifications.test.ts` covers the finish rule, payload, registry and hub.
+hosts; the log warns when it is set. `test/notifications.test.ts` covers the rules, payload, registry and hub;
+`script/e2e-session-notifications.ts` runs them against a sandbox with real Luna 6 / low prompts.

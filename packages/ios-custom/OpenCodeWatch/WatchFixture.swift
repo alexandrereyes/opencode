@@ -11,6 +11,19 @@ struct WatchFixture {
 
   let screen: Screen
 
+  /// DEBUG only: the `OpenCodeWatchPairing` default (base64 JSON, set with `simctl spawn <udid> defaults write
+  /// br.com.alexandrem.opencode.watchkitapp OpenCodeWatchPairing -string …`; a launch argument would be parsed as a
+  /// property list, where `=` breaks it) stores a pairing at every launch, so a simulator can talk to a sandbox gateway
+  /// without the iPhone, also when the system relaunches the app for a background refresh.
+  static let injectedPairing: WatchPairing? = {
+    #if DEBUG
+      UserDefaults.standard.string(forKey: "OpenCodeWatchPairing").flatMap { Data(base64Encoded: $0) }
+        .flatMap { try? JSONDecoder().decode(WatchPairing.self, from: $0) }
+    #else
+      nil
+    #endif
+  }()
+
   static let launch: WatchFixture? = {
     #if DEBUG
       UserDefaults.standard.string(forKey: "OpenCodeWatchFixture").flatMap(Screen.init(rawValue:))
@@ -55,7 +68,9 @@ struct WatchFixture {
        "host":"MacBook Pro"}
       """
     let snapshot = try! JSONDecoder().decode(WatchStateSnapshot.self, from: Data(json.utf8))
-    return WatchStateCache.Entry(snapshot: snapshot, fetched: screen == .offline ? now - 7 * 60 : now)
+    // Offline and the complications show an older read, so their captures show the relative age.
+    let age: TimeInterval = screen == .offline ? 7 * 60 : screen == .complications ? 4 * 60 : 0
+    return WatchStateCache.Entry(snapshot: snapshot, fetched: now - age)
   }
 
   static let question: WatchRequest = try! JSONDecoder().decode(WatchRequest.self, from: Data("""

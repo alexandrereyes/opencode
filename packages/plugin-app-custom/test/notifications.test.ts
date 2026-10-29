@@ -14,6 +14,9 @@ import {
   ids,
   interrupted,
   minute,
+  permission,
+  question,
+  session,
   shellExited,
   shellNotice,
   shellStarted,
@@ -61,7 +64,7 @@ function setup(answer: (push: Push) => Result = () => ({ status: "sent" })) {
   const step = (at: number, ...events: Event[]) =>
     Effect.gen(function* () {
       for (const event of events) yield* tracker.apply(event, at)
-      const plan = yield* notifier.evaluate(tracker.derive(at, host).watched, at)
+      const plan = yield* notifier.evaluate(tracker.derive(at, host), at)
       yield* plan.deliver
       return plan.wakeAt
     })
@@ -70,8 +73,22 @@ function setup(answer: (push: Push) => Result = () => ({ status: "sent" })) {
       server.watched.add(id)
       yield* tracker.apply({ type: "preferences.updated" }, T)
     })
-  return { server, tracker, shared, registry, pushes, step, watch }
+  return { server, tracker, shared, registry, pushes, step, watch, notifier }
 }
+
+const bodyOf = (push: Push | undefined) =>
+  push?.body as {
+    aps: { alert: { title: string; body: string }; "thread-id": string; "interruption-level": string }
+    opencode: {
+      kind: string
+      serverKey: string
+      sessionID: string
+      directory: string
+      attention?: string
+      requestID?: string
+      outcome?: string
+    }
+  }
 
 /** Runs and ends a watched root: `started` at T, its end at T + 1 min, then evaluations through the grace period. */
 const finish = (outcome: "succeeded" | "failed" | "interrupted") =>
@@ -102,6 +119,7 @@ it.effect("a watched session that ends successfully alerts every device once, wi
         alert: { title: "Live Activity no iOS", body: "Terminou · ios-custom" },
         sound: "default",
         "thread-id": ids.live,
+        "interruption-level": "active",
       },
       opencode: {
         kind: "session.finished",
@@ -114,14 +132,132 @@ it.effect("a watched session that ends successfully alerts every device once, wi
   }),
 )
 
-it.effect("a failed run says so; a user interruption alerts nothing", () =>
+it.effect("a failed run alerts with the bell or without it, collapsed per session; an interruption alerts nothing", () =>
   Effect.gen(function* () {
     const failed = yield* finish("failed")
-    expect(failed.map((push) => (push.body as { aps: { alert: { body: string } } }).aps.alert.body)).toEqual([
-      "Terminou com erro · ios-custom",
-      "Terminou com erro · ios-custom",
+    expect(failed.map((push) => [push.token, push.collapseID, bodyOf(push).aps.alert.body])).toEqual([
+      ["aa11", `attention:${ids.live}`, "Parou com erro · ios-custom"],
+      ["bb22", `attention:${ids.live}`, "Parou com erro · ios-custom"],
     ])
+    expect(bodyOf(failed[0]).opencode).toEqual({
+      kind: "session.attention",
+      serverKey: "mac-principal",
+      sessionID: ids.live,
+      directory: "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+      attention: "failed",
+    })
+    expect(bodyOf(failed[0]).aps["interruption-level"]).toBe("active")
     expect(yield* finish("interrupted")).toEqual([])
+    // Without the bell: the failure still alerts, a success does not.
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    yield* f.step(T, created(ids.nav, T - minute), created(ids.cache, T - minute))
+    yield* f.step(T + 1, execution("started", ids.nav, T + 1), execution("started", ids.cache, T + 1))
+    yield* f.step(T + minute, execution("failed", ids.nav, T + minute), execution("succeeded", ids.cache, T + minute))
+    yield* f.step(T + minute + limits.graceMs)
+    expect(f.pushes.map((push) => [bodyOf(push).opencode.sessionID, bodyOf(push).opencode.attention])).toEqual([
+      [ids.nav, "failed"],
+    ])
+  }),
+)
+
+it.effect("provider retries keep the run going: no alert until it really stops with an error, none if it recovers", () =>
+  Effect.gen(function* () {
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    yield* f.step(T, created(ids.nav, T - minute), created(ids.cache, T - minute))
+    yield* f.step(T + 1, execution("started", ids.nav, T + 1), execution("started", ids.cache, T + 1))
+    // `session.retry.scheduled` leaves both executions running through the backoff (about 84 s for ten retries).
+    for (const at of [10_000, 30_000, 60_000, 84_000]) yield* f.step(T + at)
+    expect(f.pushes).toEqual([])
+    yield* f.step(T + 90_000, execution("succeeded", ids.cache, T + 90_000), execution("failed", ids.nav, T + 90_000))
+    yield* f.step(T + 90_000 + limits.graceMs)
+    expect(f.pushes.map((push) => bodyOf(push).opencode.sessionID)).toEqual([ids.nav])
+  }),
+)
+
+it.effect("a question alerts once at once, from any top-level session or its subagent; titled with the session", () =>
+  Effect.gen(function* () {
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    yield* f.step(T, created(ids.cache, T - minute), created("ses_child_q", T - 1, ids.cache))
+    const form = question("frm_1", "ses_child_q", T + 1, "Qual banco usar no cache?")
+    f.server.forms.push(form)
+    yield* f.step(T + 1, { type: "form.created", data: { form } })
+    expect(f.pushes.map((push) => [push.collapseID, bodyOf(push).aps.alert, bodyOf(push).opencode])).toEqual([
+      [
+        `attention:${ids.cache}`,
+        { title: "Escolher banco do cache", body: "Pergunta: Qual banco usar no cache?" },
+        {
+          kind: "session.attention",
+          serverKey: "mac-principal",
+          sessionID: ids.cache,
+          directory: "/Users/alexandremartins/Dev/opencode2",
+          attention: "question",
+          requestID: "frm_1",
+        },
+      ],
+    ])
+    yield* f.step(T + minute)
+    yield* f.step(T + 2 * minute, { type: "form.created", data: { form } })
+    expect(f.pushes).toHaveLength(1)
+    // Answered, it is forgotten; a new question alerts again.
+    f.server.forms.length = 0
+    yield* f.step(T + 3 * minute, { type: "form.replied", data: { id: "frm_1" } })
+    const next = question("frm_2", ids.cache, T + 4 * minute, "E o TTL?")
+    f.server.forms.push(next)
+    yield* f.step(T + 4 * minute, { type: "form.created", data: { form: next } })
+    expect(f.pushes.map((push) => bodyOf(push).opencode.requestID)).toEqual(["frm_1", "frm_2"])
+  }),
+)
+
+it.effect("a permission alerts only if still pending after 3 s and auto-approval is off", () =>
+  Effect.gen(function* () {
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    yield* f.step(T, created(ids.oauth, T - minute))
+    const quick = permission("per_quick", ids.oauth, T + 1, "bash", ["ls"])
+    f.server.permissions.push(quick)
+    expect(yield* f.step(T + 1, { type: "permission.asked", data: quick })).toBe(T + 1 + limits.permissionMs)
+    // Answered within the window: nothing.
+    f.server.permissions.length = 0
+    yield* f.step(T + 2_000, { type: "permission.replied", data: { requestID: "per_quick" } })
+    yield* f.step(T + 5_000)
+    expect(f.pushes).toEqual([])
+    const slow = permission("per_slow", ids.oauth, T + 10_000, "bash", ["bun test --filter oauth"])
+    f.server.permissions.push(slow)
+    yield* f.step(T + 10_000, { type: "permission.asked", data: slow })
+    yield* f.step(T + 12_000)
+    expect(f.pushes).toEqual([])
+    yield* f.step(T + 13_000)
+    expect(f.pushes.map((push) => bodyOf(push).aps.alert.body)).toEqual(["Permissão: bash · bun test --filter oauth"])
+    expect(bodyOf(f.pushes[0]).opencode).toMatchObject({ attention: "permission", requestID: "per_slow" })
+    // With auto-approval on, nothing, however long it waits.
+    f.server.settings.autoApprove = true
+    const auto = permission("per_auto", ids.oauth, T + 20_000, "edit", ["a.ts"])
+    f.server.permissions.push(auto)
+    yield* f.step(T + 20_000, { type: "preferences.updated" }, { type: "permission.asked", data: auto })
+    yield* f.step(T + minute)
+    expect(f.pushes).toHaveLength(1)
+  }),
+)
+
+it.effect("after a restart, requests already pending and runs already over do not alert again", () =>
+  Effect.gen(function* () {
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    f.server.add(session(ids.cache, { time: { created: T - 3_600_000, updated: T - minute } }))
+    f.server.active.add(ids.cache)
+    f.server.forms.push(question("frm_old", ids.cache, T - minute, "Já perguntada"))
+    yield* f.tracker.rebuild(T)
+    yield* f.step(T)
+    yield* f.step(T + minute)
+    expect(f.pushes).toEqual([])
+    expect([...f.notifier.requests]).toEqual(["frm_old"])
+    // Work this process sees still counts.
+    yield* f.step(T + 2 * minute, execution("failed", ids.cache, T + 2 * minute))
+    yield* f.step(T + 2 * minute + limits.graceMs)
+    expect(f.pushes.map((push) => bodyOf(push).opencode.attention)).toEqual(["failed"])
   }),
 )
 
@@ -134,7 +270,7 @@ it.effect("a run that starts and fails between two evaluations still alerts once
     // A model that cannot be resolved fails at once: both events land before the hub evaluates again.
     yield* f.step(T + 1, execution("started", ids.nav, T + 1), execution("failed", ids.nav, T + 2))
     yield* f.step(T + 1 + limits.graceMs)
-    expect(f.pushes.map((push) => (push.body as { opencode: { outcome: string } }).opencode.outcome)).toEqual(["failed"])
+    expect(f.pushes.map((push) => bodyOf(push).opencode.attention)).toEqual(["failed"])
     yield* f.step(T + minute)
     expect(f.pushes).toHaveLength(1)
   }),

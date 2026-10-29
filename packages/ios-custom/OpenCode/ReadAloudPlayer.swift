@@ -183,6 +183,8 @@ extension Notification.Name {
 
   /// Closing or leaving the file ends playback and releases the audio session and lock screen controls.
   static func stopCurrent() { current?.stop() }
+  /// A reading is using the audio session (loading, playing or paused mid-reading).
+  static var isActive: Bool { [.loading, .playing, .paused].contains(current?.phase) }
 
   func stop() {
     closed = true

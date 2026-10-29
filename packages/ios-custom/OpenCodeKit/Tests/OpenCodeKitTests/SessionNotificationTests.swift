@@ -10,20 +10,39 @@ private var payload: [AnyHashable: Any] { [
 ] }
 
 @Test func finishedAlertDecodesTheServerPayloadAndIgnoresOthers() throws {
-  let alert = try #require(SessionFinishedAlert(userInfo: payload))
-  #expect(alert == SessionFinishedAlert(serverKey: "mac-principal", sessionID: "ses_a", directory: "/repo", outcome: .succeeded))
+  let alert = try #require(SessionPushAlert(userInfo: payload))
+  #expect(alert == SessionPushAlert(kind: .finished, serverKey: "mac-principal", sessionID: "ses_a", directory: "/repo"))
   #expect(alert.link == .session(serverKey: "mac-principal", sessionID: "ses_a", directory: "/repo"))
-  #expect(SessionFinishedAlert(userInfo: ["aps": ["alert": "x"]]) == nil)
+  #expect(alert.requestID == nil)
+  #expect(SessionPushAlert(userInfo: ["aps": ["alert": "x"]]) == nil)
   var other = payload
   other["opencode"] = ["kind": "something.else", "serverKey": "a", "sessionID": "b", "outcome": "succeeded"]
-  #expect(SessionFinishedAlert(userInfo: other) == nil)
+  #expect(SessionPushAlert(userInfo: other) == nil)
   var interrupted = payload
   interrupted["opencode"] = ["kind": "session.finished", "serverKey": "a", "sessionID": "b", "outcome": "interrupted"]
-  #expect(SessionFinishedAlert(userInfo: interrupted) == nil)
+  #expect(SessionPushAlert(userInfo: interrupted) == nil)
+  // An older server's bell failure.
+  var failed = payload
+  failed["opencode"] = ["kind": "session.finished", "serverKey": "a", "sessionID": "b", "outcome": "failed"]
+  #expect(SessionPushAlert(userInfo: failed)?.kind == .failed)
+}
+
+@Test func attentionAlertsCarryTheirKindAndRequest() throws {
+  for (attention, kind, request) in [("question", SessionPushAlert.Kind.question, "frm_1"),
+    ("permission", .permission, "per_1"), ("failed", .failed, nil)] as [(String, SessionPushAlert.Kind, String?)] {
+    var opencode: [String: Any] = ["kind": "session.attention", "serverKey": "mac-principal", "sessionID": "ses_a",
+      "directory": "/repo", "attention": attention]
+    if let request { opencode["requestID"] = request }
+    let alert = try #require(SessionPushAlert(userInfo: ["aps": ["interruption-level": "active"], "opencode": opencode]))
+    #expect(alert == SessionPushAlert(kind: kind, serverKey: "mac-principal", sessionID: "ses_a", directory: "/repo",
+      requestID: request))
+  }
+  let unknown: [String: Any] = ["kind": "session.attention", "serverKey": "a", "sessionID": "b", "attention": "other"]
+  #expect(SessionPushAlert(userInfo: ["opencode": unknown]) == nil)
 }
 
 @Test func finishedAlertHidesOnlyWhileThatSessionIsOpenInTheForeground() throws {
-  let alert = try #require(SessionFinishedAlert(userInfo: payload))
+  let alert = try #require(SessionPushAlert(userInfo: payload))
   #expect(!alert.presents(foreground: true, serverKey: "mac-principal", openSessionID: "ses_a"))
   #expect(alert.presents(foreground: true, serverKey: "mac-principal", openSessionID: "ses_b"))
   #expect(alert.presents(foreground: true, serverKey: "mac-principal", openSessionID: nil))

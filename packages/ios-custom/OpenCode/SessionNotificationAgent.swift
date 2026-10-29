@@ -3,16 +3,17 @@ import UIKit
 import UserNotifications
 import os
 
-/// "Avisar ao terminar": notification permission, the APNs device token and its registration with the connected
-/// server (`custom.notifications`), plus presentation and taps of the alerts the server sends when a session with the
-/// bell on finishes. Contract: `plugin-app-custom/docs/session-notifications.md`.
+/// Session alerts: notification permission, the APNs device token and its registration with the connected server
+/// (`custom.notifications`), plus presentation and taps of the alerts the server sends (questions, permissions and
+/// failures of any session, and finishes of sessions with "Avisar ao terminar").
+/// Contract: `plugin-app-custom/docs/session-notifications.md`.
 @MainActor final class SessionNotificationAgent: NSObject, UNUserNotificationCenterDelegate {
   static let shared = SessionNotificationAgent()
   nonisolated static let log = Logger(subsystem: "br.com.alexandrem.opencode", category: "SessionNotifications")
   private var token: String?
   private var client: OpenCodeClient?
-  /// Servers that accepted this device's token and have APNs configured, so a bell session's finish arrives as a
-  /// system notification and the in-app banner skips it.
+  /// Servers that accepted this device's token and have APNs configured, so their alerts arrive as system
+  /// notifications and the in-app banner skips them.
   private(set) var pushing: Set<URL> = []
 
   /// Called before the app finishes launching, so a tap that cold-launches the app still reaches the delegate.
@@ -20,7 +21,7 @@ import os
     UNUserNotificationCenter.current().delegate = self
   }
 
-  /// Asks for permission the first time a bell is turned on (never at launch); afterwards it only reads the status.
+  /// Asks for permission (the first bell, or yes to `offer`), never at launch; afterwards it only reads the status.
   func authorize() async -> Bool {
     let center = UNUserNotificationCenter.current()
     let status = await center.notificationSettings().authorizationStatus
@@ -56,6 +57,25 @@ import os
     }
   }
 
+  /// The one-time offer outside the bell: the first time a question or permission waits while notifications were
+  /// never asked for (not on launch, and not in sandbox runs unless `-OpenCodeNotificationOffer` asks for it).
+  func shouldOffer() async -> Bool {
+    guard !UserDefaults.standard.bool(forKey: Self.offeredKey) else { return false }
+    let runtime = AppRuntime.shared
+    guard runtime.servers.launchOverride == nil || ProcessInfo.processInfo.arguments.contains("-OpenCodeNotificationOffer")
+    else { return false }
+    return await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .notDetermined
+  }
+
+  /// Either answer is final: "Agora não" leaves the bell as the only way to ask again.
+  func answerOffer(accept: Bool, client: OpenCodeClient) async {
+    UserDefaults.standard.set(true, forKey: Self.offeredKey)
+    guard accept, await authorize() else { return }
+    connected(client)
+  }
+
+  private static let offeredKey = "OpenCodeNotificationsOffered"
+
   func received(token data: Data) {
     token = data.hexToken
     Task { await send() }
@@ -79,7 +99,7 @@ import os
   nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification)
     async -> UNNotificationPresentationOptions
   {
-    guard let alert = SessionFinishedAlert(userInfo: notification.request.content.userInfo) else {
+    guard let alert = SessionPushAlert(userInfo: notification.request.content.userInfo) else {
       return [.banner, .list, .sound]
     }
     return await MainActor.run {
@@ -95,9 +115,9 @@ import os
     async
   {
     guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
-      let alert = SessionFinishedAlert(userInfo: response.notification.request.content.userInfo)
+      let alert = SessionPushAlert(userInfo: response.notification.request.content.userInfo)
     else { return }
-    await AppRuntime.shared.open(alert.link)
+    await AppRuntime.shared.open(alert.link, request: alert.requestID)
   }
 }
 

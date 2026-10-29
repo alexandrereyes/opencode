@@ -210,6 +210,17 @@ private let stateJSON = """
     #expect(request.headers["cf-access-client-id"] == "cf-id")
     #expect(request.headers["cf-access-client-secret"] == "cf-secret")
     #expect(request.headers["user-agent"] == "OpenCodeWatch/0.1.0")
+    #expect(request.headers["x-watch-client"] == "app")
+  }
+
+  @Test func namesTheReaderForTheServerCounters() async throws {
+    let server = try await FakeGateway { _ in (200, "application/json", stateJSON) }
+    defer { server.stop() }
+    let widget = WatchGatewayClient(pairing: client(server).pairing, version: "0.1.0", reader: .widget)
+    _ = try await widget.state()
+    let background = WatchGatewayClient(pairing: client(server).pairing, version: "0.1.0", reader: .background)
+    _ = try await background.state(timeout: WatchBackgroundRefresh.timeout)
+    #expect(server.requests.map { $0.headers["x-watch-client"] } == ["widget", "background"])
   }
 
   @Test func postsReplyBody() async throws {
@@ -354,6 +365,92 @@ private final class OnceFlag: @unchecked Sendable {
   private let lock = NSLock()
   private var claimed = false
   func claim() -> Bool { lock.withLock { defer { claimed = true }; return !claimed } }
+}
+
+// MARK: State sync, background refresh and age
+
+@Suite struct WatchSyncTests {
+  private final class Store: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: WatchStateCache.Entry?
+    var entry: WatchStateCache.Entry? {
+      get { lock.withLock { value } }
+      set { lock.withLock { value = newValue } }
+    }
+  }
+
+  private func snapshot(_ mutate: (inout AgentsState) -> Void = { _ in }) throws -> WatchStateSnapshot {
+    var snapshot = try JSONDecoder().decode(WatchStateSnapshot.self, from: Data(stateJSON.utf8))
+    if var state = snapshot.state {
+      mutate(&state)
+      snapshot.state = state
+    }
+    return snapshot
+  }
+
+  private func sync(_ store: Store, _ answer: @escaping @Sendable () throws -> WatchStateSnapshot) -> WatchStateSync {
+    WatchStateSync(read: { store.entry }, write: { store.entry = $0 }, fetch: { try answer() })
+  }
+
+  @Test func redrawsOnlyWhenWhatTheComplicationDrawsChanges() async throws {
+    let store = Store()
+    let first = try snapshot()
+    let now = Date(timeIntervalSince1970: 1_793_112_000)
+    guard case .fetched(let entry, true, true) = await sync(store, { first }).run(now: now) else {
+      Issue.record("first fetch must redraw"); return
+    }
+    #expect(store.entry == entry)
+    #expect(entry.fetched == now)
+    // A newer `updatedAt`, other rows and titles: the ring and the totals are the same.
+    let later = try snapshot { state in
+      state.updatedAt += 60_000
+      state.sessions.removeLast()
+      state.attention[0].title = "Outro título"
+    }
+    guard case .fetched(_, true, false) = await sync(store, { later }).run(now: now + 60) else {
+      Issue.record("same drawing must not redraw"); return
+    }
+    #expect(store.entry?.fetched == now + 60)
+    // A session that finishes unread moves the ring.
+    let unread = try snapshot { state in
+      state.counts.working = 1
+      state.counts.unread = 1
+    }
+    guard case .fetched(_, true, true) = await sync(store, { unread }).run(now: now + 120) else {
+      Issue.record("other counts must redraw"); return
+    }
+    // The very same snapshot: nothing changed at all.
+    guard case .fetched(_, false, false) = await sync(store, { unread }).run(now: now + 180) else {
+      Issue.record("same snapshot is unchanged"); return
+    }
+  }
+
+  @Test func failuresKeepTheCache() async throws {
+    let store = Store()
+    let cached = WatchStateCache.Entry(snapshot: try snapshot(), fetched: Date(timeIntervalSince1970: 1_793_112_000))
+    store.entry = cached
+    #expect(await sync(store, { throw WatchGatewayError.unreachable }).run() == .unreachable(cached: cached))
+    #expect(await sync(store, { throw WatchGatewayError.unauthorized }).run() == .unauthorized)
+    #expect(store.entry == cached)
+  }
+
+  @Test func backgroundRefreshEveryThirtyMinutesWithinAFewSeconds() {
+    let now = Date(timeIntervalSince1970: 1_793_112_000)
+    #expect(WatchBackgroundRefresh.next(after: now) == now + 30 * 60)
+    #expect((15 * 60...30 * 60).contains(WatchBackgroundRefresh.interval))
+    #expect(WatchBackgroundRefresh.next(after: now, interval: 60) == now + 60)
+    #expect(WatchBackgroundRefresh.timeout < 10)
+  }
+
+  @Test func ageReadsAgoraForAMinuteThenTheRelativeText() {
+    let fetched = Date(timeIntervalSince1970: 1_793_112_000)
+    #expect(WatchAge.isFresh(fetched, at: fetched + 59))
+    #expect(!WatchAge.isFresh(fetched, at: fetched + 60))
+    #expect(WatchAge.entryDates(fetched: fetched, now: fetched + 10) == [fetched + 10, fetched + 60])
+    #expect(WatchAge.entryDates(fetched: fetched, now: fetched + 240) == [fetched + 240])
+    #expect(WatchAge.entryDates(fetched: nil, now: fetched) == [fetched])
+    #expect(AgentsText.ago(since: fetched).format(fetched + 240) == "há 4 min.")
+  }
 }
 
 // MARK: Widget push token

@@ -59,7 +59,7 @@ Use as ferramentas tools.opencode.* dentro de execute, chamando-as direto pelos 
 - Não lida (unread): a sessão terminou ou falhou depois da última vez que Alexandre a abriu. Ler pela session_read não marca como lida; só session_mark_read faz isso, e só quando ele pedir.
 - Precisa de você (needs-you): há pergunta ou permissão esperando resposta, da própria sessão ou de um subagente dela.
 - Erro (failed): a última execução falhou e ele ainda não viu; o motivo vem em session_status.
-- Avisar ao terminar (notify): o iPhone dele recebe uma notificação quando a sessão termina o trabalho todo (com sucesso ou erro). Ligue ou desligue só quando ele pedir. Fixada (pinned): ele considera importante.
+- Avisar ao terminar (notify): o iPhone dele recebe uma notificação quando a sessão termina o trabalho todo com sucesso. Perguntas, permissões pendentes e erros que param uma sessão notificam sempre, com ou sem aviso. Ligue ou desligue só quando ele pedir. Fixada (pinned): ele considera importante.
 - Arquivar tira a sessão das listas e interrompe o que estiver rodando; não há como desarquivar, mas a conversa continua legível.
 
 # Como agir
@@ -151,7 +151,8 @@ export const UpdateInput = Schema.Struct({
   agent: Schema.optionalKey(Agent.ID),
   pinned: Schema.optionalKey(Schema.Boolean),
   notify: Schema.optionalKey(Schema.Boolean).annotate({
-    description: "Avisar ao terminar: push to his iPhone when the session's work ends.",
+    description:
+      "Avisar ao terminar: push to his iPhone when the session's work ends successfully (questions, permissions and failures always notify).",
   }),
 })
 export const MarkReadInput = Schema.Struct({

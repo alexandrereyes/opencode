@@ -6,6 +6,7 @@ import { makeDevices, type Storage } from "./devices.js"
 import { Failure, fail } from "./failure.js"
 import { makeRequests, type RequestsContext } from "./requests.js"
 import { Watch } from "./rpc.js"
+import { makeStats, reader, type Stats } from "./stats.js"
 import { makeVoice, type Proxy, type SidebandFactory, type VoiceCalls, type VoiceContext } from "./voice.js"
 import { makeWidgetPush, type WidgetPush } from "./widget.js"
 
@@ -50,6 +51,9 @@ type Running = {
   readonly scope: Scope.Closeable
   readonly voice: VoiceCalls
   readonly signal: Queue.Queue<void>
+  readonly stats: Stats
+  /** The newest hub state the gateway saw, from `changed` events or a `/state` read; WidgetKit pushes follow it. */
+  readonly latest: { state: LiveActivity.AgentsState | null }
   widget?: WidgetPush
   server?: ReturnType<typeof Bun.serve>
 }
@@ -71,6 +75,8 @@ export function makeGateway(options: GatewayOptions) {
       scope,
       signal: yield* Queue.sliding<void>(1),
       voice: makeVoice({ ctx, proxy: options.proxy, sideband: options.sideband, scope }),
+      stats: makeStats(),
+      latest: { state: null },
     }
     runtime.current = running
     yield* Scope.addFinalizer(scope, running.voice.shutdown)
@@ -117,20 +123,19 @@ export function makeGateway(options: GatewayOptions) {
         devices: makeDevices(member.storage),
         send: client.send,
         bundleID: yield* options.widgetBundleID,
+        stats: running.stats,
       })
       running.widget = widget
       yield* Scope.addFinalizer(running.scope, client.close)
-      const latest = {
-        state: (yield* options.view.pipe(Effect.option)).pipe(
-          Option.map((view) => view.state),
-          Option.getOrNull,
-        ),
-      }
+      running.latest.state = (yield* options.view.pipe(Effect.option)).pipe(
+        Option.map((view) => view.state),
+        Option.getOrNull,
+      )
       yield* member.event.subscribe().pipe(
         Stream.filter((event) => event.type === "rpc.custom.live-activity.changed"),
         Stream.runForEach(() =>
           options.view.pipe(
-            Effect.tap((view) => Effect.sync(() => (latest.state = view.state))),
+            Effect.tap((view) => Effect.sync(() => (running.latest.state = view.state))),
             Effect.andThen(Queue.offer(running.signal, undefined)),
             Effect.catchCause(() => Effect.void),
           ),
@@ -139,7 +144,7 @@ export function makeGateway(options: GatewayOptions) {
       )
       for (;;) {
         const now = yield* Clock.currentTimeMillis
-        const plan = yield* widget.evaluate(latest.state, now)
+        const plan = yield* widget.evaluate(running.latest.state, now)
         yield* plan.deliver.pipe(Effect.forkIn(running.scope))
         const wait = Queue.take(running.signal)
         yield* plan.wakeAt === undefined ? wait : wait.pipe(Effect.timeoutOption(Math.max(plan.wakeAt - now, 1)))
@@ -194,6 +199,14 @@ export function makeGateway(options: GatewayOptions) {
       })
     if (method === "GET" && path === "/state") {
       const view = yield* options.view.pipe(Effect.mapError(() => fail(503, "unavailable", "Estado indisponível.")))
+      // Every reader caches what it gets for the complication: no push is needed for this state any more.
+      running.latest.state = view.state
+      running.widget?.seen(device.deviceID, view.state)
+      yield* running.stats.state(
+        device.deviceID,
+        reader(request.headers.get("x-watch-client")),
+        yield* Clock.currentTimeMillis,
+      )
       // The watch opens Responder from an attention row, so each item carries its oldest pending request.
       const state = view.state && {
         ...view.state,
@@ -273,6 +286,11 @@ export function makeGateway(options: GatewayOptions) {
             lastSeenAt: device.lastSeenAt ?? device.createdAt,
           })),
         }
+      }),
+    stats: () =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
+        return { at: now, ...(runtime.current?.stats.snapshot(now) ?? { devices: [] }) }
       }),
     revoke: (input: { readonly deviceID: string }) =>
       Effect.gen(function* () {

@@ -128,7 +128,10 @@ private struct AppRoot: View {
     }
     .onOpenURL { url in
       guard let link = AgentsDeepLink(url: url) else { return }
-      Task { await runtime.open(link) }
+      // `request` (a session alert's) opens the conversation at its pending requests.
+      let request = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+        .first { $0.name == "request" }?.value
+      Task { await runtime.open(link, request: request) }
     }
   }
 }
@@ -138,6 +141,7 @@ struct AppShell: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.scenePhase) private var scenePhase
   @State private var floatingVoice = FloatingVoicePresentation()
+  @State private var offeringNotifications = false
   @Bindable var store: SessionStore
   let runtime: AppRuntime
 
@@ -175,6 +179,21 @@ struct AppShell: View {
       }))
       .task(id: scenePhase == .active || runtime.voice.sessionID != nil) {
         if scenePhase == .active || runtime.voice.sessionID != nil { await store.run() }
+      }
+      // Notifications are offered once outside the bell, when a question or permission first waits for him.
+      .task(id: store.requestCount > 0) {
+        guard store.requestCount > 0, await SessionNotificationAgent.shared.shouldOffer() else { return }
+        offeringNotifications = true
+      }
+      .alert("Avisar quando precisarem de você?", isPresented: $offeringNotifications) {
+        Button("Agora não", role: .cancel) {
+          Task { await SessionNotificationAgent.shared.answerOffer(accept: false, client: store.client) }
+        }
+        Button("Ativar") {
+          Task { await SessionNotificationAgent.shared.answerOffer(accept: true, client: store.client) }
+        }
+      } message: {
+        Text("O iPhone avisa quando uma sessão pergunta algo, pede permissão ou para com erro, mesmo com o app fechado. O Foco continua decidindo.")
       }
   }
 }

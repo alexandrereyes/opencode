@@ -133,7 +133,8 @@ struct SessionsView: View {
             .id(route.id)
         } else {
           // The switcher replaces this route in place; a new identity rebuilds the conversation's state.
-          ConversationView(id: route.id, sessions: store, parentOnStack: route.parent, toolID: route.tool)
+          ConversationView(id: route.id, sessions: store, parentOnStack: route.parent, toolID: route.tool,
+            atRequest: route.request != nil)
             .id(route.id)
             .toastOverlay(store.toast)
         }

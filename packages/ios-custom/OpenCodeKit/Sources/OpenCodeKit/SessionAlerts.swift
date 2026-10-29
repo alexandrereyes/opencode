@@ -111,7 +111,7 @@ public struct SessionAlertPolicy: Sendable {
   }
   public mutating func admit(
     _ signal: SessionAlertSignal, server: String, session: Session, root: Session,
-    current: String?, notified: [String] = [], autoApprove: Bool = false
+    current: String?, notified: [String] = [], pushes: Bool = false, autoApprove: Bool = false
   ) -> Bool {
     guard let connectedAt, signal.created >= connectedAt else { return false }
     let key = [server, signal.sessionID, signal.kind.rawValue, signal.watermark].joined(
@@ -124,12 +124,14 @@ public struct SessionAlertPolicy: Sendable {
       session.time.archived == nil, root.time.archived == nil,
       current != session.id, current != root.id
     else { return false }
+    // While this server pushes to this device, questions, permissions, failures and bell finishes arrive as system
+    // notifications (shown in the foreground too, unless that session is open); the banner would repeat them.
     switch signal.kind {
-    case .succeeded, .failed:
-      // A bell session's finish arrives as a system notification instead (`notified` only while this server pushes).
+    case .succeeded:
       return session.parentID == nil && !notified.compactMap(SessionPreferenceKey.sessionID).contains(root.id)
-    case .permission: return !autoApprove
-    case .question: return true
+    case .failed: return session.parentID == nil && !pushes
+    case .permission: return !autoApprove && !pushes
+    case .question: return !pushes
     }
   }
 }

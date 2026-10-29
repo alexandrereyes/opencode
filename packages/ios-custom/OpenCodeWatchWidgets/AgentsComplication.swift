@@ -7,9 +7,10 @@ struct OpenCodeWatchWidgets: WidgetBundle {
   var body: some Widget { AgentsComplication() }
 }
 
-/// Complications (`opcao-1-anel-estados.png`): the ring, the corner count and one rectangular line. The
-/// timeline reads `/watch/v1/state`, keeps the last good state in the shared Keychain group and refreshes on WidgetKit push
-/// and about every 15 minutes. Tapping opens the app on the dashboard.
+/// Complications (`opcao-1-anel-estados.png`): the ring, the corner count and one rectangular line with the age of
+/// the state. The timeline reads `/watch/v1/state` (as `widget`), keeps the last good state in the shared Keychain
+/// group and reloads on WidgetKit push, when the app's background refresh sees a change, and otherwise every hour.
+/// Every one of those reloads counts against the WidgetKit budget. Tapping opens the app on the dashboard.
 struct AgentsComplication: Widget {
   var body: some WidgetConfiguration {
     StaticConfiguration(kind: WatchShared.widgetKind, provider: AgentsProvider()) { entry in
@@ -39,26 +40,31 @@ struct AgentsProvider: TimelineProvider {
 
   func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<AgentsEntry>) -> Void) {
     Task {
-      let entry = await Self.load()
-      completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(15 * 60))))
+      let now = Date()
+      let entry = await Self.load(now: now)
+      // A second entry turns `agora` into the relative age after a minute, without a reload.
+      let entries = WatchAge.entryDates(fetched: entry.fetched, now: now).map {
+        AgentsEntry(date: $0, state: entry.state, fetched: entry.fetched)
+      }
+      completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(WatchAge.timelineReload))))
     }
   }
 
   /// Fresh state when the Mac answers; otherwise the last good one (or nothing once unpaired).
-  static func load() async -> AgentsEntry {
+  static func load(now: Date) async -> AgentsEntry {
     let cache = WatchStateCache()
     guard let pairing = try? WatchKeychain().read() else {
       cache.write(nil)
-      return AgentsEntry(date: Date(), state: nil, fetched: nil)
+      return AgentsEntry(date: now, state: nil, fetched: nil)
     }
-    let client = WatchGatewayClient(pairing: pairing, version: version)
-    if let snapshot = try? await client.state() {
-      let entry = WatchStateCache.Entry(snapshot: snapshot, fetched: Date())
-      cache.write(entry)
-      return AgentsEntry(date: Date(), state: snapshot.state, fetched: entry.fetched)
+    let client = WatchGatewayClient(pairing: pairing, version: version, reader: .widget)
+    switch await WatchStateSync(client: client, cache: cache).run(now: now) {
+    case .fetched(let entry, _, _): return AgentsEntry(date: now, state: entry.snapshot.state, fetched: entry.fetched)
+    case .unreachable(let cached): return AgentsEntry(date: now, state: cached?.snapshot.state, fetched: cached?.fetched)
+    case .unauthorized:
+      let cached = cache.read()
+      return AgentsEntry(date: now, state: cached?.snapshot.state, fetched: cached?.fetched)
     }
-    let cached = cache.read()
-    return AgentsEntry(date: Date(), state: cached?.snapshot.state, fetched: cached?.fetched)
   }
 
   static let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1"
@@ -85,7 +91,7 @@ struct AgentsComplicationView: View {
   var body: some View {
     switch family {
     case .accessoryCorner: ComplicationCorner(state: entry.state)
-    case .accessoryRectangular: ComplicationRectangular(state: entry.state)
+    case .accessoryRectangular: ComplicationRectangular(state: entry.state, fetched: entry.fetched, now: entry.date)
     default: ComplicationCircular(state: entry.state)
     }
   }

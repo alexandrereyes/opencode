@@ -204,7 +204,10 @@ app, without the web's "Projetos" and "Worktrees" groups.
   | 4 | Hoje, Ontem, Esta semana (neutral) | the rest by local day of `interactionAt`; "Esta semana" is 2–6 days ago | `SessionList.rows` |
   | 5 | Anteriores (neutral, collapsed by default) | older than the seven local days (the web's `localDays`) | `SessionList.rows` |
 
-  The discreet **Arquivadas N** row closes the list and opens the archived sheet. Since 28 October every section
+  The discreet **Arquivadas N** row closes the list and opens the archived sheet. A filter (repository, Chats, state)
+  or a server without sessions shows no placeholder (29/10): only "Arquivadas N", or nothing without archives. The
+  former "Nenhuma sessão" view depended on `loading`, so every reload (one per server event) removed and restored it
+  and moved "Arquivadas" with it; only the first load (before any preferences arrive) shows "Carregando sessões…". Since 28 October every section
   mixes chats with repository sessions under "Todas" (before, only "Precisa de você" did); the Chats chip still lists
   only chats.
 - **Chat avatar when mixed:** wherever chats sit beside repository sessions ("Todas", a state filter, the session
@@ -243,7 +246,7 @@ files in `OpenCode/SessionColumn/` import only SwiftUI and OpenCodeKit and use n
 | `SessionColumnHeader.swift` | Title, voice, optional Configurações (`settings: (() -> Void)?`) and Nova sessão |
 | `SessionQuotaRings.swift` | The provider rings |
 | `SessionChips.swift` | Filter chips (moved unchanged from `SessionsView`) |
-| `SessionColumnSections.swift` | Section headers, rows by section, Negar/Permitir, empty state and "Arquivadas N"; a `decorate` closure lets the host add platform actions |
+| `SessionColumnSections.swift` | Section headers, rows by section, Negar/Permitir, first-load progress and "Arquivadas N"; a `decorate` closure lets the host add platform actions |
 | `SessionRowView.swift` | Three-line and compact rows, avatar and running arc |
 | `SessionDirectoryLine.swift` | `path · branch` and the shared row clock |
 
@@ -1293,6 +1296,27 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
   elsewhere and pages outside the scope are refused; links to the web still open in Safari after a touch.
 - **Permitir internet** in the mode bar reloads the page alone with the network (the previous mode, without local
   files); **Usar arquivos locais** returns. The choice is not remembered between files.
+
+#### Links after navigating — 29 October
+
+- The transcript view is retained with the conversation, but the conversation screen and its `FileViewerHost`
+  are rebuilt after navigating (Sessões, another session, Você). `FileOpenAction`/`ImageOpenAction` compared equal
+  for every value, so the retained cells kept the previous host's action, whose viewer state no longer existed:
+  links stopped opening until a relaunch. The actions now compare by their host (`owner`), and native text cells
+  call the action through the transcript context at tap time. `testLinksKeepOpeningAfterLeavingAndReturning`
+  covers file, folder and image links after a round trip through Sessões, another session and Você.
+
+#### Viewer arrows and video audio — 29 October
+
+- Paging is the horizontal swipe. A 20-pt translucent chevron in a lower corner (`FileSiblings.arrows`) only hints
+  that a sibling exists on that side, for every file kind; it takes no touches. It sits above each kind's bottom
+  controls (the player's timeline, the HTML mode bar, the read-aloud controls), since AVKit has no public signal
+  to hide it with its controls. VoiceOver can activate it, and the viewer has "Arquivo anterior/Próximo arquivo"
+  actions.
+- A video **without an audio track** (`VideoAudioPolicy`) sets the session to `.ambient` + `.mixWithOthers` before
+  AVPlayer activates it, so other apps keep playing; leaving restores the previous category and deactivates with
+  `.notifyOthersOnDeactivation`. A video with an audio track, even a silent one, keeps the normal player
+  behaviour. During a voice call or a reading the session is not touched.
 
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
@@ -3772,31 +3796,38 @@ does not answer requests, send prompts, reset seeds or change service lifecycle;
 
 ## Notifications
 
-**"Avisar ao terminar" (28/10).** The only system notification: the server alerts when a session with the bell on
-finishes. Contract: [`plugin-app-custom/docs/session-notifications.md`](../plugin-app-custom/docs/session-notifications.md).
+**Session alerts (rev. 29/10).** The server pushes, with no switches besides the bell: questions (at once) and
+permissions (still pending after 3 s, auto-approval off) of any session, one per request; a failure that stops a
+session (provider retries do not count); a success only with "Avisar ao terminar"; never a user interruption. All
+`interruption-level: active`, so the Focus decides. Contract:
+[`plugin-app-custom/docs/session-notifications.md`](../plugin-app-custom/docs/session-notifications.md).
 
-1. **Permission:** asked the first time a bell is turned on (`SessionNotificationAgent.authorize()`), never at launch.
-   Without it the bell stays off and a toast points to Ajustes.
+1. **Permission:** never at launch. Asked the first time a bell is turned on (`SessionNotificationAgent.authorize()`),
+   or once, the first time a question or permission waits while notifications were never asked: an alert "Avisar
+   quando precisarem de você?" with a one-line explanation, "Agora não" or "Ativar" (answered once, `shouldOffer()`;
+   off in sandbox runs unless `-OpenCodeNotificationOffer`). That is the moment the alerts are useful, and it costs
+   one tap only when he is already looking at a request.
 2. **Registration:** with permission, `registerForRemoteNotifications`; the hex token, the device ID, the server key
    and the APNs environment go to `custom.notifications/register` on every event-stream connection (several devices
    are supported; APNs-invalid tokens are dropped by the server).
-3. **Trigger and delivery (plugin):** the Live Activity tracker's "working" roll-up (own execution, subagents,
-   background shells) must stay quiet for 5 s; then "Terminou · projeto" or "Terminou com erro · projeto", titled with
-   the session title, `thread-id` = session. A user interruption alerts nothing. Sent through the Live Activity APNs
-   client and credentials.
+3. **Delivery (plugin):** through the Live Activity APNs client and credentials, `thread-id` = session,
+   `apns-collapse-id` = `attention:<session>` for attention alerts. The Agentes Live Activity update for a device
+   registered here carries no `alert`, so nothing buzzes twice; unregistered devices keep it as the fallback.
 4. **Presentation (`willPresent`):** hidden only with the app in the foreground and that session open on the same
-   server (`SessionFinishedAlert.presents`); otherwise banner, list and sound. The in-app banner skips completions of
-   bell sessions while the server pushes, so a finish is not announced twice. Requests and failures keep their in-app
-   banners.
-5. **Opening:** a tap follows the alert's `AgentsDeepLink` (server key, session, directory), the Live Activity route.
+   server (`SessionPushAlert.presents`); otherwise banner, list and sound. While the server pushes, the in-app banner
+   skips what arrives by push (questions, permissions, failures, bell finishes).
+5. **Opening:** a tap follows the alert's `AgentsDeepLink` (server key, session, directory), the Live Activity route;
+   with a `requestID` (also `request=` in the URL) the conversation opens at its end, where pending requests sit,
+   even if it was left scrolled up.
 
 Verification: `swift test` (`SessionNotificationTests`, `SubagentAlertTests`), `script/test-session-notify.py`
-(fresh simulator, both themes: rows, swipe, menu, bell off, the deep link a tap follows) and, for the server half,
-`plugin-app-custom/script/e2e-session-notifications.ts` against a sandbox with `OPENCODE_APNS_ORIGIN` pointing at
-`script/fake-apns.ts` (real Luna 6/low runs: success, background shell, failure, interruption, no bell). Fresh iOS 27.0
-simulators on this Mac never start SpringBoard's `com.apple.usernotifications.usernotificationservice`: there
-`getNotificationSettings`, `requestAuthorization` and `simctl push` hang, so the permission prompt, `willPresent` and a
-real banner tap are verified on a device only.
+(fresh simulator, both themes: rows, swipe, menu, bell off, the deep link a tap follows, and a real pending permission
+opened from the link at the request) and, for the server half, `plugin-app-custom/script/e2e-session-notifications.ts`
+against a sandbox with `OPENCODE_APNS_ORIGIN` pointing at `script/fake-apns.ts` (real Luna 6/low runs: success with and
+without the bell, a question, permissions, failures with and without retries, the Live Activity without an alert).
+Fresh iOS 27.0 simulators on this Mac never start SpringBoard's `com.apple.usernotifications.usernotificationservice`:
+there `getNotificationSettings`, `requestAuthorization` and `simctl push` hang, so the permission prompts, `willPresent`
+and a real banner tap are verified by unit tests and on a device only.
 
 TestFlight builds use the **production** APNs environment (`api.push.apple.com`), while builds installed from Xcode
 use **sandbox** (`api.sandbox.push.apple.com`). Store the environment with each token. The Agentes Live Activity below
@@ -3908,11 +3939,32 @@ watch's own Wi-Fi or cellular. The contract with the backend is
 - **Screens** (`OpenCodeWatch/`): Painel (ring, counts, pending requests first, sessions, Liquid Glass microphone,
   refresh every 10 s while visible and on pull), Responder (options with the recommended one first, dictation through
   `TextFieldLink`, permission decisions), Voz (CallKit call, live levels around the mascot, Sessão mestra line, last
-  two captions, mute and end), plus "Sem pareamento" and "Mac indisponível" with the last update. Colors are
-  `openchamber-dark` (`WatchPalette`, checked against the theme JSON by `WatchPaletteTests`).
+  two captions, mute and end), plus "Sem pareamento" and "Mac indisponível". Below the ring, `Atualizado agora` /
+  `Atualizado há N min.` says how old the state is (rev. 29/10). Colors are `openchamber-dark` (`WatchPalette`, checked
+  against the theme JSON by `WatchPaletteTests`).
 - **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
   mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
-  state in the same Keychain group and refreshes every 15 minutes, when the app updates it, and on WidgetKit push. The
+  state in the same Keychain group and reloads on WidgetKit push, when the app updates it, and otherwise every hour.
+- **Sync within the WidgetKit budget (rev. 29/10).** WidgetKit counts every complication reload outside the app in
+  front (push, timeline or background request) against one daily budget, 40 to 70 for a widget looked at often; the
+  server's 150 pushes a day plus a 15-minute timeline exhausted it, so only opening the app updated the complication.
+  Now `WatchStateSync` (OpenCodeKit) is the one read for the app, the background refresh and the complication: it
+  writes the shared cache and says whether anything changed and whether what the complication draws changed
+  (`WatchComplicationKey`: the ring's counts and the two totals). The app in front reloads on any change (not
+  budgeted); the **background app refresh** (`BackgroundRefresh` and `WatchAppDelegate` in `OpenCodeWatchApp.swift`,
+  `WatchBackgroundRefresh`: about every 30 minutes, an 8 s read, rescheduled after each run and whenever the app leaves
+  the screen) reloads only when the drawing changed; the timeline policy is 60 minutes. watchOS crashes the app on
+  `scheduleBackgroundRefresh` unless the application delegate implements `handle(_:)` (seen in the simulator: SwiftUI's
+  `.backgroundTask` alone is not enough), so a `WKApplicationDelegateAdaptor` receives every background task, completing
+  WatchConnectivity's only once nothing is pending. Every read sends `X-Watch-Client: app|background|widget`, which the gateway counts (`custom.watch` →
+  `stats`) and uses to skip pushes for a state the watch already read; the server pushes at once only for a new
+  question, permission or failure or for the active total reaching or leaving zero, folds the rest into one push per
+  30 minutes, and caps pushes at 40 a day ([`watch.md`](../plugin-app-custom/docs/watch.md), "Budget"). The
+  rectangular complication shows the age of the state next to `OpenCode` (`agora`, then `há N min.`; a second timeline
+  entry makes the switch without a reload); the circular and corner families have no room. DEBUG builds accept
+  `-OpenCodeWatchRefreshSeconds N` (a shorter refresh) and the `OpenCodeWatchPairing` default (base64 JSON pairing,
+  written with `simctl spawn … defaults write`) to watch a background refresh happen in the simulator; it needs a build
+  signed to run locally (`CODE_SIGN_IDENTITY=-`), since an unsigned one has no keychain entitlement. The
   push token comes only to an extension with `aps-environment` (rev. 28/10: it was missing, so WidgetKit never issued
   a token and no watch registered one). `WatchWidgetToken` saves it in the shared Keychain first, then posts it to
   `/watch/v1/widget-token` when paired; the extension's `WidgetPushHandler` and every app refresh call it, so a token

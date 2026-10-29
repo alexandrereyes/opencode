@@ -121,14 +121,39 @@ struct ComplicationCorner: View {
   }
 }
 
+/// How old the state is: `agora` in its first minute, then the live relative text (`há 3 min.`). `now` is the
+/// timeline entry's date in a complication and the `TimelineView` date in the app, which re-render at the switch.
+struct WatchAgeText: View {
+  let fetched: Date
+  let now: Date
+  var body: some View {
+    if WatchAge.isFresh(fetched, at: now) {
+      Text("agora")
+    } else {
+      Text(.currentDate, format: AgentsText.ago(since: fetched))
+    }
+  }
+}
+
 struct ComplicationRectangular: View {
   let state: AgentsState?
+  /// When the state was read from the Mac; nil before the first read.
+  let fetched: Date?
+  let now: Date
   var body: some View {
     HStack(spacing: 8) {
       WatchRingView(state: state, lineWidth: 3.5, numberSize: 15).frame(width: 46, height: 46)
       VStack(alignment: .leading, spacing: 1) {
-        Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.watch(.primary))
-          .widgetAccentable()
+        // The brand keeps its width; the age, smaller, shrinks first.
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+          Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.watch(.primary))
+            .widgetAccentable().lineLimit(1).fixedSize()
+          Spacer(minLength: 0)
+          if let fetched {
+            WatchAgeText(fetched: fetched, now: now).font(.system(size: 10)).monospacedDigit()
+              .foregroundStyle(Color.watch(.textSecondary)).lineLimit(1).minimumScaleFactor(0.7)
+          }
+        }
         Text(state.map(\.complicationLine) ?? "Nenhuma sessão ativa")
           .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.watch(.textStrong))
           .lineLimit(2).minimumScaleFactor(0.8)

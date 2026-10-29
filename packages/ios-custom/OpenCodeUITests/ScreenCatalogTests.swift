@@ -260,6 +260,17 @@ import XCTest
     shot("new-session-from-repository-chip")
   }
 
+  func testEmptyProject() {
+    let app = launch()
+    defer { app.terminate() }
+    // Projeto 1 has only managed chats, so its repository filter has no sessions.
+    chip("filter-project-Projeto Exemplo 1", app)
+    XCTAssertTrue(app.buttons["sessions-archived"].waitForExistence(timeout: 10))
+    XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'session-row-'")).count, 0)
+    XCTAssertFalse(app.staticTexts["Nenhuma sessão"].exists)
+    shot("sessions-project-empty")
+  }
+
   func testConversation() {
     let app = launch()
     defer { app.terminate() }
@@ -322,15 +333,21 @@ import XCTest
     shot("files-explorer-default")
     tap("file-explorer-file-README.md", app)
     XCTAssertTrue(app.buttons["file-markdown-source"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.descendants(matching: .any)["file-next"].firstMatch.waitForExistence(timeout: 10))
+    XCTAssertFalse(app.descendants(matching: .any)["file-previous"].firstMatch.exists)
     shot("files-markdown-default")
     tap("Fechar", app)
     tap("file-explorer-file-preview.png", app)
     XCTAssertTrue(app.navigationBars["preview.png"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.descendants(matching: .any)["file-previous"].firstMatch.waitForExistence(timeout: 10))
+    XCTAssertFalse(app.descendants(matching: .any)["file-next"].firstMatch.exists)
     shot("files-image-default")
     tap("Fechar", app)
     tap("file-explorer-file-index.html", app)
     XCTAssertTrue(app.webViews.firstMatch.staticTexts["Próxima versão"].waitForExistence(timeout: 20))
     XCTAssertTrue(app.descendants(matching: .any)["file-html-mode"].exists)
+    XCTAssertTrue(app.descendants(matching: .any)["file-previous"].firstMatch.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.descendants(matching: .any)["file-next"].firstMatch.waitForExistence(timeout: 10))
     shot("files-html-preview")
   }
 

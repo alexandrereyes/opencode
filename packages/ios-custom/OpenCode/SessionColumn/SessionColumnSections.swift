@@ -67,23 +67,15 @@ struct SessionColumnSections<Decorated: View>: View {
           }
         }
       }
-      if sections.isEmpty {
-        if store.entries.isEmpty && store.loading {
-          HStack {
-            Spacer()
-            ProgressView("Carregando sessões…")
-            Spacer()
-          }
-          .padding(.vertical, 30).listRowSeparator(.hidden).listRowBackground(theme.color(.background))
-        } else if !store.loading {
-          ContentUnavailableView(
-            "Nenhuma sessão", systemImage: "bubble.left.and.bubble.right",
-            description: Text("As sessões aparecerão aqui quando estiverem disponíveis.")
-          )
-          .foregroundStyle(theme.color(.textSecondary))
-          .listRowSeparator(.hidden)
-          .listRowBackground(theme.color(.background))
+      // Only the first load shows progress: later reloads (one per server event) must not change the rows. A
+      // filter, or a server, without sessions shows no placeholder, just "Arquivadas N" when there are any.
+      if store.preferences == nil && store.loading {
+        HStack {
+          Spacer()
+          ProgressView("Carregando sessões…")
+          Spacer()
         }
+        .padding(.vertical, 30).listRowSeparator(.hidden).listRowBackground(theme.color(.background))
       }
       if let archived {
         Button(action: archived) {

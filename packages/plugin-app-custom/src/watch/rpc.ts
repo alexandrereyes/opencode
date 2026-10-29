@@ -31,6 +31,27 @@ export const DeviceView = Schema.Struct({
 
 const OperationFailed = Schema.Struct({ message: Schema.String })
 
+const Usage = {
+  /** `/state` reads by reader: each `widget` read is one complication reload, counted by WidgetKit's budget. */
+  state: Schema.Struct({ app: Schema.Int, background: Schema.Int, widget: Schema.Int, unknown: Schema.Int }),
+  pushes: Schema.Struct({ urgent: Schema.Int, coalesced: Schema.Int, failed: Schema.Int }),
+  capped: Schema.Int,
+}
+
+export interface Stats extends Schema.Schema.Type<typeof Stats> {}
+export const Stats = Schema.Struct({
+  at: Schema.Number,
+  devices: Schema.Array(
+    Schema.Struct({
+      deviceID: Schema.String,
+      /** The last 24 hours. */
+      day: Schema.Struct(Usage),
+      /** Hours with activity in the last 24, newest first; `hour` is its start (epoch ms). */
+      hours: Schema.Array(Schema.Struct({ hour: Schema.Number, ...Usage })),
+    }),
+  ),
+}).annotate({ identifier: "Watch.Stats" })
+
 export const Definition = Rpc.define({
   id: "custom.watch",
   methods: {
@@ -48,6 +69,11 @@ export const Definition = Rpc.define({
     revoke: {
       input: Schema.toStandardSchemaV1(Schema.Struct({ deviceID: DeviceID })),
       output: Schema.toStandardSchemaV1(Schema.Struct({})),
+    },
+    /** In-memory usage counters since the server started (diagnostics of the WidgetKit budget). */
+    stats: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({})),
+      output: Schema.toStandardSchemaV1(Stats),
     },
   },
   events: {},
