@@ -11,6 +11,8 @@ final class MacVoiceAppDelegate: NSObject, NSApplicationDelegate {
       for window in MacRuntime.shared.windows.values { await window.drafts.flush() }
       ReadAloudPlayer.stopCurrent()
       MacAudioDevices.shared.stop()
+      MacMediaPause.resume()
+      MacMediaPause.flush()
       sender.reply(toApplicationShouldTerminate: true)
     }
     return .terminateLater
@@ -107,6 +109,7 @@ struct MacVoiceSettings: View {
         Text("A conversa usa o serviço privado pelo WARP e delega seus pedidos à Sessão mestra.").font(.caption)
         Button("Abrir permissão do microfone") { MacMicrophonePermission.openSettings() }
       }
+      MacDictationSettings()
       Section("Memória da voz") {
         Button("Ver transcrição") { transcript = true }.disabled(runtime.store == nil)
         Text("Resumo e falas recentes, compartilhados com o iPhone pelo mesmo servidor. Não é um arquivo ilimitado.").font(.caption)
@@ -118,5 +121,36 @@ struct MacVoiceSettings: View {
       .sheet(isPresented: $transcript) {
         if let store = runtime.store { VoiceTranscriptView(memory: store.voiceMemory).macCancelable() }
       }
+  }
+}
+
+/// The dictation microphone and the music: saved by device UID, back to Automático when that device is gone.
+private struct MacDictationSettings: View {
+  @AppStorage(MacMicrophone.key) private var microphone = MacMicrophone.automatic
+  @AppStorage(MacMicrophone.pausesMediaKey) private var pausesMedia = true
+  @State private var inputs: [MacMicrophone.Input] = []
+  @State private var current: String?
+  var body: some View {
+    Section("Ditado") {
+      Picker("Microfone", selection: Binding(
+        get: { microphone == MacMicrophone.system || inputs.contains { $0.id == microphone } ? microphone : MacMicrophone.automatic },
+        set: { microphone = $0; refresh() })) {
+        Text("Automático (evita o microfone do fone Bluetooth)").tag(MacMicrophone.automatic)
+        Text("Padrão do sistema").tag(MacMicrophone.system)
+        Divider()
+        ForEach(inputs) { Text($0.name).tag($0.id) }
+      }
+      Text("Gravando agora por: \(current ?? "entrada padrão do sistema"). O ditado não muda a entrada padrão do Mac.")
+        .font(.caption)
+      Toggle("Pausar a música ao ditar", isOn: $pausesMedia)
+      Text("Pausa o que estiver tocando enquanto você dita e retoma ao parar ou pausar a gravação. Só retoma o que o OpenCode pausou.")
+        .font(.caption)
+    }
+    .onAppear(perform: refresh)
+    .onReceive(NotificationCenter.default.publisher(for: .macAudioDeviceChanged)) { _ in refresh() }
+  }
+  private func refresh() {
+    inputs = MacMicrophone.inputs()
+    current = (MacMicrophone.recordingInput() ?? MacMicrophone.defaultInput(among: inputs))?.name
   }
 }

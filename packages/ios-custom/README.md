@@ -3303,6 +3303,17 @@ adds the same model download, progress, retry, deletion and licenses. Dados do i
   retry, local pending audio and model management match iOS. The transcript lands in the composer itself, at the
   caret, which takes the focus to review and send it; there is no review sheet and it never sends automatically.
   The **right Option key** dictates too (see [Adjustment round](#adjustment-round--28-october)). Device changes and app deactivation pause recording.
+- **Dictation microphone and music:** the Mac records with `AVAudioEngine` (`OpenCodeMac/MacMicrophone.swift`), the
+  input chosen in Ajustes → Voz → **Microfone** set on the input node (`kAudioOutputUnitProperty_CurrentDevice`); the
+  system default input never changes. **Automático** follows the default input unless it is Bluetooth, whose
+  microphone forces the headset into the call profile (HFP, phone-quality music); then the built-in microphone
+  records. **Padrão do sistema** always follows the default; a device saved by UID that disappears falls back to
+  Automático. The file stays 48 kHz mono Float32 CAF, appended across pause/resume. **Pausar a música ao ditar**
+  (on by default) pauses the now-playing media while recording and plays it again on stop or pause, only if this
+  app paused it and it is still the paused now-playing player. MediaRemote answers only Apple-signed processes
+  since macOS 15.4, so `osascript` (JXA) loads it and sends explicit pause/play commands, never a toggle (VoiceInk
+  uses a Perl-hosted adapter framework for the same reason). GPT Live keeps WebRTC's default devices: the macOS
+  WebRTC build exposes no input-device selection.
 - **Read aloud:** response footers and Markdown files use `custom.speech`, the same `ReadAloudPlayer`, pill/full
   controls, seeking, speed and server bookmarks. The voice comes from the speech server (separate from GPT Live's
   voice choice). Starting a call or dictation pauses it; reading cannot start while either owns the microphone.

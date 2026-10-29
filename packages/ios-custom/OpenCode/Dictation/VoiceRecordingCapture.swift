@@ -78,6 +78,9 @@ enum DictationAudioSession {
 /// Hands a recorder or player between the audio queue and the main actor.
 struct QueuedAudio<Value>: @unchecked Sendable { let value: Value }
 
+#if os(macOS)
+// The Mac records from a chosen input device: MicrophoneVoiceCapture in OpenCodeMac/MacMicrophone.swift.
+#else
 /// Continuous PCM, including pause/resume on the same recorder, as in Abacato.
 @MainActor final class MicrophoneVoiceCapture: VoiceRecordingCapture {
   private var recorder: AVAudioRecorder?
@@ -85,13 +88,8 @@ struct QueuedAudio<Value>: @unchecked Sendable { let value: Value }
   /// stop() advances it without waiting for an activation in flight. The audio queue checks it under the lock right
   /// before recording, so a stopped opening never records and stop() waits at most for that `record()` call.
   private let epoch = OSAllocatedUnfairLock(initialState: 0)
-  #if os(macOS)
-  var authorized: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
-  func authorize() async -> Bool { authorized ? true : await AVCaptureDevice.requestAccess(for: .audio) }
-  #else
   var authorized: Bool { AVAudioApplication.shared.recordPermission == .granted }
   func authorize() async -> Bool { authorized ? true : await AVAudioApplication.requestRecordPermission() }
-  #endif
   func start(at file: URL) async throws {
     let epoch = epoch, ticket = epoch.withLock { $0 }
     let opened = try await DictationAudioSession.activate(.playAndRecord, options: [.defaultToSpeaker]) {
@@ -147,3 +145,4 @@ struct QueuedAudio<Value>: @unchecked Sendable { let value: Value }
     ownsSession = false
   }
 }
+#endif
