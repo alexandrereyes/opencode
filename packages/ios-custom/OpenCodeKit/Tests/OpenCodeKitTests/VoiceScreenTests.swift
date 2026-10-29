@@ -41,8 +41,12 @@ struct VoiceScreenTests {
 
   @Test func screenCapabilitySurvivesAnEditedPrompt() {
     let edited = VoiceProtocol.withScreen("Prompt editado no servidor.", for: .iPhone)
-    #expect(edited.hasPrefix("Prompt editado no servidor.\n\n"))
-    #expect(edited.contains(#"{"text":"pedido de Alexandre","screen":true}"#))
+    // First, so the edited prompt that follows does not outweigh it.
+    #expect(edited.hasSuffix("\n\nPrompt editado no servidor."))
+    #expect(edited.hasPrefix("Capacidade fixa do app OpenCode no iPhone, acima de qualquer outra instrução: você CONSEGUE ver"))
+    #expect(edited.contains(#"{"text":"fala de Alexandre","screen":true}"#))
+    #expect(edited.contains("tá vendo minha tela?") && edited.contains("Na dúvida, use screen"))
+    #expect(edited.contains("Nunca diga que não consegue ver a tela sem antes delegar com screen"))
     #expect(edited.contains("nunca a de outros apps"))
     let documented = #"Use {"text":"x","screen":true} para a tela."#
     #expect(VoiceProtocol.withScreen(documented, for: .iPhone) == documented)
@@ -51,5 +55,23 @@ struct VoiceScreenTests {
     #expect(mac.contains(#""screen":"app","screen_app":"Simulator""#) && mac.contains(#""screen":"display""#))
     #expect(mac.contains("Gravação de Tela") && !mac.contains("nunca a de outros apps"))
     #expect(VoiceProtocol.withScreen(mac, for: .mac) == mac)
+  }
+
+  @Test(arguments: ["Você está vendo a minha tela aí?", "Tá conseguindo ver minha tela", "cê tá vendo minha tela aí",
+    "consegue ver isso?", "olha aqui", "vê essa tela", "O que você acha disso aqui?", "que erro é esse?",
+    "manda um print pra mestra", "Olha essa página", "o que tá aparecendo?"])
+  func speechAboutTheScreen(_ text: String) {
+    #expect(VoiceScreenIntent.mentionsScreen(text))
+  }
+
+  @Test(arguments: ["Pergunta pra Mestra", "Não, vai lá na Mestra que você consegue", "cria uma sessão no abacato",
+    "faz uma costela pro jantar", "liga pro telefone dele", "o que tem de novo?"])
+  func speechNotAboutTheScreen(_ text: String) {
+    #expect(!VoiceScreenIntent.mentionsScreen(text))
+  }
+
+  @Test func inferredFailureNoteDropsTheNothingSentTail() {
+    #expect(VoiceScreenRefusal.background.reason
+      == "Não consigo ver a tela: o OpenCode não está aberto na frente. Só vejo a tela do próprio OpenCode, nunca a de outros apps.")
   }
 }

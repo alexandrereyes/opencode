@@ -366,6 +366,27 @@ recebe a imagem**; só a mestra a vê. O probe opt-in `testExplicitSilentLiveIma
   exemplo “Não consigo ver a tela: o OpenCode não está aberto na frente. Só vejo a tela do próprio
   OpenCode, nunca a de outros apps. Nada foi enviado à Sessão mestra.”) e aparece num toast do app.
 
+#### Quando o GPT Live não marca `screen` (29/10)
+
+Nos testes de 29/10 o GPT Live respondeu "não tô vendo" a "Você está vendo a minha tela aí?" sem delegar e,
+depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples. Duas defesas:
+
+- **Instruções na frente:** o bloco fixo de cada app agora vem **antes** do prompt do servidor (que é editável
+  e longo), afirma que ele consegue ver a tela, lista perguntas ("tá vendo minha tela?", "consegue ver isso?",
+  "o que você acha disso aqui?"…), manda usar `screen` na dúvida e proíbe dizer que não vê sem delegar.
+- **Rede de segurança no app:** uma delegação sem `screen` ganha a captura (alvo `front`) quando o texto
+  delegado ou o que Alexandre falou desde a delegação anterior (até 45 s, pelos trechos de transcrição de
+  entrada) fala da tela (`VoiceScreenIntent`: tela, print, captura, janela, página, "isso aqui", "olha
+  aqui", "vê isso", "o que acha disso", "que erro é esse"…). Se essa captura inferida falhar, o texto vai
+  mesmo assim, com `[O app tentou anexar a tela, mas não conseguiu: motivo]`; só o `screen` explícito
+  continua bloqueando o envio.
+- **Mestra:** o prompt dela manda analisar a imagem, repetir esse motivo quando houver e nunca dizer que
+  não vê telas; sem imagem nem motivo, diz que a captura não veio e pede "olha a tela".
+- Alternativa avaliada e não feita: uma ferramenta da mestra que pede a captura ao aparelho da ligação
+  pelo canal de dados do iPhone/Mac. Resolveria também pedidos sem nenhuma palavra de tela, mas exige
+  RPC nova no plugin, fonte nova nos dois apps, tempo limite e app em primeiro plano; a heurística cobre
+  os dois casos relatados só no app.
+
 #### No Mac (outros apps também)
 
 `MacVoiceScreen` decide com `VoiceScreenPlanner` (Kit, puro e testado) a partir do app da frente

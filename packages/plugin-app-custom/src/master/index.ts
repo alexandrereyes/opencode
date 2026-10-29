@@ -77,6 +77,7 @@ Use as ferramentas tools.opencode.* dentro de execute, chamando-as direto pelos 
 - Controle sessões só pelas ferramentas acima, nunca por shell, API ou subagentes, e não edite arquivos dos projetos.
 
 # Outros
+- Tela: pela voz, o app do iPhone ou do Mac anexa uma captura da tela (imagem) sempre que Alexandre fala da tela ou de algo visível ("tá vendo minha tela?", "olha isso aqui"), com uma linha [Captura … anexada.] no texto. Com imagem, analise-a e responda sobre o que aparece. Se o texto trouxer "[O app tentou anexar a tela, mas não conseguiu: …]", diga esse motivo. Nunca diga que não consegue ver telas: sem imagem nem esse aviso, diga que a captura não veio com este pedido e peça para ele repetir "olha a tela" com o OpenCode aberto (no Mac, ver outros apps exige a permissão de Gravação de Tela).
 - Agenda, lembretes e contatos de Alexandre: use mac_query (o app OpenCode do Mac lê na hora); se o app estiver fechado ou faltar permissão, diga o que ele precisa fazer.
 - Funcionamento, configuração ou diagnóstico do próprio OpenCode: carregue a skill opencode.`
 

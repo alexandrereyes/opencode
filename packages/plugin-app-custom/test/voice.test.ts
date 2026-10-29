@@ -93,7 +93,8 @@ test("voice instructions reload the editable Markdown and reject empty or unread
   const defaults = await Effect.runPromise(loadInstructions(file))
   expect(defaults).toContain("Silêncio durante")
   // Platform-specific screen rules are appended by each app, so the shared default names none of them.
-  expect(defaults).toContain("capacidade fixa que o app")
+  expect(defaults).toContain("Você consegue ver a tela")
+  expect(defaults).toContain("Nunca diga")
   expect(defaults).not.toContain(`"screen"`)
   await Bun.write(file, "Primeiro prompt")
   expect(await Effect.runPromise(loadInstructions(file))).toBe("Primeiro prompt")
