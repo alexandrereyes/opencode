@@ -96,7 +96,8 @@ import os
 extension AppRuntime {
   /// Opens a Live Activity link: switches to its server when another one is active, then shows the session (its
   /// conversation resolves the Location from the Session) or the Sessões list.
-  func open(_ link: AgentsDeepLink) async {
+  /// `request`: a pending question or permission to open the session at (a notification's).
+  func open(_ link: AgentsDeepLink, request: String? = nil) async {
     if let server = AgentsActivityAgent.server(for: link.serverKey, in: servers), server.id != servers.activeID {
       do { try servers.select(server.id) } catch {
         AgentsActivityAgent.log.error("deep link server: \(error.localizedDescription, privacy: .public)")
@@ -107,7 +108,9 @@ extension AppRuntime {
     store.settingsOpen = false
     switch link {
     case .session(_, let sessionID, _):
-      if store.conversationPath.last?.id != sessionID { store.conversationPath = [.init(id: sessionID)] }
+      if store.conversationPath.last?.id != sessionID || request != nil {
+        store.conversationPath = [.init(id: sessionID, request: request)]
+      }
     case .sessions: store.conversationPath = []
     }
   }

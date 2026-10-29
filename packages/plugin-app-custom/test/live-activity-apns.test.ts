@@ -222,12 +222,21 @@ it.live("a session alert uses the alert push type with the bare bundle topic; OP
     yield* Effect.addFinalizer(() => client.close)
     const body = { aps: { alert: { title: "Sessão", body: "Terminou · repo" }, "thread-id": "ses_1" } }
     expect(
-      yield* client.send({ token: "c0ffee", environment: "production", priority: 10, expiration: 1, body, type: "alert" }),
+      yield* client.send({
+        token: "c0ffee",
+        environment: "production",
+        priority: 10,
+        expiration: 1,
+        body,
+        type: "alert",
+        collapseID: "attention:ses_1",
+      }),
     ).toEqual({ status: "sent" })
     expect(fake.received[0]?.headers).toMatchObject({
       "apns-push-type": "alert",
       "apns-topic": defaults.bundleID,
       "apns-priority": "10",
+      "apns-collapse-id": "attention:ses_1",
     })
     expect(JSON.parse(fake.received[0]?.body ?? "")).toEqual(body)
     yield* Effect.promise(() => rm(directory, { recursive: true }))

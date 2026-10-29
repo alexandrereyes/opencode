@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """"Avisar ao terminar" in the Sessões screen, on a freshly created simulator against an owned sandbox: imports two
 owned sessions (no model calls), mutes TARGET the old way (`sidebar.mute`) and turns the bell on for OTHER through the
-server, runs SessionNotifyTests, and serves it a control endpoint that opens the notification deep link
-(`AgentsDeepLink`, the same route a tap on the alert takes) with `xcrun simctl openurl`. Afterwards it checks the stored
+server, leaves a third one (long history) waiting on a shell permission after a real Luna 6 / low run, runs
+SessionNotifyTests, and serves it a control endpoint that opens the notification deep link (`AgentsDeepLink`, the same
+route a tap on the alert takes; `request` opens at the pending request) with `xcrun simctl openurl`. Afterwards it checks the stored
 preferences, then deletes its sessions, keys, repository and simulator.
 
 The alert payload itself is covered end to end by `plugin-app-custom/script/e2e-session-notifications.ts`; presenting
@@ -92,6 +93,34 @@ try:
                  "time": {"created": at - 900, "completed": at - 800}, "finish": "stop",
                  "content": [{"type": "text", "text": "Histórico sintético."}]}]}, "POST")
         time.sleep(1)
+    # REQUEST: a long history, then a real Luna 6 / low run left waiting on a shell permission.
+    request = "ses_" + uuid.uuid4().hex
+    owned.append(request)
+    ids["REQUEST"] = request
+    history = []
+    for index in range(40):
+        at = now - 600_000 + index * 2_000
+        history.append({"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Pergunta longa número %d." % index,
+            "time": {"created": at}})
+        history.append({"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build", "model": model,
+            "time": {"created": at + 500, "completed": at + 900}, "finish": "stop",
+            "content": [{"type": "text", "text": ("Resposta sintética longa %d. " % index) * 12}]})
+    api("/api/experimental/session/import", {
+        "info": {"id": request, "title": "Aviso — pedido pendente", "projectID": "global",
+            "location": {"directory": str(repo)}, "agent": "build", "model": model,
+            "permissions": [{"action": "shell", "resource": "*", "effect": "ask"}],
+            "cost": 0, "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+            "outcome": "succeeded", "time": {"created": now - 600_000, "updated": now - 500_000, "idle": now - 500_000,
+                "viewed": now - 500_000}},
+        "location": {"directory": str(repo)}, "messages": history}, "POST")
+    api("/api/session/" + request + "/prompt", {"text": "Use a ferramenta shell para rodar exatamente: echo aviso"}, "POST")
+    deadline = time.time() + 180
+    while time.time() < deadline and not api("/api/session/" + request + "/permission")["data"]:
+        time.sleep(1)
+    permissions = api("/api/session/" + request + "/permission")["data"]
+    if not permissions:
+        raise RuntimeError("The request session never asked for permission")
+    ids["PERMISSION"] = permissions[0]["id"]
     rpc("custom.preferences/mutate", {"type": "sidebar.mute", "session": key(ids["TARGET"]), "muted": True})
     rpc("custom.preferences/mutate", {"type": "sidebar.notify", "session": key(ids["OTHER"]), "notify": True})
 
@@ -102,10 +131,13 @@ try:
         def do_GET(self):
             status = 200
             try:
-                if self.path != "/open":
+                if self.path not in ("/open", "/open-request"):
                     raise ValueError(self.path)
-                link = "br.com.alexandrem.opencode://session?" + urllib.parse.urlencode(
-                    {"server": server_key, "id": ids["TARGET"], "directory": str(repo)})
+                query = {"server": server_key, "id": ids["TARGET"], "directory": str(repo)}
+                if self.path == "/open-request":
+                    query = {"server": server_key, "id": ids["REQUEST"], "directory": str(repo),
+                        "request": ids["PERMISSION"]}
+                link = "br.com.alexandrem.opencode://session?" + urllib.parse.urlencode(query)
                 subprocess.run(["xcrun", "simctl", "openurl", device, link], check=True, timeout=30)
                 body = json.dumps({"link": link}).encode()
             except Exception as error:
@@ -120,6 +152,7 @@ try:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     environment.write_text(json.dumps({"OPENCODE_NOTIFY_TARGET": ids["TARGET"], "OPENCODE_NOTIFY_OTHER": ids["OTHER"],
         "OPENCODE_NOTIFY_TITLE": "Aviso — antes silenciada",
+        "OPENCODE_NOTIFY_REQUEST": ids["REQUEST"], "OPENCODE_NOTIFY_REQUEST_TITLE": "Aviso — pedido pendente",
         "OPENCODE_NOTIFY_CONTROL": "http://127.0.0.1:%d" % server.server_address[1]}))
     environment.chmod(0o600)
     status = subprocess.call([sys.executable, str(Path(__file__).with_name("test-isolated.py")), "--device", device,
@@ -146,6 +179,10 @@ finally:
                 rpc("custom.preferences/mutate", intent)
             except Exception:
                 pass
+        try:
+            api("/api/session/" + session + "/interrupt?resume=false", {}, "POST")
+        except Exception:
+            pass
         try:
             api("/api/session/" + session, method="DELETE")
         except Exception:

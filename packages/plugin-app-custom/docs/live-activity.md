@@ -366,6 +366,17 @@ first in the order question, permission, failed. An activity registered with `ac
 token is invalid) the activity is removed from the registration. A failed update clears the "already sent" marker so
 the next 10 s slot retries; a failed start is retried after the 5-minute window.
 
+**Alerts with session notifications (rev. 2026-10-29).** A device also registered in `custom.notifications` gets
+its urgent updates without `alert`, since the session alert already buzzes; others keep the alert as the fallback (see
+[session-notifications.md](session-notifications.md#live-activity-alerts)).
+
+**Expiry (rev. 2026-10-29).** ActivityKit ends an activity after 8 hours. Its token then fails (APNs 410/invalid):
+the registry drops it, remembers the activity as `expired` and sets `rearm`, which arms push-to-start while work goes
+on (cleared by the next start push). An `ended` report that is no user refusal also rearms. A `dismissed` report for
+the expired activity, or for one registered 7 h 45 min or more ago (`limits.activityMs`; `registeredAt` now survives
+token re-reports), is no refusal either: only a swipe within the 8 hours sets `dismissed` and holds push-to-start
+until `activeTotal` returns to 0.
+
 **APNs configuration.** Set `OPENCODE_APNS_KEY_PATH` (the `.p8` file) and `OPENCODE_APNS_KEY_ID`; optionally
 `OPENCODE_APNS_TEAM_ID` and `OPENCODE_APNS_BUNDLE_ID`. They are read once when the hub starts; an unreadable key logs a
 warning and keeps pushes off (`unconfigured`). Pushes run in their own fibers with a 10 s request timeout; the HTTP/2

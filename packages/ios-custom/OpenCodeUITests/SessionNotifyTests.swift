@@ -23,6 +23,23 @@ import XCTest
       element.label)
   }
 
+  /// Asks the runner to open a notification's deep link. `simctl openurl` asks before opening the app's scheme (a
+  /// notification tap does not); the prompt sometimes swallows the first tap while it animates in, so the link is
+  /// opened again once if nothing happened.
+  private func openLink(_ path: String, showing header: XCUIElement, title: String) async throws -> Bool {
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    for _ in 0..<2 {
+      try await control(path)
+      let open = springboard.buttons["Abrir"]
+      if open.waitForExistence(timeout: 5) {
+        try await Task.sleep(for: .seconds(1))
+        open.tap()
+      }
+      if shows(header, title) { return true }
+    }
+    return false
+  }
+
   private func shows(_ element: XCUIElement, _ label: String) -> Bool {
     XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "label == %@", label), evaluatedWith: element)],
       timeout: 10) == .completed
@@ -79,20 +96,40 @@ import XCTest
     let header = app.staticTexts["conversation-header-title"]
     XCTAssertTrue(header.waitForExistence(timeout: 20))
     XCTAssertNotEqual(header.label, title)
-    // `simctl openurl` asks before opening the app's scheme (a notification tap does not); the prompt sometimes
-    // swallows the first tap while it animates in, so the link is opened again once if nothing happened.
-    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-    var opened = false
-    for _ in 0..<2 where !opened {
-      try await control("/open")
-      let open = springboard.buttons["Abrir"]
-      if open.waitForExistence(timeout: 5) {
-        try await Task.sleep(for: .seconds(1))
-        open.tap()
-      }
-      opened = shows(header, title)
-    }
+    let opened = try await openLink("/open", showing: header, title: title)
     XCTAssertTrue(opened, header.label)
     shot("opened-from-link")
+  }
+
+  /// A question or permission alert opens its session at the pending request, even when he left it scrolled up.
+  func testRequestAlertOpensAtThePendingRequest() async throws {
+    let target = try XCTUnwrap(environment["OPENCODE_NOTIFY_REQUEST"])
+    let title = try XCTUnwrap(environment["OPENCODE_NOTIFY_REQUEST_TITLE"])
+    let app = XCUIApplication()
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme",
+      environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    app.launch()
+    defer { app.terminate() }
+    try app.requireSandbox()
+    let row = app.buttons["session-row-" + target]
+    app.revealSessionRow(row)
+    row.tap()
+    let header = app.staticTexts["conversation-header-title"]
+    XCTAssertTrue(header.waitForExistence(timeout: 20))
+    let allow = app.buttons["Permitir"]
+    XCTAssertTrue(allow.waitForExistence(timeout: 30))
+    // Leave it read from the top, far from the pending card.
+    let transcript = app.collectionViews.firstMatch
+    for _ in 0..<12 { transcript.swipeDown(velocity: .fast) }
+    XCTAssertFalse(allow.exists && allow.isHittable, "O pedido deveria ter saído da tela")
+    shot("request-scrolled-up")
+    app.buttons["Voltar"].firstMatch.tap()
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 10))
+    let reopened = try await openLink("/open-request", showing: header, title: title)
+    XCTAssertTrue(reopened, header.label)
+    XCTAssertTrue(allow.waitForExistence(timeout: 15))
+    XCTAssertTrue(allow.isHittable, "O alerta deve abrir no pedido pendente")
+    shot("opened-at-request")
   }
 }

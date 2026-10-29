@@ -121,6 +121,7 @@ export function world() {
   const prompts = new Map<string, number>()
   const transcripts = new Map<string, SessionMessage.Info[]>()
   const watched = new Set<string>()
+  const settings = { autoApprove: false }
   const reads: string[] = []
   const ctx: TrackerContext = {
     session: {
@@ -148,7 +149,7 @@ export function world() {
           }
         }),
     },
-    watched: () => Effect.sync(() => [...watched]),
+    marks: () => Effect.sync(() => ({ notify: [...watched], autoApprove: settings.autoApprove })),
     message: {
       list: ({ sessionID, type }) =>
         Effect.sync(() => {
@@ -178,7 +179,7 @@ export function world() {
     },
   }
   const add = (info: Session.Info) => infos.set(info.id, info)
-  return { ctx, infos, active, forms, permissions, prompts, reads, add, transcripts, watched }
+  return { ctx, infos, active, forms, permissions, prompts, reads, add, transcripts, watched, settings }
 }
 
 export type Scene = "working" | "one-question" | "two-questions" | "mixed" | "failed-only" | "calm"

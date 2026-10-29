@@ -82,6 +82,8 @@ final class SessionStore {
     var startFilter: SessionListFilter?
     /// The conversation's "Agentes e tarefas" screen, pushed above it.
     var agents = false
+    /// A pending question or permission to open at (a notification tap): requests sit at the transcript's end.
+    var request: String? = nil
   }
   /// The resource viewer (simulator, emulator or browser) shown full screen above everything.
   var openResource: SessionResource?

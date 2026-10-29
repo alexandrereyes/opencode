@@ -3775,31 +3775,38 @@ does not answer requests, send prompts, reset seeds or change service lifecycle;
 
 ## Notifications
 
-**"Avisar ao terminar" (28/10).** The only system notification: the server alerts when a session with the bell on
-finishes. Contract: [`plugin-app-custom/docs/session-notifications.md`](../plugin-app-custom/docs/session-notifications.md).
+**Session alerts (rev. 29/10).** The server pushes, with no switches besides the bell: questions (at once) and
+permissions (still pending after 3 s, auto-approval off) of any session, one per request; a failure that stops a
+session (provider retries do not count); a success only with "Avisar ao terminar"; never a user interruption. All
+`interruption-level: active`, so the Focus decides. Contract:
+[`plugin-app-custom/docs/session-notifications.md`](../plugin-app-custom/docs/session-notifications.md).
 
-1. **Permission:** asked the first time a bell is turned on (`SessionNotificationAgent.authorize()`), never at launch.
-   Without it the bell stays off and a toast points to Ajustes.
+1. **Permission:** never at launch. Asked the first time a bell is turned on (`SessionNotificationAgent.authorize()`),
+   or once, the first time a question or permission waits while notifications were never asked: an alert "Avisar
+   quando precisarem de você?" with a one-line explanation, "Agora não" or "Ativar" (answered once, `shouldOffer()`;
+   off in sandbox runs unless `-OpenCodeNotificationOffer`). That is the moment the alerts are useful, and it costs
+   one tap only when he is already looking at a request.
 2. **Registration:** with permission, `registerForRemoteNotifications`; the hex token, the device ID, the server key
    and the APNs environment go to `custom.notifications/register` on every event-stream connection (several devices
    are supported; APNs-invalid tokens are dropped by the server).
-3. **Trigger and delivery (plugin):** the Live Activity tracker's "working" roll-up (own execution, subagents,
-   background shells) must stay quiet for 5 s; then "Terminou · projeto" or "Terminou com erro · projeto", titled with
-   the session title, `thread-id` = session. A user interruption alerts nothing. Sent through the Live Activity APNs
-   client and credentials.
+3. **Delivery (plugin):** through the Live Activity APNs client and credentials, `thread-id` = session,
+   `apns-collapse-id` = `attention:<session>` for attention alerts. The Agentes Live Activity update for a device
+   registered here carries no `alert`, so nothing buzzes twice; unregistered devices keep it as the fallback.
 4. **Presentation (`willPresent`):** hidden only with the app in the foreground and that session open on the same
-   server (`SessionFinishedAlert.presents`); otherwise banner, list and sound. The in-app banner skips completions of
-   bell sessions while the server pushes, so a finish is not announced twice. Requests and failures keep their in-app
-   banners.
-5. **Opening:** a tap follows the alert's `AgentsDeepLink` (server key, session, directory), the Live Activity route.
+   server (`SessionPushAlert.presents`); otherwise banner, list and sound. While the server pushes, the in-app banner
+   skips what arrives by push (questions, permissions, failures, bell finishes).
+5. **Opening:** a tap follows the alert's `AgentsDeepLink` (server key, session, directory), the Live Activity route;
+   with a `requestID` (also `request=` in the URL) the conversation opens at its end, where pending requests sit,
+   even if it was left scrolled up.
 
 Verification: `swift test` (`SessionNotificationTests`, `SubagentAlertTests`), `script/test-session-notify.py`
-(fresh simulator, both themes: rows, swipe, menu, bell off, the deep link a tap follows) and, for the server half,
-`plugin-app-custom/script/e2e-session-notifications.ts` against a sandbox with `OPENCODE_APNS_ORIGIN` pointing at
-`script/fake-apns.ts` (real Luna 6/low runs: success, background shell, failure, interruption, no bell). Fresh iOS 27.0
-simulators on this Mac never start SpringBoard's `com.apple.usernotifications.usernotificationservice`: there
-`getNotificationSettings`, `requestAuthorization` and `simctl push` hang, so the permission prompt, `willPresent` and a
-real banner tap are verified on a device only.
+(fresh simulator, both themes: rows, swipe, menu, bell off, the deep link a tap follows, and a real pending permission
+opened from the link at the request) and, for the server half, `plugin-app-custom/script/e2e-session-notifications.ts`
+against a sandbox with `OPENCODE_APNS_ORIGIN` pointing at `script/fake-apns.ts` (real Luna 6/low runs: success with and
+without the bell, a question, permissions, failures with and without retries, the Live Activity without an alert).
+Fresh iOS 27.0 simulators on this Mac never start SpringBoard's `com.apple.usernotifications.usernotificationservice`:
+there `getNotificationSettings`, `requestAuthorization` and `simctl push` hang, so the permission prompts, `willPresent`
+and a real banner tap are verified by unit tests and on a device only.
 
 TestFlight builds use the **production** APNs environment (`api.push.apple.com`), while builds installed from Xcode
 use **sandbox** (`api.sandbox.push.apple.com`). Store the environment with each token. The Agentes Live Activity below

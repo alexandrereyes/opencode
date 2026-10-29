@@ -64,11 +64,15 @@ const iphone: LiveActivity.RegisterInput = {
   pushToStartToken: "aa11",
 }
 
-function setup(answer?: (push: Push) => Result) {
+function setup(answer?: (push: Push) => Result, alerted?: ReadonlySet<string>) {
   const shared = storage()
   const registry = makeRegistry(shared)
   const fake = apns(answer)
-  const lifecycle = makeLifecycle({ registry, send: fake.client.send })
+  const lifecycle = makeLifecycle({
+    registry,
+    send: fake.client.send,
+    ...(alerted ? { alerted: () => Effect.succeed(alerted) } : {}),
+  })
   const evaluate = (tracker: Tracker, now: number) =>
     lifecycle.evaluate(tracker.derive(now, host), now).pipe(
       Effect.tap((plan) => plan.deliver),
@@ -203,6 +207,77 @@ it.effect("a new failed session alerts; the end comes after 10 calm minutes with
     yield* endEvaluate(yield* scene("working"), T + limits.endMs + minute)
     expect(endPushes.at(-1)).toMatchObject({ token: "aa11", priority: 10 })
     expect(endPushes.at(-1)?.body).toHaveProperty("aps.event", "start")
+  }),
+)
+
+it.effect("a device registered for session alerts gets urgent updates without an alert; others keep it", () =>
+  Effect.gen(function* () {
+    for (const [alerted, expected] of [
+      [new Set([iphone.deviceID]), undefined],
+      [new Set(["outro-aparelho"]), { title: "Sessão parou com erro", body: "Deploy no Swarm · core-infra" }],
+      [undefined, { title: "Sessão parou com erro", body: "Deploy no Swarm · core-infra" }],
+    ] as const) {
+      const { registry, pushes, evaluate } = setup(undefined, alerted)
+      const tracker = yield* scene("working")
+      yield* registry.register(iphone, T - 2 * minute)
+      yield* registry.activity({ deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" }, T - minute)
+      yield* evaluate(tracker, T - 30_000)
+      yield* tracker.apply(execution("failed", ids.deploy, T), T)
+      yield* evaluate(tracker, T)
+      expect(pushes.at(-1)).toMatchObject({ token: "bb22", priority: 10 })
+      if (expected) expect(pushes.at(-1)?.body).toHaveProperty("aps.alert", expected)
+      else expect(pushes.at(-1)?.body).not.toHaveProperty("aps.alert")
+    }
+  }),
+)
+
+it.effect("an activity that expires (about 8 h) while work goes on rearms push-to-start and is no dismissal", () =>
+  Effect.gen(function* () {
+    const hours = 3_600_000
+    // APNs refuses the token of an activity ActivityKit ended: the device may get a new one at once.
+    const expired = setup((push) =>
+      push.token === "bb22" ? { status: "invalid", reason: "ExpiredToken" } : { status: "sent" },
+    )
+    const working = yield* scene("working")
+    yield* expired.registry.register(iphone, T - 8 * hours)
+    yield* expired.registry.activity(
+      { deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" },
+      T - 8 * hours,
+    )
+    yield* expired.registry.started(iphone.deviceID, T - 8 * hours)
+    yield* expired.evaluate(working, T)
+    expect((yield* expired.registry.list(T)).at(0)).toMatchObject({ expired: "act-1", rearm: true, dismissed: false })
+    yield* expired.evaluate(working, T + 1)
+    expect(expired.pushes.map((push) => [push.token, (push.body as { aps: { event: string } }).aps.event])).toEqual([
+      ["bb22", "update"],
+      ["aa11", "start"],
+    ])
+    expect((yield* expired.registry.list(T)).at(0)?.rearm).toBeUndefined()
+    // The user then clears the ended card: the app reports it dismissed, but it is not a refusal.
+    yield* expired.registry.ended({ deviceID: iphone.deviceID, activityID: "act-1", reason: "dismissed" }, T + 2)
+    expect((yield* expired.registry.list(T)).at(0)?.dismissed).toBe(false)
+
+    // Reported dismissed 8 h after it started (the app found the cleared card on launch): no refusal either; a token
+    // re-reported meanwhile keeps the original start.
+    const late = setup()
+    yield* late.registry.register(iphone, T - 8 * hours)
+    yield* late.registry.activity({ deviceID: iphone.deviceID, activityID: "act-2", pushToken: "cc33" }, T - 8 * hours)
+    yield* late.registry.activity({ deviceID: iphone.deviceID, activityID: "act-2", pushToken: "cc33" }, T - hours)
+    expect((yield* late.registry.list(T)).at(0)?.activity?.registeredAt).toBe(T - 8 * hours)
+    yield* late.registry.ended({ deviceID: iphone.deviceID, activityID: "act-2", reason: "dismissed" }, T)
+    expect((yield* late.registry.list(T)).at(0)).toMatchObject({ dismissed: false, rearm: true })
+    yield* late.evaluate(working, T)
+    expect(late.pushes.at(-1)?.body).toHaveProperty("aps.event", "start")
+
+    // A swipe within the 8 hours is a refusal, as before.
+    const swiped = setup()
+    yield* swiped.registry.register(iphone, T - hours)
+    yield* swiped.registry.activity({ deviceID: iphone.deviceID, activityID: "act-3", pushToken: "dd44" }, T - hours)
+    yield* swiped.registry.ended({ deviceID: iphone.deviceID, activityID: "act-3", reason: "dismissed" }, T)
+    expect((yield* swiped.registry.list(T)).at(0)).toMatchObject({ dismissed: true })
+    expect((yield* swiped.registry.list(T)).at(0)?.rearm).toBeUndefined()
+    yield* swiped.evaluate(working, T + minute)
+    expect(swiped.pushes).toEqual([])
   }),
 )
 

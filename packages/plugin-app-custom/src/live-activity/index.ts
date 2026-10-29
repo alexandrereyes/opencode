@@ -86,7 +86,15 @@ export function makeHub(options: HubOptions) {
         host,
         client
           ? {
-              lifecycle: makeLifecycle({ registry: running.registry, send: client.send }),
+              lifecycle: makeLifecycle({
+                registry: running.registry,
+                send: client.send,
+                // Devices that receive the session alerts themselves: their activity updates stay silent.
+                alerted: (now) =>
+                  running.notifications
+                    .list(now)
+                    .pipe(Effect.map((devices) => new Set(devices.map((device) => device.deviceID)))),
+              }),
               notifier: makeNotifier({ registry: running.notifications, send: client.send }),
             }
           : undefined,
@@ -123,7 +131,7 @@ export function makeHub(options: HubOptions) {
           Effect.catchCause((cause) => Effect.logWarning("Live Activity push delivery failed", { cause })),
           Effect.forkIn(running.scope),
         )
-        const alerts = yield* push.notifier.evaluate(derived.watched, now)
+        const alerts = yield* push.notifier.evaluate(derived, now)
         if (alerts.wakeAt !== undefined) wakes.push(alerts.wakeAt)
         yield* alerts.deliver.pipe(
           Effect.catchCause((cause) => Effect.logWarning("Session notification delivery failed", { cause })),
@@ -267,13 +275,16 @@ export const registerLiveActivity = Effect.fn("LiveActivity.register")(function*
       message: ctx.message,
       request: ctx.request,
       storage: ctx.storage,
-      watched: () =>
+      marks: () =>
         ctx
           .rpc(Preferences.Definition)
           .get({})
           .pipe(
-            Effect.map((profile) => marksFrom(profile).notify),
-            Effect.orElseSucceed(() => []),
+            Effect.map((profile) => ({
+              notify: marksFrom(profile).notify,
+              autoApprove: profile.data.settings.autoApprove,
+            })),
+            Effect.orElseSucceed(() => ({ notify: [], autoApprove: false })),
           ),
       events: ctx.event.subscribe().pipe(
         // A preferences change ("Avisar ao terminar") arrives as an RPC event; the tracker only needs to know it happened.

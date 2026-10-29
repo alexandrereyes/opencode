@@ -28,6 +28,8 @@ export type Push = {
    * plain alert (session notifications) uses the bundle ID itself.
    */
   readonly type?: "liveactivity" | "widgets" | "alert"
+  /** `apns-collapse-id`: a newer alert with the same ID replaces the older one on the device. */
+  readonly collapseID?: string
   /** Bundle ID the topic is built from; the app's own when omitted (a watch widget uses its watch app's). */
   readonly bundleID?: string
 }
@@ -120,6 +122,7 @@ export function makeClient(input: {
               "apns-priority": String(push.priority),
               "apns-expiration": String(push.expiration),
               "content-type": "application/json",
+              ...(push.collapseID ? { "apns-collapse-id": push.collapseID } : {}),
             },
             JSON.stringify(push.body),
           ),
