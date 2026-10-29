@@ -1,7 +1,7 @@
-import { resolveThemeVariant } from "../../ui-custom/src/theme/resolve"
-import { resolveThemeVariantV2 } from "../../ui-custom/src/theme/v2/resolve"
-import { hexToOklch, oklchToHex } from "../../ui-custom/src/theme/color"
-import type { DesktopTheme, HexColor } from "../../ui-custom/src/theme/types"
+import { resolveThemeVariant } from "./theme/resolve"
+import { resolveThemeVariantV2 } from "./theme/v2/resolve"
+import { hexToOklch, oklchToHex } from "./theme/color"
+import type { DesktopTheme, HexColor } from "./theme/types"
 import { join } from "node:path"
 import { composite, legible, luminance, mix } from "./theme-contrast"
 
@@ -9,7 +9,7 @@ const root = join(import.meta.dir, "../OpenCode/Resources/Themes")
 // Alpha primitives live in CSS rather than the web resolver's returned ramp map.
 const alphaTokens = Object.fromEntries(
   [
-    ...(await Bun.file(join(import.meta.dir, "../../ui-custom/src/styles/tokens/colors.css")).text()).matchAll(
+    ...(await Bun.file(join(import.meta.dir, "theme/colors.css")).text()).matchAll(
       /--(v2-alpha-[\w-]+):\s*(#[\da-f]{8});/gi,
     ),
   ].map((match) => [match[1]!, match[2]!]),
@@ -138,8 +138,8 @@ const roles = {
 
 const themes = new Bun.Glob("*.json")
 const registry: { id: string; name: string; dark: boolean }[] = []
-for await (const file of themes.scan(join(import.meta.dir, "../../ui-custom/src/theme/themes"))) {
-  const theme: DesktopTheme = await Bun.file(join(import.meta.dir, "../../ui-custom/src/theme/themes", file)).json()
+for await (const file of themes.scan(join(import.meta.dir, "theme/themes"))) {
+  const theme: DesktopTheme = await Bun.file(join(import.meta.dir, "theme/themes", file)).json()
   for (const mode of ["dark", "light"] as const) {
     const variant = theme[mode]
     const palette = variant.palette ?? variant.seeds!

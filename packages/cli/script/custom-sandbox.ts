@@ -129,14 +129,13 @@ async function up() {
       OPENCODE_CUSTOM_LAUNCHD: "1",
     }
     await privateFile(path.join(home, "environment.json"), JSON.stringify(runtime))
-    console.log("Building the custom plugin and web assets (service worker disabled)…")
+    console.log("Building the custom plugin and the upstream web app (service worker disabled)…")
     await run([process.execPath, "run", "build"], path.join(source, "packages/plugin-app-custom"))
-    await run([process.execPath, "run", "build"], path.join(source, "packages/app-custom"), {
-      ...process.env,
-      VITE_OPENCODE_DISABLE_SERVICE_WORKER: "1",
-    })
-    if (!(await Bun.file(path.join(source, "packages/app-custom/dist/index.html")).exists()))
+    await run([process.execPath, "run", "build"], path.join(source, "packages/app"))
+    if (!(await Bun.file(path.join(source, "packages/app/dist/index.html")).exists()))
       throw new Error("Web build did not produce dist/index.html")
+    // The upstream app always registers /sw.js in production builds; without the file the sandbox origin keeps none.
+    await rm(path.join(source, "packages/app/dist/sw.js"), { force: true })
     await privateFile(
       path.join(home, "launch.ts"),
       [

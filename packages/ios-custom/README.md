@@ -2,12 +2,14 @@
 
 **Mockups:** see the versioned [native screen references](docs/screens/README.md) and their offline regeneration script.
 
-Native iOS client, written in Swift, for the OpenCode backend. It talks to the same server as the TUI and the custom
-web app (`packages/app-custom`), and adds no separate backend of its own.
+Native iOS client, written in Swift, for the OpenCode backend. It talks to the same server as the TUI and adds no
+separate backend of its own.
 
-The goal is to replace the custom web app on the phone, where it runs today as a PWA, with a native experience. It
-will grow feature by feature until the phone no longer needs the web app. Other form factors (iPad, Mac) may follow
-later.
+The iOS and Mac apps replaced the custom web app, which was removed on 2026-10-29; the custom server now serves
+upstream's standard web app for occasional browser access. References in this document and in `docs/` to
+`packages/app-custom`, `packages/ui-custom` and `packages/session-ui-custom` (often shortened to `app-custom/…` or
+`session-ui-custom/…`) point to the tag `web-custom-final`, for example
+`git show web-custom-final:packages/app-custom/src/servers/connect/pairing.ts`.
 
 This is a personal app. It is distributed only through a private TestFlight (internal testing) and will never be
 submitted to the App Store.
@@ -1831,9 +1833,9 @@ the project's development language; there is no English source copy.
 ## Themes
 
 No view uses a fixed color: every color comes from semantic tokens of a registered theme. Themes are generated, not
-written by hand: a Bun script in this package runs the custom web app's own resolver
-(`packages/ui-custom/src/theme`) over the OpenCode theme JSON files and writes the resolved tokens, which the app
-bundles. Adding a theme means running the script. Você → Aparência lists the 38 generated families with previews,
+written by hand: `script/generate-themes.ts` runs the resolver in `script/theme` (moved there from the former custom
+web app's `packages/ui-custom/src/theme`) over the theme JSON files in `script/theme/themes` and writes the resolved
+tokens, which the app bundles. Adding a theme means running the script. Você → Aparência lists the 38 generated families with previews,
 one row per family. OpenChamber with **Sistema** is the default. **Sistema**, **Claro** and **Escuro** select the
 variant independently of the family; Sistema follows device changes live. Family and appearance persist locally.
 `-OpenCodeTheme <variant>` takes precedence for the whole launch, including over settings changes. The old

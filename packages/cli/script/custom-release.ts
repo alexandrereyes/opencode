@@ -151,11 +151,11 @@ export async function prepare(home: string, dryRun = false) {
   await command(["git", "archive", "--format=tar", `--output=${work}/source.tar`, commit])
   await command(["tar", "-xf", `${work}/source.tar`, "-C", source])
   await command([`${work}/bin/bun`, "install", "--frozen-lockfile", "--backend=copyfile"], source, env, false)
-  for (const pkg of ["cli", "app-custom", "plugin-app-custom"])
+  for (const pkg of ["cli", "app", "plugin-app-custom"])
     await command([`${work}/bin/bun`, "typecheck"], path.join(source, "packages", pkg), env, false)
   await command([`${work}/bin/bun`, "run", "build"], path.join(source, "packages/plugin-app-custom"), env, false)
   await command(
-    [`${work}/bin/bun`, "run", "script/build.ts", "--single", "--skip-install", "--custom"],
+    [`${work}/bin/bun`, "run", "script/build.ts", "--single", "--skip-install"],
     path.join(source, "packages/cli"),
     env,
     false,

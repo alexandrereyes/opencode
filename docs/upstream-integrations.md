@@ -11,6 +11,26 @@ adds one line to `packages/server/src/handlers/shell.ts`: `shell.create` waits f
 `core/session/shell.ts` does, so plugin `shell` hooks apply to the first shell of a cold Location
 (`packages/server/test/shell.test.ts`).
 
+## Custom web app removal — 2026-10-29
+
+The custom web app (`packages/app-custom`, `packages/ui-custom`, `packages/session-ui-custom`) was removed in
+`chore: remove the custom web app`; its last revision is the tag `web-custom-final` (`0d5165d4b`). The native iOS and
+Mac apps are the custom clients, and the release now embeds upstream's `packages/app` unchanged. Later integrations
+therefore have no custom UI port to adapt or reconcile, and the 71 UI entries of `docs/upstream-overrides.md` are
+resolved as dropped.
+
+- Back to the integrated upstream baseline (`d4a6223d0`): `packages/cli/script/{app-assets.ts,build.ts}` (no `--custom`
+  build), `packages/cli/src/services/web-ui.ts` and `packages/cli/test/web-ui.test.ts` (no extra blob CSP sources),
+  `packages/storybook`, `.github/workflows/{test.yml,storybook.yml}`, `infra/webapp.ts`, the root `dev:web` and
+  `bench:devex` scripts, and `packages/client/package.json` (the custom-web-only `session-metrics` module is deleted).
+- `custom-release.ts` typechecks `packages/app` instead of `app-custom`; `custom-server.ts` and `custom-sandbox.ts` serve
+  and build `packages/app`. The sandbox deletes `dist/sw.js`, because upstream always registers it in production builds.
+- The iOS theme generator's inputs (the resolver, the theme JSON files and `colors.css`) moved from `packages/ui-custom`
+  to `packages/ios-custom/script/theme`; `generate-themes.ts` reproduces the committed iOS themes byte for byte.
+- Shared overlap against `d4a6223d0`, with the command of the 2026-09-17 beta integration below: **50 → 47 modified files, 739 → 732 added
+  lines, 63 → 59 removed lines**. Across all shared paths (outside the custom packages, `docs` and `.agents`): 90 → 75
+  modified files.
+
 ## Upstream source branch
 
 Integrate from `upstream/dev`. Since 2.0.27 (2026-10-12), upstream publishes the

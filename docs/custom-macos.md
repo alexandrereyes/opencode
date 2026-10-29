@@ -31,8 +31,8 @@ bun run custom:activate <full-40-character-sha>
 
 `OPENCODE_CUSTOM_HOME` defaults to `~/.local/share/opencode-custom-v2`. Preparation
 uses `git archive HEAD`, installs frozen dependencies in the snapshot, typechecks
-CLI/TUI, app-custom and plugin-app-custom, builds the plugin and compiles the CLI
-with `--custom` (embedding **app-custom**, not app). CLI `--version` and `--help`
+CLI/TUI, the upstream web app (`packages/app`) and plugin-app-custom, builds the plugin and
+compiles the CLI with upstream's embedded web app, unchanged. CLI `--version` and `--help`
 are checked with isolated XDG directories. Before publication, `custom-parser-smoke.ts` checks
 the compiled binary's rejection of an inherited `--server` on unsupported commands, version
 actions triggered by `--version=false` / `--no-version`, `--` operand handling, and help actions.
@@ -66,23 +66,15 @@ MCP services are Location-scoped and connect eagerly, so each materialized Locat
 process per local MCP server, for example `safaridriver --mcp` (about 3 MB) and
 `codex-computer-use-mcp` (about 65 MB of Node). `LocationActivity` evicts a Location, stopping
 those processes, after 60 minutes without session events and no active execution; the server log
-records `location services evicted`. The custom sidebar resolves worktree roots and branch labels
-for groups and Recent rows through the `custom.worktrees` `locate` RPC in the server default
-Location, so listing worktrees or sessions does not boot their Locations. On first inventory load,
-the web app lists stored rows and calls `custom.worktrees.check` without a Location override.
-This read-only Git drift check refreshes through the official `worktree.refresh` endpoint only
-for missing directories, newly discovered directories, or linked worktrees whose stored rows
-are still unowned; RPC failures and unknown strategies also fall back to the official refresh.
-An unchanged expanded project therefore does not boot its Location. Explicit refresh actions
-are unchanged, and only core writes the inventory. When integrating upstream, reconcile this
-check with `Worktree.refresh`, its insert/conflict ownership rules, and the built-in Git strategy;
-the custom plugin currently registers no worktree strategies. Before syncing Location catalogs,
-the custom app calls `custom.worktrees.available` in the default Location once per directory and
-connection. A confirmed missing directory skips catalog requests while session history remains
-readable. Catalog failures recheck availability to detect terminal removals after the cold check;
-other failures retain normal error reporting. Reconnecting or reloading clears this availability
-cache, allowing restored directories to load again. This does not change the inventory cache or
-its cold drift check. Opening a session in an existing directory boots its Location as before.
+records `location services evicted`. The `custom.worktrees` RPCs run in the server default
+Location, so clients can resolve worktree roots and branch labels (`locate`), list a project's
+worktree branches (`branches`) and confirm that a directory still exists before syncing its
+catalogs (`available`) without booting each Location. The iOS and Mac apps use these three.
+`check` is a read-only Git drift check that refreshes through the official `worktree.refresh`
+endpoint only for missing directories, newly discovered directories, or linked worktrees whose
+stored rows are still unowned; only core writes the inventory. When integrating upstream,
+reconcile it with `Worktree.refresh`, its insert/conflict ownership rules, and the built-in Git
+strategy; the custom plugin currently registers no worktree strategies.
 Location keys compare directory strings exactly, so case variants of one directory on
 the case-insensitive macOS filesystem (`~/Dev/x` and `~/dev/x`) become separate Locations with
 duplicate processes. Initialization and tool discovery do not create Safari's automation window or consume its one
@@ -99,8 +91,8 @@ Source and installed
 dependencies exist only under `builds/prepare-*` while building and are removed after
 successful publication. Neither source nor node_modules ships in a release. Artifact
 hashes are verified before activation and reuse. Failed build directories are retained
-for diagnosis and can be removed manually. The binary serves its embedded custom web
-with `opencode serve`; there is no production source server or second Bun executable.
+for diagnosis and can be removed manually. The binary serves its embedded web app
+(upstream's `packages/app`) with `opencode serve`; there is no production source server or second Bun executable.
 Its compiled version is the health version; no environment variable substitutes a commit.
 
 ### macOS privacy permissions
@@ -418,8 +410,9 @@ The default is `http://127.0.0.1:4177`, tmux session `custom-sandbox-4177`, and
 `<os.tmpdir()>/opencode/custom-sandbox-4177` (canonicalized on macOS). Override with
 `--port` and `--home`; ports 4096 and 4178 are always refused. The sandbox's watch gateway listens on
 `--watch-port` (default `0`, any free port, logged as `Watch gateway listening`); 4192, production's, is refused. Dependencies must already
-be installed. `up` builds the plugin and custom web assets with service-worker registration
-disabled, starts `custom-server.ts`, and waits for authenticated `/api/info`. An already
+be installed. `up` builds the plugin and upstream's web app (`packages/app`), removes `dist/sw.js`
+so the sandbox origin installs no service worker (upstream always registers `/sw.js` in production
+builds, so the console reports the failed registration), starts `custom-server.ts`, and waits for authenticated `/api/info`. An already
 healthy owned sandbox is left untouched; use `down` then `up` to rebuild changed source.
 
 The sandbox loads the plugin's `tsc` output (`packages/plugin-app-custom/dist`), unlike the release,
@@ -452,85 +445,33 @@ the production backend/proxy. The underlying `custom-server.ts` remains availabl
 supervisors; `OPENCODE_CUSTOM_LAUNCHD=1` keeps it running without stdin. It uses the same
 release config generator as production, but is not a production release.
 
-## Agent dashboard
+## Web app
 
-The desktop sidebar has **Agent dashboard** immediately below **New session**. The
-`/agent-dashboard` route fills the central workspace with compact or comfortable cards;
-selecting a card opens its normal Session. The route also fits narrow windows, while its
-navigation entry follows the existing desktop-only sidebar breakpoint (768px).
+The custom clients are the native iOS and Mac apps (`packages/ios-custom`). The release embeds
+upstream's web app (`packages/app`) unchanged, so the browser at `http://127.0.0.1:4096` and
+`https://mac.alexandrem.com.br` shows the standard OpenCode web UI against the custom backend. It is
+kept for occasional browser access and has none of the custom client features (archive, snippets,
+chat quotes, Sessão mestra, LLM proxy panels, custom themes and so on); those live in the native apps.
 
-The selected server's global navigation index includes sessions outside the recent page.
-The default view shows active sessions, pending permissions/questions, and conversation
-activity or completion in the last 24 hours. Search covers title, project name, and directory;
-filters cover project, status, and subagents. Cards keep creation order during live updates.
-Filters, density, the displayed
-page size, and return scroll position persist per window.
+The custom web app (`packages/app-custom`, `packages/ui-custom`, `packages/session-ui-custom`) was
+removed on 2026-10-29. It remains in Git history at the tag `web-custom-final`, which the native apps'
+documentation cites as their former behavior reference. A browser that used the custom web app keeps
+its service worker and local storage for that origin until upstream's service worker replaces it; if
+the first visit after the switch looks stale or broken, clear the site data for that origin only.
 
-Top-level sessions are the default; their cards include descendant running/attention state
-and a subagent count. **Include subagents** exposes child cards individually. Completed and
-error states come from execution outcomes; interrupted or never-run sessions remain idle.
-Unread responses alone do not mean **Needs you**.
-
-Navigation refreshes reconcile complete rows, removing omitted request/unread timestamps.
-This clears **Needs you** in both the dashboard and sidebar after a question or permission is resolved.
-
-The dashboard reuses existing APIs and SSE. It pages lightweight navigation metadata,
-renders 60 cards at a time with **Show more** (running/attention cards bypass this limit), and reads only the three latest messages for
-visible/near-visible cards, with four preview requests at most in flight. Previews retain
-up to 600 text characters, omit reasoning and tool payloads, and follow live text/tool events.
-Current branch reads are deduplicated by Location and requested as cards become visible;
-branches are displayed on cards but are not a search criterion. A text response outside the
-three-message window is not loaded. No per-card timeline or periodic history polling is mounted.
-
-New source copy is English-only, including the **Agent dashboard** title; other locales use
-the runtime fallback. This change adds a route and sidebar integration, without changing
-session/timeline code; no session production-benchmark comparison is applicable. Unit
-coverage exercises request/status transitions, the 24-hour boundary, filters, stable order,
-descendant aggregation, preview omission, and bounded read concurrency. Reactive unit tests in
-`test-browser/agent-dashboard-preview.test.ts` exercise the production preview's SSE updates,
-stale reads, execution completion/interruption, and viewport/unmount cancellation using the
-browser Solid runtime. Browser verification
-is prepared in `e2e/regression/agent-dashboard.spec.ts` for an isolated reviewer-run server.
-
-## iOS timeline history
-
-TanStack Virtual defers scroll corrections on iOS WebKit while a touch, momentum or any reported
-scroll is active, because a programmatic write would cancel momentum. An older page admitted then
-moved the rows under the reader and snapped back when scrolling stopped. On iOS (including iPadOS
-touch and trackpad), older pages are still fetched during the gesture but enter the timeline only
-200ms after scrolling settles, so the prepend anchors with one immediate write. Later automatic
-pages wait until the held page is admitted; explicit navigation admits it at once.
-
-Row size corrections made during a touch, momentum, any reported scroll or the 200ms after release
-use the existing visual translation. On iOS that translation is transferred to the native offset only
-after the same settle point, never at release or near the top: Safari applies a write made during a
-gesture or momentum one frame late, after the rows have already dropped their translation. Other
-platforms are unchanged.
-
-`e2e/regression/mobile-history-admission.spec.ts` covers the held drag with an iPhone user agent in
-Chromium. The fix was also measured in Safari on an iOS 26.1 Simulator (Xcode), driving touch swipes
-with AXe against the real BTW improve session and sampling row positions every frame: the production
-build before the fix showed reversals of 670–2,700 px; afterward at most two shifts of up to 180 px remained,
-at the top of history when the loaded content shrinks at scroll position zero.
-
-## Lean web transcript
+## Lean transcript
 
 Tool results keep their media inline: every `read` of an image stores the whole file as a base64
-`data:` URI in the assistant message, because the model replays it from history. The web client
-received and retained those payloads although no web view displays them (the `read` card loads its
-image from disk by path). A session that read 410 large PNGs reached 1.16 GB of messages, and
-opening it downloaded about 584 MB, enough for WebKit to reload the PWA for memory.
+`data:` URI in the assistant message, because the model replays it from history. A session that read
+410 large PNGs reached 1.16 GB of messages, so a client reading the plain endpoint downloads payloads
+that no transcript view displays.
 
 The custom plugin exposes `custom.transcript/list`, the same page as
 `GET /api/session/:sessionID/message` (same cursors, limits and order) with every inline tool-result
-payload emptied to `data:<mime>;base64,`. The web transcript store reads pages through it, and the
-event source empties the same payloads from live `session.tool.success` and `session.tool.failed`
-events before any listener sees them. Stored messages, model history, export, the TUI and other
-clients still receive the originals. User attachments keep their inline data for thumbnails.
-
-Type-filtered reads use the endpoint directly. A server without the plugin, or any failed RPC
-read, falls back to the endpoint, which also reports its canonical errors (missing session,
-invalid cursor). The agent dashboard's three-message previews still use the endpoint.
+payload emptied to `data:<mime>;base64,`. Stored messages, model history, export, the TUI and the
+standard web app still receive the originals. User attachments keep their inline data for thumbnails.
+A server without the plugin, or any failed RPC read, should fall back to the endpoint, which also
+reports its canonical errors (missing session, invalid cursor).
 
 `custom.transcript/skills` returns only `{ id, name }` for the skills a session loaded, deduplicated
 in first-load order: direct activations (`skill` messages), skills attached to prompts and completed
@@ -539,239 +480,42 @@ never downloads a transcript to find them. A server without this method shows th
 unavailable.
 
 Measured on the isolated 4177 runtime with a synthetic 32-message session holding 90 image reads
-(325 MB stored): the endpoint served 214.6 MB for 20 messages while the RPC served 41 KB. Opening the
-session in Chrome loaded 324.6 MB in 2.9 s and reached a 722 MB JS heap through the endpoint, against
-64 KB and a 39 MB heap through the RPC.
-
-## New session layout
-
-The new-session screen shows a compact wordmark (at most 240px wide) above the location
-selectors and the composer. The project selector, followed by the worktree selector, sits
-above the composer's left edge. The project list is searchable and marks the current choice.
-Each project uses its custom image, or a folder tinted with the project color from the sidebar;
-projects without a color use a muted folder. The worktree menu lists **Project root** with the
-root checkout's branch, then **Worktrees**, with **New** to create one on submit. Worktrees
-appear by branch name, using the folder name when the branch is unavailable. The branches
-come from one `custom.worktrees` `branches` RPC (`git worktree list`), so opening the menu
-does not boot each worktree's Location. Choosing **New** keeps the **from branch** base selector.
-
-Both the new-session and session composers put the add menu on the left. The thinking
-variant, model, and agent follow on the right, before the send button. The default variant
-stays visible but muted. Other variants use the info color. The agent uses its configured
-color, the built-in agent tone, or a stable palette color.
-
-## Mobile composer
-
-On mobile layouts (below 768px), Enter inserts a new line and Shift+Enter submits the
-composer. Desktop keeps Enter to submit and Shift+Enter for a new line. Mod+Enter
-retains alternate delivery, and Enter still selects an open suggestion before submission.
-
-Touch devices (a coarse primary pointer, including iPhone and iPad) enable autocorrection,
-sentence capitalization, and spellcheck in normal chat mode. Desktop pointer input and shell
-mode keep these disabled. Writing assistance follows the input device, not viewport width.
-
-### Reference editing
-
-The web composer uses CodeMirror 6 for its document, selection, composition, and undo history.
-Files, agents, apps, sessions, skills, and snippets remain ordinary editable text with inline
-decorations; they are not atomic `contenteditable=false` chips. Selecting a suggestion associates
-its metadata with that exact text range. Edits outside the range move it, while an edit that changes
-any character inside the range removes the old association so submission cannot send stale metadata.
-Undo and redo restore the text and association together. Copying a complete Session reference emits
-its portable `opencode://` form for same-server structured paste; copying only part of its text stays
-plain text.
-
-Pasting one or more images inserts editable `[filename]` references at the current selection and keeps
-each range associated with that image's attachment identity. Generic and repeated clipboard names are
-made unique before insertion. Editing or deleting a reference removes its image from the payload;
-removing the preview removes the matching reference. Both directions are one CodeMirror history change,
-so undo and redo restore or remove the text and image together. Drafts, history, and queued-message edits
-retain the association. Pending image reads track intervening edits and reserve filenames across concurrent
-pastes; their references remain in paste order even when storage completes out of order. Snippet expansion
-and prompt concatenation remap each image range before image file parts carry the matching mention in the
-multimodal request. Cited images follow document order; uncited picker attachments retain their existing order.
-
-### Attachment staging
-
-The custom composer accepts arbitrary files. Supported images and PDFs up to 20 MiB
-remain inline; text, unsupported types, and larger files stream directly to the server's
-temporary upload directory. They appear as path attachments after upload, without storing
-their bytes in the browser's draft database. Upload cards and a persistent toast show
-progress and offer cancellation; sending is disabled while this composer's uploads finish.
-Uploads remain owned by the draft where selection or paste started, including after navigation.
-
-Pasted images retain their editable `[filename]` references even when delivered by path.
-Path references survive draft reloads, history, snippet expansion, and queued-message edits.
-Removing a queued attachment also removes its model-visible path note. Restored inline images
-load their bytes only when shown or sent. Failed sends restore the draft and remove its
-duplicate history entry; toast error descriptions are bounded before retention.
+(325 MB stored): the endpoint served 214.6 MB for 20 messages while the RPC served 41 KB.
 
 ## Prompt snippets
 
-Settings → Snippets manages reusable text with a name, description, comma-separated search aliases,
-and content. Snippets are stored persistently in the OpenCode server database, globally or scoped
-to a project. Settings selects the server to manage; all its devices share the same catalog and
-receive live updates. Existing device-local snippets are not migrated.
-Project snippets override global snippets with the same name. Type `#` in the composer, search,
-and select with Enter, Tab, or a click. Selected references use the theme accent and expand to their
-captured content on submission, including when a command is prefixed from the composer menu.
-Drafts and prompt history retain the structured association while its text remains unchanged.
+`custom.snippets` stores reusable text with a name, description, comma-separated search aliases, and
+content in the OpenCode server database, globally or scoped to a project. All clients of a server share
+the same catalog and receive live updates. Project snippets override global snippets with the same name.
 Snippets do not require server config files.
 
-## Project explorer
+## Project directories
 
-**Add project** on Home and in the new-session project menu opens a flat directory explorer
-instead of the tree picker; the desktop native picker and the SSH project dialog are unchanged.
-The path field is both location and filter: text up to the last `/` is the browsed directory
-and the rest filters its children by prefix, starting at `~/`. Arrow keys move, Enter opens the
-highlighted folder (or `..`), and Cmd/Ctrl+Enter adds the typed path. Home also allows batch
-selection with the checkboxes or Space while browsing; each row's `+` adds that folder at once.
-Existing projects are marked **Added**, and **Show hidden** reveals dot folders. The server
-home directory and filesystem roots cannot be added, so browsing `~/` never adds home by accident.
+`custom.directories` creates only the final folder of a path, so a missing parent fails instead of
+creating a tree, and reports the server home directory, which V2 sync does not publish. The native
+apps' project explorer uses it for **Criar e adicionar**.
 
-When the typed final segment does not exist, the action becomes **Create and add**. The
-`custom.directories` plugin RPC creates only that final folder, so a missing parent fails
-instead of creating a tree; it also reports the server home directory, which V2 sync does not
-publish. Servers without the custom plugin start at the current location and cannot create folders.
+## Session references
 
-## Chat quotes
+The `opencode.session_read` tool retrieves another session's text on demand in newest-first pages:
+20 messages by default, up to 50, with a 20,000-character message-text budget. Tool payloads and
+reasoning are omitted; truncated messages are marked.
 
-Select prose or code inside one assistant text part and choose **Comment**. The composer
-keeps the selected passage and an optional editable comment in **Chat quotes** above the
-prompt. Quotes can be removed, collapsed, or sent without additional prompt text.
-Confirming with the checkmark, Escape, or Cmd/Ctrl+Enter finishes editing and collapses
-the quotes panel; plain Enter inserts a line break. The chip reopens saved quotes.
+## LLM proxy subscriptions
 
-Drafts are scoped to their Session and server and survive reloads. Submission appends the
-quoted passages, source message/part IDs, and comments to the model-visible text while
-keeping structured quote metadata for history, queue editing, and revert. Failed prompt
-admission restores the submitted quotes. Selection cannot span different text parts.
-
-Sent quotes use a shared desktop/mobile renderer inside the user bubble, with a caption and subtle quote line.
-Long passages initially show four lines and expand independently; comments remain fully visible.
-Copy retains the complete underlying message, including quote context, regardless of the collapsed state.
-
-The implementation uses existing prompt APIs; no Protocol or generated client changes.
-This ports the chat-comment workflow, not OpenChamber's separate Notes feature.
-
-Validation: production-build browser scenarios at 1440px and 390px cover selection,
-editing, persistence, quote-only submission, history recall, and removal. Existing queue
-regressions and composer/persistence tests also pass. A cold-session entry benchmark
-measured 307ms first correct / 333ms stable on the base and 236ms / 266ms with the feature
-(one local sample each, not a statistically significant performance comparison).
-
-## Session mentions
-
-Type `@` in the web composer to search recent top-level sessions on the current server by
-title or exact ID. Sessions from other projects are included; the current session, archived
-sessions, and subagents with a parent are excluded. The existing mention query ends at a space.
-Session suggestions show a conversation icon, title, directory, and shortened ID. Selected
-references use a distinct inline decoration alongside Mac app, file, and agent references while
-remaining directly editable.
-
-References retain their identity through drafts, history, queue edits, and same-server copy/paste.
-Submission adds compact, deduplicated references. The `opencode.session_read` tool retrieves
-text on demand in newest-first pages: 20 messages by default, up to 50, with a 20,000-character
-message-text budget. Tool payloads and reasoning are omitted; truncated messages are marked.
-
-Pending autocomplete searches keep the composer visible and focused. Browser regressions cover
-delayed results, duplicate titles, Mac apps with the same label, and long chips on mobile.
-
-## Inference footer
-
-Assistant response metadata stays visible on desktop and mobile, with trailing copy actions.
-Icon-labelled items show model, recorded reasoning variant, agent, output tokens per second,
-processing duration, and local date/time (`dd/MM HH:mm`). TPS uses existing output-token and
-provider-stream timestamps; unavailable metrics are omitted. No API changes are required.
-
-## Session context overview
-
-The existing Context tab prioritizes context usage, session and descendant costs, project/branch,
-LLM proxy subscriptions, subagent navigation, background tasks, and MCP connection controls above the detailed statistics.
-Project and branch share the context header. Subagents precede Subscriptions, followed by
-background tasks and MCPs; there is no separate Project section.
-The current Session's Context label, ring and usage value stay together at the start edge.
-Its token count uses a fixed K suffix for thousands (for example 701K), with localized decimals.
-Each subagent's metadata line shows its agent icon/name and the production context ring,
-compact token count, and percentage for its most recent measured assistant call. This is
-not cumulative token consumption. The model and limit belong to the child; unknown limits
-do not produce an invented percentage. These reads load locally without suspending Usage.
-The latest measurement remains visible during an unmeasured streaming step; the next measured
-step reflects compaction. A bounded recent-assistant read revalidates on opening, reconnection,
-and committed revert, while live step events update the indicator without periodic polling.
-Session data follows the live event stream. Subscription snapshots refresh every 60 seconds while
-the tab is visible (and on manual refresh); they are read-only and do not trigger upstream polling.
-Usage renders cached Session information immediately. Pending subscription and subagent requests
-show the shared Spinner locally rather than suspending the whole route or mobile navigation.
-MCP catalogs keep their loading state until a response arrives. Closing Usage or changing Session
-invalidates its family loader before it can publish late results to the shared cache.
-
-Set `OPENCODE_LLM_PROXY_URL` on the backend to the internal proxy base URL. The authenticated
-`GET /api/server/subscriptions` endpoint reads `/_admin/status` server-side and returns only quota
-metadata. Weekly percentages are shown as remaining quota; dates are quota resets, not subscription
-or OAuth expirations. Missing/stale usage is marked explicitly. No credits balance is displayed.
-The same `custom.subscriptions` RPC also reads the separate Anthropic pool from
-`/_admin/anthropic/status`, normalizing `*_max_20x`/`*_max_5x` tiers to Max 20x/Max 5x and
-counting banked resets from unpaused Anthropic grants. A 404 or 503 means the proxy has no
-enabled Anthropic pool, so the pool is hidden instead of reported as a failure. The sidebar
-footer, under an "LLM proxy" heading, shows one row per pool (Codex and Claude) with its
-combined weekly meter, balance in Pro 20x or Max 20x equivalents (each Pro Max account counts as
-one Pro 20x quota), days to the next renewal, and banked resets; Claude also shows a chip with the average five-hour quota, tinted when it runs
-low. Selecting a row opens the details popover (desktop) or panel (mobile) on that pool's tab
-and highlights the row. Each tab is one card: plans and account count, balance with the
-combined meter and pace marker, accounts grouped by plan with availability, each account's weekly
-meter and renewal countdown (`7.3d`, `7h`, or `10m`), and a short status badge. Five-hour windows
-retain their `5h` label, followed by the percentage and the time until that window renews
-(`5h 60% (2h 15m)`), and appear alongside the weekly meter only while the weekly quota is not
-exhausted. The email occupies the first row with a trailing banked-reset summary, including zero:
-`2 reset (7d 8h)`. Minutes appear only below one day, for example `8h 10m` or `10m`.
-The parenthesized countdown is the nearest banked-reset expiration when dated,
-with the exact timestamp in a tooltip; unknown inventory shows a dash. The next row pairs a status
-badge (green `available` for ready accounts) with the single weekly quota aligned at the end.
-Weekly-exhausted accounts omit empty quota bars while retaining their status and percentage.
-A hairline separates every pair of consecutive accounts in the same plan. Quota meters belong to
-their account; plan headings and the footer provide separation at group boundaries instead.
-The footer shows the next renewal weekday, numeric date,
-24-hour time (`dom., 04/10 08:33`), and pooled banked resets. Exact renewal and expiry times are
-in tooltips; the update time and refresh button sit below the card. The two pools are never
-combined, matching the proxy's lack of cross-provider failover.
-Panel tab selection is persisted per server and Session, including across Location changes.
-The chat/side-panel divider width is a shared local preference: resizing it in any Session
-applies to existing and new Sessions and survives reloads. Narrow windows clamp the rendered
-width without overwriting the saved preference.
-Entering a desktop Session opens the side panel automatically, selecting Context when no
-previous panel tab is saved. Existing selections are restored; mobile navigation is unchanged.
-
-Subscriptions initially shows a collapsed available-Pro-pool overview. The weekly percentage is
-the mean remaining quota of enabled, authenticated Pro accounts with fresh capacity and no cooldown
-(observed plan wins over the login claim). Exhausted or cooling-down accounts do not dilute the
-available balance; availability still reports available accounts over total Pro membership.
-Missing or stale participating measurements make the balance unknown rather than zero or a partial
-average. Account details explicitly label remaining/used quota, plan, and confirmed or
-unconfirmed capacity; non-Pro accounts are marked outside the active pool.
-The update time reflects the oldest measurement included. Expanding reveals every subscription,
-including accounts outside the Pro pool. Banked resets are not added to the balance.
-Subscription details list available Pro accounts first, followed by other Pro accounts,
-Plus, and other plans. Accounts retain their source order within the same priority group;
-the ordering follows quota refreshes without changing pool calculations or proxy selection.
-The always-visible summary also shows the fresh banked-reset inventory for the Pro pool, with
-the first and last expiration (or no expiration). Unknown inventory is not reported as zero.
-Each expanded account shows its own banked-reset count beside the plan, including zero;
-unavailable inventory is marked explicitly. Dividers separate the account rows.
-On mobile, Usage and its live context ring occupy the fourth tab; Terminal is in More options.
-Background task rows are single-line previews. Selecting one opens its full text in a dialog,
-with an Open subagent link for agent tasks.
-Background activity follows current runtime state and the selected Session. Historical tool
-metadata saying a task was backgrounded is not evidence that it is still running after completion,
-cancellation, or a server restart.
-Movement messages are queried by type to discover previous Locations after a cold reload, so a
-Session still shows its live shells in the original Location until they exit. Fork-copied history
-does not transfer ownership, and a child reused in foreground is not duplicated in background.
+Set `OPENCODE_LLM_PROXY_URL` on the backend to the internal proxy base URL. The `custom.subscriptions`
+RPC reads `/_admin/status` server-side and returns only quota metadata: weekly percentages as remaining
+quota, and dates as quota resets, not subscription or OAuth expirations. Missing or stale usage is marked
+explicitly. It also reads the separate Anthropic pool from `/_admin/anthropic/status`, normalizing
+`*_max_20x`/`*_max_5x` tiers to Max 20x/Max 5x and counting banked resets from unpaused Anthropic
+grants. A 404 or 503 means the proxy has no enabled Anthropic pool, so the pool is omitted instead of
+reported as a failure. The two pools are never combined, matching the proxy's lack of cross-provider
+failover.
 
 ## Codex web search
 
 When `OPENCODE_LLM_PROXY_URL` is set on the backend (the same root URL used by the
-subscription panel), the custom plugin registers **Codex Search** with provider ID
+subscriptions RPC), the custom plugin registers **Codex Search** with provider ID
 `codex`. It uses `POST /backend-api/codex/alpha/search` through the proxy, not a Codex
 CLI subprocess. No provider or default is added when the URL is unset.
 
@@ -801,26 +545,18 @@ This is an internal Codex endpoint, not a stable public API. `open`, `click`, an
 `find` are not exposed here: retaining account-scoped references across proxy calls
 would need a separate integration. No proxy-side account-affinity or retry policy is changed.
 
-## OpenChamber theme
+## Native app themes
 
-Settings → General → Appearance → Theme offers an **OpenChamber** theme (`packages/ui-custom/src/theme/themes/openchamber.json`)
-with light and dark variants adapted from OpenChamber's signature palette: warm ink neutrals,
-orange accent, Vitesse-style syntax, teal links, green inline code and a tinted user-message
-bubble. Two optional pairs of theme variables drive the custom session UI; every other theme keeps
-its default colors: `v2-user-message-background`/`v2-user-message-text` (user bubble in both
-local and worktree sessions, replacing the worktree accent bubble) and `v2-inline-code-background`/`v2-inline-code-text` (Markdown inline code and paths,
-which otherwise follow `syntax-string`).
+The iOS and Mac themes are generated from the theme JSON files in `packages/ios-custom/script/theme/themes`,
+including **OpenChamber** (warm ink neutrals, orange accent, Vitesse-style syntax, teal links, green inline
+code and a tinted user-message bubble). Run `bun packages/ios-custom/script/generate-themes.ts`; the resolver
+in `packages/ios-custom/script/theme` came from the former custom web UI. Two optional pairs of theme
+variables apply to every theme that defines them: `v2-user-message-background`/`v2-user-message-text` (user
+bubble) and `v2-inline-code-background`/`v2-inline-code-text` (Markdown inline code and paths, which otherwise
+follow `syntax-string`).
 
-## Model picker
+## Model preferences
 
-The composer model picker and the **Select model** dialog (`mod+'`) share one list. Search matches
-model name, ID and provider, keeps the sections and disables reordering while a query is active.
-The star adds a model to **Favorites** (new favorites go first) without selecting it; favorites
-also stay in their provider section, and hidden models stay out of both. Drag the grip handles to
-reorder favorites or provider sections; collapsed sections are remembered per browser.
-The pin makes a model and the thinking level shown in its row the **web default** for new
-sessions; pin it again to clear it. The default takes precedence over agent and `opencode.json`
-models in new-session drafts but never changes existing sessions, the TUI or the config file.
-Favorites, provider order and the default live in the server-side preferences profile
-(`plugin-app-custom` `custom.preferences`), so every browser shares them. ↑↓ navigate, Enter
-selects and ←→ cycles the highlighted model's thinking level before selecting it.
+Favorite models, provider order and the default model with its thinking level live in the server-side
+preferences profile (`plugin-app-custom` `custom.preferences`), so every client of the server shares them.
+The default applies to new sessions only and never changes existing sessions, the TUI or the config file.

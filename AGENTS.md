@@ -1,9 +1,9 @@
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit generated client files directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk` composes Client, Core, and Server.
-- Shared backend and API implementation changes belong in `packages/core`, `packages/cli`, `packages/server`, `packages/protocol`, `packages/schema`, and related generated client surfaces when required. Custom plugin policy belongs in `packages/plugin-app-custom`; custom web product work follows the package ownership rules below.
+- Shared backend and API implementation changes belong in `packages/core`, `packages/cli`, `packages/server`, `packages/protocol`, `packages/schema`, and related generated client surfaces when required. Custom plugin policy belongs in `packages/plugin-app-custom`; custom client product work belongs in the native apps (`packages/ios-custom`), following the rules below.
 - This repository does not use Changesets. Do not add `.changeset` files; follow the existing release workflow instead.
 - The default upstream branch is `dev`. In this fork, `origin/dev` is a stale copy; use `upstream/dev` for the upstream branch.
-- For upstream-compatible work, default new branches and worktrees to `upstream/dev` and target pull requests to `dev`. For custom backend, plugin, or web product work, branch from `custom`, or `origin/custom` when the local ref is unavailable, and target `custom`. Use another base or target branch when the requester explicitly instructs it.
+- For upstream-compatible work, default new branches and worktrees to `upstream/dev` and target pull requests to `dev`. For custom backend, plugin, or native app work, branch from `custom`, or `origin/custom` when the local ref is unavailable, and target `custom`. Use another base or target branch when the requester explicitly instructs it.
 - Local `main` and `dev` refs may not exist; use `upstream/dev` for diffs against upstream.
 
 ## Custom Branch Protection
@@ -20,7 +20,7 @@
 - Before integrating an upstream revision into `custom`, read it and reconcile every open (`active` or `reconcile`) entry against the revision being integrated; update the register in the same integration. Resolve an entry only when its outcome is applied and no upstream follow-up remains.
 - When applying an upstream PR or commit early, or adapting or porting an upstream change, add its entry in the same change, following the template in that file. The register was started without a retroactive audit; add older cases when they are identified.
 - A conflict-free merge or commit ancestry is not evidence that the local code matches the final upstream change. Compare behavior, APIs, schema, migrations, and tests, then decide explicitly. Remove only an override made redundant in the same path or service.
-- Upstream UI changes are ported deliberately into `packages/app-custom`, `packages/ui-custom`, or `packages/session-ui-custom`; integrating upstream does not update those ports, and an equivalent in `packages/app` does not make a needed custom port redundant.
+- There is no custom web UI to port upstream UI changes into: the web app served by the custom server is upstream's `packages/app`, updated by each upstream integration.
 
 ## Backend Customizations
 
@@ -34,12 +34,11 @@ Follow this order while preserving existing behavior, data, and runtime guarante
 - Document remaining integration points, measure overlap against a fixed upstream base, and verify behavioral parity with meaningful tests.
 - Keep unrelated upstream fixes outside the customization scope.
 
-## Web UI Customizations
+## Web UI
 
-- Put all custom web product work in `packages/app-custom`, `packages/ui-custom`, and `packages/session-ui-custom`. Keep the upstream-owned `packages/app`, `packages/ui`, and `packages/session-ui` trees identical to the upstream revision integrated as the branch's current baseline; never make direct custom edits there.
-- Keep shared backend and API contracts in the main monorepo packages, including Client, Schema, Protocol, Server, utilities, and custom plugins. Do not duplicate the backend dependency closure into the custom UI packages.
-- Port useful upstream UI improvements into the custom packages deliberately and manually; do not merge upstream UI trees over the custom paths.
-- The custom web development, build, deployment, and custom-server asset path is `packages/app-custom`. Upstream desktop continues to consume `@opencode/app`, `@opencode/ui`, and `@opencode/session-ui` unless a separate desktop customization is explicitly requested.
+- The custom server embeds and serves upstream's web app, `packages/app`, unchanged. Keep the upstream-owned `packages/app`, `packages/ui`, `packages/session-ui`, and `packages/storybook` trees identical to the upstream revision integrated as the branch's current baseline; never make custom edits there.
+- Custom client features live in the native iOS and Mac apps (`packages/ios-custom`), backed by `packages/plugin-app-custom`. Do not add a custom web UI package.
+- The former custom web app (`packages/app-custom`, `packages/ui-custom`, `packages/session-ui-custom`) remains in Git history at the tag `web-custom-final`; native app documentation that cites those paths refers to that tag.
 
 ## Live TUI Testing
 

@@ -14,7 +14,7 @@ if (!/^[a-f0-9]{40}$/.test(version)) throw new Error("OPENCODE_CUSTOM_COMMIT mus
 const password = await Bun.file(`${root}/password`).text()
 const source = path.resolve(import.meta.dirname, "../../..")
 const plugin = path.join(source, "packages/plugin-app-custom/dist")
-const web = path.join(source, "packages/app-custom/dist")
+const web = path.join(source, "packages/app/dist")
 const assets: AssetMap = Object.fromEntries(
   await Promise.all(
     Array.from(new Bun.Glob("**/*").scanSync({ cwd: web, onlyFiles: true })).map(async (name) => [

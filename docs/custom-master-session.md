@@ -115,10 +115,11 @@ as the earlier `active`/`form.reply` additions. Five upstream-owned files, **7 a
 
 No Protocol/HttpApi, schema, generated client or upstream implementation body changes.
 
-The custom web composer resolved a session's agent only among visible agents, so sending from the web to the hidden
-`mestra` agent fell back to `build` and switched the session away from Mestra (its controls disappeared mid-conversation).
-`packages/app-custom/src/providers/models` now keeps a session's current hidden agent while the picker still lists only
-visible agents.
+The web composer resolves a session's agent only among visible agents, so sending from the web to the hidden `mestra`
+agent falls back to `build` and switches the session away from Mestra (its controls disappear mid-conversation). The
+removed custom web app kept a session's current hidden agent (`packages/app-custom/src/providers/models` at the tag
+`web-custom-final`); the standard web app now served by the custom backend (`packages/app`, filter in
+`src/providers/models/selection.tsx`) does not, so use the native apps for the Sessão mestra.
 
 Live evaluation used fake repositories, seeded sessions in every state (unread, read, failed, muted, pinned, pending
 question, subagent permission, running) and fresh Mestra sessions driven through the HTTP API, checking both the answers

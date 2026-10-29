@@ -5,6 +5,10 @@ implementation contract for waves 1–7, not a proposal for new APIs. The approv
 “Second screen: Conversa”; the web implementation is the behavioral reference. No Swift or web UI changes are needed
 to use this contract.
 
+The custom web app was removed on 2026-10-29. Its source paths cited below (`packages/app-custom`,
+`packages/session-ui-custom`, `packages/ui-custom`) refer to the tag `web-custom-final`, and the
+`@opencode/client/session-metrics` module cited with them was removed with it.
+
 ## Reading conventions and ownership
 
 - All timestamps below are **Unix epoch milliseconds**, not ISO strings. Effect's internal DateTime objects are
