@@ -14,6 +14,9 @@ import UniformTypeIdentifiers
 /// the server's follow-up preference, like the iPhone; right-clicking Enviar offers the other delivery (Enviar
 /// agora / Adicionar à fila). Dictation uses the iPhone's local recorder and Parakeet; the transcript lands in this
 /// editor, where it is reviewed and sent (no review sheet), and the right Option key dictates too.
+///
+/// Every Mac text field is this composer (`features`): the chat's, Nova sessão's and a quote's comment, and in its
+/// `reply` mode Pergunta paralela and the questions' own answers (`MacReplyComposer`).
 struct MacComposer: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.voiceController) private var voice
@@ -24,6 +27,12 @@ struct MacComposer: View {
   /// Inside another screen (Nova sessão): only the editor card, which that screen sends from; it shows the model,
   /// MCPs and agent itself.
   var embedded: MacComposerEmbedding? = nil
+  var features = MacComposerFeatures.chat
+  /// The empty field's text; the chat's by default.
+  var placeholder: String? = nil
+  var identifier = "conversation-composer"
+  /// Beside `+` and the capsules, before the microphone (Pergunta paralela's model).
+  var accessory: AnyView? = nil
   /// Sits on the card's top right corner (the chat's ↓ when the window leaves no margin for it).
   var corner: AnyView? = nil
   @State private var owner = UUID()
@@ -31,6 +40,10 @@ struct MacComposer: View {
   @State private var highlight = ComposerSuggestionHighlight()
   @State private var picking: MacPicker?
 
+  /// The trigger being typed, when this composer offers it.
+  private var trigger: ComposerTrigger? {
+    draft.trigger.flatMap { features.triggers.contains($0.character) ? $0 : nil }
+  }
   private var hasContent: Bool { draft.hasText || !draft.attachments.isEmpty || !draft.quotes.isEmpty }
   private var canSubmit: Bool {
     guard !draft.recording.visible else { return false }
@@ -40,7 +53,7 @@ struct MacComposer: View {
 
   var body: some View {
     VStack(spacing: 7) {
-      if let trigger = draft.trigger {
+      if let trigger {
         ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn, highlight: highlight) {
           choose($0, replacing: trigger)
         }
@@ -96,14 +109,37 @@ struct MacComposer: View {
     .task {
       // `-OpenCodeMacKeys "/ r down down return"`: types into the editor through AppKit's own key path, one key
       // every 0.4 s (characters, or up/down/return/tab/esc/ctrl-n/ctrl-p/newline), for quick checks without a
-      // keyboard; `clear` empties the field, `paste-image` pastes a small PNG and `unchip` closes the first
-      // attachment's chip.
+      // keyboard; `clear` empties the field, `paste-image` pastes a small PNG, `unchip` closes the first
+      // attachment's chip, `ropt` taps the right Option key, `new-session`, `btw` and `comment` open those sheets, `wait` waits a second. Keys go to
+      // the open sheet's focused composer when there is one.
       guard embedded == nil, let keys = MacFixture.value("-OpenCodeMacKeys") else { return }
       try? await Task.sleep(for: .seconds(2))
       for key in keys.split(separator: " ").map(String.init) {
-        guard let text = draft.input?.textView, let window = text.window else { return }
-        window.makeFirstResponder(text)
-        if key == "paste-image" {
+        guard let text = draft.input?.textView, let main = text.window else { return }
+        var window = main
+        while let sheet = window.attachedSheet { window = sheet }
+        if window === main {
+          main.makeFirstResponder(text)
+        } else if !(window.firstResponder is ComposerTextNSView), let field = MacSyntheticKey.composer(in: window.contentView) {
+          window.makeFirstResponder(field)
+        }
+        if key == "dump" {
+          for field in MacSyntheticKey.composers(in: window.contentView) + MacSyntheticKey.composers(in: main.contentView) {
+            guard let scroll = field.enclosingScrollView else { continue }
+            print("MacDump \(field.accessibilityIdentifier()) clip=\(scroll.contentView.bounds) doc=\(field.frame) scroll=\(scroll.frame) inset=\(scroll.contentInsets) origin=\(field.textContainerOrigin) min=\(field.minSize) max=\(field.maxSize)")
+          }
+          fflush(stdout)
+        } else if key == "comment" {
+          draft.commenting = ChatQuote(messageID: "msg_check", partID: "prt_check", text: "Trecho citado")
+        } else if key == "wait" {
+          try? await Task.sleep(for: .seconds(1))
+        } else if key == "ropt" {
+          MacSyntheticKey.rightOption(window)
+        } else if key == "new-session" {
+          windowRuntime?.newSession()
+        } else if key == "btw" {
+          windowRuntime?.askSideQuestion()
+        } else if key == "paste-image" {
           let item = NSPasteboardItem()
           let image = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 8, bitsPerSample: 8,
             samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
@@ -126,7 +162,7 @@ struct MacComposer: View {
     .onDisappear {
       if draft.editorOwner == owner { draft.editorOwner = nil }
       draft.recording.suspend()
-      if embedded == nil, let windowRuntime { MacDictationKey.shared.unregister(windowRuntime.id, owner: owner) }
+      MacDictationKey.shared.unregister(owner)
     }
     .modifier(MacMicrophonePermission(denied: Binding(get: { draft.recording.permissionDenied }, set: { draft.recording.permissionDenied = $0 })))
     .alert("Baixar transcrição neste Mac?", isPresented: Binding(get: { draft.recording.asksDownload }, set: { draft.recording.asksDownload = $0 })) {
@@ -144,7 +180,7 @@ struct MacComposer: View {
 
   private var card: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if draft.attachments.contains(where: { $0.quoteID == nil }) { attachmentRow }
+      if features.attachments, draft.attachments.contains(where: { $0.quoteID == nil }) { attachmentRow }
       if draft.importing {
         ProgressView("Preparando anexos…").controlSize(.small).appFont(.caption)
       }
@@ -158,32 +194,50 @@ struct MacComposer: View {
       if voice?.state.visible == true {
         Text("Encerre a conversa por voz para ditar.").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
       }
-      // The editor draws its placeholder on its own first line, with the same font and line height as the text.
-      MacComposerEditor(draft: draft, theme: theme, owner: owner, canSubmit: canSubmit, submit: submit, dictate: dictate,
-        placeholder: store.isChild ? "Mensagem para o subagente…" : "Pergunte qualquer coisa…",
-        cancel: embedded?.cancel,
-        firstSuggestion: firstSuggestion, moveSuggestion: { highlight.move($0) }, attach: { items in
-          MacAttachments.receive(items, store: store, draft: draft)
-        })
-        .padding(.horizontal, 4)
-      HStack(spacing: 8) {
-        attach
-        if embedded == nil {
-          ComposerModelChip(label: store.modelLabel(store.selectedModel(draft)).isEmpty ? "Modelo"
-            : store.modelLabel(store.selectedModel(draft))) { openModelPalette() }
-            .buttonStyle(.plain).foregroundStyle(theme.color(.text))
-            .help("Modelo e esforço (⌥⌘M)")
-            .accessibilityIdentifier("model-picker")
-          agent
+      if features.bare {
+        // Inside its host's card (a question's own answer): the microphone and send beside the field.
+        HStack(alignment: .center, spacing: 6) {
+          editor
+          action
         }
-        Spacer(minLength: 4)
-        action
+      } else {
+        editor.padding(.horizontal, 4)
+        HStack(spacing: 8) {
+          if features.attachments { attach }
+          if features.capsules {
+            ComposerModelChip(label: store.modelLabel(store.selectedModel(draft)).isEmpty ? "Modelo"
+              : store.modelLabel(store.selectedModel(draft))) { openModelPalette() }
+              .buttonStyle(.plain).foregroundStyle(theme.color(.text))
+              .help("Modelo e esforço (⌥⌘M)")
+              .accessibilityIdentifier("model-picker")
+            agent
+          }
+          accessory
+          Spacer(minLength: 4)
+          action
+        }
       }
     }
-    .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 10)
-    .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 18))
-    .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(store.isChild ? .accent : .border), lineWidth: store.isChild ? 1 : 0.7) }
+    .padding(.horizontal, features.bare ? 0 : 12).padding(.top, features.bare ? 0 : 12)
+    .padding(.bottom, features.bare ? 0 : 10)
+    .background { if !features.bare { RoundedRectangle(cornerRadius: 18).fill(theme.color(.surface)) } }
+    .overlay {
+      if !features.bare {
+        RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(store.isChild && features.capsules ? .accent : .border),
+          lineWidth: store.isChild && features.capsules ? 1 : 0.7)
+      }
+    }
     .overlay(alignment: .topTrailing) { corner }
+  }
+
+  /// The editor draws its placeholder on its own first line, with the same font and line height as the text.
+  private var editor: some View {
+    MacComposerEditor(draft: draft, theme: theme, owner: owner, trigger: trigger, canSubmit: canSubmit, submit: submit,
+      dictate: dictate,
+      placeholder: placeholder ?? (store.isChild ? "Mensagem para o subagente…" : "Pergunte qualquer coisa…"),
+      identifier: identifier, cancel: embedded?.cancel,
+      firstSuggestion: firstSuggestion, moveSuggestion: { highlight.move($0) },
+      attach: features.attachments ? { items in MacAttachments.receive(items, store: store, draft: draft) } : nil)
   }
 
   private var attach: some View {
@@ -226,7 +280,6 @@ struct MacComposer: View {
 
   private func dictate() {
     guard dictationAvailable else { return }
-    guard let windowRuntime, windowRuntime.app.front === windowRuntime else { return }
     if draft.recording.capturing { draft.recording.finish(); return }
     draft.recording.handle(.began); draft.recording.handle(.ended)
   }
@@ -239,12 +292,14 @@ struct MacComposer: View {
     draft.focused = true
   }
 
-  /// The right Option key dictates into this window's conversation composer (`MacDictationKey`).
+  /// The right Option key dictates into the composer with the focus, or into the conversation's of the front window
+  /// (`MacDictationKey`).
   private func registerDictationKey() {
-    guard embedded == nil, let windowRuntime else { return }
     let recording = draft.recording
-    MacDictationKey.shared.register(windowRuntime.id, MacDictationKey.Target(
+    MacDictationKey.shared.register(MacDictationKey.Target(
       owner: owner,
+      conversation: embedded == nil ? windowRuntime?.id : nil,
+      editor: { [weak draft, owner] in draft?.editorOwner == owner ? draft?.input?.textView : nil },
       recording: { recording.capturing },
       available: { [weak voice, weak draft] in
         voice?.state.visible != true && draft?.sending == false && draft?.importing == false
@@ -341,7 +396,7 @@ struct MacComposer: View {
 
   /// Return's and Tab's pick: the highlighted item, once loaded for the trigger still being typed.
   private func firstSuggestion() -> (() -> Void)? {
-    guard let trigger = draft.trigger else { return nil }
+    guard let trigger else { return nil }
     if let item = highlight.selected(for: trigger) { return { choose(item, replacing: trigger) } }
     guard let first = suggestionReturn.first, first.trigger == trigger else { return nil }
     return { choose(first.item, replacing: trigger) }
@@ -361,14 +416,18 @@ struct MacComposerEditor: NSViewRepresentable {
   @Bindable var draft: ConversationDraft
   let theme: AppTheme
   let owner: UUID
+  /// The suggestion trigger this composer answers (`MacComposerFeatures.triggers`).
+  let trigger: ComposerTrigger?
   let canSubmit: Bool
   let submit: () -> Void
   var dictate: () -> Void = {}
   var placeholder = ""
+  var identifier = "conversation-composer"
   var cancel: (() -> Void)? = nil
   let firstSuggestion: () -> (() -> Void)?
   var moveSuggestion: (Int) -> Bool = { _ in false }
-  let attach: ([NSPasteboardItem]) -> Bool
+  /// Pasted images and files; nil where the composer takes no attachments.
+  let attach: (([NSPasteboardItem]) -> Bool)?
 
   func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -394,16 +453,17 @@ struct MacComposerEditor: NSViewRepresentable {
     text.isEditable = !draft.sending
     text.submit = submit
     text.dictate = dictate
-    text.canSubmit = canSubmit && draft.trigger == nil
-    text.querying = draft.trigger != nil
+    text.canSubmit = canSubmit && trigger == nil
+    text.querying = trigger != nil
     text.firstSuggestion = firstSuggestion
     text.moveSuggestion = moveSuggestion
     text.escape = { [weak draft] in draft?.dismissSuggestions() }
     text.cancel = cancel
     text.attach = attach
     text.insertionPointColor = theme.nsColor(.primary)
-    text.isContinuousSpellCheckingEnabled = draft.trigger == nil
+    text.isContinuousSpellCheckingEnabled = trigger == nil
     if text.placeholder != placeholder { text.placeholder = placeholder }
+    if text.accessibilityIdentifier() != identifier { text.setAccessibilityIdentifier(identifier) }
     guard !text.hasMarkedText() else {
       view.representedRevision = -1
       return
@@ -477,6 +537,80 @@ struct MacComposerEmbedding {
   let canSubmit: Bool
   let submit: () -> Void
   var cancel: (() -> Void)? = nil
+}
+
+/// What a composer offers where it is. Dictation (the microphone, the right Option key, ⌃⌥Space), the growing and
+/// scrolling field, Return/Shift+Return/Esc and the automatic corrections turned off come with every one.
+struct MacComposerFeatures {
+  /// The suggestion triggers that open the panel (`@` `&` `/` `$` `#`); none in a plain answer.
+  var triggers: Set<String> = ["@", "&", "/", "$", "#"]
+  /// `+`, images pasted or dropped and cited in the text, and the attachments' chips.
+  var attachments = true
+  /// The model and agent capsules (the chat's; Nova sessão shows its own below the editor).
+  var capsules = true
+  /// Inside its host's own card (a question's answer): no card, the microphone beside the field.
+  var bare = false
+
+  static let chat = MacComposerFeatures()
+  static let newSession = MacComposerFeatures(capsules: false)
+  /// A quote's comment: tokens and attachments, but no command, which only starts a prompt.
+  static let comment = MacComposerFeatures(triggers: ["@", "&", "$", "#"], capsules: false)
+  /// Pergunta paralela: plain text, typed or dictated, in a card of its own.
+  static let reply = MacComposerFeatures(triggers: [], attachments: false, capsules: false)
+  /// A question's own answer or a form field, inside the question's card.
+  static let answer = MacComposerFeatures(triggers: [], attachments: false, capsules: false, bare: true)
+}
+
+/// A plain answer bound to a string (Pergunta paralela, a question's own answer, a form field): the composer in a
+/// `reply` mode over a draft of its own that saves nothing.
+struct MacReplyComposer: View {
+  let store: ConversationStore
+  @Binding var text: String
+  let placeholder: String
+  var features = MacComposerFeatures.answer
+  var canSubmit = true
+  let submit: () -> Void
+  /// Esc runs this (a sheet's Fechar); without it Esc leaves the field.
+  var cancel: (() -> Void)? = nil
+  /// Takes the keyboard when it appears, with the caret at the end.
+  var focusOnAppear = false
+  var identifier = "question-reply"
+  var accessory: AnyView? = nil
+  @State private var draft = Self.scratch()
+
+  var body: some View {
+    MacComposer(store: store, draft: draft,
+      embedded: MacComposerEmbedding(canSubmit: canSubmit, submit: submit,
+        cancel: cancel ?? { [weak draft] in draft?.input?.window?.makeFirstResponder(nil) }),
+      features: features, placeholder: placeholder, identifier: identifier, accessory: accessory)
+      .onAppear {
+        // Where its dictation records (a saved draft makes it on its first save).
+        try? FileManager.default.createDirectory(at: draft.persistence.directory, withIntermediateDirectories: true)
+        receive(text)
+        if focusOnAppear { draft.focused = true }
+      }
+      .onDisappear { try? FileManager.default.removeItem(at: draft.persistence.directory) }
+      .onChange(of: draft.contentRevision) {
+        let value = draft.document.text
+        if value != text { text = value }
+      }
+      .onChange(of: text) { _, value in receive(value) }
+  }
+
+  private static func scratch() -> ConversationDraft {
+    let draft = ConversationDraft.scratch()
+    #if DEBUG
+    MacSyntheticKey.fakeDictation(draft)
+    #endif
+    return draft
+  }
+
+  /// The host's text (cleared after sending, restored after a stop) replaces the field's, caret at the end.
+  private func receive(_ value: String) {
+    guard value != draft.document.text else { return }
+    draft.text = NSAttributedString(string: value)
+    draft.selection = NSRange(location: (value as NSString).length, length: 0)
+  }
 }
 
 /// Model and effort, and the agent, chosen for the next prompt (the composer's capsule, `/model`, `/agent`).
@@ -599,6 +733,40 @@ private struct MacPickerSheet: View {
       windowNumber: window.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: ignoring,
       isARepeat: false, keyCode: code) else { return }
     window.sendEvent(event)
+  }
+
+  /// A tap of the right Option key, through the app's event queue where `MacDictationKey` watches it.
+  static func rightOption(_ window: NSWindow) {
+    for down in [true, false] {
+      let flags = NSEvent.ModifierFlags(rawValue: down ? NSEvent.ModifierFlags.option.rawValue | 0x40 : 0)
+      guard let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags, timestamp: 0,
+        windowNumber: window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "",
+        isARepeat: false, keyCode: DictationKeyGesture.keyCode) else { return }
+      NSApp.postEvent(event, atStart: false)
+    }
+  }
+
+  /// `-OpenCodeMacFakeDictation`: the fixture's fake microphone and transcription, set before `recording` is made.
+  static func fakeDictation(_ draft: ConversationDraft) {
+    guard MacLaunch.fixture, ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFakeDictation"),
+      draft.recordingFactory == nil else { return }
+    let transcription = TranscriptionController(source: DictationFixtureSource(), engine: DictationFixtureEngine(),
+      monitorsNetwork: false)
+    draft.recordingFactory = {
+      VoiceRecordingComposer(file: $0, capture: DictationFixtureCapture(), transcription: transcription)
+    }
+  }
+
+  static func composers(in view: NSView?) -> [ComposerTextNSView] {
+    guard let view else { return [] }
+    if let field = view as? ComposerTextNSView { return [field] }
+    return view.subviews.flatMap { composers(in: $0) }
+  }
+
+  static func composer(in view: NSView?) -> ComposerTextNSView? {
+    guard let view else { return nil }
+    if let field = view as? ComposerTextNSView { return field }
+    return view.subviews.lazy.compactMap { composer(in: $0) }.first
   }
 }
 

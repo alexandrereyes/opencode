@@ -583,7 +583,7 @@ struct MacQuoteCommentSheet: View {
         .padding(.leading, 12)
         .overlay(alignment: .leading) { Rectangle().fill(theme.color(.primary)).frame(width: 2) }
       MacComposer(store: store, draft: editor, embedded: MacComposerEmbedding(canSubmit: lent && !editor.importing,
-        submit: commit, cancel: { dismiss() }))
+        submit: commit, cancel: { dismiss() }), features: .comment)
       HStack(spacing: 16) {
         if let mark {
           Button("Ir ao trecho citado", systemImage: "text.quote") {

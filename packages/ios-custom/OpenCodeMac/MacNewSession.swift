@@ -202,7 +202,8 @@ struct MacNewSession: View {
   /// like the chat (⌘Return too, from the footer's Enviar).
   private var editor: some View {
     MacComposer(store: store.composer, draft: store.draft,
-      embedded: MacComposerEmbedding(canSubmit: store.canSend, submit: { Task { await store.send() } }))
+      embedded: MacComposerEmbedding(canSubmit: store.canSend, submit: { Task { await store.send() } }),
+      features: .newSession)
       .disabled(store.sending)
       .accessibilityLabel("Mensagem")
   }
@@ -375,6 +376,9 @@ private struct MacBaseBranchPicker: View {
     startInChats = request.startInChats
     memoryKey = "OpenCodeNewSession." + sessions.client.configuration.url.absoluteString
     draft = (drafts ?? sessions.drafts).draft(request.master ? "new-session-master" : "new-session")
+    #if DEBUG
+    MacSyntheticKey.fakeDictation(draft)
+    #endif
     composer = ConversationStore(id: "new-session", client: sessions.client, hub: sessions.hub,
       catalog: sessions.catalog)
     categories = UserDefaults.standard.dictionary(forKey: memoryKey + ".categories") as? [String: String] ?? [:]

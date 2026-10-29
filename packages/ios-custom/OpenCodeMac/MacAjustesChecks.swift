@@ -119,7 +119,9 @@ import SwiftUI
     }
     transcript.scrollToLatest(animated: false)
     let field = try await wait("campo da pergunta") {
-      views(window).compactMap { $0 as? MacReplyTextView }.first { $0.window != nil && $0.visibleRect.height > 4 }
+      views(window).compactMap { $0 as? ComposerTextNSView }.first {
+        $0.accessibilityIdentifier() == "question-reply" && $0.window != nil && $0.visibleRect.height > 4
+      }
     }
     // A real click (down and up) on the field focuses it.
     click(field, in: window)

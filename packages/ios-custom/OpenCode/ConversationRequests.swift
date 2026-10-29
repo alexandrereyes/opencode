@@ -116,8 +116,8 @@ struct ConversationQuestionCard: View {
                 return field.options?.contains { $0.value == text } == true ? "" : text
               }, set: { values[field.key] = .string($0) })
             #if os(macOS)
-            // Return sends, Shift+Return breaks the line, Esc leaves the field; a click focuses it.
-            MacReplyField(text: text, placeholder: "Outra resposta…", submit: send)
+            // The Mac composer's answer mode: dictation, Return sends, Shift+Return breaks the line, Esc leaves.
+            MacReplyComposer(store: store, text: text, placeholder: "Outra resposta…", submit: send)
               .padding(11).background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
             #else
             TextField("Outra resposta…", text: text)
@@ -142,7 +142,8 @@ struct ConversationQuestionCard: View {
             }
             HStack {
               #if os(macOS)
-              MacReplyField(text: Binding(get: { custom[field.key] ?? "" }, set: { custom[field.key] = $0 }),
+              MacReplyComposer(store: store,
+                text: Binding(get: { custom[field.key] ?? "" }, set: { custom[field.key] = $0 }),
                 placeholder: "Outra resposta…", submit: { addCustom(field) })
               #else
               TextField(

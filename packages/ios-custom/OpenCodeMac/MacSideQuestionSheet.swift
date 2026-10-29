@@ -99,28 +99,14 @@ struct MacSideQuestionSheet: View {
     .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 6)
   }
 
+  /// The composer in its `reply` mode: dictation and the right Option key, Return asks, Esc closes.
   private var composer: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      MacReplyField(text: $state.text, placeholder: "Pergunte em paralelo…", submit: submit, cancel: { dismiss() },
-        focusOnAppear: true, identifier: "side-question-composer")
-        .padding(.horizontal, 4)
-      HStack {
-        Text(store.modelLabel(store.session?.model)).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-        Spacer()
-        Button(action: submit) {
-          Image(systemName: "arrow.up").font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(theme.color(.onPrimary))
-            .frame(width: 28, height: 28).background(theme.color(.primary), in: Circle())
-        }
-        .buttonStyle(.plain).disabled(!canSubmit).opacity(canSubmit ? 1 : 0.4)
-        .help("Enviar pergunta paralela (↩) · Shift+Return quebra a linha")
-        .accessibilityLabel("Enviar pergunta paralela")
-      }
-    }
-    .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 10)
-    .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 18))
-    .overlay { RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(.border), lineWidth: 0.7) }
-    .accessibilityElement(children: .contain).accessibilityIdentifier("side-question-card")
+    MacReplyComposer(store: store, text: $state.text, placeholder: "Pergunte em paralelo…", features: .reply,
+      canSubmit: canSubmit, submit: submit, cancel: { dismiss() }, focusOnAppear: true,
+      identifier: "side-question-composer",
+      accessory: AnyView(Text(store.modelLabel(store.session?.model)).appFont(.caption)
+        .foregroundStyle(theme.color(.textSecondary)).lineLimit(1)))
+      .accessibilityElement(children: .contain).accessibilityIdentifier("side-question-card")
   }
 
   private var canSubmit: Bool {

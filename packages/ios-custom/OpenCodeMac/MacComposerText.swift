@@ -158,7 +158,12 @@ final class ComposerInputView: NSScrollView {
   /// once it is tall enough for everything, nothing may stay scrolled (that hid the top of the first line).
   override func tile() {
     super.tile()
-    guard let document = documentView, document.frame.height <= contentView.bounds.height + 0.5,
+    guard let document = documentView else { return }
+    // The clip view is flipped and the text view only tracks its width: autoresizing moved the text view by the
+    // field's change in height. Shrinking back to one line (an empty draft, after sending) left its frame at y -14,
+    // the placeholder and caret cut in half above the field.
+    if document.frame.origin != .zero { document.setFrameOrigin(.zero) }
+    guard document.frame.height <= contentView.bounds.height + 0.5,
       contentView.bounds.origin.y != 0 else { return }
     contentView.scroll(to: .zero)
     reflectScrolledClipView(contentView)
@@ -248,6 +253,13 @@ final class ComposerTextNSView: NSTextView {
     let container = NSTextContainer(size: CGSize(width: 300, height: CGFloat.greatestFiniteMagnitude))
     manager.addTextContainer(container)
     self.init(frame: .zero, textContainer: container)
+  }
+
+  // Inside the transcript's hosted rows (a question's answer) the first click must focus the field.
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+  override func mouseDown(with event: NSEvent) {
+    if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+    super.mouseDown(with: event)
   }
 
   override func keyDown(with event: NSEvent) {

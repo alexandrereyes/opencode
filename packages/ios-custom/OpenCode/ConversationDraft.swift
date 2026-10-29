@@ -169,6 +169,16 @@ extension ComposerTokenKind {
     text = quote.document.attributed
     selection = NSRange(location: editorText.length, length: 0)
   }
+  #if os(macOS)
+  /// A Mac plain answer's editor (`MacReplyComposer`): nothing is saved; dictation records in a temporary directory.
+  static func scratch() -> ConversationDraft { ConversationDraft(scratchIn: "ReplyDrafts") }
+  private init(scratchIn folder: String) {
+    persistence = DraftPersistence(
+      server: "local", sessionID: UUID().uuidString,
+      root: FileManager.default.temporaryDirectory.appending(path: folder, directoryHint: .isDirectory))
+    ephemeral = true
+  }
+  #endif
   func commentEditor(_ quote: ChatQuote) -> ConversationDraft {
     ConversationDraft(comment: quote, recordingFactory: recordingFactory)
   }

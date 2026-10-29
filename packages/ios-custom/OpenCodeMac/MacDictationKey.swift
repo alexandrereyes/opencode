@@ -1,34 +1,57 @@
 import AppKit
 import OpenCodeKit
 
-/// The right Option key dictates into the front window's composer (`DictationKeyGesture`): a tap starts and the
-/// next stops, holding records until release. Local event monitors only see events while the app is in front, so
-/// the key keeps its normal meaning in every other app; the left Option key is never looked at.
+/// The right Option key dictates into the composer with the focus in the front window, a sheet's included (Nova
+/// sessão, a comment, Pergunta paralela), or else into that window's conversation composer (`DictationKeyGesture`):
+/// a tap starts and the next stops, holding records until release. Local event monitors only see events while the
+/// app is in front, so the key keeps its normal meaning in every other app; the left Option key is never looked at.
 @MainActor final class MacDictationKey {
   static let shared = MacDictationKey()
 
-  /// The composer of each window's conversation, registered while it is on screen.
+  /// A composer on screen (`MacComposer`), registered while it is there.
   struct Target {
-    /// The composer view that registered it: another conversation's composer may appear before it leaves.
+    /// The composer view that registered it.
     let owner: UUID
+    /// The window whose conversation composer this is; nil for the others.
+    let conversation: UUID?
+    /// Its text view, while it is the draft's editor.
+    let editor: () -> NSTextView?
     let recording: () -> Bool
     let available: () -> Bool
     let perform: (DictationKeyGesture.Action) -> Void
   }
 
-  private var targets: [UUID: Target] = [:]
+  /// In registration order: another conversation's composer may appear before the previous one leaves.
+  private var targets: [Target] = []
   private var gesture = DictationKeyGesture()
   private var target: Target?
   private var hold: Task<Void, Never>?
   private var monitor: Any?
 
-  func register(_ window: UUID, _ target: Target) {
-    targets[window] = target
+  func register(_ target: Target) {
+    targets.removeAll { $0.owner == target.owner }
+    targets.append(target)
     start()
   }
 
-  func unregister(_ window: UUID, owner: UUID) {
-    if targets[window]?.owner == owner { targets[window] = nil }
+  func unregister(_ owner: UUID) {
+    targets.removeAll { $0.owner == owner }
+  }
+
+  /// The focused composer of the key window or of the front window's sheet; else the front window's conversation
+  /// composer, unless a sheet covers it.
+  private var focused: Target? {
+    let front = MacRuntime.shared.front?.window
+    var sheet = front?.attachedSheet
+    while let next = sheet?.attachedSheet { sheet = next }
+    let windows = [NSApp.keyWindow, sheet, front].compactMap { $0 }
+    for window in windows {
+      if let target = targets.last(where: { target in
+        target.editor().map { $0.window === window && window.firstResponder === $0 } ?? false
+      }) { return target }
+    }
+    guard let runtime = MacRuntime.shared.front, front?.attachedSheet == nil else { return nil }
+    return targets.last { $0.conversation == runtime.id }
   }
 
   private func start() {
@@ -54,8 +77,7 @@ import OpenCodeKit
       return
     }
     if rightDown, !gesture.down {
-      guard let window = MacRuntime.shared.front, window.window?.attachedSheet == nil,
-        let target = targets[window.id], target.available() else { return }
+      guard let target = focused, target.available() else { return }
       self.target = target
       let others = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         .subtracting([.option, .capsLock, .numericPad, .function])

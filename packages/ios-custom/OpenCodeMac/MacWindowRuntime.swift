@@ -125,6 +125,7 @@ import SwiftUI
     let input = MacConversationInput(conversation: conversation, sessions: app.store!, draft: drafts.draft(conversation.id))
     #if DEBUG
     MacVoiceChecks.prepare(input.draft)
+    MacSyntheticKey.fakeDictation(input.draft)
     MacAjustesChecks.prepare(input.draft)
     #endif
     inputs[conversation.id] = input
