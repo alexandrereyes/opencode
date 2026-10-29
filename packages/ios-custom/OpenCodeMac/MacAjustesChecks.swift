@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|divider`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -35,6 +35,7 @@ import SwiftUI
       case "question": try await question(window: window, runtime: runtime, shot: shot)
       case "quote": try await quote(window: window, runtime: runtime, shot: shot)
       case "image": try await image(window: window, shot: shot)
+      case "viewer": try await viewer(window: window, theme: theme, folder: folder)
       case "archived": try await archived(window: window, shot: shot)
       case "numbers": try await numbers(window: window, runtime: runtime)
       case "width": try await width(window: window, runtime: runtime, shot: shot)
@@ -209,6 +210,224 @@ import SwiftUI
     guard provider.suggestedName == "Personagens.png", provider.hasItemConformingToTypeIdentifier("public.file-url") else {
       throw Failure(description: "arrastar sem arquivo PNG")
     }
+  }
+
+  // MARK: The image viewer: zoom, pan, keys and its menu
+
+  /// A 4800×3600 board in the viewer, off the screens: the wheel zooms around the pointer, dragging pans, ⌘1 ⌘= ⌘−
+  /// ⌘0 and the arrows, a resize keeps the middle (or the fit), the double click, the right-click menu (captured,
+  /// `<name>-menu.png`) leaves the window open, the title bar's PNG and Esc.
+  private static func viewer(window: NSWindow, theme: AppTheme, folder: String) async throws {
+    let board = try require(board(), "prancha")
+    MacImageWindow.show(MacViewedImage(image: board, name: "Prancha de teste"), theme: theme, over: window)
+    let viewer = try await wait("visualizador") { NSApp.windows.first { $0.isVisible && $0.title == "Prancha de teste" } }
+    // Off the screens, like the main window of the captures.
+    viewer.setFrame(NSRect(x: -5200, y: 80, width: 1200, height: 860), display: true)
+    try await Task.sleep(for: .milliseconds(800))
+    func shot(_ step: String) { MacCapture.shot(viewer, theme: theme, to: folder + "/\(MacCapture.name)-\(step).png") }
+    let scroll = try await wait("tela da imagem") { views(viewer).compactMap { $0 as? MacImageScrollView }.first }
+    let clip = scroll.contentView
+    let document = try require(scroll.documentView, "imagem")
+    func state() -> String {
+      "\(Int((scroll.magnification * 100).rounded()))% · origem \(Int(clip.bounds.minX)),\(Int(clip.bounds.minY))"
+    }
+    func expect(_ condition: Bool, _ what: String) throws {
+      guard condition else { throw Failure(description: "\(what) (\(state()))") }
+    }
+    // Fitted at 100% = one pixel per screen pixel: the whole board, centered.
+    let fit = min(1, scroll.bounds.width / document.frame.width, scroll.bounds.height / document.frame.height)
+    try expect(abs(scroll.magnification - fit) < 0.002, "abriu fora do ajuste \(fit)")
+    try expect(viewer.firstResponder === document, "a tela não tem o foco do teclado: \(viewer.firstResponder.map { String(describing: type(of: $0)) } ?? "nada")")
+    shot("ajustada")
+    print("MacAjustes viewer: abriu em \(state()), ajuste \(fit)")
+
+    // The wheel zooms around the pointer.
+    let pointer = scroll.convert(NSPoint(x: scroll.bounds.width * 0.3, y: scroll.bounds.height * 0.7), to: nil)
+    let under = clip.convert(pointer, from: nil)
+    let event = try require(wheel(3, at: pointer), "evento da roda")
+    viewer.sendEvent(event)
+    try await Task.sleep(for: .milliseconds(300))
+    let still = clip.convert(pointer, from: nil)
+    try expect(scroll.magnification > fit * 1.5,
+      "a roda não deu zoom (Δ \(event.scrollingDeltaY), em \(event.locationInWindow) para \(pointer))")
+    try expect(hypot(still.x - under.x, still.y - under.y) < 1, "o ponto sob o ponteiro saiu do lugar: \(under) → \(still)")
+    shot("roda")
+    print("MacAjustes viewer: roda → \(state()), ponto sob o ponteiro \(Int(under.x)),\(Int(under.y)) mantido")
+
+    // Dragging pans by the same distance on screen.
+    let before = clip.bounds.origin
+    let start = scroll.convert(NSPoint(x: scroll.bounds.midX, y: scroll.bounds.midY), to: nil)
+    viewer.sendEvent(mouse(.leftMouseDown, at: start, in: viewer))
+    for step in 1...6 {
+      viewer.sendEvent(mouse(.leftMouseDragged, at: NSPoint(x: start.x - CGFloat(step) * 20, y: start.y - CGFloat(step) * 10),
+        in: viewer))
+    }
+    viewer.sendEvent(mouse(.leftMouseUp, at: NSPoint(x: start.x - 120, y: start.y - 60), in: viewer))
+    let moved = NSPoint(x: (clip.bounds.minX - before.x) * scroll.magnification,
+      y: (clip.bounds.minY - before.y) * scroll.magnification)
+    try expect(abs(moved.x - 120) < 1 && abs(moved.y + 60) < 1, "arrastar moveu \(moved), esperado 120,-60")
+    shot("arrastada")
+    print("MacAjustes viewer: arrastar 120,60 pt → \(state())")
+
+    // ⌘1, ⌘0, ⌘+ and ⌘− in the window, ahead of the menus (⌘1 there opens the first session).
+    // Zooms and arrows animate on a screen: each step waits for it.
+    func command(_ character: String, code: UInt16) async throws {
+      guard viewer.performKeyEquivalent(with: key(character, code: code, flags: .command, window: viewer)) else {
+        throw Failure(description: "⌘\(character) não tratado pela janela")
+      }
+      try await Task.sleep(for: .milliseconds(500))
+    }
+    try await command("1", code: 18)
+    try expect(abs(scroll.magnification - 1) < 0.001, "⌘1 não mostrou o tamanho real")
+    shot("tamanho-real")
+    try await command("=", code: 24)
+    try expect(abs(scroll.magnification - 1.25) < 0.001, "⌘= não ampliou um passo")
+    try await command("-", code: 27)
+    try expect(abs(scroll.magnification - 1) < 0.001, "⌘− não reduziu um passo")
+    // The arrows pan.
+    let arrow = clip.bounds.origin
+    viewer.sendEvent(key("\u{F703}", code: 124, window: viewer))
+    viewer.sendEvent(key("\u{F701}", code: 125, window: viewer))
+    try await Task.sleep(for: .milliseconds(400))
+    try expect(abs(clip.bounds.minX - arrow.x - 60) < 0.5 && abs(clip.bounds.minY - arrow.y - 60) < 0.5,
+      "as setas moveram para \(clip.bounds.origin) a partir de \(arrow)")
+    // A manual zoom keeps the middle through a resize.
+    let middle = NSPoint(x: clip.bounds.midX, y: clip.bounds.midY)
+    viewer.setFrame(NSRect(x: -5200, y: 80, width: 1500, height: 900), display: true)
+    try await Task.sleep(for: .milliseconds(200))
+    try expect(hypot(clip.bounds.midX - middle.x, clip.bounds.midY - middle.y) < 1 && abs(scroll.magnification - 1) < 0.001,
+      "redimensionar com zoom tirou o meio \(middle) do lugar")
+    try await command("0", code: 29)
+    let refit = min(1, scroll.bounds.width / document.frame.width, scroll.bounds.height / document.frame.height)
+    try expect(abs(scroll.magnification - refit) < 0.002, "⌘0 não ajustou à janela (\(refit))")
+    // Fitting follows the window.
+    viewer.setFrame(NSRect(x: -5200, y: 80, width: 900, height: 700), display: true)
+    try await Task.sleep(for: .milliseconds(200))
+    let small = min(1, scroll.bounds.width / document.frame.width, scroll.bounds.height / document.frame.height)
+    try expect(abs(scroll.magnification - small) < 0.002, "o ajuste não acompanhou a janela (\(small))")
+    try expect(abs(clip.bounds.midX - document.frame.midX) < 1 && abs(clip.bounds.midY - document.frame.midY) < 1,
+      "a imagem ajustada não está no meio")
+    print("MacAjustes viewer: ⌘1 ⌘= ⌘− ⌘0, setas e redimensionar ok → \(state())")
+
+    // A double click: 100% under the pointer, then the fit again.
+    let spot = scroll.convert(NSPoint(x: scroll.bounds.width * 0.75, y: scroll.bounds.height * 0.25), to: nil)
+    let target = clip.convert(spot, from: nil)
+    viewer.sendEvent(mouse(.leftMouseDown, at: spot, in: viewer))
+    viewer.sendEvent(mouse(.leftMouseUp, at: spot, in: viewer))
+    viewer.sendEvent(mouse(.leftMouseDown, at: spot, in: viewer, clicks: 2))
+    viewer.sendEvent(mouse(.leftMouseUp, at: spot, in: viewer, clicks: 2))
+    try await Task.sleep(for: .milliseconds(500))
+    let after = clip.convert(spot, from: nil)
+    try expect(abs(scroll.magnification - 1) < 0.001 && hypot(after.x - target.x, after.y - target.y) < 1,
+      "o duplo clique não foi a 100% no ponto \(target) → \(after)")
+    viewer.sendEvent(mouse(.leftMouseDown, at: spot, in: viewer, clicks: 2))
+    viewer.sendEvent(mouse(.leftMouseUp, at: spot, in: viewer, clicks: 2))
+    try await Task.sleep(for: .milliseconds(500))
+    try expect(abs(scroll.magnification - small) < 0.002, "o segundo duplo clique não voltou ao ajuste")
+
+    // The menu has the zoom too, and the window stays open while it is up.
+    let menu = contextMenu(viewer, at: start, to: folder + "/\(MacCapture.name)-menu.png")
+    try expect(menu.titles == ["Copiar imagem", "—", "Ampliar", "Reduzir", "Ajustar à janela", "Tamanho real"],
+      "menu \(menu.titles)")
+    try expect(viewer.isVisible, "o menu fechou a janela")
+    // The title bar's icon is the PNG at full size.
+    let file = try await wait("arquivo da barra de título") { viewer.representedURL }
+    let written = try require(NSBitmapImageRep(data: try Data(contentsOf: file)), "png")
+    try expect(written.pixelsWide == 4800 && written.pixelsHigh == 3600, "arquivo \(written.pixelsWide)×\(written.pixelsHigh)")
+    shot("final")
+    print("MacAjustes viewer: menu \(menu.titles) · ícone do título \(file.lastPathComponent)")
+    // Esc closes.
+    viewer.sendEvent(key("\u{1b}", code: 53, window: viewer))
+    try await wait("Esc fechou") { viewer.isVisible ? nil : true }
+  }
+
+  /// A mouse's wheel turned `lines` notches away from the user over `point` of the window it is sent to: built from a
+  /// CGEvent that is never posted. Such an event has no window, so its location in the window is its location on
+  /// the screen, set to `point`.
+  private static func wheel(_ lines: Int32, at point: NSPoint) -> NSEvent? {
+    guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0,
+      wheel3: 0) else { return nil }
+    event.location = CGPoint(x: point.x, y: (NSScreen.screens.first?.frame.maxY ?? 0) - point.y)
+    event.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: Int64(lines))
+    event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Double(lines))
+    event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(lines) * 10)
+    return NSEvent(cgEvent: event)
+  }
+
+  /// A right click in `window` at `point`; while its menu tracks, the menu's own window is captured and the menu
+  /// closed. Returns the items and whether `window` stayed key.
+  private static func contextMenu(_ window: NSWindow, at point: NSPoint, to path: String) -> (titles: [String], key: Bool) {
+    menuProbe = ([], false)
+    probe = (window, path)
+    let observer = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil,
+      queue: .main) { note in
+      nonisolated(unsafe) let object = note.object
+      MainActor.assumeIsolated {
+        guard let menu = object as? NSMenu, menu.supermenu == nil else { return }
+        probeMenu = menu
+        let timer = Timer(timeInterval: 0.5, repeats: false) { _ in
+          MainActor.assumeIsolated {
+            guard let menu = probeMenu else { return }
+            menuProbe = (menu.items.map { $0.isSeparatorItem ? "—" : $0.title }, probe?.window.isKeyWindow == true)
+            if let path = probe?.path { captureMenus(to: path) }
+            menu.cancelTracking()
+          }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+      }
+    }
+    defer {
+      NotificationCenter.default.removeObserver(observer)
+      probe = nil
+      probeMenu = nil
+    }
+    window.sendEvent(mouse(.rightMouseDown, at: point, in: window))
+    window.sendEvent(mouse(.rightMouseUp, at: point, in: window))
+    return menuProbe
+  }
+
+  private static var menuProbe: (titles: [String], key: Bool) = ([], false)
+  private static var probe: (window: NSWindow, path: String)?
+  private static var probeMenu: NSMenu?
+
+  /// This app's open menu windows, through the window server (no permission needed for its own windows).
+  private static func captureMenus(to path: String) {
+    typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+    let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    guard let menu = windows.first(where: {
+      ($0[kCGWindowOwnerPID as String] as? Int32) == getpid() && ($0[kCGWindowLayer as String] as? Int ?? 0) >= 101
+    }), let number = menu[kCGWindowNumber as String] as? UInt32,
+      let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return }
+    let capture = unsafeBitCast(symbol, to: Capture.self)
+    guard let image = capture(.null, 1 << 3, number, 1 << 0 | 1 << 3)?.takeRetainedValue(),
+      let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
+    try? png.write(to: URL(fileURLWithPath: path))
+  }
+
+  /// A 4800×3600 sheet of colored cards with one-pixel lines, like a large board of mocks.
+  private static func board() -> CGImage? {
+    let width = 4800, height = 3600
+    guard let space = CGColorSpace(name: CGColorSpace.sRGB), let context = CGContext(data: nil, width: width,
+      height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    context.setFillColor(CGColor(gray: 0.95, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    for row in 0..<9 {
+      for column in 0..<12 {
+        context.setFillColor(NSColor(hue: CGFloat((row * 5 + column) % 24) / 24, saturation: 0.5, brightness: 0.85,
+          alpha: 1).cgColor)
+        context.fill(CGRect(x: 40 + column * 396, y: 40 + row * 396, width: 356, height: 356))
+        context.setFillColor(CGColor(gray: 0.1, alpha: 1))
+        for line in 0..<12 { context.fill(CGRect(x: 60 + column * 396, y: 70 + row * 396 + line * 24, width: 300, height: 1)) }
+      }
+    }
+    return context.makeImage()
+  }
+
+  private static func mouse(_ type: NSEvent.EventType, at point: NSPoint, in window: NSWindow, clicks: Int = 1,
+    flags: NSEvent.ModifierFlags = []) -> NSEvent {
+    NSEvent.mouseEvent(with: type, location: point, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+      windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1)!
   }
 
   // MARK: A19 — searching Arquivadas

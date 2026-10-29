@@ -3561,6 +3561,18 @@ project filter replacing the chips and the highlight of the open subagent.
   so (`TranscriptState.jumpToLatest`).
 - **Images (A14).** The viewer has Copiar imagem (⌘C, PNG and TIFF on the clipboard) and shows the original file;
   an image in the chat and in the viewer has Copiar imagem in its right-click menu and drags out as a PNG file.
+- **Image viewer (29 October).** `MacImageScrollView` puts the original in one layer of a magnifying `NSScrollView`:
+  100% is one image pixel per screen pixel, from 10% (or the fit) to 1600%, mipmapped when reduced and with hard
+  pixels from 200%. A mouse's wheel and ⌘ + scroll zoom smoothly around the pointer; the trackpad's and Magic
+  Mouse's scroll pans with inertia and their pinch zooms; dragging pans (open/closed hand); a double click or a
+  two-finger double tap switches fit ↔ 100% at that point; ⌘+/⌘=, ⌘−, ⌘0 (fit), ⌘1 (100%, ahead of Ir's ⌘1 in this
+  window), the arrows (⌥ pages) and Esc, listed under Imagem in ⌘/. The bar: − % + (the percentage fits), Ajustar,
+  Tamanho real, Copiar imagem, Fechar; the right-click menu repeats the zoom. A resize keeps the fit, or the middle
+  of a manual zoom. Dragging out moved to the title bar's icon (the window's represented PNG, always copied) and ⌥ +
+  drag. A click outside still closes it, but not during a pan, a drag out or with the menu open. The glass
+  "Copiar imagem" pill seen over the image was that menu with its only item: macOS 27 hides menu images, so a
+  one-item menu is a pill. `-OpenCodeMacAjustes viewer` checks it on a 4800×3600 board. Arquivos still shows images
+  with Quick Look.
 - **Contexto's figures (A15).** Context first, with its ring before the number (centered on the number and its
   caption), then cache hit, then cost.
 - **Composer row (A16).** The usage line under the composer is gone (context and cache are in Contexto and the

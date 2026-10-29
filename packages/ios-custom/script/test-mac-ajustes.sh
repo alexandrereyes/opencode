@@ -17,7 +17,7 @@ codesign --force --deep --sign - "$copy" 2>/dev/null
 # cfprefsd may still write the last app's preferences right after it exits.
 trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
 failed=0
-for mode in composer question quote image archived numbers width dictation jump master divider; do
+for mode in composer question quote image viewer archived numbers width dictation jump master divider; do
   # Each mode starts from a fresh window: no restored window, reading place or Contexto width.
   defaults delete "$domain" 2>/dev/null || true
   rm -rf "$HOME/Library/Saved Application State/$domain.savedState"

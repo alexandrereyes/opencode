@@ -520,14 +520,6 @@ struct MacViewedImage: Identifiable {
   var original: (() async -> CGImage?)? = nil
 }
 
-/// Copiar imagem, for an image in the chat and in its viewer.
-struct MacImageMenu: View {
-  let image: CGImage
-  var body: some View {
-    Button("Copiar imagem", systemImage: "doc.on.doc") { MacImageTransfer.copy(image) }
-  }
-}
-
 /// Images leave the app as PNG (and TIFF for older apps) on the clipboard, and as a PNG file when dragged out.
 @MainActor enum MacImageTransfer {
   static func copy(_ image: CGImage) {
@@ -540,16 +532,22 @@ struct MacImageMenu: View {
   }
 
   static func provider(_ image: CGImage, name: String) -> NSItemProvider {
+    guard let file = file(image, name: name), let provider = NSItemProvider(contentsOf: file) else { return NSItemProvider() }
+    provider.suggestedName = file.lastPathComponent
+    return provider
+  }
+
+  /// The image as `<name>.png` in a new temporary folder; safe off the main thread.
+  nonisolated static func file(_ image: CGImage, name: String) -> URL? {
     let base = URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
       .components(separatedBy: CharacterSet(charactersIn: "/:\\")).joined(separator: "-")
     let folder = FileManager.default.temporaryDirectory.appending(path: "OpenCodeImages/" + UUID().uuidString)
     let file = folder.appending(path: (base.isEmpty ? "Imagem" : base) + ".png")
     guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil,
       let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]),
-      (try? png.write(to: file)) != nil, let provider = NSItemProvider(contentsOf: file)
-    else { return NSItemProvider() }
-    provider.suggestedName = file.lastPathComponent
-    return provider
+      (try? png.write(to: file)) != nil
+    else { return nil }
+    return file
   }
 }
 

@@ -6,7 +6,7 @@ import SwiftUI
 /// together with the code named in their comment.
 struct MacShortcut: Identifiable {
   enum Group: String, CaseIterable, Identifiable {
-    case general = "Geral", sessions = "Sessões", conversation = "Conversa", window = "Janela"
+    case general = "Geral", sessions = "Sessões", conversation = "Conversa", window = "Janela", image = "Imagem"
     var id: String { rawValue }
   }
 
@@ -71,7 +71,6 @@ struct MacShortcut: Identifiable {
   static let dictationKey = MacShortcut(.conversation, "Ditado", caps: ["⌥", "direito"])
   static let dictationEditor = MacShortcut(.conversation, "Ditado no editor", caps: ["⌃", "⌥", "Espaço"])
   static let createSession = MacShortcut(.conversation, "Enviar em Nova sessão", .return)
-  static let copyImage = MacShortcut(.conversation, "Copiar imagem no visualizador", "c")
 
   // Janela
   static let context = MacShortcut(.window, "Mostrar ou ocultar Contexto", "i", [.option, .command])
@@ -82,11 +81,21 @@ struct MacShortcut: Identifiable {
   static let sidebar = MacShortcut(.window, "Mostrar ou ocultar Sessões", caps: ["⌃", "⌘", "S"])
   static let proxy = MacShortcut(.window, "LLM proxy", "l", [.shift, .command])
 
+  // Imagem: the image viewer's window. MacImageScrollView handles the zoom keys (⌘= too) and the arrows there,
+  // ahead of the menus, so ⌘1 is Tamanho real in it.
+  static let copyImage = MacShortcut(.image, "Copiar imagem", "c")
+  static let zoomIn = MacShortcut(.image, "Ampliar", caps: ["⌘", "+"])
+  static let zoomOut = MacShortcut(.image, "Reduzir", caps: ["⌘", "−"])
+  static let zoomFit = MacShortcut(.image, "Ajustar à janela", caps: ["⌘", "0"])
+  static let zoomActual = MacShortcut(.image, "Tamanho real", caps: ["⌘", "1"])
+  static let panImage = MacShortcut(.image, "Mover a imagem", caps: ["←", "↑", "↓", "→"])
+
   static let all: [MacShortcut] = [
     search, newSession, newWindow, reload, compose, settings, shortcuts, searchNext, searchPrevious,
     numbered, previous, next, back, master, fromThis, rename, pin, archive, delete, selectAll,
-    find, model, sideQuestion, send, newline, dictationKey, dictationEditor, createSession, copyImage,
+    find, model, sideQuestion, send, newline, dictationKey, dictationEditor, createSession,
     context, files, previousFile, nextFile, sidebar, proxy,
+    copyImage, zoomIn, zoomOut, zoomFit, zoomActual, panImage,
   ]
 
   private static func caps(_ modifiers: EventModifiers) -> [String] {
@@ -143,7 +152,7 @@ struct MacShortcutsSheet: View {
       .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 8))
       .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(theme.color(.border), lineWidth: 0.7) }
       HStack(alignment: .top, spacing: 0) {
-        column([.general])
+        column([.general, .image])
         divider
         column([.sessions])
         divider
