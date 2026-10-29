@@ -3582,7 +3582,7 @@ project filter replacing the chips and the highlight of the open subagent.
 
 **Checks.** `MacAdjustmentsTests` (cost format, ⌘1–⌘9 order, archived search, remembered width and its range,
 absolute breadcrumb, run label, model rows, the right Option key's rules). `script/test-mac-ajustes.sh` runs
-`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master`)
+`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider`)
 in the fixture through real AppKit events: line heights, wrapping width and scroll position with one line, three,
 tokens and twelve; a click, Shift+Return, Return and Esc in a question; a pending quote opening focused, Return and
 Esc; ⌘C in the viewer (the clipboard is restored afterwards) and the drag provider; the archived search; the Ir

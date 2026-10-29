@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|divider`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -41,6 +41,7 @@ import SwiftUI
       case "dictation": try await dictation(window: window, runtime: runtime, shot: shot)
       case "jump": try await jump(window: window, runtime: runtime, shot: shot)
       case "master": try await master(window: window, runtime: runtime, shot: shot)
+      case "divider": try await divider(window: window, runtime: runtime)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -278,6 +279,37 @@ import SwiftUI
         throw Failure(description: "Contexto \(context) / chat \(chat) na janela \(windowWidth)")
       }
       shot("contexto-\(Int(requested))")
+    }
+  }
+
+  /// The chat | Contexto divider: the pointer 6 pt either side of the hairline reaches its grip, over the
+  /// transcript and over Contexto, and dragging it 80 pt left widens Contexto by 80 pt.
+  private static func divider(window: NSWindow, runtime: MacWindowRuntime) async throws {
+    let grip = try await wait("a alça do divisor") {
+      views(window).first { String(describing: type(of: $0)) == "Grip" && $0.window != nil && $0.bounds.width > 0 }
+    }
+    let root = try require(window.contentView?.superview, "a raiz da janela")
+    let center = grip.convert(CGPoint(x: grip.bounds.midX, y: grip.bounds.midY), to: nil)
+    for offset in [-6.0, -3, 0, 3, 6] {
+      let point = CGPoint(x: center.x + offset, y: center.y)
+      let hit = root.hitTest(root.convert(point, from: nil))
+      guard hit === grip else {
+        throw Failure(description: "a \(Int(offset)) pt da linha o clique vai para \(hit.map { type(of: $0) }.map(String.init(describing:)) ?? "nada")")
+      }
+    }
+    let before = runtime.contextWidth
+    func mouse(_ type: NSEvent.EventType, _ x: CGFloat) -> NSEvent {
+      NSEvent.mouseEvent(with: type, location: CGPoint(x: x, y: center.y), modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+        eventNumber: 0, clickCount: 1, pressure: 1)!
+    }
+    window.sendEvent(mouse(.leftMouseDown, center.x + 4))
+    for step in 1...8 { window.sendEvent(mouse(.leftMouseDragged, center.x + 4 - CGFloat(step) * 10)) }
+    window.sendEvent(mouse(.leftMouseUp, center.x - 76))
+    try await Task.sleep(for: .milliseconds(300))
+    print("MacAjustes divider: Contexto \(Int(before)) → \(Int(runtime.contextWidth))")
+    guard abs(runtime.contextWidth - before - 80) < 1 else {
+      throw Failure(description: "arrastar 80 pt mudou Contexto de \(before) para \(runtime.contextWidth)")
     }
   }
 

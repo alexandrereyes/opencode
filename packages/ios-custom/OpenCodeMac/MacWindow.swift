@@ -180,22 +180,61 @@ private struct MacColumnDivider: View {
   var body: some View {
     Rectangle().fill(theme.color(.border)).frame(width: 1)
       .overlay {
-        Color.clear.frame(width: 9).contentShape(Rectangle())
-          .onHover { inside in
-            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-          }
-          .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
-            .onChanged { value in
-              // A width remembered from a wider window starts the drag from what is shown.
-              let origin = start ?? min(max(width, range.lowerBound), range.upperBound)
-              start = origin
-              width = min(max(origin - value.translation.width, range.lowerBound), range.upperBound)
-            }
-            .onEnded { _ in
-              start = nil
-              ended(width)
-            })
+        MacColumnGrip { translation in
+          // A width remembered from a wider window starts the drag from what is shown.
+          let origin = start ?? min(max(width, range.lowerBound), range.upperBound)
+          start = origin
+          width = min(max(origin - translation, range.lowerBound), range.upperBound)
+        } ended: {
+          start = nil
+          ended(width)
+        }
+        .frame(width: 13)
       }
+      // Above Contexto, which the grip's right half overlaps.
+      .zIndex(1)
       .accessibilityHidden(true)
+  }
+}
+
+/// The divider's grab area, in AppKit: the transcript and Contexto's scroll views are AppKit views, which win hit
+/// testing and cursor updates over a SwiftUI shape, so a SwiftUI grab area beside them was mostly unreachable.
+private struct MacColumnGrip: NSViewRepresentable {
+  let changed: (Double) -> Void
+  let ended: () -> Void
+
+  func makeNSView(context: Context) -> Grip { Grip() }
+  func updateNSView(_ view: Grip, context: Context) {
+    view.changed = changed
+    view.ended = ended
+  }
+
+  final class Grip: NSView {
+    var changed: (Double) -> Void = { _ in }
+    var ended: () -> Void = {}
+    private var origin: CGFloat?
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func updateTrackingAreas() {
+      super.updateTrackingAreas()
+      trackingAreas.forEach(removeTrackingArea)
+      addTrackingArea(NSTrackingArea(rect: .zero, options: [.cursorUpdate, .activeInActiveApp, .inVisibleRect],
+        owner: self))
+    }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+    override func mouseDown(with event: NSEvent) { origin = event.locationInWindow.x }
+    override func mouseDragged(with event: NSEvent) {
+      guard let origin else { return }
+      // Views the pointer crosses while dragging would set their own cursor.
+      NSCursor.resizeLeftRight.set()
+      changed(event.locationInWindow.x - origin)
+    }
+    override func mouseUp(with event: NSEvent) {
+      guard origin != nil else { return }
+      origin = nil
+      ended()
+    }
   }
 }
