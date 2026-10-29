@@ -27,6 +27,8 @@ extension PromptRequest {
     var sessions: [JSONValue] = []
     var apps: [JSONValue] = []
     var suffix: [String] = contextText
+    // Cited attachments (`[image-1.png]`): the attachment's `mention`, like the web's image mentions.
+    var cited: [String: JSONValue] = [:]
     for span in expanded.validTokens {
       let mention = JSONValue.object([
         "start": .number(Double(span.start)), "end": .number(Double(span.end)),
@@ -74,20 +76,22 @@ extension PromptRequest {
             ]))
           suffix.append(app.context)
         }
+      case .attachment: cited[span.token.id] = mention
       case .snippet, .command: break
       }
     }
     var staged: [JSONValue] = []
     for item in attachments where item.attachment.quoteID == nil {
       suffix.append("Attached file: `\(item.path)`")
+      let mention = cited[item.attachment.id].map { ["mention": $0] } ?? [:]
       if let inline = item.inline {
-        files.append(.object(["uri": .string(inline), "name": .string(item.attachment.name)]))
+        files.append(.object(["uri": .string(inline), "name": .string(item.attachment.name)].merging(mention) { $1 }))
       } else {
         staged.append(
           .object([
             "name": .string(item.attachment.name), "mime": .string(item.attachment.mime),
             "path": .string(item.path),
-          ]))
+          ].merging(mention) { $1 }))
       }
     }
     for quote in quotes {
@@ -152,7 +156,9 @@ extension PromptRequest {
     if !sessions.isEmpty { metadata["sessions"] = .array(sessions) }
     if !apps.isEmpty { metadata["apps"] = .array(apps) }
     if !staged.isEmpty { metadata["attachments"] = .array(staged) }
-    if let data = try? JSONEncoder().encode(display.tokens),
+    // Citations are restored from their attachments' `mention`, like the web; older clients would fail to decode
+    // the new token kind, so it never enters `composerTokens`.
+    if let data = try? JSONEncoder().encode(display.tokens.filter { $0.token.kind != .attachment }),
       let tokens = try? JSONDecoder().decode(JSONValue.self, from: data)
     {
       metadata["composerTokens"] = tokens

@@ -4,9 +4,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The chat's composer on the iPhone's model (`ConversationDraft`, `ConversationStore.send`, `ComposerSources`):
-/// `@` sessions, apps, agents and references, `!` files, `/` commands, `$` skills and `#` snippets open the
-/// shared suggestion panel and become atomic colored tokens; `+`, dragging onto the window and pasting add
-/// attachments; quotes wait in `Citações · N`. Then the model and agent capsules and the microphone, which
+/// `@` sessions, apps, agents and references, `&` files, `/` commands, `$` skills and `#` snippets open the
+/// shared suggestion panel (↑/↓ or ⌃P/⌃N move, Return or Tab picks, Esc closes) and become atomic colored tokens;
+/// a pasted or dropped image is cited in the text as `[image-1.png]`, like the web; `+` adds attachments; quotes
+/// wait in `Citações · N`. Then the model and agent capsules and the microphone, which
 /// turns into Enviar once there is something to send. Context and cache live in Contexto and the title's ring.
 ///
 /// Return sends and Shift+Return breaks the line (the Mac chat convention). Sending while the agent works uses
@@ -27,6 +28,7 @@ struct MacComposer: View {
   var corner: AnyView? = nil
   @State private var owner = UUID()
   @State private var suggestionReturn = ComposerSuggestionReturn()
+  @State private var highlight = ComposerSuggestionHighlight()
   @State private var picking: MacPicker?
 
   private var hasContent: Bool { draft.hasText || !draft.attachments.isEmpty || !draft.quotes.isEmpty }
@@ -39,7 +41,9 @@ struct MacComposer: View {
   var body: some View {
     VStack(spacing: 7) {
       if let trigger = draft.trigger {
-        ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn) { choose($0, replacing: trigger) }
+        ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn, highlight: highlight) {
+          choose($0, replacing: trigger)
+        }
       }
       if draft.replacing != nil {
         HStack {
@@ -89,6 +93,35 @@ struct MacComposer: View {
       try? await Task.sleep(for: .seconds(delay))
       firstSuggestion()?()
     }
+    .task {
+      // `-OpenCodeMacKeys "/ r down down return"`: types into the editor through AppKit's own key path, one key
+      // every 0.4 s (characters, or up/down/return/tab/esc/ctrl-n/ctrl-p/newline), for quick checks without a
+      // keyboard; `clear` empties the field, `paste-image` pastes a small PNG and `unchip` closes the first
+      // attachment's chip.
+      guard embedded == nil, let keys = MacFixture.value("-OpenCodeMacKeys") else { return }
+      try? await Task.sleep(for: .seconds(2))
+      for key in keys.split(separator: " ").map(String.init) {
+        guard let text = draft.input?.textView, let window = text.window else { return }
+        window.makeFirstResponder(text)
+        if key == "paste-image" {
+          let item = NSPasteboardItem()
+          let image = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 8, pixelsHigh: 8, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
+            bitsPerPixel: 0)
+          item.setData(image?.representation(using: .png, properties: [:]) ?? Data(), forType: .png)
+          _ = MacAttachments.receive([item], store: store, draft: draft)
+        } else if key == "clear" {
+          draft.replace(NSRange(location: 0, length: draft.editorText.length), with: NSAttributedString())
+        } else if key == "unchip" {
+          guard let attachment = draft.attachments.first else { continue }
+          MacAttachments.uncite(attachment, in: draft)
+          draft.remove(attachment)
+        } else {
+          MacSyntheticKey.send(key, to: window)
+        }
+        try? await Task.sleep(for: .milliseconds(400))
+      }
+    }
     #endif
     .onDisappear {
       if draft.editorOwner == owner { draft.editorOwner = nil }
@@ -129,7 +162,7 @@ struct MacComposer: View {
       MacComposerEditor(draft: draft, theme: theme, owner: owner, canSubmit: canSubmit, submit: submit, dictate: dictate,
         placeholder: store.isChild ? "Mensagem para o subagente…" : "Pergunte qualquer coisa…",
         cancel: embedded?.cancel,
-        firstSuggestion: firstSuggestion, attach: { items in
+        firstSuggestion: firstSuggestion, moveSuggestion: { highlight.move($0) }, attach: { items in
           MacAttachments.receive(items, store: store, draft: draft)
         })
         .padding(.horizontal, 4)
@@ -158,7 +191,7 @@ struct MacComposer: View {
       Button("Arquivos…", systemImage: "doc") { MacAttachments.choose(images: false, store: store, draft: draft) }
       Button("Imagens…", systemImage: "photo") { MacAttachments.choose(images: true, store: store, draft: draft) }
       Divider()
-      Button("Mencionar arquivo (!)", systemImage: "at") { insertTrigger("!") }
+      Button("Mencionar arquivo (&)", systemImage: "at") { insertTrigger("&") }
     } label: {
       Image(systemName: "plus").font(.system(size: 13, weight: .medium)).foregroundStyle(theme.color(.text))
         .frame(width: 28, height: 28)
@@ -262,6 +295,8 @@ struct MacComposer: View {
       HStack(spacing: 8) {
         ForEach(draft.attachments.filter { $0.quoteID == nil }) { attachment in
           MacAttachmentChip(attachment: attachment, url: draft.persistence.file(attachment)) {
+            // A cited image leaves the text with its chip.
+            MacAttachments.uncite(attachment, in: draft)
             draft.remove(attachment)
           }
           .disabled(draft.sending || draft.importing)
@@ -304,8 +339,11 @@ struct MacComposer: View {
     draft.insert(item.token, replacing: trigger.range)
   }
 
+  /// Return's and Tab's pick: the highlighted item, once loaded for the trigger still being typed.
   private func firstSuggestion() -> (() -> Void)? {
-    guard let trigger = draft.trigger, let first = suggestionReturn.first, first.trigger == trigger else { return nil }
+    guard let trigger = draft.trigger else { return nil }
+    if let item = highlight.selected(for: trigger) { return { choose(item, replacing: trigger) } }
+    guard let first = suggestionReturn.first, first.trigger == trigger else { return nil }
     return { choose(first.item, replacing: trigger) }
   }
 
@@ -329,6 +367,7 @@ struct MacComposerEditor: NSViewRepresentable {
   var placeholder = ""
   var cancel: (() -> Void)? = nil
   let firstSuggestion: () -> (() -> Void)?
+  var moveSuggestion: (Int) -> Bool = { _ in false }
   let attach: ([NSPasteboardItem]) -> Bool
 
   func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -358,6 +397,7 @@ struct MacComposerEditor: NSViewRepresentable {
     text.canSubmit = canSubmit && draft.trigger == nil
     text.querying = draft.trigger != nil
     text.firstSuggestion = firstSuggestion
+    text.moveSuggestion = moveSuggestion
     text.escape = { [weak draft] in draft?.dismissSuggestions() }
     text.cancel = cancel
     text.attach = attach
@@ -379,6 +419,7 @@ struct MacComposerEditor: NSViewRepresentable {
         length: min(draft.selection.length, max(0, length - draft.selection.location))))
       view.restyle()
       text.undoManager?.removeAllActions()
+      context.coordinator.cited = MacAttachments.cited(in: view.textStorage)
     } else if restyle {
       view.restyle()
     }
@@ -391,17 +432,21 @@ struct MacComposerEditor: NSViewRepresentable {
     }
   }
 
-  /// One line at least; it grows line by line up to `ComposerInputView.maximumLines`, then scrolls.
+  /// One line at least; it grows line by line up to `ComposerInputView.maximumLines` or 40% of the window, whichever
+  /// is smaller (three lines at least), then the text scrolls inside the field, following the caret.
   func sizeThatFits(_ proposal: ProposedViewSize, nsView: ComposerInputView, context: Context) -> CGSize? {
     guard let width = proposal.width, width > 0 else { return nil }
     let line = nsView.lineHeight
-    return CGSize(width: width,
-      height: min(max(line, nsView.contentHeight(width: width)), line * ComposerInputView.maximumLines))
+    let window = nsView.window.map { max(3, floor($0.contentLayoutRect.height * 0.4 / line)) } ?? .infinity
+    let maximum = line * min(ComposerInputView.maximumLines, window)
+    return CGSize(width: width, height: min(max(line, nsView.contentHeight(width: width)), maximum))
   }
 
   final class Coordinator: NSObject, NSTextViewDelegate {
     var parent: MacComposerEditor
     var updating = false
+    /// The attachments cited in the text after the last edit; a citation erased takes its attachment along.
+    var cited: Set<String> = []
     init(_ parent: MacComposerEditor) { self.parent = parent }
 
     func textDidChange(_ notification: Notification) {
@@ -410,6 +455,11 @@ struct MacComposerEditor: NSViewRepresentable {
       parent.draft.receiveEditor(input)
       input.textView.typingAttributes = input.plainAttributes
       input.invalidateIntrinsicContentSize()
+      let now = MacAttachments.cited(in: input.textStorage)
+      for id in cited.subtracting(now) {
+        if let attachment = parent.draft.attachments.first(where: { $0.id == id }) { parent.draft.remove(attachment) }
+      }
+      cited = now
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {
@@ -535,6 +585,23 @@ private struct MacPickerSheet: View {
 }
 
 #if DEBUG
+/// A key event delivered through the window, as the keyboard would (`-OpenCodeMacKeys`).
+@MainActor enum MacSyntheticKey {
+  static func send(_ name: String, to window: NSWindow) {
+    let named: [String: (UInt16, String, NSEvent.ModifierFlags)] = [
+      "up": (126, "\u{F700}", []), "down": (125, "\u{F701}", []), "return": (36, "\r", []), "tab": (48, "\t", []),
+      "esc": (53, "\u{1B}", []), "ctrl-n": (45, "\u{0E}", .control), "ctrl-p": (35, "\u{10}", .control),
+      "space": (49, " ", []), "delete": (51, "\u{7F}", []), "newline": (36, "\r", .shift),
+    ]
+    let (code, characters, flags) = named[name] ?? (0, name, [])
+    let ignoring = name == "ctrl-n" ? "n" : name == "ctrl-p" ? "p" : characters
+    guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+      windowNumber: window.windowNumber, context: nil, characters: characters, charactersIgnoringModifiers: ignoring,
+      isARepeat: false, keyCode: code) else { return }
+    window.sendEvent(event)
+  }
+}
+
 /// The model picker's opening time: from the request to the sheet's appearance, then to the end of the first main
 /// run-loop turn after it (its first layout and drawing), printed as `MacPicker …` for `script` runs.
 @MainActor enum MacPickerTiming {
@@ -595,7 +662,9 @@ private struct MacAttachmentChip: View {
     importFiles(panel.urls, store: store, draft: draft)
   }
 
-  static func importFiles(_ urls: [URL], store: ConversationStore, draft: ConversationDraft) {
+  /// Files chosen with `+` arrive as attachments without a citation, like the web's picker; images pasted or
+  /// dropped (`cite`) are cited in the text.
+  static func importFiles(_ urls: [URL], cite: Bool = false, store: ConversationStore, draft: ConversationDraft) {
     guard !urls.isEmpty else { return }
     Task {
       draft.importing = true
@@ -606,7 +675,11 @@ private struct MacAttachmentChip: View {
           guard size <= AttachmentEncoding.draftLimit else { throw AttachmentError.tooLarge }
           let data = try await Task.detached { try Data(contentsOf: url) }.value
           let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-          await store.importAttachment(data, name: url.lastPathComponent, mime: mime, draft: draft)
+          if cite, mime.hasPrefix("image/") {
+            await importCited(data, name: url.lastPathComponent, mime: mime, store: store, draft: draft)
+          } else {
+            await store.importAttachment(data, name: url.lastPathComponent, mime: mime, draft: draft)
+          }
         } catch {
           store.toast.show(error.localizedDescription, kind: .error)
         }
@@ -614,11 +687,11 @@ private struct MacAttachmentChip: View {
     }
   }
 
-  /// Pasted images (screenshots) and files.
+  /// Pasted images (screenshots) and files. Images are cited at the caret, like the web's paste.
   static func receive(_ items: [NSPasteboardItem], store: ConversationStore, draft: ConversationDraft) -> Bool {
     let files = items.compactMap { $0.string(forType: .fileURL).flatMap(URL.init(string:)) }
     if !files.isEmpty {
-      importFiles(files, store: store, draft: draft)
+      importFiles(files, cite: true, store: store, draft: draft)
       return true
     }
     let images = items.compactMap { item -> (Data, String)? in
@@ -634,11 +707,86 @@ private struct MacAttachmentChip: View {
       draft.importing = true
       defer { draft.importing = false }
       for (data, ext) in images {
-        await store.importAttachment(data, name: "Imagem-\(UUID().uuidString.prefix(6)).\(ext)",
-          mime: ext == "png" ? "image/png" : "image/jpeg", draft: draft)
+        await importCited(data, name: "image.\(ext)", mime: ext == "png" ? "image/png" : "image/jpeg",
+          store: store, draft: draft)
       }
     }
     return true
+  }
+
+  /// Imports an image under a name unique in the draft and cites it at the caret as `[name]`.
+  static func importCited(_ data: Data, name: String, mime: String, store: ConversationStore,
+    draft: ConversationDraft) async
+  {
+    let unique = citedName(name, mime: mime, existing: draft.attachments.map(\.name))
+    guard let attachment = await store.importAttachment(data, name: unique, mime: mime, draft: draft) else { return }
+    cite(attachment, in: draft)
+  }
+
+  /// The citation token at the caret, with a space before it when glued to a word (the web's insertion boundaries).
+  static func cite(_ attachment: DraftAttachment, in draft: ConversationDraft) {
+    let text = draft.editorText.string as NSString
+    let location = min(draft.selection.location, text.length)
+    var range = NSRange(location: location, length: min(draft.selection.length, text.length - location))
+    if location > 0, let scalar = UnicodeScalar(text.character(at: location - 1)),
+      !CharacterSet.whitespacesAndNewlines.contains(scalar), !"([{".unicodeScalars.contains(scalar)
+    {
+      draft.replace(range, with: NSAttributedString(string: " ", attributes: draft.input?.plainAttributes))
+      range = NSRange(location: location + 1, length: 0)
+    }
+    draft.insert(ComposerToken(kind: .attachment, id: attachment.id, text: "[\(attachment.name)]"), replacing: range)
+  }
+
+  /// Removes the attachment's citation from the text (its chip was closed), with the space after it.
+  static func uncite(_ attachment: DraftAttachment, in draft: ConversationDraft) {
+    let text = draft.editorText
+    var found: NSRange?
+    text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, range, stop in
+      guard let token = (value as? ComposerTokenAttachment)?.token, token.kind == .attachment,
+        token.id == attachment.id else { return }
+      found = range
+      stop.pointee = true
+    }
+    guard var range = found else { return }
+    let string = text.string as NSString
+    if NSMaxRange(range) < string.length, string.character(at: NSMaxRange(range)) == 32 { range.length += 1 }
+    draft.replace(range, with: NSAttributedString())
+  }
+
+  /// The attachment IDs cited in an editor text.
+  static func cited(in text: NSAttributedString) -> Set<String> {
+    var ids: Set<String> = []
+    text.enumerateAttribute(.attachment, in: NSRange(location: 0, length: text.length)) { value, _, _ in
+      if let token = (value as? ComposerTokenAttachment)?.token, token.kind == .attachment { ids.insert(token.id) }
+    }
+    return ids
+  }
+
+  /// The web's `assignAttachmentFilenames`: a safe file name, generic ones (`image`, `Screenshot`, `clipboard`…)
+  /// numbered from `image-1`, and unique among the draft's attachments (case-insensitive).
+  static func citedName(_ name: String, mime: String, existing: [String]) -> String {
+    var used = Set(existing.map { $0.lowercased() })
+    let unsafe = CharacterSet(charactersIn: "<>:\"/\\|?*[]").union(.controlCharacters)
+    let last = name.replacingOccurrences(of: "\\", with: "/").components(separatedBy: "/").last ?? ""
+    let clean = String(String.UnicodeScalarView(last.unicodeScalars.map { unsafe.contains($0) ? "-" : $0 }))
+      .trimmingCharacters(in: .whitespaces)
+    let file = clean.isEmpty ? "image" : clean
+    let dot = (file as NSString).range(of: ".", options: .backwards).location
+    let hasExtension = dot != NSNotFound && dot > 0
+    let fallback = ["image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"][mime] ?? "png"
+    let ext = hasExtension ? (file as NSString).substring(from: dot + 1).lowercased() : fallback
+    let base = hasExtension ? (file as NSString).substring(to: dot) : file
+    let generic = base.range(of: #"^(?:image|screenshot|screen[-_ ]?shot|clipboard|pasted[-_ ]?image|untitled|unknown|file|blob)(?:[-_ ]?\(?\d+\)?)?$"#,
+      options: [.regularExpression, .caseInsensitive]) != nil
+    let root = generic ? "image" : base
+    var index = generic ? 1 : 0
+    var candidate = "\(root)\(index > 0 ? "-\(index)" : "").\(ext)"
+    while used.contains(candidate.lowercased()) {
+      index = index == 0 ? 2 : index + 1
+      candidate = "\(root)-\(index).\(ext)"
+    }
+    used.insert(candidate.lowercased())
+    return candidate
   }
 
   /// Files and images dropped on the conversation.
@@ -647,15 +795,12 @@ private struct MacAttachmentChip: View {
       if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
           guard let url else { return }
-          Task { @MainActor in importFiles([url], store: store, draft: draft) }
+          Task { @MainActor in importFiles([url], cite: true, store: store, draft: draft) }
         }
       } else if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
         provider.loadDataRepresentation(forTypeIdentifier: UTType.png.identifier) { data, _ in
           guard let data else { return }
-          Task { @MainActor in
-            await store.importAttachment(data, name: "Imagem-\(UUID().uuidString.prefix(6)).png", mime: "image/png",
-              draft: draft)
-          }
+          Task { @MainActor in await importCited(data, name: "image.png", mime: "image/png", store: store, draft: draft) }
         }
       }
     }

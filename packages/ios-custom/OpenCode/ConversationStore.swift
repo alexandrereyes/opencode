@@ -526,9 +526,10 @@ import UniformTypeIdentifiers
     if composerCatalog == nil { composerCatalog = try await client.composerSources(directory: directory) }
     return composerCatalog?.newSessionDocument(document) ?? document
   }
-  func importAttachment(
+  /// The imported attachment, nil when it failed (the toast says why).
+  @discardableResult func importAttachment(
     _ bytes: Data, name: String, mime: String, draft: ConversationDraft, reservedBytes: Int = 0
-  ) async {
+  ) async -> DraftAttachment? {
     do {
       let (data, name, mime) = try await Task.detached(priority: .userInitiated) {
         try AttachmentEncoding.prepare(bytes, name: name, mime: mime)
@@ -544,7 +545,11 @@ import UniformTypeIdentifiers
       try await draft.persistence.store(data, attachment: attachment)
       draft.attachments.append(attachment)
       await draft.persist()
-    } catch { toast.show(error.localizedDescription, kind: .error) }
+      return attachment
+    } catch {
+      toast.show(error.localizedDescription, kind: .error)
+      return nil
+    }
   }
   /// Images pasted or dropped into the editor, imported like the "+" menu's photos.
   func importImages(_ providers: [NSItemProvider], draft: ConversationDraft, reservedBytes: Int = 0) async {

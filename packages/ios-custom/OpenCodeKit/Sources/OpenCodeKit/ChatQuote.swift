@@ -157,7 +157,7 @@ extension ComposerDocument {
       case .app:
         value["type"] = .string("app")
         value["app"] = .object(span.token.detail ?? [:])
-      case .command: break
+      case .command, .attachment: break
       }
       result.append(.object(value))
       cursor = span.end

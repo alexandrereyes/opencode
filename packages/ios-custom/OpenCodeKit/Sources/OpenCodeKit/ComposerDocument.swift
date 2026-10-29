@@ -2,6 +2,9 @@ import Foundation
 
 public enum ComposerTokenKind: String, Codable, Sendable {
   case file, reference, session, agent, command, skill, snippet, app
+  /// A pasted image cited in the text as `[name]` (the web's `addCitedAttachments`): `id` is the draft attachment's
+  /// ID; it is sent as that attachment's `mention`. Only the Mac composer creates it.
+  case attachment
 }
 
 public struct ComposerToken: Codable, Sendable, Equatable {

@@ -109,6 +109,10 @@ final class ComposerInputView: NSScrollView {
     textView.textContainer?.widthTracksTextView = true
     textView.isVerticallyResizable = true
     textView.isHorizontallyResizable = false
+    // Created in code, the text view's size limits default to its zero frame: past the field's height the text would
+    // be clipped instead of growing taller than the clip view and scrolling.
+    textView.minSize = .zero
+    textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
     textView.autoresizingMask = [.width]
     textView.disableAutomaticCorrections()
     textView.setAccessibilityLabel("Mensagem")
@@ -209,6 +213,8 @@ final class ComposerTextNSView: NSTextView {
   var canSubmit = false
   var querying = false
   var firstSuggestion: (() -> (() -> Void)?)?
+  /// Moves the panel's highlight by ±1; false while it has nothing to move through.
+  var moveSuggestion: ((Int) -> Bool)?
   var escape: (() -> Void)?
   var cancel: (() -> Void)?
   /// Image or file data pasted or dropped on the editor: the composer turns it into an attachment.
@@ -271,6 +277,24 @@ final class ComposerTextNSView: NSTextView {
     if event.keyCode == 53, querying {
       escape?()
       return
+    }
+    // While the panel is open, ↑/↓ (and ⌃P/⌃N, like the system's lists) move its highlight instead of the caret, and
+    // Tab picks it like Return.
+    if querying, !hasMarkedText() {
+      let plain = flags.subtracting([.numericPad, .function, .capsLock]).isEmpty
+      let control = flags.subtracting([.capsLock]) == .control
+      let delta: Int? =
+        if plain, event.keyCode == 125 || event.keyCode == 126 { event.keyCode == 125 ? 1 : -1 }
+        else if control, key == "n" || key == "p" { key == "n" ? 1 : -1 }
+        else { nil }
+      if let delta {
+        _ = moveSuggestion?(delta)
+        return
+      }
+      if plain, event.keyCode == 48 {
+        firstSuggestion?()?()
+        return
+      }
     }
     // Inside a sheet (a quote's comment), Esc closes it instead of NSTextView's word completion.
     if event.keyCode == 53, let cancel {
