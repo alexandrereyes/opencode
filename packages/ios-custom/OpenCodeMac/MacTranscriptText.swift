@@ -312,7 +312,10 @@ final class MacResponseTextView: NSTextView {
     }
     quoteRanges = zip(prose.segments, prose.ranges).compactMap { $0.quoteDepth > 0 ? (quoteMap.display($1), $0.quoteDepth) : nil }
     ruleRanges = zip(prose.segments, prose.ranges).compactMap { $0.kind == .rule ? quoteMap.display($1) : nil }
-    selectedTextAttributes = [.backgroundColor: theme.nsColor(.primary).withAlphaComponent(0.28)]
+    let selected = theme.nsColor(.primary).withAlphaComponent(0.28)
+    if selectedTextAttributes[.backgroundColor] as? NSColor != selected {
+      selectedTextAttributes = [.backgroundColor: selected]
+    }
     if let storage = textStorage, !storage.isEqual(to: decorated) {
       replace(storage, with: decorated)
       if selection.length > 0, NSMaxRange(selection) <= text.length { setSelectedRange(quoteMap.display(selection)) }
@@ -339,7 +342,10 @@ final class MacResponseTextView: NSTextView {
   /// The laid-out height at this width.
   func fittingHeight(width: CGFloat) -> CGFloat {
     if frame.width != width { frame.size.width = width }
-    textContainer?.size = CGSize(width: width, height: .greatestFiniteMagnitude)
+    // Setting the container's size, even to the same value, lays the whole text out again: a streamed answer
+    // would be laid out from its start on every measure.
+    let size = CGSize(width: width, height: .greatestFiniteMagnitude)
+    if textContainer?.size != size { textContainer?.size = size }
     guard let manager = textLayoutManager else { return 0 }
     manager.ensureLayout(for: manager.documentRange)
     return ceil(manager.usageBoundsForTextContainer.height)

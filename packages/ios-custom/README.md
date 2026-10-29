@@ -3724,6 +3724,42 @@ after. While streaming, `MacWindow` went from 0.3 evaluations a second to none a
 `MacConversationView` from 23 to 1.5 and the transcript host's update from 23 to 2; what remains there is the
 transcript's own rebuild of the growing answer. These are shared-machine Debug samples, comparable with each other only.
 
+**Round 2: the open conversation streaming.** With the shown root answering, the window was laid out and the
+transcript rebuilt on every delta, and the transcript grew with the conversation's length. What changed:
+
+- **Secondary information is sampled** (`MacSampled`, in `MacConversationInput.swift`): the title ring's context share
+  and the tray's execution start read the transcript, which every delta changes; they are republished at most every
+  200 ms and only when they change (the last change always lands). The tray takes the sampled start through
+  `ConversationTray(started:)` (iOS still reads it from the messages). The search follows the revision only while it
+  is open.
+- **Transcript** (`MacTranscriptController.swift`): at most 30 rebuilds a second (was 60; the last change always
+  rebuilds); `TranscriptProjection.Cache` reuses each response's items while its inputs (activity entry, marks, gap,
+  each text's completion, divider and parse, disclosures) are unchanged; items are compared once, index by index, and
+  unchanged unmeasured items keep their estimate instead of being estimated again; the reading identities are built
+  once per change. `-OpenCodeMacPerfVerify` checks every cached projection against a full one. The growing block's
+  `fittingHeight` no longer resets the text container's size (which laid the whole text out again); off screen it was
+  already neither configured nor measured.
+- `TranscriptMarks` finds each calendar day once instead of asking the calendar about every message, and counts texts
+  without building arrays (same marks; OpenCodeKit's 616 tests pass). The composer keeps its heights per width until
+  its text changes, so a window layout no longer lays out a copy of the draft for every width SwiftUI asks about.
+  `ContextColumnStore` matches events against a set kept with its members.
+
+`-OpenCodeMacPerfLong <n>` adds `n` earlier turns to the root, served in pages of the requested size; the run loads
+them all (`older()`) before measuring. `-OpenCodeMacPerfScrolledUp` measures with the reader away from the end.
+Medians of two interleaved runs per side, before → after (main-thread CPU, the shown root streaming):
+
+| Scenario | Debug | Debug `-O` |
+| --- | --- | --- |
+| Short conversation, streaming | 39.5% → 36% | 39% → 34% |
+| Short conversation, typing while streaming | 43% → 38.5% | (noisy) |
+| 300 turns (905 messages), streaming | 89.5% → 74% | 62.5% → 46.5% |
+| 300 turns, typing while streaming | 86.5% → 52.5% | 64% → 24.5% |
+
+Rebuilds went from 45 to 29 a second; `MacChatAvatar` from 23 evaluations a second to none. Still open: the
+growing block's TextKit 2 view replaces its layout fragment views on every update, and since the transcript sits in
+SwiftUI's constraint-based host, each change invalidates the window's root layout (`constraintsDidChangeInEngine` in
+`AppKitPlatformViewHost`); `ConversationActivity.project` and the Markdown parse of a long answer remain whole-history.
+
 ## Platform and distribution
 
 - **Only the latest iOS.** The deployment target is always the current major version (iOS 27 today) and moves up with

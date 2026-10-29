@@ -20,6 +20,10 @@ import SwiftUI
   private let scrollView = MacTranscriptScrollView()
   private let document = MacTranscriptDocument()
   private(set) var items: [TranscriptItem] = []
+  /// `items` as the shared reading rules see them, built once per change of the items.
+  private var identities: [TranscriptItemIdentity] = []
+  /// Unchanged messages keep their items from one projection to the next.
+  private let projectionCache = TranscriptProjection.Cache()
   private(set) var geometry = TranscriptGeometry(topPadding: 16, bottomPadding: 16)
   private var measured: [Bool] = []
   private var owners: [TranscriptOwner] = []
@@ -210,11 +214,12 @@ import SwiftUI
   // MARK: Items
 
   private var lastRebuild: CFTimeInterval = 0
-  /// At most one rebuild per display frame: a streamed delta and the parse it causes land together.
+  /// At most 30 rebuilds a second: a streamed delta and the parse it causes land together, and an answer still
+  /// reads as fluid while each rebuild leaves the main thread more room. The last change always rebuilds.
   private func scheduleRebuild() {
     guard !rebuildScheduled else { return }
     rebuildScheduled = true
-    let wait = max(0, lastRebuild + 1.0 / 60 - CACurrentMediaTime())
+    let wait = max(0, lastRebuild + 1.0 / 30 - CACurrentMediaTime())
     DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
       self?.rebuildScheduled = false
       self?.rebuild()
@@ -222,6 +227,9 @@ import SwiftUI
   }
 
   private func rebuild() {
+    #if DEBUG
+    MacPerf.count("transcript.rebuild")
+    #endif
     lastRebuild = CACurrentMediaTime()
     var stale: [TranscriptPart] = []
     let next = withObservationTracking {
@@ -260,24 +268,42 @@ import SwiftUI
         guard let parsed = parses.parsed(part) else { return nil }
         if parsed.source != part.source { stale(part) }
         return (parsed.source, parsed.sections)
-      })
+      },
+      cache: projectionCache)
     var seen = Set<String>()
-    return TranscriptProjection.items(input).filter { seen.insert($0.id).inserted }
+    let items = TranscriptProjection.items(input).filter { seen.insert($0.id).inserted }
+    #if DEBUG
+    // `-OpenCodeMacPerfVerify`: the cached projection must equal a full one.
+    if MacPerf.verify {
+      var full = input
+      full.cache = nil
+      var unique = Set<String>()
+      if TranscriptProjection.items(full).filter({ unique.insert($0.id).inserted }) != items { MacPerf.mismatch("projeção") }
+    }
+    #endif
+    return items
   }
 
   /// New items keep the reader's anchor (or the end, while following) in the same pass.
   private func apply(_ next: [TranscriptItem]) {
-    guard next != items else { return }
+    // Compared once, item by item at the same index: a streamed delta changes only the last items.
+    let same = next.indices.map { $0 < items.count && items[$0] == next[$0] }
+    guard next.count != items.count || same.contains(false) else { return }
     let old = items
     if let spacer = memory.spacerPrompt, !next.contains(where: { $0.id == spacer }), old.contains(where: { $0.id == spacer }) {
       memory.spacerPrompt = next.last(where: \.sticky)?.id
       geometry.spacerPrompt = memory.spacerPrompt
     }
-    let anchor = revealed ? stableAnchor().flatMap { geometry.continued($0, from: old.map(\.identity), to: next.map(\.identity)) } : nil
+    let nextIdentities = next.map(\.identity)
+    let anchor = revealed ? stableAnchor().flatMap { geometry.continued($0, from: identities, to: nextIdentities) } : nil
     let previous = Dictionary(old.indices.filter { measured.indices.contains($0) && measured[$0] }.map {
       (old[$0].id, geometry.entries[$0].height)
     }, uniquingKeysWith: { first, _ in first })
+    // Unmeasured items still in place keep their estimate: estimating hundreds of texts on every delta was most
+    // of a long conversation's rebuild.
+    let estimates = same.indices.map { same[$0] && geometry.entries.indices.contains($0) ? geometry.entries[$0].height : nil }
     items = next
+    identities = nextIdentities
     let starts = MacTranscriptContext.responseStarts(next)
     if starts != context.responseStarts {
       let changed = starts.symmetricDifference(context.responseStarts)
@@ -285,7 +311,7 @@ import SwiftUI
       // Native prose draws its icon itself; hosted items read the context.
       for id in changed { if let prose = cells[id] as? MacProseCell, let item = prose.item { prose.configure(item, context: context) } }
     }
-    replaceGeometry(previous: previous)
+    replaceGeometry(previous: previous, estimates: estimates)
     let ids = Set(next.map(\.id))
     for (id, cell) in cells where !ids.contains(id) { recycle(id, cell) }
     if isViewLoaded {
@@ -299,18 +325,19 @@ import SwiftUI
     publishState()
   }
 
-  private func replaceGeometry(previous: [String: Double] = [:]) {
+  /// `estimates` holds, at each index whose item did not change, its height so far: an unmeasured one keeps it.
+  private func replaceGeometry(previous: [String: Double] = [:], estimates: [Double?] = []) {
     var flags: [Bool] = []
-    let entries = items.map { item in
+    let entries = items.enumerated().map { index, item in
       let known = memory.heights.height(item, width: width).map(Double.init)
       flags.append(known != nil)
       let height = known ?? previous[item.id] ?? memory.heights.last(item.id, width: width).map(Double.init)
-        ?? Double(estimate(item))
+        ?? (index < estimates.count ? estimates[index] : nil) ?? Double(estimate(item))
       return TranscriptGeometry.Entry(id: item.id, gap: Double(item.gap), height: height, sticky: item.sticky)
     }
     geometry.replace(entries)
     measured = flags
-    owners = TranscriptGeometry.owners(items.map(\.identity))
+    owners = TranscriptGeometry.owners(identities)
   }
 
   private func relayout() {
@@ -389,6 +416,9 @@ import SwiftUI
       for index in indices {
         let cell = materialize(index)
         guard !measured[index] else { continue }
+        #if DEBUG
+        MacPerf.count("transcript.measure")
+        #endif
         let value = Double(cell.measure(width: width, context: context))
         measured[index] = true
         memory.heights.store(CGFloat(value), for: items[index], width: width)

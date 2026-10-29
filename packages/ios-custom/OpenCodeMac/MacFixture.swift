@@ -179,7 +179,9 @@ private struct MacFixtureServer: Sendable {
       input?["sessionID"]?.string == MacFixture.rootID
         ? #"{"data":[\#(Self.children.map { session($0) }.joined(separator: ","))],"next":null}"#
         : #"{"data":[],"next":null}"#
-    case "custom.transcript/list": transcript(input?["sessionID"]?.string ?? "")
+    case "custom.transcript/list":
+      transcript(input?["sessionID"]?.string ?? "", limit: input?["limit"]?.number.map(Int.init),
+        cursor: input?["cursor"]?.string)
     case "custom.transcript/skills":
       #"{"data":[{"id":"opencode-custom","name":"opencode-custom"},{"id":"mac-prints","name":"Capturas do app de Mac"},{"id":"swift-testing","name":"Swift Testing"}]}"#
     case "custom.resources/list": #"{"resources":[\#(resources)]}"#
@@ -356,7 +358,7 @@ private struct MacFixtureServer: Sendable {
 
   // MARK: Transcripts
 
-  private func transcript(_ id: String) -> String {
+  private func transcript(_ id: String, limit: Int? = nil, cursor: String? = nil) -> String {
     if let child = Self.live.first(where: { $0.id == id }) {
       let tool = child.activity.map { #",{"type":"tool","id":"call_\#(id)",\#($0.dropFirst())"# } ?? ""
       return #"{"data":[{"id":"msg_\#(id)_a","type":"assistant","time":{"created":\#(now - minute)},"content":[{"type":"text","text":"Trabalhando em \#(child.title)\#(perfTick)."}\#(tool)]}]}"#
@@ -364,7 +366,39 @@ private struct MacFixtureServer: Sendable {
     guard id == MacFixture.rootID else {
       return #"{"data":[{"id":"msg_\#(id)","type":"assistant","time":{"created":\#(now - 30 * minute)},"content":[{"type":"text","text":"Resumo sintético da sessão\#(MacPerf.streaming.contains(id) ? perfTick : "")."}]}]}"#
     }
-    return #"{"data":[\#(rootMessages.reversed().joined(separator: ","))]}"#
+    let messages = Array(rootMessages.reversed())
+    // `-OpenCodeMacPerfLong`: pages of `limit`, newest first, like a real server; otherwise everything at once.
+    guard MacFixture.value("-OpenCodeMacPerfLong") != nil, let limit else {
+      return #"{"data":[\#(messages.joined(separator: ","))]}"#
+    }
+    let start = cursor.flatMap { Int($0.dropFirst()) } ?? 0
+    let end = min(messages.count, start + limit)
+    let next = end < messages.count ? #""o\#(end)""# : "null"
+    return #"{"data":[\#(messages[min(start, end)..<end].joined(separator: ","))],"cursor":{"next":\#(next),"previous":null}}"#
+  }
+
+  /// `-OpenCodeMacPerfLong <n>`: `n` earlier turns before the root's two, each a prompt and an answer with Markdown
+  /// (a heading, paragraphs, a list and code) and two tool calls, for the transcript's cost in a long conversation.
+  private func longHistory(before start: Double) -> [String] {
+    guard let count = MacFixture.value("-OpenCodeMacPerfLong").flatMap(Int.init), count > 0 else { return [] }
+    let model = #"{"id":"opus-5.5","providerID":"llm-proxy","variant":"xhigh"}"#
+    return (0..<count).flatMap { index -> [String] in
+      let at = start - Double(count - index) * 4 * minute
+      let answer = "## Etapa \(index)\n\nRevisei o fluxo \(index) da janela e o comportamento das colunas ao redimensionar. "
+        + String(repeating: "O texto continua com detalhes da implementação e dos testes. ", count: 6)
+        + "\n\n- Primeiro item da lista \(index)\n- Segundo item, com `código` inline\n- Terceiro item\n\n"
+        + "```swift\nlet value\(index) = compute(\(index))\nprint(value\(index))\n```\n\n"
+        + String(repeating: "Mais um parágrafo explicando a decisão tomada nesta etapa. ", count: 4)
+      let encoded = String(decoding: try! JSONEncoder().encode(answer), as: UTF8.self)
+      let tools = (0..<2).map { tool in
+        #"{"type":"tool","id":"call_long_\#(index)_\#(tool)","name":"read","state":{"status":"completed","input":{"path":"\#(root)/File\#(index)_\#(tool).swift"},"metadata":{}},"time":{"created":\#(at + 2_000),"ran":\#(at + 2_000),"completed":\#(at + 4_000)}}"#
+      }.joined(separator: ",")
+      return [
+        #"{"id":"msg_long_\#(index)_u","type":"user","time":{"created":\#(at)},"text":"Pedido \#(index): ajusta a etapa seguinte"}"#,
+        #"{"id":"msg_long_\#(index)_a","type":"assistant","agent":"build","model":\#(model),"time":{"created":\#(at + 1_000),"completed":\#(at + 60_000)},"content":[\#(tools),{"type":"text","text":\#(encoded)}]}"#,
+        #"{"id":"msg_long_\#(index)_i","type":"idle","time":{"created":\#(at + 61_000)}}"#,
+      ]
+    }
   }
 
   /// `-OpenCodeMacPerf`: previews of streaming sessions change as their text grows.
@@ -405,7 +439,7 @@ private struct MacFixtureServer: Sendable {
       return #"{"type":"tool","id":"call_\#(child.id)","name":"subagent","state":{"status":"running","input":{"agent":"\#(child.agent)","description":"\#(child.title)"},"metadata":{"sessionID":"\#(child.id)"}},"time":{"created":\#(start),"ran":\#(start)}}"#
     }.joined(separator: ",")
     let model = #"{"id":"opus-5.5","providerID":"llm-proxy","variant":"xhigh"}"#
-    return [
+    return longHistory(before: first) + [
       #"{"id":"msg_root_1","type":"user","time":{"created":\#(first)},"text":"Gera o app de Mac com a coluna de contexto ao vivo"}"#,
       #"{"id":"msg_root_2","type":"assistant","agent":"build","model":\#(model),"time":{"created":\#(first + 5_000),"completed":\#(done)},"content":[{"type":"text","text":\#(encoded)},\#(tools.joined(separator: ","))]}"#,
       #"{"id":"msg_root_3","type":"idle","time":{"created":\#(done + 1_000)}}"#,

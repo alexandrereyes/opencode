@@ -120,8 +120,14 @@ final class ComposerInputView: NSScrollView {
     textView.setAccessibilityLabel("Mensagem")
     textView.setAccessibilityIdentifier("conversation-composer")
     documentView = textView
+    NotificationCenter.default.addObserver(self, selector: #selector(textEdited),
+      name: NSTextStorage.didProcessEditingNotification, object: textView.textStorage)
   }
   required init?(coder: NSCoder) { nil }
+
+  /// Heights of the text at the widths SwiftUI asked about, until the text or its attributes change.
+  private var heights: [CGFloat: CGFloat] = [:]
+  @objc private func textEdited() { heights.removeAll() }
 
   func restyle() {
     let selection = textView.selectedRange()
@@ -154,7 +160,15 @@ final class ComposerInputView: NSScrollView {
   /// The height the text needs at this width, one line at least. SwiftUI asks for several widths while it lays the
   /// composer out; only the field's own width is measured on its container. Resizing that container to another
   /// width left the text wrapped narrower than the field, taller than measured and scrolled: the top line was cut.
-  func contentHeight(width: CGFloat) -> CGFloat { textView.textHeight(width: width, lineHeight: lineHeight) }
+  /// A window's layout pass asks the same widths again and again; other widths are laid out on a copy of the text,
+  /// so their heights are kept until the text changes.
+  func contentHeight(width: CGFloat) -> CGFloat {
+    if let height = heights[width] { return height }
+    let height = textView.textHeight(width: width, lineHeight: lineHeight)
+    if heights.count > 16 { heights.removeAll() }
+    heights[width] = height
+    return height
+  }
 
   /// Growing by a line, the text view scrolls its new last line into view before SwiftUI makes the field taller;
   /// once it is tall enough for everything, nothing may stay scrolled (that hid the top of the first line).

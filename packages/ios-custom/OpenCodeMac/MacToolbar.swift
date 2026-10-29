@@ -170,7 +170,7 @@ struct MacChatTitle: View {
     let subtitle = subtitle(row)
     HStack(spacing: 9) {
       MacChatAvatar(
-        conversation: conversation, master: master,
+        context: conversation.map { runtime.input($0).contextFraction }, master: master,
         colors: theme.avatar(SessionList.avatarColor(row?.project, fallback: row?.session.projectID ?? "")),
         monogram: SessionList.monogram(row?.projectName ?? title),
         icon: row.flatMap { $0.chat ? nil : ProjectIcon.of($0.project) })
@@ -195,17 +195,20 @@ struct MacChatTitle: View {
   }
 }
 
-/// The title's avatar in its context ring. The ring's usage is read from the transcript, which every streamed delta
-/// changes: only this view observes it, not the whole title.
+/// The title's avatar in its context ring. The ring's usage comes from the transcript, which every streamed delta
+/// changes; it is sampled (`MacSampled`), so a delta neither re-evaluates the title nor lays the window out.
 private struct MacChatAvatar: View {
-  let conversation: ConversationStore?
+  let context: MacSampled<Double?>?
   let master: Bool
   let colors: (background: Color, text: Color)
   let monogram: String
   let icon: ProjectIcon?
 
   var body: some View {
-    ConversationAvatar(context: conversation?.sessionUsage?.fraction, master: master, colors: colors,
+    #if DEBUG
+    let _ = MacPerf.count("MacChatAvatar")
+    #endif
+    ConversationAvatar(context: context?.value ?? nil, master: master, colors: colors,
       monogram: monogram, icon: icon, size: 30)
   }
 }
