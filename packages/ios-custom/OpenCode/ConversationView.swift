@@ -11,8 +11,12 @@ struct ConversationView: View {
   @State private var contextOpen = false
   @State private var detailsOpen = false
   @State private var switcherOpen = false
-  /// What the switcher chose, applied once the sheet has dismissed (a session ID, or nil for Nova sessão).
-  @State private var switcherChoice: String??
+  /// Applied once the sheet has dismissed, so the current conversation saves its place first.
+  @State private var switcherChoice: SwitcherChoice?
+  private enum SwitcherChoice {
+    case session(String)
+    case create(SessionListFilter)
+  }
   @State private var renameOpen = false
   @State private var renameTitle = ""
   @State private var archiveOpen = false
@@ -172,7 +176,7 @@ struct ConversationView: View {
         })
     )
     .background(ConversationBackGesture(capture: leavePosition, appeared: { screenVisible = true }))
-    .toolbar(.hidden, for: .navigationBar, .tabBar)
+    .toolbar(.hidden, for: .navigationBar)
     .onChange(of: conversation.reversion.boundary(conversation.session)) { _, _ in
       conversation.updateActivity()
     }
@@ -219,14 +223,20 @@ struct ConversationView: View {
       onDismiss: {
         guard let choice = switcherChoice else { return }
         switcherChoice = nil
-        if let id = choice { switchSession(to: id) } else { startNewSession() }
+        switch choice {
+        case .session(let id): switchSession(to: id)
+        case .create(let filter):
+          leavePosition()
+          sessions.conversationPath.append(.init(id: "draft_" + UUID().uuidString,
+            newSession: true, startInChats: true, startFilter: filter))
+        }
       }
     ) {
       SessionSwitcherSheet(sessions: sessions, current: conversation.id) { id in
-        switcherChoice = .some(id)
+        switcherChoice = .session(id)
         switcherOpen = false
-      } newSession: {
-        switcherChoice = .some(nil)
+      } newSession: { filter in
+        switcherChoice = .create(filter)
         switcherOpen = false
       }
       .sessionAlertOverlay()
@@ -248,6 +258,7 @@ struct ConversationView: View {
           if await conversation.archive() {
             sessions.toast.show("Sessão arquivada")
             leavePosition()
+            sessions.conversations.removeFamily(conversation.id, sessions: sessions.entries.map(\.session))
             dismiss()
             await sessions.reload()
           }
@@ -266,25 +277,8 @@ struct ConversationView: View {
       if search.open { search.update(conversation) }
     }
     .onChange(of: conversation.memory.state.restoring) { old, value in
-      guard old, !value, !conversation.memory.state.resumeOffered, screenVisible, let mark = quoteTarget else { return }
-      quoteValidation?.cancel()
-      quoteValidation = Task { @MainActor in
-        guard let message = conversation.activity.messages.first(where: { $0.message.id == mark.quote.messageID })?.message,
-          let entry = (message.content ?? []).enumerated().first(where: { message.partID(at: $0.offset) == mark.quote.partID }),
-          let source = entry.element.text else {
-          conversation.toast.show("O trecho citado não está mais disponível.")
-          quoteTarget = nil
-          quoteRevealed = nil
-          return
-        }
-        let blocks = await ResponseMarkdownCache.shared.parse(source)
-        guard !Task.isCancelled else { return }
-        if ChatQuoteAnchoring.sourceRanges(mark.quote, source: source, blocks: blocks).isEmpty {
-          conversation.toast.show("O trecho citado foi alterado e não pode ser marcado.")
-          quoteTarget = nil
-          quoteRevealed = nil
-        }
-      }
+      guard old, !value, !conversation.memory.state.resumeOffered, screenVisible else { return }
+      validateQuoteTarget()
     }
     // One event loop while the screen is shown. Hiding the app does not restart it: the reconnection that
     // follows merges the tail without republishing an unchanged transcript.
@@ -522,11 +516,14 @@ struct ConversationView: View {
       // While reading aloud, the end of the transcript sits above the player.
       bottomPadding: 12 + (readAloudHeight > 0 ? readAloudHeight + 12 : 0),
       openChild: { openChild($0) }, openNote: { note = TranscriptNote(part: $0, id: $1) },
-      canPersist: { !sessions.deletedIDs.contains(conversation.id) })
+      canPersist: { !sessions.deletedIDs.contains(conversation.id) }, pagingSuspended: search.open)
     .background(theme.color(.background))
     .onChange(of: conversation.readingRequest) { _, request in
       guard let request else { return }
-      transcript?.reveal(messageID: request.messageID, offset: request.offset, persist: request.persist)
+      // A quote's passage may be gone or changed: say so once its message is shown, or found missing.
+      transcript?.reveal(messageID: request.messageID, offset: request.offset, persist: request.persist) { _ in
+        if screenVisible { validateQuoteTarget() }
+      }
     }
     .task(id: "\(conversation.hasTranscript):\(requestedTool ?? "")") {
       guard conversation.hasTranscript, let tool = requestedTool else { return }
@@ -542,7 +539,13 @@ struct ConversationView: View {
     .overlay(alignment: .top) {
       ConversationViewportNotices(state: conversation.memory.state) { transcript?.resume() }
     }
-    .overlay { if conversation.loading { ProgressView("Carregando conversa…").appFont(.caption) } }
+    .overlay {
+      if conversation.loading {
+        ProgressView("Carregando conversa…").appFont(.caption)
+      } else if conversation.memory.state.waitingForHistory {
+        ProgressView("Restaurando leitura…").appFont(.caption)
+      }
+    }
     .sheet(item: $note) { note in TranscriptNoteSheet(note: note) }
     #if DEBUG
     .overlay(alignment: .bottomLeading) {
@@ -569,6 +572,28 @@ struct ConversationView: View {
     quoteRevealTask?.cancel()
     quoteRevealed = quoteTarget?.id
     conversation.revealMessage(quote.messageID, persist: false)
+  }
+  /// The quoted passage being revealed must still exist and still match its quote.
+  private func validateQuoteTarget() {
+    guard let mark = quoteTarget else { return }
+    quoteValidation?.cancel()
+    quoteValidation = Task { @MainActor in
+      guard let message = conversation.activity.messages.first(where: { $0.message.id == mark.quote.messageID })?.message,
+        let entry = (message.content ?? []).enumerated().first(where: { message.partID(at: $0.offset) == mark.quote.partID }),
+        let source = entry.element.text else {
+        conversation.toast.show("O trecho citado não está mais disponível.")
+        quoteTarget = nil
+        quoteRevealed = nil
+        return
+      }
+      let blocks = await ResponseMarkdownCache.shared.parse(source)
+      guard !Task.isCancelled else { return }
+      if ChatQuoteAnchoring.sourceRanges(mark.quote, source: source, blocks: blocks).isEmpty {
+        conversation.toast.show("O trecho citado foi alterado e não pode ser marcado.")
+        quoteTarget = nil
+        quoteRevealed = nil
+      }
+    }
   }
   private func openChild(_ id: String) {
     leavePosition()

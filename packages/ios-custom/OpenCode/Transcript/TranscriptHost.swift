@@ -21,6 +21,7 @@ struct TranscriptHost: UIViewControllerRepresentable {
   let openChild: (String) -> Void
   let openNote: (TranscriptPart, String) -> Void
   let canPersist: () -> Bool
+  var pagingSuspended = false
 
   func makeUIViewController(context: Context) -> TranscriptViewController {
     Self.mount(store, reading: reading)
@@ -48,6 +49,7 @@ struct TranscriptHost: UIViewControllerRepresentable {
     controller.context.openChild = openChild
     controller.context.openNote = openNote
     controller.canPersist = canPersist
+    controller.pagingSuspended = pagingSuspended
   }
 
   static func dismantleUIViewController(_ controller: TranscriptViewController, coordinator: ()) {

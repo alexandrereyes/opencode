@@ -12,6 +12,8 @@ import SwiftUI
   var restoring = true
   /// The saved place is older than the history this opening reads: offer to keep paging.
   var resumeOffered = false
+  /// The opening waits for history toward the saved place: show that it is loading.
+  var waitingForHistory = false
 }
 
 /// The conversation transcript: a non-inverted collection view whose layout keeps the reader's place in the
@@ -111,11 +113,6 @@ import SwiftUI
 
   override func didMove(toParent parent: UIViewController?) {
     super.didMove(toParent: parent)
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT %@ parent=%@", String(describing: ObjectIdentifier(self)), String(describing: parent))
-    }
-    #endif
     if parent != nil { mount() } else { unmount() }
   }
 
@@ -140,12 +137,6 @@ import SwiftUI
     super.viewDidLayoutSubviews()
     let bounds = collectionView.bounds.size
     let text = traitCollection.preferredContentSizeCategory
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics"), bounds != size {
-      NSLog("TRANSCRIPT layout %@ -> %@ offset=%.2f revealed=%@", NSCoder.string(for: size),
-        NSCoder.string(for: bounds), collectionView.contentOffset.y, String(revealed))
-    }
-    #endif
     if bounds.width != size.width || text != category {
       // Every height depends on width and text size; keep the reader's place through the change.
       let anchor = revealed ? layout.anchor : nil
@@ -154,7 +145,8 @@ import SwiftUI
       relayout(anchor)
     } else if bounds.height != size.height {
       // The keyboard or composer resized the viewport: the end stays at the end, anything else stays put.
-      let end = revealed && distanceToLatest <= 1
+      // Whether it was at the end is judged with the height it had.
+      let end = revealed && latestOffset(height: size.height) - collectionView.contentOffset.y <= 1
       size = bounds
       layout.invalidateLayout()
       if end {
@@ -290,6 +282,8 @@ import SwiftUI
       return
     }
     let old = items
+    // Content added since the opening: from now on growth is growth, not a correction to keep at the end.
+    if layout.keepsEnd, latestSignature != seenLatest { layout.keepsEnd = false }
     // The sent prompt's optimistic row and its delivered message share an ID; should they not, the trailing
     // space passes to the prompt that replaced it, so the content never shrinks under the reader.
     if let spacer = memory.spacerPrompt, !next.contains(where: { $0.id == spacer }),
@@ -307,7 +301,23 @@ import SwiftUI
     let changed = next.indices.filter { index in
       oldIndex[next[index].id].map { old[$0].kind != next[index].kind } ?? false
     }.map { IndexPath(item: $0, section: 0) }
-    let anchor = revealed ? layout.anchor.flatMap { continued($0, from: old, to: next) } : nil
+    // A part shown without its beginning gets it at its end: its text grows above what the reader sees.
+    let marker = ConversationStreamLog.missingStart
+    layout.growsAtStart.formUnion(changed.compactMap { path in
+      let item = next[path.item]
+      guard let was = oldIndex[item.id].map({ old[$0] }), was.part?.source.hasPrefix(marker) == true,
+        item.part?.source.hasPrefix(marker) == false else { return nil }
+      return item.id
+    })
+    // The history control stays above whatever a page prepends: the reader's place is the content below it.
+    var place = layout.anchor
+    if let current = place, let index = old.firstIndex(where: { $0.id == current.id }), case .older = old[index].kind,
+      old.indices.contains(index + 1)
+    {
+      place = .init(id: old[index + 1].id,
+        screenY: current.screenY + layout.geometry.tops[index + 1] - layout.geometry.tops[index])
+    }
+    let anchor = revealed ? place.flatMap { continued($0, from: old, to: next) } : nil
     let previous = Dictionary(old.indices.filter(layout.isMeasured).map {
       (old[$0].id, CGFloat(layout.geometry.entries[$0].height))
     }, uniquingKeysWith: { first, _ in first })
@@ -327,24 +337,34 @@ import SwiftUI
         }
         if !changed.isEmpty { collectionView.reconfigureItems(at: changed) }
       }
-      if let anchor, let offset = layout.offset(for: anchor) { setOffset(offset) }
+      if let anchor, let offset = layout.offset(for: anchor) {
+        // History prepended above a transcript shorter than its viewport: what is on screen stays, with room
+        // below it until the next drag.
+        if offset > layout.maximumOffset + 0.5 {
+          layout.contentFloor = offset + collectionView.bounds.height
+          layout.invalidateLayout()
+        }
+        setOffset(offset)
+      }
       collectionView.layoutIfNeeded()
     }
     layout.pendingAnchor = nil
     if let animating { collectionView.setContentOffset(CGPoint(x: 0, y: clamp(animating())), animated: true) }
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT apply %d -> %d deleted=%d inserted=%d changed=%d reordered=%@ revealed=%@ anchor=%@ offset=%.1f last=%@", old.count,
-        next.count, deleted.count, inserted.count, changed.count, String(reordered), String(revealed),
-        anchor?.id ?? "-", collectionView.contentOffset.y, next.last?.id ?? "-")
-    }
-    #endif
     guard revealed else {
       positionInitially()
       return
     }
     collectionView.accessibilityValue = "\(store.messages.count) mensagens carregadas"
     publishState()
+    fillViewport()
+  }
+
+  /// A transcript shorter than its viewport cannot be scrolled to its top: page history in until it fills it
+  /// (an empty page ends the history). Prepending keeps what is on screen still.
+  private func fillViewport() {
+    guard revealed, autoPaging, store.hasOlder, CGFloat(layout.geometry.contentEnd) < collectionView.bounds.height
+    else { return }
+    loadOlder()
   }
 
   /// The anchor to restore after an update. When its item is replaced (a placeholder by the blocks its parse
@@ -356,14 +376,20 @@ import SwiftUI
     if next.contains(where: { $0.id == anchor.id }) { return anchor }
     guard let index = old.firstIndex(where: { $0.id == anchor.id }) else { return nil }
     let item = old[index]
+    let geometry = layout.geometry
+    // A new item takes the replaced one's place; one that was already there (the prompt below a day chip
+    // that moved to older history) stays where it was.
+    func replaced(by id: String) -> TranscriptGeometry.Anchor {
+      guard let was = old.firstIndex(where: { $0.id == id }) else { return .init(id: id, screenY: anchor.screenY) }
+      return .init(id: id, screenY: anchor.screenY + CGFloat(geometry.tops[was] - geometry.tops[index]))
+    }
     if let part = item.part, let replacement = next.first(where: { $0.part?.partID == part.partID }) {
-      return .init(id: replacement.id, screenY: anchor.screenY)
+      return replaced(by: replacement.id)
     }
     if let message = item.message, let replacement = next.first(where: { $0.message == message }) {
-      return .init(id: replacement.id, screenY: anchor.screenY)
+      return replaced(by: replacement.id)
     }
     let survivors = Set(next.map(\.id))
-    let geometry = layout.geometry
     guard let following = old.indices.dropFirst(index + 1).first(where: { survivors.contains(old[$0].id) })
     else { return nil }
     return .init(id: old[following].id,
@@ -441,13 +467,6 @@ import SwiftUI
 
   func layout(_ layout: TranscriptLayout, measured height: CGFloat, at index: Int) {
     guard items.indices.contains(index) else { return }
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics"), revealed {
-      NSLog("TRANSCRIPT measured %@ %.1f -> %.1f window=%@ offset=%.1f", items[index].id,
-        memory.heights.height(items[index], width: size.width, category: category) ?? -1, height,
-        String(collectionView.window != nil), collectionView.contentOffset.y)
-    }
-    #endif
     memory.heights.store(height, for: items[index], width: size.width, category: category)
   }
 
@@ -469,11 +488,6 @@ import SwiftUI
     if case .prompt(let message, _) = item.kind { primeTruncation(message.id, text: message.displayText) }
     if case .pending(let pending, _) = item.kind { primeTruncation(pending.id, text: pending.payload.displayText) }
     cell.configure(item, context: context)
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT cell %@ %@ at %d", String(describing: ObjectIdentifier(cell)), item.id, indexPath.item)
-    }
-    #endif
     return cell
   }
 
@@ -517,28 +531,12 @@ import SwiftUI
       // Rows measured in this pass may move the offset (an estimate replaced above the place) or the place
       // itself; compare with where the view actually is.
       for _ in 0..<4 {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-          var owner = "-"
-          if case .message(let id, _) = position.target { owner = store.activity.anchors[id] ?? id }
-          let index = items.firstIndex { $0.message == owner }
-          NSLog("TRANSCRIPT position offset=%.1f actual=%.1f owner=%@ item=%@ top=%.1f", offset,
-            collectionView.contentOffset.y, owner, index.map { items[$0].id } ?? "-",
-            index.map { layout.messageTop($0) } ?? -1)
-        }
-        #endif
         collectionView.layoutIfNeeded()
         offset = clamp(resolve(position) ?? latestOffset)
         guard abs(offset - collectionView.contentOffset.y) > 0.25 else { break }
         setOffset(offset)
       }
     }
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT positioned offset=%.1f actual=%.1f resolve=%.1f", offset, collectionView.contentOffset.y,
-        resolve(position) ?? -1)
-    }
-    #endif
     requestVisibleParses()
     // Markdown near the place is parsed and laid out before the first frame: the rebuild positions again.
     if parseNear(layout.visibleTop) {
@@ -546,49 +544,22 @@ import SwiftUI
       return
     }
     show()
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT revealed pinned=%@ usable=%.1f anchor=%@ screenY=%.1f position=%@",
-        layout.pinned.map { items[$0.index].id } ?? "-", layout.usableTop, layout.anchor?.id ?? "-",
-        layout.anchor?.screenY ?? -1, String(describing: position))
-    }
-    #endif
-    #if DEBUG
-    let arguments = ProcessInfo.processInfo.arguments
-    if let flag = arguments.firstIndex(of: "-OpenCodeFixtureRevealTurn"), arguments.indices.contains(flag + 1) {
-      Task { @MainActor [weak self] in
-        try? await Task.sleep(for: .seconds(2))
-        _ = self?.revealTurn(arguments[flag + 1])
-        try? await Task.sleep(for: .seconds(2))
-        guard let self, let pinned = layout.pinned else { return }
-        NSLog("TRANSCRIPT turn pinned=%@ y=%.1f visibleTop=%.1f next=%@ nextTop=%.1f", items[pinned.index].id, pinned.y,
-          layout.visibleTop, items[pinned.index + 1].id, layout.geometry.tops[pinned.index + 1])
-      }
-    }
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureJumpLater") {
-      Task { @MainActor [weak self] in
-        try? await Task.sleep(for: .seconds(2))
-        self?.scrollToLatest(animated: true)
-        for _ in 0..<6 {
-          try? await Task.sleep(for: .milliseconds(400))
-          guard let self else { return }
-          NSLog("TRANSCRIPT latest distance=%.1f offset=%.1f latest=%.1f max=%.1f size=%.1f jump=%@", distanceToLatest,
-            collectionView.contentOffset.y, latestOffset, layout.maximumOffset, collectionView.contentSize.height,
-            String(state.jumpToLatest))
-        }
-      }
-    }
-    #endif
   }
 
   /// The first frame waits for the final position only so long: past the deadline (a parse that does not land,
-  /// history that does not arrive, a projection that never matches) the transcript shows at the best place
-  /// it can resolve now. It is never hidden for good.
+  /// a projection that never matches) the transcript shows at the best place it can resolve now. History
+  /// still paging toward a saved place gets longer, with a visible indicator, since a slow network still
+  /// progresses. It is never hidden for good.
   private func armRevealDeadline() {
     guard revealDeadline == nil else { return }
     revealDeadline = Task { @MainActor [weak self] in
       try? await Task.sleep(for: Self.revealDeadline)
       guard let self, !revealed else { return }
+      if pagingTowardTarget {
+        state.waitingForHistory = true
+        try? await Task.sleep(for: Self.historyDeadline - Self.revealDeadline)
+        guard !revealed else { return }
+      }
       if !items.isEmpty {
         let position = target ?? ReadingPosition(.followTail)
         // A saved place still being paged in: show the end and offer to keep going.
@@ -603,9 +574,17 @@ import SwiftUI
     }
   }
   static let revealDeadline = Duration.milliseconds(400)
+  static let historyDeadline = Duration.milliseconds(2500)
+  /// Older pages are being read to reach the saved place.
+  private var pagingTowardTarget: Bool {
+    paging != nil || (restorePages > 0 && restorePages < 5 && store.hasOlder)
+  }
   private var revealDeadline: Task<Void, Never>?
 
   private func show() {
+    seenLatest = latestSignature
+    layout.keepsEnd = distanceToLatest <= 1
+    state.waitingForHistory = false
     revealed = true
     target = nil
     revealDeadline?.cancel()
@@ -616,6 +595,7 @@ import SwiftUI
     state.restoring = false
     memory.anchor = currentPosition()
     publishState()
+    fillViewport()
   }
 
   /// The content offset that shows a reading position, if its item or message is loaded.
@@ -682,29 +662,42 @@ import SwiftUI
 
   /// The offset that shows the latest content: the end at the bottom edge, or a just-sent prompt at the top
   /// while its answer is shorter than the viewport.
-  var latestOffset: CGFloat {
+  var latestOffset: CGFloat { min(latestOffset(height: collectionView.bounds.height), layout.maximumOffset) }
+
+  private func latestOffset(height: CGFloat) -> CGFloat {
     let geometry = layout.geometry
-    var offset = CGFloat(geometry.contentEnd) - collectionView.bounds.height
+    var offset = CGFloat(geometry.contentEnd) - height
     if let id = layout.geometry.spacerPrompt, let index = geometry.index(of: id) {
       offset = max(offset, CGFloat(geometry.tops[index]))
     }
-    return min(max(0, offset), layout.maximumOffset)
+    return max(0, offset)
   }
 
   private var distanceToLatest: CGFloat { latestOffset - collectionView.contentOffset.y }
 
+  /// The conversation's content as published: it changes when anything is added or grows (the store
+  /// republishes), never when something is only measured.
+  private var latestSignature: String { "\(store.revision):\(store.pendingSteers.count)" }
+  /// The end as the reader last saw it (or as it was when the transcript opened).
+  private var seenLatest = ""
+
   func scrollToLatest(animated: Bool) {
+    placedByReader = true
     guard revealed else { return }
     scroll(to: { [unowned self] in latestOffset }, animated: animated)
   }
 
   /// Explicit navigation to a message (search, quotes, read aloud): pages history until it is loaded.
-  func reveal(messageID: String, offset: Double = 0, animated: Bool = false, persist: Bool = false) {
+  /// `done` tells whether the message was found and shown.
+  func reveal(
+    messageID: String, offset: Double = 0, animated: Bool = false, persist: Bool = false,
+    done: ((Bool) -> Void)? = nil
+  ) {
     let owner = store.activity.anchors[messageID] ?? messageID
     guard let index = items.firstIndex(where: { $0.message == owner }) else {
       page(until: { [weak self] in self?.items.contains { $0.message == owner } ?? true }) { [weak self] in
-        guard let self, items.contains(where: { $0.message == owner }) else { return }
-        reveal(messageID: messageID, offset: offset, animated: animated, persist: persist)
+        guard let self, items.contains(where: { $0.message == owner }) else { return done?(false) ?? () }
+        reveal(messageID: messageID, offset: offset, animated: animated, persist: persist, done: done)
       }
       return
     }
@@ -713,7 +706,9 @@ import SwiftUI
       let index = items.firstIndex { $0.message == owner } ?? index
       return visibleTop(line: layout.messageTop(index) + CGFloat(offset), viewportTop: nil)
     }, animated: animated)
+    placedByReader = persist
     if persist { capture() }
+    done?(true)
   }
 
   /// Opens a tool's group and shows its message, paging history until it is loaded.
@@ -729,6 +724,7 @@ import SwiftUI
 
   /// A pinned prompt's tap: its turn's first row moves just below it. False when the prompt is not pinned.
   func revealTurn(_ prompt: String) -> Bool {
+    placedByReader = true
     guard let pinned = layout.pinned, items[pinned.index].id == "prompt:" + prompt,
       pinned.index + 1 < items.count else { return false }
     let id = items[pinned.index].id
@@ -751,6 +747,7 @@ import SwiftUI
   /// After a send, the new prompt rises to the top of the transcript; the trailing space lets it get there.
   private func revealSentPrompt() {
     guard let since = awaitingPrompt, revealed else { return }
+    placedByReader = true
     guard since.duration(to: .now) < .seconds(10) else { awaitingPrompt = nil; return }
     guard let last = items.lastIndex(where: \.sticky), memory.spacerPrompt != items[last].id,
       store.pendingInbox.contains(where: { "prompt:" + $0.id == items[last].id })
@@ -770,6 +767,7 @@ import SwiftUI
   /// are measured and it stops moving; a distant one is then approached from one viewport away, so the
   /// animation crosses only measured rows and lands exactly. Instant with Reduce Motion.
   private func scroll(to target: @escaping () -> CGFloat, animated: Bool) {
+    layout.keepsEnd = false
     let origin = collectionView.contentOffset.y
     var destination = clamp(target())
     UIView.performWithoutAnimation {
@@ -786,11 +784,6 @@ import SwiftUI
       collectionView.layoutIfNeeded()
       destination = clamp(target())
     }
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT scroll origin=%.1f destination=%.1f actual=%.1f", origin, destination, collectionView.contentOffset.y)
-    }
-    #endif
     if animated, !UIAccessibility.isReduceMotionEnabled {
       animating = target
       collectionView.setContentOffset(CGPoint(x: 0, y: destination), animated: true)
@@ -839,6 +832,10 @@ import SwiftUI
     }
   }
 
+  /// A search, or an offer to resume reading, moves the transcript by its own navigation: reaching the top
+  /// that way pages nothing in, which would move their results.
+  var pagingSuspended = false
+  private var autoPaging: Bool { !pagingSuspended && !state.resumeOffered }
   private func loadOlder() {
     guard revealed, store.hasOlder, !store.paging, paging == nil else { return }
     Task { await store.older() }
@@ -866,12 +863,16 @@ import SwiftUI
   func capture() {
     guard revealed, let position = currentPosition() else { return }
     memory.anchor = position
-    guard canPersist() else { return }
+    guard canPersist(), placedByReader else { return }
     reading.set(distanceToLatest <= 1 ? ReadingPosition(.followTail) : position, sessionID: store.id)
     do { try reading.flush() } catch {
       store.toast.show("Não foi possível guardar a posição de leitura.", kind: .error)
     }
   }
+
+  /// The passage on screen is one the reader chose (scrolled to, ↓, a prompt's tap, a send): only then is it
+  /// saved. An opening's restoration or a search, quote or tool reveal leaves the saved place as it was.
+  private var placedByReader = false
 
   private func scheduleCapture() {
     captureTask?.cancel()
@@ -884,6 +885,8 @@ import SwiftUI
   // MARK: Scrolling
 
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+    placedByReader = true
+    layout.keepsEnd = false
     animating = nil
     animationRetries = 0
     layout.contentFloor = 0
@@ -894,16 +897,10 @@ import SwiftUI
   func scrollViewDidScroll(_ scrollView: UIScrollView) {
     guard revealed else { return }
     if !touching { layout.contentFloor = scrollView.contentOffset.y + scrollView.bounds.height }
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT scrolled offset=%.1f size=%.1f bounds=%.1f spacer=%@ anchor=%@ %.1f tracking=%@",
-        scrollView.contentOffset.y, scrollView.contentSize.height, scrollView.bounds.height,
-        memory.spacerPrompt ?? "-", layout.anchor?.id ?? "-", layout.anchor?.screenY ?? 0, String(scrollView.isTracking))
-    }
-    #endif
     publishState()
     requestVisibleParses()
-    if layout.visibleTop < size.height * 1.5 { loadOlder() }
+    // Only the reader's own scrolling pages history in.
+    if touching, autoPaging, layout.visibleTop < size.height * 1.5 { loadOlder() }
   }
 
   func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
@@ -911,12 +908,6 @@ import SwiftUI
   }
   func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { settled() }
   func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT ended offset=%.1f target=%.1f pinned=%@", collectionView.contentOffset.y,
-        animating.map { clamp($0()) } ?? -1, layout.pinned.map { items[$0.index].id } ?? "-")
-    }
-    #endif
     // Rows measured, or the viewport resized, on the way may have moved the destination: finish the same
     // motion toward it rather than jump (twice at most).
     if let target = animating {
@@ -938,12 +929,28 @@ import SwiftUI
     scheduleCapture()
   }
 
+  /// ↓ follows the web's reading threshold (more than a viewport, and at least 400 points, from the end), but
+  /// appears as soon as anything new sits below (an answer growing, messages arriving, even while hidden) once
+  /// the reader has seen the end without it.
   private func publishState() {
     guard isViewLoaded, revealed else { return }
-    let jump = distanceToLatest > 24
+    let distance = distanceToLatest
+    let signature = latestSignature
+    if signature != seenLatest { layout.keepsEnd = false }
+    if distance <= 1 { seenLatest = signature }
+    let threshold = seenLatest != latestSignature ? 24 : max(400, collectionView.bounds.height)
+    let jump = distance > threshold
     if state.jumpToLatest != jump { state.jumpToLatest = jump }
     let sticky = layout.usableTop
     if state.stickyHeight != sticky { state.stickyHeight = sticky }
+    // Rows wholly under the pinned prompt cannot be seen, so VoiceOver does not visit them either.
+    let line = collectionView.contentOffset.y + sticky
+    let pinned = layout.pinned?.index
+    for cell in collectionView.visibleCells {
+      guard let path = collectionView.indexPath(for: cell) else { continue }
+      let covered = path.item != pinned && cell.frame.maxY <= line
+      if cell.accessibilityElementsHidden != covered { cell.accessibilityElementsHidden = covered }
+    }
   }
 }
 
@@ -965,6 +972,6 @@ extension TranscriptViewController: TranscriptGeometrySource, TranscriptDriving 
     }
     return rows
   }
-  func userScrollBegan() {}
+  func userScrollBegan() { placedByReader = true }
 }
 #endif

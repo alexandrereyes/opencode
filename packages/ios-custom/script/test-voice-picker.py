@@ -10,22 +10,26 @@ import sys
 import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-derived = temporary / "ios-vozescolha-derived"
-evidence = temporary / "ios-vozescolha-prints"
+# Overrides let a separate agent use its own sandbox, simulator and build.
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4177")
+home = Path(os.environ.get("OPENCODE_TEST_HOME", temporary / "custom-sandbox-4177"))
+derived = Path(os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-vozescolha-derived"))
+evidence = Path(os.environ.get("OPENCODE_TEST_EVIDENCE", temporary / "ios-vozescolha-prints"))
 evidence.mkdir(parents=True, exist_ok=True)
 devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
-device = next(d["udid"] for group in devices["devices"].values() for d in group if d["name"] == "OpenCode Voz Escolha")
+device = os.environ.get("OPENCODE_TEST_DEVICE") or next(
+    d["udid"] for group in devices["devices"].values() for d in group if d["name"] == "OpenCode Voz Escolha")
 theme = os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")
-password = (temporary / "custom-sandbox-4177/password").read_text().strip()
+password = (home / "password").read_text().strip()
 run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
 targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]] if "TestConfigurations" in run
     else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
 for target in targets:
     target.setdefault("EnvironmentVariables", {}).update({"OPENCODE_TEST_PASSWORD": password,
         "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme,
-        "OPENCODE_TEST_SERVER_URL": "http://127.0.0.1:4177",
+        "OPENCODE_TEST_SERVER_URL": server,
         "OPENCODE_TEST_LIVE_VOICE_CATALOG": os.environ.get("OPENCODE_TEST_LIVE_VOICE_CATALOG", "0")})
-    target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177", "-OpenCodeTheme", theme]
+    target["CommandLineArguments"] = ["-OpenCodeServerURL", server, "-OpenCodeTheme", theme]
 token = uuid.uuid4().hex[:8]
 configured = derived / ("Build/Products/VoicePicker-" + token + ".xctestrun")
 result = evidence / (theme + "-" + token + ".xcresult")

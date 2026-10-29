@@ -40,19 +40,23 @@ struct SessionSelectionBar: View {
   }
 }
 
-/// The title row of the Sessões column: "Sessões", then voice, the optional Configurações and Nova sessão.
-/// iOS keeps settings in Você and passes no `settings` action; the Mac passes one to show the gear.
+/// The title row of the Sessões column: "Sessões", then voice, the optional Configurações, Nova sessão and the
+/// optional Você avatar. The iPhone passes `account` (it has no tab bar); the Mac passes `settings` for the gear and
+/// keeps its avatar in its title bar.
 struct SessionColumnHeader: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   var voiceActive = false
+  var voice: (() -> Void)?
   /// The Mac has no voice calls yet: the button stays visible but disabled.
   var voiceDisabled = false
-  let voice: () -> Void
   var settings: (() -> Void)?
+  var account: (() -> Void)?
   let newSession: () -> Void
   var newSessionDisabled = false
   var selection: SessionColumnSelection?
+  var close: (() -> Void)?
+  var newSessionIdentifier = "new-session"
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -117,14 +121,16 @@ struct SessionColumnHeader: View {
           .accessibilityLabel("Ações das sessões selecionadas")
           .accessibilityIdentifier("sessions-selection-menu")
         }
-        Button(action: voice) {
-          symbol("waveform", color: voiceActive ? .primary : .textStrong)
+        if let voice {
+          Button(action: voice) {
+            symbol("waveform", color: voiceActive ? .primary : .textStrong)
+          }
+          .adaptiveGlass(Circle(), interactive: true)
+          .disabled(voiceDisabled)
+          .opacity(voiceDisabled ? 0.45 : 1)
+          .accessibilityLabel(voiceActive ? "Encerrar conversa por voz" : "Conversar por voz")
+          .accessibilityIdentifier("voice-start")
         }
-        .adaptiveGlass(Circle(), interactive: true)
-        .disabled(voiceDisabled)
-        .opacity(voiceDisabled ? 0.45 : 1)
-        .accessibilityLabel(voiceActive ? "Encerrar conversa por voz" : "Conversar por voz")
-        .accessibilityIdentifier("voice-start")
         if let settings {
           Button(action: settings) { symbol("gearshape", color: .textStrong) }
             .adaptiveGlass(Circle(), interactive: true)
@@ -136,6 +142,19 @@ struct SessionColumnHeader: View {
           .opacity(newSessionDisabled ? 0.5 : 1)
           .disabled(newSessionDisabled)
           .accessibilityLabel("Nova sessão")
+          .accessibilityIdentifier(newSessionIdentifier)
+        if let account {
+          Button(action: account) { AccountAvatar() }
+            .adaptiveGlass(Circle(), interactive: true)
+            .accessibilityLabel("Você")
+            .accessibilityHint("Ajustes, Dados do iPhone, LLM proxy e temas")
+            .accessibilityIdentifier("sessions-account")
+        }
+        if let close {
+          Button(action: close) { symbol("xmark", color: .textStrong) }
+            .adaptiveGlass(Circle(), interactive: true)
+            .accessibilityLabel("Fechar").accessibilityIdentifier("switcher-close")
+        }
       }
       .buttonStyle(.plain)
     }
@@ -144,5 +163,21 @@ struct SessionColumnHeader: View {
   private func symbol(_ name: String, color: ThemeRole) -> some View {
     Image(systemName: name).appSymbol(.header).foregroundStyle(theme.color(color))
       .frame(width: 48, height: 48).contentShape(Circle())
+  }
+}
+
+/// Alexandre's "AR" with the ring the Você tab showed: a neutral track and a green half, decorative.
+private struct AccountAvatar: View {
+  @Environment(\.appTheme) private var theme
+
+  var body: some View {
+    ZStack {
+      Circle().stroke(theme.color(.border), lineWidth: 1.5)
+      Circle().trim(from: 0, to: 0.5).stroke(theme.color(.success), lineWidth: 1.5).rotationEffect(.degrees(-90))
+      Text("AR").appFont(.secondary, weight: .medium).foregroundStyle(theme.color(.textStrong))
+        .lineLimit(1).minimumScaleFactor(0.6)
+    }
+    .padding(3)
+    .frame(width: 48, height: 48).contentShape(Circle())
   }
 }

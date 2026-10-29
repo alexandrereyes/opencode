@@ -111,8 +111,8 @@ import XCTest
   func test03NewChatListsAppsForComputerUseIntent() throws {
     let app = try launch()
     defer { app.terminate() }
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
-    app.tabBars.buttons["Sessões"].tap()
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
+    app.showSessions()
     if app.buttons["Fechar alerta"].exists { app.buttons["Fechar alerta"].tap() }
     app.buttons["Nova sessão"].tap()
     XCTAssertTrue(app.buttons["Projeto: Chats"].waitForExistence(timeout: 20))

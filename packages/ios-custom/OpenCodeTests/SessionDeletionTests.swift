@@ -32,9 +32,13 @@ import XCTest
     store.expansions.set(["tool": true], sessionID: child.id)
     try store.quoteDismissals.dismiss(["quote"], sessionID: child.id)
     store.conversationPath = [.init(id: root.id), .init(id: child.id, parent: root.id)]
+    let retained = store.conversation(child.id)
+    retained.memory.controller = TranscriptViewController(store: retained, reading: store.reading)
     await store.delete(root)
     XCTAssertEqual(store.deletedIDs, [root.id, child.id])
     XCTAssertTrue(store.conversationPath.isEmpty)
+    XCTAssertNil(store.liveConversation(child.id))
+    XCTAssertNil(retained.memory.controller)
     XCTAssertNil(store.reading.position(child.id))
     XCTAssertTrue(store.expansions.values(child.id).isEmpty)
     XCTAssertTrue(ChatQuoteDismissals(server: configuration.url.absoluteString).values(child.id).isEmpty)
@@ -83,5 +87,24 @@ import XCTest
     XCTAssertEqual(action.title, "Excluir sessão")
     XCTAssertTrue(action.attributes.contains(.destructive))
     XCTAssertFalse(action.attributes.contains(.disabled))
+  }
+
+  func testArchiveDropsRetainedFamilyButKeepsOtherConversationsAndReading() throws {
+    let configuration = ServerConfiguration(url: URL(string: "http://127.0.0.1:4177/test-" + UUID().uuidString)!)
+    let store = SessionStore(configuration: configuration)
+    _ = store.conversation("root")
+    // An intermediate child may have been evicted; known family records still connect the retained leaf.
+    let known = [try session("root"), try session("child", parent: "root"), try session("leaf", parent: "child")]
+    let leaf = store.conversation("leaf")
+    leaf.memory.controller = TranscriptViewController(store: leaf, reading: store.reading)
+    let other = store.conversation("other")
+    store.reading.set(.init(.message(id: "passage", offset: 42)), sessionID: "leaf")
+    store.conversations.removeFamily("root", sessions: known)
+    XCTAssertNil(store.liveConversation("root"))
+    XCTAssertNil(store.liveConversation("leaf"))
+    XCTAssertNil(leaf.memory.controller)
+    XCTAssertTrue(store.liveConversation("other") === other)
+    XCTAssertNotNil(store.reading.position("leaf"), "archiving preserves the durable reading place")
+    try store.reading.remove(["leaf"])
   }
 }

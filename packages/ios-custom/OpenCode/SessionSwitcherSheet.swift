@@ -1,104 +1,103 @@
 import OpenCodeKit
 import SwiftUI
 
-/// The conversation header's quick switcher: the rows the Sessões tab already keeps (no server reload), most
-/// recent activity first, with local search. Its own view, so the conversation's streaming never re-renders it.
+/// The same chips, sections and rows as Sessões, with local filtering and a marked current session.
 struct SessionSwitcherSheet: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
   let sessions: SessionStore
   let current: String
   let choose: (String) -> Void
-  let newSession: () -> Void
-  @State private var search = ""
+  let newSession: (SessionListFilter) -> Void
+  @State private var filter: SessionListFilter
+  @State private var collapse: SessionSectionCollapse
+  @State private var presentation = SessionListPresentation()
+  @State private var showProjects = false
+  @State private var showArchived = false
+  @State private var projectAction: PreferenceIntent?
 
-  var body: some View {
-    #if os(iOS)
-    NavigationStack {
-      list
-        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Buscar sessão")
-        .navigationTitle("Sessões").navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-          ToolbarItem(placement: .topBarTrailing) {
-            Button("Fechar", systemImage: "xmark") { dismiss() }.accessibilityIdentifier("switcher-close")
-          }
-        }
-    }
-    .sessionRowTimeline()
-    .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-    .tint(theme.color(.primary))
-    #else
-    // A popover under the title on the Mac: the search field on top, Return opens the first match.
-    VStack(spacing: 0) {
-      TextField("Buscar sessão", text: $search)
-        .textFieldStyle(.roundedBorder).padding(10)
-        .onSubmit {
-          if let first = SessionSwitcher.rows(sessions.rows, query: search, label: { sessions.directoryLabel($0) }).first {
-            choose(first.id)
-          }
-        }
-      list
-    }
-    .sessionRowTimeline()
-    .tint(theme.color(.primary))
-    #endif
+  init(sessions: SessionStore, current: String, choose: @escaping (String) -> Void,
+    newSession: @escaping (SessionListFilter) -> Void) {
+    self.sessions = sessions
+    self.current = current
+    self.choose = choose
+    self.newSession = newSession
+    // Start broad, but include ordinary Chats, which the tab intentionally keeps out of Todas.
+    let filter = SessionListFilter(project: sessions.rows.first { $0.id == current }?.chat == true
+      ? SessionListFilter.chats : nil)
+    _filter = State(initialValue: filter)
+    let collapse = SessionSectionCollapse(rawValue: UserDefaults.standard.string(forKey: "OpenCodeSessionSections") ?? "")
+      ?? SessionSectionCollapse()
+    _collapse = State(initialValue: collapse)
   }
 
-  private var list: some View {
-    let rows = SessionSwitcher.rows(sessions.rows, query: search) { sessions.directoryLabel($0) }
-    return ScrollViewReader { proxy in
+  var body: some View {
+    NavigationStack {
+      ScrollViewReader { proxy in
         List {
-          ForEach(rows) { row in
-            Button {
-              choose(row.id)
-            } label: {
-              HStack(alignment: .top, spacing: 10) {
-                SessionCompactRowView(row: row, directory: sessions.directoryLabel(row.session), showsWorking: true)
-                if row.id == current {
-                  Image(systemName: "checkmark").appSymbol(.inline, weight: .semibold)
-                    .foregroundStyle(theme.color(.primary)).padding(.top, 24).accessibilityHidden(true)
-                }
-              }
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(row.id == current ? .isSelected : [])
-            .accessibilityIdentifier("switcher-row-" + row.id)
-            .id(row.id)
-            .listRowInsets(EdgeInsets(top: 9, leading: AppLayout.margin, bottom: 9, trailing: AppLayout.margin))
-            .listRowSeparatorTint(theme.color(.border))
-            .listRowBackground(
-              row.id == current
-                ? AnyView(
-                  RoundedRectangle(cornerRadius: 14).fill(theme.color(.surface))
-                    .padding(.horizontal, AppLayout.margin - 6).padding(.vertical, 2))
-                : AnyView(theme.color(.background)))
-            .alignmentGuide(.listRowSeparatorLeading) { _ in AppLayout.compactRowTextInset }
-          }
-          if rows.isEmpty {
-            Text(search.isEmpty ? "Nenhuma sessão" : "Nenhuma sessão encontrada")
-              .appFont(.secondary).foregroundStyle(theme.color(.textSecondary))
-              .listRowBackground(theme.color(.background)).listRowSeparator(.hidden)
-          }
-          Button(action: newSession) {
-            Label("Nova sessão", systemImage: "plus").appFont(.secondary, weight: .medium)
-              .foregroundStyle(theme.color(.primary)).frame(maxWidth: .infinity, alignment: .leading)
-              .padding(.horizontal, 16).frame(minHeight: 48)
-              .background(theme.color(.primary).opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-              .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(theme.color(.primary).opacity(0.25)) }
-          }
-          .buttonStyle(.plain)
-          .accessibilityIdentifier("switcher-new-session")
-          .listRowInsets(EdgeInsets(top: 12, leading: AppLayout.margin, bottom: 12, trailing: AppLayout.margin))
-          .listRowSeparator(.hidden).listRowBackground(theme.color(.background))
+          Color.clear.frame(height: 0).listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden).accessibilityHidden(true).id("switcher-top")
+          SessionColumnSections(collapse: $collapse, store: sessions,
+            rows: filter.rows(sessions.rows, label: sessions.directoryLabel), scope: filter,
+            presentation: presentation, open: { choose($0.id) },
+            archived: filter.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sessions.archived.isEmpty
+              ? { showArchived = true } : nil,
+            current: current, identifierPrefix: "switcher-row-") { _, content in content }
         }
         .listStyle(.plain)
-        // Chats and repository sessions share this list, so chats use the shared chat avatar.
-        .environment(\.sessionRowsMixChats, true)
+        .environment(\.defaultMinListRowHeight, 0)
         .scrollContentBackground(.hidden).background(theme.color(.background))
-        #if os(iOS)
         .scrollEdgeEffectStyle(.hard, for: .top)
-        #endif
-        .onAppear { proxy.scrollTo(current, anchor: .center) }
+        .accessibilityIdentifier("session-switcher-list")
+        .sessionListScrolling(presentation, store: sessions)
+        .onAppear { proxy.scrollTo("switcher-top", anchor: .top) }
+        .onChange(of: filter) { _, _ in
+          // This target exists before and after filtering, including when no results match.
+          proxy.scrollTo("switcher-top", anchor: .top)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+          VStack(spacing: 10) {
+            SessionColumnHeader(newSession: { newSession(filter) }, newSessionDisabled: sessions.preferences == nil,
+              close: { dismiss() }, newSessionIdentifier: "switcher-new-session")
+            SessionChips(store: sessions, selection: $filter) { _, intent in
+              projectAction = intent
+            } add: { showProjects = true }
+            .padding(.horizontal, AppLayout.margin)
+            HStack(spacing: 8) {
+              Image(systemName: "magnifyingglass").foregroundStyle(theme.color(.icon))
+              TextField("Buscar sessão", text: $filter.query)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .accessibilityIdentifier("switcher-search")
+              if !filter.query.isEmpty {
+                Button { filter.query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                  .buttonStyle(.plain).accessibilityLabel("Limpar busca")
+              }
+            }
+            .appFont(.secondary).padding(10).background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, AppLayout.margin)
+          }
+          .padding(.top, 8).padding(.bottom, 10).background(theme.color(.background))
+        }
       }
+      .toolbar(.hidden, for: .navigationBar)
+      .sheet(isPresented: $showProjects) { AddProjectPicker(store: sessions) }
+      .sheet(isPresented: $showArchived) { ArchivedSessionsView(store: sessions) }
+      .confirmationDialog("Alterar filtro?", isPresented: Binding(
+        get: { projectAction != nil }, set: { if !$0 { projectAction = nil } })) {
+        Button("Confirmar") {
+          guard let intent = projectAction else { return }
+          projectAction = nil
+          Task {
+            await sessions.mutate(intent)
+            if let id = filter.project, id != SessionListFilter.chats,
+              !sessions.selectedProjects.contains(where: { $0.project.id == id }) { filter.project = nil }
+          }
+        }
+        Button("Cancelar", role: .cancel) { projectAction = nil }
+      }
+    }
+    .sessionRowTimeline()
+    .presentationDetents([.large]).presentationDragIndicator(.visible)
+    .tint(theme.color(.primary))
   }
 }

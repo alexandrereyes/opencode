@@ -151,22 +151,23 @@ private struct TranscriptFooter: View {
   let message: ConversationMessage
   let store: ConversationStore
   var body: some View {
-    HStack(spacing: 10) {
-      Text(ConversationProjection.footer(message, models: store.displayModels))
+    // Its buttons are full 44-point targets; the line keeps its place through the items' gaps.
+    HStack(spacing: 0) {
+      Text(ConversationProjection.footer(message, models: store.displayModels)).padding(.trailing, 4)
         .appFont(.caption).monospacedDigit()
       Button {
         UIPasteboard.general.string = store.responseText(endingAt: message.id)
         Haptics.play(.selection)
         store.toast.show("Resposta copiada")
       } label: {
-        Image(systemName: "doc.on.doc").appSymbol(.inline)
+        Image(systemName: "doc.on.doc").appSymbol(.inline).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
       }
       .buttonStyle(.plain).accessibilityLabel("Copiar resposta")
       Button {
         Haptics.play(.selection)
         store.readAloudResponse(endingAt: message.id)
       } label: {
-        Image(systemName: "play").appSymbol(.inline)
+        Image(systemName: "play").appSymbol(.inline).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
       }
       .buttonStyle(.plain).accessibilityLabel("Ouvir resposta")
       .accessibilityIdentifier("read-aloud-message-" + message.id)

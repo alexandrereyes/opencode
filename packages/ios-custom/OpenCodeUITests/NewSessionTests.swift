@@ -3,6 +3,8 @@ import XCTest
 @MainActor final class NewSessionTests: XCTestCase {
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
   private var theme: String { environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
+  /// The one MCP these cases may toggle; test-new-session.py picks one the sandbox has and restores its state.
+  private var mcp: String { environment["OPENCODE_TEST_NEW_SESSION_MCP"] ?? "codex-computer-use" }
   private func launch() throws -> XCUIApplication {
     continueAfterFailure = false
     let app = XCUIApplication()
@@ -10,8 +12,8 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(
       environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
-    app.tabBars.buttons["Sessões"].tap()
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
+    app.showSessions()
     return app
   }
   private func openNewSession(_ app: XCUIApplication) {
@@ -112,22 +114,19 @@ import XCTest
     XCTAssertTrue(app.buttons["new-project"].label.contains("opencode2"))
     chooseProject("abacato-v2", app)
     chooseDestination("new-root", app)
-    let safe = app.switches["mcp-safari-devtools"]
-    XCTAssertTrue(safe.waitForExistence(timeout: 10))
-    safe.tap()
-    XCTAssertEqual(
-      XCTWaiter.wait(
-        for: [
-          XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == 'Desativado'"), object: safe)
-        ], timeout: 20), .completed)
-    safe.tap()
-    XCTAssertEqual(
-      XCTWaiter.wait(
-        for: [
-          XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == 'Ativado'"), object: safe)
-        ], timeout: 20), .completed)
+    // A live toggle on the root checkout, there and back.
+    let live = app.switches["mcp-" + mcp]
+    XCTAssertTrue(live.waitForExistence(timeout: 10))
+    let initial = try XCTUnwrap(live.value as? String)
+    for value in [initial == "Ativado" ? "Desativado" : "Ativado", initial] {
+      live.tap()
+      XCTAssertEqual(
+        XCTWaiter.wait(
+          for: [
+            XCTNSPredicateExpectation(
+              predicate: NSPredicate(format: "value == %@", value), object: live)
+          ], timeout: 20), .completed)
+    }
     app.buttons["new-directory"].tap()
     XCTAssertTrue(app.navigationBars["Diretório"].waitForExistence(timeout: 5))
     keyboardHidden(app)
@@ -147,7 +146,7 @@ import XCTest
     XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
     keyboardSettled(app)
     shot("n4-new-worktree")
-    app.switches["mcp-safari-devtools"].tap()
+    app.switches["mcp-" + mcp].tap()
     keyboardSettled(app)
     shot("mcp-preview-off")
     app.buttons["new-base"].tap()
@@ -314,8 +313,8 @@ import XCTest
     keyboardSettled(app)
     app.buttons["base-feat/redesign-identidade"].tap()
     ready(app)
-    // Only safari-devtools is allowed to change, including in the destination preview.
-    app.switches["mcp-safari-devtools"].tap()
+    // Only the test MCP is allowed to change, including in the destination preview.
+    app.switches["mcp-" + mcp].tap()
     submit("Responda apenas OK, sem ferramentas. Onda 9 nova.", app)
   }
 }

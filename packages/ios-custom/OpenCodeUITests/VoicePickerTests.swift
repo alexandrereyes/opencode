@@ -9,11 +9,11 @@ import XCTest
     if active { app.launchArguments += ["-OpenCodeVoiceBarFixture", "listening"] }
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
-    XCTAssertTrue(app.tabBars.buttons["Você"].waitForExistence(timeout: 20))
-    app.tabBars.buttons["Você"].tap()
+    XCTAssertTrue(app.accountButton.waitForExistence(timeout: 20))
+    app.openYou()
     let row = app.buttons["settings-voice"]
     for _ in 0..<8 {
-      if row.exists && row.isHittable && row.frame.maxY < app.tabBars.firstMatch.frame.minY - 70 { break }
+      if row.exists && row.isHittable && row.frame.maxY < app.frame.maxY - 70 { break }
       app.swipeUp(velocity: .slow)
     }
     XCTAssertTrue(row.isHittable)

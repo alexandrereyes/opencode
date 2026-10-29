@@ -18,6 +18,8 @@ struct MacSessionColumn: View {
   @State private var showProjects = false
   @State private var bulkDelete: [SessionRow]?
   @AppStorage("OpenCodeSessionSections") private var collapse = SessionSectionCollapse()
+  /// Holds the rows' order and sections still while the list scrolls, like the iPhone's Sessões.
+  @State private var presentation = SessionListPresentation()
 
   private struct ProjectAction: Identifiable {
     let name: String
@@ -59,7 +61,8 @@ struct MacSessionColumn: View {
         .listRowBackground(theme.color(.background))
       }
       SessionColumnSections(
-        store: store,
+        collapse: $collapse, store: store, rows: store.filtered,
+        scope: SessionListFilter(project: store.selectedProject, state: store.filter), presentation: presentation,
         open: open,
         archived: { showArchived = true },
         selection: runtime.sessionSelection,
@@ -86,6 +89,7 @@ struct MacSessionColumn: View {
       }
     }
     .listStyle(.plain)
+    .sessionListScrolling(presentation, store: store)
     .environment(\.defaultMinListRowHeight, 1)
     .scrollContentBackground(.hidden)
     .background(theme.color(.background))

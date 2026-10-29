@@ -69,7 +69,7 @@ final class SessionStore {
   var filter = SessionFilter.all
   /// A selected repository's project ID, or `chatsSelection` for managed chats.
   var selectedProject: String?
-  static let chatsSelection = "custom.chats"
+  static let chatsSelection = SessionListFilter.chats
   var chatsSelected: Bool { selectedProject == Self.chatsSelection }
   struct ConversationRoute: Hashable {
     let id: String
@@ -79,6 +79,7 @@ final class SessionStore {
     var master = false
     var origin: NewSessionOrigin? = nil
     var startInChats = false
+    var startFilter: SessionListFilter?
     /// The conversation's "Agentes e tarefas" screen, pushed above it.
     var agents = false
   }
@@ -91,7 +92,8 @@ final class SessionStore {
       #endif
     }
   }
-  var selectedTab = 3
+  /// Você (settings) as a sheet over Sessões, opened from the header avatar.
+  var settingsOpen = false
   /// Recently opened conversations and those on the stack, so screens pushed above one share its store
   /// and returning to one finds it as it was left.
   @ObservationIgnored let conversations = ConversationRegistry()
@@ -117,7 +119,7 @@ final class SessionStore {
   var shownSessionID: String?
   var currentSessionID: String? { shownSessionID }
   #else
-  var currentSessionID: String? { selectedTab == 3 && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
+  var currentSessionID: String? { !settingsOpen && conversationPath.last?.newSession != true ? (conversationPath.last?.master == true ? masterID : conversationPath.last?.id) : nil }
   #endif
   let toast = ToastCenter()
   let alerts: SessionAlertCenter
@@ -127,11 +129,11 @@ final class SessionStore {
   let voiceMemory: VoiceMemoryStore
   @ObservationIgnored let hub: EventHub
   @ObservationIgnored let drafts: ConversationDrafts
-  @ObservationIgnored let quoteModes = QuoteModes()
-  @ObservationIgnored let reversions = ConversationReverts()
   @ObservationIgnored let reading: ReadingPositionStore
   @ObservationIgnored let quoteDismissals: ChatQuoteDismissals
+  @ObservationIgnored let quoteModes = QuoteModes()
   @ObservationIgnored let expansions = ConversationExpansionMemory()
+  @ObservationIgnored let reversions = ConversationReverts()
   @ObservationIgnored private var order = RecentOrder()
   private(set) var chatRoot: String?
   @ObservationIgnored private var reloadPending = false
@@ -247,11 +249,7 @@ final class SessionStore {
       return rows.filter { $0.id == id }
     }
     #endif
-    return rows.filter {
-      filter.includes($0)
-        && (chatsSelected
-          ? $0.chat : selectedProject == nil || (!$0.chat && $0.project?.id == selectedProject))
-    }
+    return SessionListFilter(project: selectedProject, state: filter).rows(rows, label: directoryLabel)
   }
   var requestCount: Int { rows.reduce(0) { $0 + $1.requestCount } }
   var selectedProjects: [(directory: String, project: Project)] {
@@ -298,6 +296,15 @@ final class SessionStore {
     } onCancel: { task.cancel() }
     if runID == id { runningTask = nil }
   }
+  #if DEBUG
+  /// One deterministic transition during a List gesture, without any server or model.
+  func finishSessionListFixture() {
+    guard ScrollFixtures.mode != nil else { return }
+    active.remove("ses_scroll_0000")
+    previews["ses_scroll_0000"]?.activity = "concluído"
+    order.snapshot(entries, active: active)
+  }
+  #endif
 
   func stop() async {
     await voiceMemory.stop()
@@ -328,6 +335,7 @@ final class SessionStore {
     await reload()
     for await frame in events {
       if Task.isCancelled { break }
+      conversations.record(frame)
       switch frame.event {
       case .connected:
         voiceMemory.resume()
@@ -463,9 +471,14 @@ final class SessionStore {
     visible.insert(session.id)
     enqueuePreview(session.id)
   }
-  func hide(_ session: Session) { visible.remove(session.id) }
+  func hide(_ session: Session) {
+    visible.remove(session.id)
+    previewQueue.removeAll { $0 == session.id }
+    previewDirty.remove(session.id)
+  }
 
   private func enqueuePreview(_ id: String) {
+    guard visible.contains(id) else { return }
     if previewing.contains(id) {
       previewDirty.insert(id)
       return
@@ -477,9 +490,10 @@ final class SessionStore {
   private func drainPreviews() {
     while previewing.count < 4, !previewQueue.isEmpty {
       let id = previewQueue.removeFirst()
+      guard visible.contains(id) else { continue }
       previewing.insert(id)
       Task {
-        if let preview = try? await client.preview(id), !deletedIDs.contains(id) { previews[id] = preview }
+        if let preview = try? await client.preview(id), visible.contains(id), !deletedIDs.contains(id) { previews[id] = preview }
         previewing.remove(id)
         if previewDirty.remove(id) != nil { enqueuePreview(id) }
         drainPreviews()
@@ -568,7 +582,10 @@ final class SessionStore {
     await perform(session.id) { try await client.markViewed(session) }
   }
   func archive(_ row: SessionRow) async {
-    await perform(row.id, feedback: .light) { try await client.archive(row.id) }
+    await perform(row.id, feedback: .light) {
+      try await client.archive(row.id)
+      conversations.removeFamily(row.id, sessions: entries.map(\.session))
+    }
   }
   /// Like the web's bulk actions: serial requests, one per root (the server cascades children), no retries.
   /// The failures stay selected; one toast summarizes the batch.
@@ -579,6 +596,7 @@ final class SessionStore {
     for id in ids {
       do {
         try await client.archive(id)
+        conversations.removeFamily(id, sessions: entries.map(\.session))
         result.succeeded.append(id)
       } catch { result.failed.append(id) }
     }

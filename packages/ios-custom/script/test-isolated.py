@@ -21,6 +21,9 @@ parser.add_argument("--theme", default="openchamber-dark")
 parser.add_argument("--server-url", default="http://127.0.0.1:4177")
 parser.add_argument("--home", type=Path)
 parser.add_argument("--environment", type=Path, help="Private JSON with prepared test fixture IDs")
+parser.add_argument("--attempts", type=int, default=int(os.environ.get("OPENCODE_TEST_ATTEMPTS", "1")),
+    help="Retry failed tests up to this many attempts (the first simulator launch can ignore its arguments)")
+parser.add_argument("--location", metavar="LAT,LON", help="Simulator only: install the app, grant it location and set this position (DeviceDataTests)")
 parser.add_argument("tests", nargs="+")
 args = parser.parse_args()
 if args.dictation_fixture and any(test.startswith("OpenCodeUITests/") and not test.startswith("OpenCodeUITests/DictationUITests") for test in args.tests):
@@ -34,6 +37,8 @@ offline = {
     "OpenCodeUITests/ConversationFollowTests/testHistoryJumpToLatestInBothThemes",
     "OpenCodeUITests/ConversationFollowTests/testHeightChangesFollowMonotonicallyInBothThemes",
 }
+if args.location and args.physical:
+    parser.error("--location sets a simulator's position")
 if args.physical and (args.device != "00008110-00065DA13A78401E" or any(test not in offline for test in args.tests)):
     parser.error("The physical worker is restricted to the iPhone 14 and server-free fixtures")
 if not args.physical:
@@ -63,21 +68,30 @@ try:
             target.setdefault("EnvironmentVariables", {}).update(json.loads(args.environment.read_text()))
         target.setdefault("EnvironmentVariables", {}).update(OPENCODE_TEST_PASSWORD=password,
             OPENCODE_SERVER_PASSWORD=password, OPENCODE_TEST_THEME=args.theme, OPENCODE_TEST_SERVER_URL=args.server_url)
-        arguments = ["-OpenCodeServerURL", args.server_url, "-OpenCodeTheme", args.theme]
+        # Tests choose their own theme (OPENCODE_TEST_THEME); app arguments appended here would override it.
+        arguments = ["-OpenCodeServerURL", args.server_url]
         if args.physical:
             arguments += ["-OpenCodeScrollFixture", "conversation"]
         if args.dictation_fixture:
             arguments += ["-OpenCodeDictationFixture", "fake"]
-        target["CommandLineArguments"] = arguments
+        target["CommandLineArguments"] = arguments + ["-OpenCodeTheme", args.theme]
         target["UITargetAppCommandLineArguments"] = arguments
         target.setdefault("UITargetAppEnvironmentVariables", {})["OPENCODE_SERVER_PASSWORD"] = password
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
+    if args.location:
+        # Granted before the run (a fresh simulator would otherwise ask), with the position set right before it: one
+        # set long before may yield no fix within the app's 3-second limit.
+        subprocess.run(["xcrun", "simctl", "install", args.device,
+            str(args.derived / "Build/Products/Debug-iphonesimulator/OpenCode.app")], check=True)
+        subprocess.run(["xcrun", "simctl", "privacy", args.device, "grant", "location", "br.com.alexandrem.opencode"], check=True)
+        subprocess.run(["xcrun", "simctl", "location", args.device, "set", args.location], check=True)
     with (args.evidence / (token + ".log")).open("w") as log:
         status = subprocess.call(prefix + ["xcodebuild", "test-without-building", "-xctestrun", str(configured),
             "-destination", ("platform=iOS,id=" if args.physical else "platform=iOS Simulator,id=") + args.device,
             "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never", "-test-timeouts-enabled", "YES",
             "-maximum-test-execution-time-allowance", "600" if args.physical else "300", "-resultBundlePath", str(result)]
+            + (["-retry-tests-on-failure", "-test-iterations", str(args.attempts)] if args.attempts > 1 else [])
             + ["-only-testing:" + test for test in args.tests], stdout=log, stderr=subprocess.STDOUT)
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
         "--output-path", str(args.evidence / (token + "-attachments"))], check=True, stdout=subprocess.DEVNULL)

@@ -91,6 +91,11 @@ final class TranscriptLayout: UICollectionViewLayout {
   /// a row replaced) keeps this much scrollable space, so the offset is never clamped and the screen never
   /// moves; the reader's next drag releases it.
   var contentFloor: CGFloat = 0
+  /// Opened at the end, with nothing added since: the cells measured after the first frame (SwiftUI settles
+  /// some a pass later) correct their estimates without new content, so the end stays at the end.
+  var keepsEnd = false
+  /// Items whose text got the beginning it was shown without: they grow above the reader's place.
+  var growsAtStart: Set<String> = []
 
   override var collectionViewContentSize: CGSize {
     CGSize(width: collectionView?.bounds.width ?? 0,
@@ -186,6 +191,12 @@ final class TranscriptLayout: UICollectionViewLayout {
         .filter { $0 != index && $0 != displaced && isMeasured($0) }.min()
       above = shown.map { index < $0 } ?? true
     }
+    if growsAtStart.remove(geometry.entries[index].id) != nil, index == place { above = true }
+    if keepsEnd, !above, Double(visibleTop + viewport) >= geometry.contentEnd - 1,
+      geometry.spacer(viewport: Double(viewport)) == 0
+    {
+      above = true
+    }
     let delta = geometry.setHeight(Double(preferred.frame.height), at: index)
     if measured.indices.contains(index) { measured[index] = true }
     delegate?.layout(self, measured: preferred.frame.height, at: index)
@@ -193,12 +204,6 @@ final class TranscriptLayout: UICollectionViewLayout {
     if above {
       context.contentOffsetAdjustment = CGPoint(x: 0, y: CGFloat(delta))
     }
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics"), abs(delta) > 0.5 {
-      NSLog("TRANSCRIPT sized %@ delta=%.1f above=%@ place=%d", geometry.entries[index].id, delta, String(above),
-        place ?? -1)
-    }
-    #endif
     let visible = collectionView?.indexPathsForVisibleItems ?? []
     context.invalidateItems(at: Array(Set(visible + [original.indexPath]).filter { $0.item < geometry.count }))
     return context

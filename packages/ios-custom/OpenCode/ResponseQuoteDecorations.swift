@@ -77,10 +77,13 @@ extension ResponseTextView {
       return
     }
     if quoteGeometryDirty {
-      quoteGeometryDirty = false
+      // Marks often arrive after the text: an edit may not be laid out yet, and rects measured now would be
+      // empty. Lay it out first; should it still yield nothing, measure again on the next pass.
+      if let manager = textLayoutManager { manager.ensureLayout(for: manager.documentRange) }
       quoteRects = quoteHighlights.map { highlight in
         (highlight.mark, highlight.ranges.flatMap(displayRanges).flatMap(textRects))
       }
+      quoteGeometryDirty = quoteRects.contains { $0.1.isEmpty }
       quoteButtons.forEach { $0.removeFromSuperview() }
       quoteButtons = quoteInsertions.compactMap { insertion in
         guard let rect = textRects(insertion.range).first else { return nil }
@@ -116,10 +119,22 @@ extension ResponseTextView {
       parent = view.superview
     }
   }
+  /// The text's rects from its own layout, whatever part of it the view has drawn so far: selection rects only
+  /// cover what the view's viewport has laid out, which misses marks configured before the cell is sized.
   func textRects(_ range: NSRange) -> [CGRect] {
-    guard let start = position(from: beginningOfDocument, offset: range.location),
-      let end = position(from: start, offset: range.length), let text = textRange(from: start, to: end) else { return [] }
-    return selectionRects(for: text).map(\.rect).filter { $0.width > 0 && $0.height > 0 }
+    guard let manager = textLayoutManager, let content = manager.textContentManager,
+      let start = content.location(content.documentRange.location, offsetBy: range.location),
+      let end = content.location(start, offsetBy: range.length), let text = NSTextRange(location: start, end: end)
+    else { return [] }
+    manager.ensureLayout(for: text)
+    var rects: [CGRect] = []
+    manager.enumerateTextSegments(in: text, type: .standard, options: []) { _, frame, _, _ in
+      if frame.width > 0, frame.height > 0 {
+        rects.append(frame.offsetBy(dx: textContainerInset.left, dy: textContainerInset.top))
+      }
+      return true
+    }
+    return rects
   }
   func drawQuoteDecorations() {
     for (mark, rects) in quoteRects {

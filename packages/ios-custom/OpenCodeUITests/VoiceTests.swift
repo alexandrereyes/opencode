@@ -36,7 +36,7 @@ import XCTest
     XCTAssertLessThanOrEqual(bar.frame.maxY, app.textViews["conversation-composer"].frame.minY)
     capture("voice-conversation")
     app.buttons["Voltar"].tap()
-    app.tabBars.buttons["Você"].tap()
+    app.openYou()
     XCTAssertTrue(bar.exists)
     bar.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0))
       .withOffset(CGVector(dx: -86, dy: 29)).tap()

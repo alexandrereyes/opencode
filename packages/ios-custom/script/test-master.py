@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Only OpenCode Mestra + owned 4179 sandbox; credentials never appear in argv/logs."""
+"""Only an owned loopback sandbox (never 4096/4178); credentials never appear in argv/logs.
+
+Self-contained: the target conversation of `testTargetUserMessageShowsMasterOrigin` is a synthetic import whose user
+message carries the `custom.master` metadata the master's tools write, so no recorded voice/master transcript is needed.
+"""
 import base64
 import json
 import os
@@ -14,8 +18,8 @@ import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
 # Overrides let an isolated worker use its own sandbox, build and simulator (never 4096/4178).
-server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4179")
-home = Path(os.environ.get("OPENCODE_TEST_HOME", str(temporary / "custom-sandbox-4179")))
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4177")
+home = Path(os.environ.get("OPENCODE_TEST_HOME", str(temporary / "custom-sandbox-4177")))
 derived = Path(os.environ.get("OPENCODE_TEST_DERIVED", str(temporary / "ios-mestra-derived")))
 base_evidence = Path(os.environ.get("OPENCODE_TEST_EVIDENCE", str(temporary / "ios-mestra-prints")))
 evidence = base_evidence / "review-1" if "--review-1" in sys.argv else base_evidence
@@ -62,6 +66,23 @@ if not regressions:
     owned.append(chat)
     rpc("custom.chats", "confirm", {**allocation, "sessionID": chat})
     extra.update({"OPENCODE_TEST_CHAT": chat, "OPENCODE_TEST_CHAT_DIRECTORY": allocation["directory"]})
+    master_target = "ses_" + uuid.uuid4().hex
+    directory = home / "repos" / "mestra-target"
+    directory.mkdir(parents=True, exist_ok=True)
+    api("/api/experimental/session/import", {
+        "info": {"id": master_target, "title": "Mestra · alvo", "projectID": "global",
+            "location": {"directory": str(directory)}, "agent": "build", "model": model, "cost": 0,
+            "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+            "outcome": "succeeded", "time": {"created": now, "updated": now, "idle": now, "viewed": now}},
+        "location": {"directory": str(directory)},
+        "messages": [{"id": "msg_" + uuid.uuid4().hex, "type": "user", "time": {"created": now - 1000},
+            "text": "Confira o status do PR.", "metadata": {"custom.master": {"sessionID": "ses_" + uuid.uuid4().hex}}},
+            {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build", "model": model,
+             "time": {"created": now - 500, "completed": now}, "finish": "stop",
+             "content": [{"type": "text", "text": "O PR está aprovado."}]}],
+    })
+    owned.append(master_target)
+    extra["OPENCODE_TEST_MASTER_TARGET"] = master_target
 if regressions:
     directory = str(home / "repos/mestra-alpha")
     model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
@@ -101,14 +122,13 @@ old = profile["data"].get("masterSessions", {}).get("local")
 if old:
     rpc("custom.archive", "archive", {"sessionID": old})
 rpc("custom.preferences", "mutate", {"type": "master.clear", "server": "local"})
-live = json.loads((base_evidence / "live-transcript.json").read_text())
 run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
 targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]]
     if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"])
 for target in targets:
     target.setdefault("EnvironmentVariables", {}).update({
         "OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password,
-        "OPENCODE_TEST_THEME": theme, "OPENCODE_TEST_MASTER_TARGET": live["root"],
+        "OPENCODE_TEST_THEME": theme,
         "OPENCODE_TEST_SERVER_URL": server, **extra,
     })
     target["CommandLineArguments"] = ["-OpenCodeServerURL", server]

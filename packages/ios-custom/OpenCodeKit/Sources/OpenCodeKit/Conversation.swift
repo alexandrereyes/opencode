@@ -12,7 +12,7 @@ public struct ModelReference: Codable, Sendable, Hashable {
   }
   /// A tool `model` input: `providerID/modelID` or `providerID/modelID#variant`.
   public init?(selector: String) {
-    let parts = selector.split(separator: "#", maxSplits: 1).map(String.init)
+    let parts = selector.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
     guard let slash = parts[0].firstIndex(of: "/"), slash != parts[0].startIndex,
       parts[0].index(after: slash) != parts[0].endIndex
     else { return nil }
@@ -76,6 +76,26 @@ public struct MessageTime: Codable, Sendable, Equatable {
 }
 
 /// Unknown message and part types retain their tag rather than failing the whole page.
+/// A shell message's output: plain text from older servers, `{ output, cursor, size, truncated }` from current ones.
+public struct ShellMessageOutput: Codable, Sendable, Equatable {
+  public var text: String
+
+  public init(_ text: String) { self.text = text }
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+    if let text = try? container.decode(String.self) {
+      self.text = text
+      return
+    }
+    struct Structured: Decodable { let output: String? }
+    text = try container.decode(Structured.self).output ?? ""
+  }
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(text)
+  }
+}
+
 public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
   public var id: String
   public var type: ConversationMessageKind
@@ -96,7 +116,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
   public var status: String?
   public var outcome: String?
   public var command: String?
-  public var output: String?
+  public var output: ShellMessageOutput?
   public var name: String?
   public var summary: String?
   public var shellID: String?
@@ -119,7 +139,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
           state: .object([
             "status": .string(status == "running" ? "running" : "completed"),
             "input": .object(["command": .string(command ?? "")]),
-            "content": .array([.object(["type": .string("text"), "text": .string(output ?? "")])]),
+            "content": .array([.object(["type": .string("text"), "text": .string(output?.text ?? "")])]),
             "metadata": .object(exit.map { ["exit": .number(Double($0))] } ?? [:]),
           ]), time: time)
       ]
@@ -143,7 +163,7 @@ public struct ConversationMessage: Codable, Sendable, Identifiable, Equatable {
         ? "Resumindo contexto…"
         : status == "failed" ? "Falha ao resumir contexto" : "Contexto resumido"
     case "skill": "Skill · \(name ?? "")"
-    case "shell": "$ \(command ?? "")\n\(output ?? "")"
+    case "shell": "$ \(command ?? "")\n\(output?.text ?? "")"
     case "idle": outcome == "interrupted" ? "Execução interrompida" : "Execução concluída"
     default: text ?? description ?? "Aviso · \(type)"
     }

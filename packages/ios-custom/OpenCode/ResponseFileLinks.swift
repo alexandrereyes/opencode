@@ -52,7 +52,7 @@ extension ResponseTextView {
         }
       }
     }
-    if attributedText != text { attributedText = text }
+    if attributedText != text { replaceText(text) }
   }
 }
 

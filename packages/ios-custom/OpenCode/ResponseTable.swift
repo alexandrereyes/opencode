@@ -141,7 +141,9 @@ private struct ResponseTableContent: UIViewRepresentable {
     view.memory = memory
     if view.identity != "\(messageID)/\(partID)/\(block.id)" {
       view.identity = "\(messageID)/\(partID)/\(block.id)"
-      view.contentOffset.x = memory?.tableOffset(view.identity) ?? 0
+      // UIScrollView clamps an offset assigned before its content has been measured.
+      view.pendingOffset = memory?.tableOffset(view.identity) ?? 0
+      view.setNeedsLayout()
     }
     view.accessibilityIdentifier = "markdown-table-content-\(block.id)"
     view.wrap = wrap
@@ -186,9 +188,12 @@ final class ResponseTableView: UIScrollView {
   var identity = ""
   /// Keeps the horizontal position per table, so a rebuilt response shows the same columns.
   weak var memory: TranscriptMemory?
+  var pendingOffset: CGFloat?
   override var contentOffset: CGPoint {
     didSet {
-      if !identity.isEmpty, contentOffset.x != oldValue.x { memory?.setTableOffset(identity, value: contentOffset.x) }
+      if pendingOffset == nil, !identity.isEmpty, contentOffset.x != oldValue.x {
+        memory?.setTableOffset(identity, value: contentOffset.x)
+      }
     }
   }
   var wrap = true
@@ -255,7 +260,7 @@ final class ResponseTableView: UIScrollView {
   }
   override func layoutSubviews() {
     super.layoutSubviews()
-    guard layoutWidth != bounds.width else { return }
+    guard bounds.width > 0, layoutWidth != bounds.width || pendingOffset != nil else { return }
     layoutWidth = bounds.width
     let layout = measure(bounds.width)
     contentSize = CGSize(width: layout.width, height: layout.height)
@@ -277,6 +282,11 @@ final class ResponseTableView: UIScrollView {
     }
     grid.frame = CGRect(origin: .zero, size: contentSize)
     grid.separators = separators
+    if let offset = pendingOffset {
+      contentOffset.x = min(max(0, offset), maximum)
+      pendingOffset = nil
+      memory?.setTableOffset(identity, value: contentOffset.x)
+    }
   }
 
   /// One plain layer per separator: no backing bitmap, however wide or tall the table is.

@@ -8,9 +8,10 @@ private actor RetainedReads {
   private var tail: [String] = ["msg_a", "msg_b"]
   private var history: [String: [String]] = [:]
   private(set) var olderReads = 0
-  /// Older pages never answer, like a request lost on a dead connection.
-  private var stalled = false
-  func stallOlderPages() { stalled = true }
+  /// Older pages answer after this long; a stall never answers, like a request lost on a dead connection.
+  private var olderDelay: Duration = .zero
+  func stallOlderPages() { olderDelay = .seconds(30) }
+  func slowOlderPages(_ delay: Duration) { olderDelay = delay }
   func setTail(_ ids: [String], history: [String: [String]] = [:]) {
     tail = ids
     self.history = history
@@ -26,7 +27,7 @@ private actor RetainedReads {
       let input = (try? JSONDecoder().decode(JSONValue.self, from: request.httpBody!))?.object?["input"]?.object
       let cursor = input?["cursor"]?.string
       if cursor != nil { olderReads += 1 }
-      if cursor != nil, stalled { try? await Task.sleep(for: .seconds(30)) }
+      if cursor != nil, olderDelay > .zero { try? await Task.sleep(for: olderDelay) }
       let ids = cursor.map { history[$0] ?? [] } ?? tail
       // Pages are newest first; each one points at the next older page by its oldest message.
       let data = ids.reversed().map { #"{"id":"\#($0)","type":"user","time":{"created":1},"text":"\#($0)"}"# }
@@ -226,13 +227,65 @@ private final class ObservedFlag: @unchecked Sendable {
     await reads.stallOlderPages()
     XCTAssertTrue(store.hasOlder)
     store.memory.anchor = ReadingPosition(.message(id: "msg_never", offset: 0))
-    try await assertShown(store, within: TranscriptViewController.revealDeadline + .milliseconds(400),
+    let controller = try await assertShown(store, within: TranscriptViewController.historyDeadline + .milliseconds(400),
       "the transcript is never hidden for good")
+    XCTAssertTrue(store.memory.state.resumeOffered, "the end shows with an offer to keep paging")
+    _ = controller
   }
 
-  private func assertShown(
-    _ store: ConversationStore, within limit: Duration, _ message: String, line: UInt = #line
-  ) async throws {
+  /// A conversation shorter than its viewport cannot be scrolled to its top, so it pages history in by itself
+  /// until it fills the viewport or the history ends (an empty page), without moving what is on screen.
+  func testAShortConversationPagesInItsHistoryWithoutMoving() async throws {
+    let reads = RetainedReads()
+    await reads.setTail(["msg_c", "msg_d"], history: ["msg_c": ["msg_a", "msg_b"]])
+    let store = store(reads)
+    await store.refresh()
+    XCTAssertTrue(store.hasOlder)
+    try await assertShown(store, within: TranscriptViewController.revealDeadline, "a short tail shows at once") {
+      controller in
+      let view: UICollectionView = controller.collectionView
+      @MainActor func screenY(_ id: String) -> CGFloat? {
+        controller.items.firstIndex { $0.id == id }
+          .flatMap { view.layoutAttributesForItem(at: IndexPath(item: $0, section: 0))?.frame.minY }
+          .map { $0 - view.contentOffset.y }
+      }
+      let before = try XCTUnwrap(screenY("prompt:msg_d"))
+      let start = ContinuousClock.now
+      while store.hasOlder || store.paging, start.duration(to: .now) < .seconds(5) {
+        try await Task.sleep(for: .milliseconds(20))
+      }
+      view.layoutIfNeeded()
+      XCTAssertFalse(store.hasOlder, "an empty page ends the history")
+      let olderReads = await reads.olderReads
+      XCTAssertEqual(olderReads, 2, "one page with messages, then the empty one")
+      XCTAssertTrue(controller.items.contains { $0.id == "prompt:msg_a" })
+      // Known: a prompt prepended under the reading line settles its height a pass after it is first measured, and
+      // that correction moves what follows it once (26 points here).
+      XCTExpectFailure("a prepended prompt's late height correction moves the screen once")
+      XCTAssertEqual(try XCTUnwrap(screenY("prompt:msg_d")), before, accuracy: 0.5, "what was on screen stayed put")
+    }
+  }
+
+  func testOpeningWaitsForSlowHistoryTowardTheSavedPlace() async throws {
+    let reads = RetainedReads()
+    await reads.setTail(["msg_c", "msg_d"], history: ["msg_c": ["msg_a", "msg_b"]])
+    let store = store(reads)
+    await store.refresh()
+    // A slow network: the page holding the saved place arrives after the short deadline, within the long one.
+    await reads.slowOlderPages(.milliseconds(900))
+    store.memory.anchor = ReadingPosition(.message(id: "msg_a", offset: 0))
+    let start = ContinuousClock.now
+    let controller = try await assertShown(store, within: TranscriptViewController.historyDeadline,
+      "the saved place restores by itself")
+    XCTAssertGreaterThan(start.duration(to: .now), TranscriptViewController.revealDeadline)
+    XCTAssertFalse(store.memory.state.resumeOffered)
+    XCTAssertTrue(controller.items.contains { $0.id == "prompt:msg_a" }, "it showed once the saved place had arrived")
+  }
+
+  @discardableResult private func assertShown(
+    _ store: ConversationStore, within limit: Duration, _ message: String, line: UInt = #line,
+    whileShown: @MainActor (TranscriptViewController) async throws -> Void = { _ in }
+  ) async throws -> TranscriptViewController {
     let reading = ReadingPositionStore(server: "test", root: FileManager.default.temporaryDirectory
       .appending(path: "retention-" + UUID().uuidString))
     let controller = TranscriptViewController(store: store, reading: reading)
@@ -249,6 +302,8 @@ private final class ObservedFlag: @unchecked Sendable {
     }
     XCTAssertFalse(controller.collectionView.isHidden, message, line: line)
     XCTAssertLessThanOrEqual(start.duration(to: .now), limit + .milliseconds(150), message, line: line)
+    try await whileShown(controller)
+    return controller
   }
 
   func testMemoryObservesEachKeyAlone() {

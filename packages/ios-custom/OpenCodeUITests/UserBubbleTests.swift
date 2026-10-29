@@ -287,7 +287,7 @@ import UIKit
       var app = try launch(theme: theme, preference: nil)
       XCTAssertTrue(try toggle(app).waitForExistence(timeout: 10))
       app.buttons["Voltar"].tap()
-      app.tabBars.buttons["Você"].tap()
+      app.openYou()
       var setting = app.switches["settings-collapsible-user-messages"]
       XCTAssertTrue(setting.waitForExistence(timeout: 10))
       app.swipeUp(velocity: .slow)
@@ -304,7 +304,7 @@ import UIKit
       XCTAssertFalse(try toggle(app).exists)
       shot(app, "app-collapse-disabled-" + theme)
       app.buttons["Voltar"].tap()
-      app.tabBars.buttons["Você"].tap()
+      app.openYou()
       setting = app.switches["settings-collapsible-user-messages"]
       XCTAssertTrue(setting.waitForExistence(timeout: 10))
       app.swipeUp(velocity: .slow)

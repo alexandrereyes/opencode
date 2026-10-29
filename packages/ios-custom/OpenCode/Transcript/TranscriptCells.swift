@@ -130,12 +130,6 @@ final class TranscriptHostCell: UICollectionViewCell, TranscriptMessageCell {
       CGSize(width: layoutAttributes.frame.width, height: UIView.layoutFittingCompressedSize.height),
       withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
     attributes.frame.size.height = ceil(size.height)
-    #if DEBUG
-    if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-      NSLog("TRANSCRIPT fit %@ %@ at %d: %.1f (was %.1f)", String(describing: ObjectIdentifier(self)), itemID,
-        layoutAttributes.indexPath.item, attributes.frame.height, layoutAttributes.frame.height)
-    }
-    #endif
     return attributes
   }
 }

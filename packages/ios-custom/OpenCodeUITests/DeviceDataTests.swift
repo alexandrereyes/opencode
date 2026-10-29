@@ -31,8 +31,8 @@ import XCTest
     return data
   }
   private func openDeviceData(_ app: XCUIApplication) {
-    XCTAssertTrue(app.tabBars.buttons["Você"].waitForExistence(timeout: 30))
-    app.tabBars.buttons["Você"].tap()
+    XCTAssertTrue(app.accountButton.waitForExistence(timeout: 30))
+    app.openYou()
     XCTAssertTrue(app.navigationBars["Você"].waitForExistence(timeout: 10))
     let row = app.descendants(matching: .any)["settings-device-data"].firstMatch
     for _ in 0..<8 where !(row.exists && row.isHittable) { app.collectionViews.firstMatch.swipeUp(velocity: .slow) }
@@ -72,7 +72,7 @@ import XCTest
     let location = app.switches["device-source-location"]
     if location.value as? String != "1" { location.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap() }
     XCTAssertTrue(app.staticTexts["device-source-status-location"].waitForLabel(containing: "Permitido", timeout: 15))
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     let accessory = app.buttons["master-accessory"]
     XCTAssertTrue(accessory.waitForExistence(timeout: 30))
     accessory.tap()

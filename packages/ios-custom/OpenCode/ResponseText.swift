@@ -22,14 +22,15 @@ extension EnvironmentValues {
 
 final class ResponseTextView: UITextView {
   private(set) var measuredSizes: [CGFloat: CGSize] = [:]
-  override var attributedText: NSAttributedString! {
-    didSet {
-      invalidateMeasurement()
-      lineBreaks.widths = [:]
-      #if DEBUG
-      if (oldValue?.length ?? 0) > 0, attributedText != nil { TranscriptCounters.replaced.add(1, ordering: .relaxed) }
-      #endif
-    }
+  /// Replaces the whole text. Not an `attributedText` override: VoiceOver and UI tests read that property from
+  /// a background queue, where a main-actor override traps.
+  func replaceText(_ text: NSAttributedString?) {
+    #if DEBUG
+    if (attributedText?.length ?? 0) > 0, text != nil { TranscriptCounters.replaced.add(1, ordering: .relaxed) }
+    #endif
+    attributedText = text
+    invalidateMeasurement()
+    lineBreaks.widths = [:]
   }
   private let lineBreaks = InlineCodeLineBreaks()
   override init(frame: CGRect, textContainer: NSTextContainer?) {
@@ -104,7 +105,7 @@ final class ResponseTextView: UITextView {
   @discardableResult func show(_ text: NSAttributedString) -> Bool {
     let storage = textStorage
     guard storage.length > 0, text.length > 0 else {
-      attributedText = text
+      replaceText(text)
       return false
     }
     let old = Array(storage.string.utf16)
@@ -119,7 +120,7 @@ final class ResponseTextView: UITextView {
       storage.attributedSubstring(from: NSRange(location: 0, length: start))
         .isEqual(to: text.attributedSubstring(from: NSRange(location: 0, length: start)))
     else {
-      attributedText = text
+      replaceText(text)
       return false
     }
     storage.beginEditing()
@@ -400,6 +401,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.openNote = openNote
     view.openFile = fileOpenOverride ?? fileAction?.open
     view.openFolder = folderOpenOverride ?? fileAction?.folder
+    let quotesBefore = view.quoteHighlights
     view.configureQuotes(quotesOverride ?? quotes, block: block, theme: theme)
     if filesStableOverride ?? filesStable {
       coordinator.resolveFiles(view, block: block, context: fileContextOverride ?? imageContext)
@@ -451,7 +453,8 @@ struct SelectableResponseText: UIViewRepresentable {
     }
     let selection = view.originalRange(view.selectedRange)
     view.renderQuoteMarkers(in: text, traits: UITraitCollection(preferredContentSizeCategory: category))
-    // A streamed answer edits only its changed tail; anything else measures and decorates again.
+    // A streamed answer edits only its changed tail; anything else (new quote marks included) measures and
+    // decorates again.
     var incremental = false
     if !view.textStorage.isEqual(to: text) {
       incremental = view.show(text)
@@ -460,7 +463,7 @@ struct SelectableResponseText: UIViewRepresentable {
     view.inlineCodeRanges = view.inlineCodeRanges.flatMap(view.displayRanges)
     view.searchRange = view.searchMatch.flatMap { ConversationSearch.renderedRanges($0.range, block: block).first.map(view.displayRange) }
     view.applyFileLinks(coordinator.knownFiles)
-    if !incremental { view.invalidateMeasurement() }
+    if !incremental || view.quoteHighlights != quotesBefore { view.invalidateMeasurement() }
     view.accessibilityLabel = block.copyText
     view.accessibilityValue = block.copyText
     view.linkTextAttributes = [:]
@@ -479,7 +482,7 @@ struct SelectableResponseText: UIViewRepresentable {
     coordinator.fileKey = nil
     coordinator.knownFiles = [:]
     view.clearSelection()
-    view.attributedText = nil
+    view.replaceText(nil)
     view.sourceBlock = nil
     view.prose = nil
     view.source = ""

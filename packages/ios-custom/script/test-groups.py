@@ -111,6 +111,9 @@ try:
     command = ["xcodebuild", "test-without-building", "-xctestrun", str(configuration), "-destination",
         os.environ.get("OPENCODE_TEST_DESTINATION", "platform=iOS Simulator,name=OpenCode Grupos2"), "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
         "-test-timeouts-enabled", "YES", "-maximum-test-execution-time-allowance", "180", "-resultBundlePath", str(result)]
+    attempts = int(os.environ.get("OPENCODE_TEST_ATTEMPTS", "1"))
+    if attempts > 1:
+        command += ["-retry-tests-on-failure", "-test-iterations", str(attempts)]
     command += ["-only-testing:" + method for method in (sys.argv[1:] or [
         "OpenCodeUITests/ToolGroupingTests",
         "OpenCodeUITests/TranscriptCompatibilityTests/testToolsReasoningAndChildThroughBothTransports",

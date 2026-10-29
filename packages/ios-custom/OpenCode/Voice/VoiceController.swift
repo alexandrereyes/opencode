@@ -129,10 +129,10 @@ import AVFoundation
     #if DEBUG
     let arguments = ProcessInfo.processInfo.arguments
     #if os(macOS)
-    let isolated = (sessions.client.configuration.url.host == "127.0.0.1" && sessions.client.configuration.url.port == 4203)
+    let isolated = sessions.client.configuration.isolatedTestSandbox
       || (MacLaunch.fixture && MacFixture.value("-OpenCodeServerURL") == "http://127.0.0.1:4203")
     #else
-    let isolated = sessions.client.configuration.url.host == "127.0.0.1" && [4177, 4180, 4183].contains(sessions.client.configuration.url.port ?? -1)
+    let isolated = sessions.client.configuration.isolatedTestSandbox
     #endif
     let fixture = isolated && arguments.contains("-OpenCodeVoiceFixture")
     let fakeMaster = isolated && (fixture || arguments.contains("-OpenCodeVoiceFakeMaster"))

@@ -183,8 +183,9 @@ for target in targets:
             environment[key + "_CARRIER"] = item["carrier"]
             environment["OPENCODE_QUOTE_DIRECTORY"] = item["directory"]
     environment["OPENCODE_QUOTE_LIVE_TEXT"] = live_source
-    arguments = ["-OpenCodeServerURL", server_url, "-OpenCodeTheme", args.theme]
-    target["CommandLineArguments"] = arguments
+    # Tests choose their own theme (OPENCODE_TEST_THEME); app arguments appended here would override it.
+    arguments = ["-OpenCodeServerURL", server_url]
+    target["CommandLineArguments"] = arguments + ["-OpenCodeTheme", args.theme]
     target["UITargetAppCommandLineArguments"] = arguments
     target.setdefault("UITargetAppEnvironmentVariables", {})["OPENCODE_SERVER_PASSWORD"] = password
     if args.quotes_unavailable:

@@ -210,8 +210,8 @@ import XCTest
       app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = environment["OPENCODE_TEST_PASSWORD"]
       app.launchEnvironment["OPENCODE_TEST_PROMPT_FIXTURE"] = fixture
       app.launch()
-      XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
-      app.tabBars.buttons["Sessões"].tap()
+      XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
+      app.showSessions()
       if app.buttons["Fechar alerta"].exists { app.buttons["Fechar alerta"].tap() }
       app.buttons["Nova sessão"].tap()
       XCTAssertTrue(app.buttons["new-project"].waitForExistence(timeout: 20))

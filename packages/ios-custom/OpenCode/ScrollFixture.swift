@@ -3,7 +3,6 @@ import OpenCodeKit
 import SwiftUI
 
 @MainActor enum ScrollFixtures {
-  static weak var scrollState: ConversationScrollState?
   static weak var conversation: ConversationStore?
   static weak var driving: TranscriptDriving?
   static let mode: String? = argument("-OpenCodeScrollFixture")
@@ -110,7 +109,7 @@ struct ScrollFixtureRoot: View {
     let theme = appearance.theme(systemDark: systemScheme == .dark)
     Group {
       if ScrollFixtures.mode == "catalog" {
-        AppTabs(store: store, runtime: AppRuntime.shared)
+        AppShell(store: store, runtime: AppRuntime.shared)
           .environment(\.voiceController, AppRuntime.shared.voice)
           .environment(\.voiceSessionStore, store)
       } else if ScrollFixtures.mode == "conversation", ScrollFixtures.reentry != nil {

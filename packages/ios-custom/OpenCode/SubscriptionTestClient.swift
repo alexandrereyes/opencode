@@ -3,7 +3,7 @@ import OpenCodeKit
 
 func subscriptionClient(configuration: ServerConfiguration, client: OpenCodeClient) -> any SubscriptionClient {
   #if DEBUG
-  if ["http://127.0.0.1:4177", "http://127.0.0.1:4183"].contains(configuration.url.absoluteString),
+  if configuration.isolatedTestSandbox,
      let scenario = ProcessInfo.processInfo.environment["OPENCODE_PROXY_STUB"] {
     return SubscriptionTestClient(scenario: scenario)
   }

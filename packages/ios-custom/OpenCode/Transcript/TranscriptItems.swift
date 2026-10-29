@@ -152,9 +152,8 @@ enum TranscriptProjection {
             add("rule:" + row.id, .rule)
           default:
             guard !row.parts.isEmpty else { continue }
-            let keys = [row.id] + row.parts.map { "activity:detail:" + $0.id }
             add("row:" + row.id, .activity(row, messageID: message.id,
-              expansion: input.expansion.filter { keys.contains($0.key) }))
+              expansion: expansions(id: row.id, parts: row.parts, items: row.items, values: input.expansion)))
           }
         }
         if let error = message.error {
@@ -167,7 +166,8 @@ enum TranscriptProjection {
         if message.type == "assistant", input.marks.footers.contains(message.id), message.time.completed != nil,
           message.error == nil, message.retry == nil, !message.responseText.isEmpty
         {
-          add("footer:" + message.id, .footer(message))
+          // The footer's 44-point targets extend 12.5 points above and below its line.
+          add("footer:" + message.id, .footer(message), spacing: 4)
         }
       } else if message.type == "shell" {
         let keys = [message.id] + message.tools.compactMap(\.id).map { "activity:detail:" + $0 }
@@ -176,8 +176,8 @@ enum TranscriptProjection {
         add("notice:" + message.id, .notice(message))
       }
       if content.isEmpty { continue }
+      trailing = content.last.map { if case .footer = $0.kind { 0 } else { 10 } } ?? 10
       items += content
-      trailing = 10
     }
     // Like delivered prompts, each pending one starts a section, so delivery swaps it in place.
     for item in input.pending {
@@ -199,5 +199,17 @@ enum TranscriptProjection {
   private static func footnote(_ block: MarkdownBlock) -> Bool {
     if case .footnote = block.kind { return true }
     return false
+  }
+
+  /// Every disclosure in the shared activity card contributes to its measured height, including grouped
+  /// filenames and individual diffs. Keep those choices in the height key when the cell is reused.
+  private static func expansions(
+    id: String, parts: [ConversationActivityPart], items: [ConversationActivityItem], values: [String: Bool]
+  ) -> [String: Bool] {
+    let shown = items.isEmpty ? ConversationActivityItem.project(parts) : items
+    let keys = Set([id] + parts.map { "activity:detail:" + $0.id } + shown.flatMap { item in
+      ["activity:read:" + item.id] + item.files.map { "activity:file:\(item.id):\($0.path)" }
+    })
+    return values.filter { keys.contains($0.key) }
   }
 }

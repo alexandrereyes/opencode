@@ -115,7 +115,7 @@ def main():
                            "-destination", "platform=iOS Simulator,id=" + device,
                            "-parallel-testing-enabled", "NO", "-collect-test-diagnostics", "never",
                            "-resultBundlePath", str(result)]
-                selected = args.only or (["testTabs", "testSections", "testUnreadChips", "testRunningChips", "testSessionSelection", "testSessionSwitcher", "testConversation", "testNewSession", "testNewSessionFromRepository", "testZComposer", "testShortPrompt", "testActivity"]
+                selected = args.only or (["testTabs", "testSections", "testUnreadChips", "testMixedChats", "testRunningChips", "testSessionSelection", "testSessionSwitcher", "testConversation", "testNewSession", "testNewSessionFromRepository", "testZComposer", "testShortPrompt", "testActivity", "testSettings", "testSubscriptions"]
                                          if theme == "light" else [""])
                 command += ["-only-testing:OpenCodeUITests/ScreenCatalogTests" + ("/" + t if t else "")
                             for t in selected]

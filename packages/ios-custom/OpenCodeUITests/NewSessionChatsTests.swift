@@ -24,10 +24,10 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(
       environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
     // The first case creates a chat and sends a prompt: act only on the sandbox.
     try app.requireSandbox()
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     return app
   }
   private func openNewSession(_ app: XCUIApplication) {

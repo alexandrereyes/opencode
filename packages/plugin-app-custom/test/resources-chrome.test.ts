@@ -365,6 +365,7 @@ describe.skipIf(!cli)("playwright-cli sessions", () => {
     ])
   }, 60_000)
 
+  // Four playwright-cli runs (close and delete-data per session) outlast the default 5 s hook on a loaded Mac.
   afterAll(async () => {
     await adapter.close()
     for (const name of ["desktop", "phone"]) {
@@ -383,7 +384,7 @@ describe.skipIf(!cli)("playwright-cli sessions", () => {
           .map((file) => fs.rm(path.join(daemons, hash, file), { force: true })),
       )
     }
-  })
+  }, 60_000)
 
   const evaluateIn = async (target: Entry, expression: string) => {
     const probed = (await adapter.probe([target])).get(target.id)

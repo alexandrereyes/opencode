@@ -102,10 +102,6 @@ struct ScrollFixtureDriver: UIViewRepresentable {
         jumps.append(abs(moves[moves.count / 2]))
         if abs(moves[moves.count / 2]) > 0.5 {
           moved += 1
-          if ProcessInfo.processInfo.arguments.contains("-OpenCodeScrollDiagnostics") {
-            NSLog("DRIVER moved %.1f applied=%.1f offset=%.1f rows=%@", moves[moves.count / 2], applied,
-              scroll.contentOffset.y, current.keys.sorted().prefix(4).joined(separator: ","))
-          }
         }
       }
       growingShift = max(growingShift, growing.max() ?? 0)

@@ -1,9 +1,11 @@
 import OpenCodeKit
 import SwiftUI
 
+/// Você, a sheet over Sessões opened from its header avatar.
 struct SettingsView: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.floatingVoice) private var floatingVoice
+  @Environment(\.dismiss) private var dismiss
   let runtime: AppRuntime
   let store: SessionStore
   @State private var proxyProvider: SubscriptionProvider?
@@ -86,6 +88,11 @@ struct SettingsView: View {
       }
       .settingsList(theme)
       .navigationTitle("Você")
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Fechar", systemImage: "xmark") { dismiss() }.accessibilityIdentifier("settings-close")
+        }
+      }
       .refreshable { await store.quota.refresh() }
       .sheet(item: $proxyProvider) { provider in
         SubscriptionDetailSheet(store: store.quota, initialProvider: provider).sessionAlertOverlay()

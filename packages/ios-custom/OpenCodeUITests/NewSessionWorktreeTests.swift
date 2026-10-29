@@ -31,8 +31,8 @@ import XCTest
       environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
     defer { app.terminate() }
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
-    app.tabBars.buttons["Sessões"].tap()
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
+    app.showSessions()
     app.buttons["Nova sessão"].tap()
     let project = app.buttons["new-project"]
     XCTAssertTrue(project.waitForExistence(timeout: 20))

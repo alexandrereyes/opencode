@@ -13,7 +13,7 @@ import Testing
     {"session":{"id":"chat","projectID":"c","location":{"directory":"/chats/day/a"},"time":{"created":1,"updated":1}}}
   ]
   """#.utf8))
-  let rows = SessionList.rows(entries: entries, projects: projects, active: ["child"], pins: [], muted: [], autoApprove: false, ranks: [:], chatRoot: "/chats")
+  let rows = SessionList.rows(entries: entries, projects: projects, active: ["child"], pins: [], notify: [], autoApprove: false, ranks: [:], chatRoot: "/chats")
   let chips = [ChipEntry(key: "b", name: "B", position: 0), ChipEntry(key: "a", name: "A", position: 1),
     ChipEntry(key: "c", name: "C", position: 2), ChipEntry(key: ChipManualOrder.chats, name: "Chats", position: 3)]
   let items = ProjectRail.items(rows: rows, chips: chips, active: ["child"])

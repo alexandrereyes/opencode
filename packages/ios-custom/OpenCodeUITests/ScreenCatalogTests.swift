@@ -15,6 +15,8 @@ import XCTest
     XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 20))
     // Fail before any interaction if launch ever falls through to AppRoot/a real connection.
     XCTAssertTrue(app.buttons["session-row-ses_scroll_0000"].waitForExistence(timeout: 10), "Catálogo offline não carregou")
+    XCTAssertEqual(app.staticTexts["debug-server-url"].label, "http://127.0.0.1:4183")
+    XCTAssertFalse(app.tabBars.firstMatch.exists)
     // Complete both inline icon decodes, including SVG rasterization, before capturing any screen.
     RunLoop.current.run(until: Date().addingTimeInterval(2))
     return app
@@ -63,11 +65,9 @@ import XCTest
     shot("sessions-list-chats")
     chip("filter-project-Projeto Exemplo 0", app)
     shot("sessions-list-repository")
-    for (title, name) in [("Painel", "dashboard-tab-default"), ("Pedidos", "requests-tab-default"),
-                           ("Projetos", "projects-tab-default"), ("Você", "you-settings-default")] {
-      app.tabBars.buttons[title].tap()
-      shot(name)
-    }
+    // No tab bar: Você opens from the header avatar.
+    app.openYou()
+    shot("you-settings-default")
   }
 
   /// Every section of the column: the top of the list, then the days with "Anteriores" expanded.
@@ -136,6 +136,15 @@ import XCTest
     shot("sessions-chips-unread")
   }
 
+  func testMixedChats() {
+    let app = launch()
+    defer { app.terminate() }
+    let chat = app.buttons["session-row-ses_scroll_0001"]
+    XCTAssertTrue(chat.waitForExistence(timeout: 10))
+    XCTAssertTrue(chat.label.contains("Chats"))
+    shot("sessions-chats-mixed")
+  }
+
   func testRunningChips() {
     let app = launch(["-OpenCodeCatalogUnread"])
     defer { app.terminate() }
@@ -181,6 +190,20 @@ import XCTest
     tap("sessions-selection-done", app)
   }
 
+  func testNotifySwipe() {
+    let app = launch()
+    defer { app.terminate() }
+    let row = app.buttons["session-row-ses_scroll_0000"]
+    XCTAssertTrue(row.label.contains("avisa ao terminar"))
+    shot("sessions-notify-enabled")
+    let other = app.buttons["session-row-ses_scroll_0002"]
+    app.revealSessionRow(other)
+    other.swipeLeft()
+    XCTAssertTrue(app.buttons["Avisar ao terminar"].waitForExistence(timeout: 5))
+    shot("sessions-swipe-notify")
+    // Never toggle the preference; this reference only shows the available action.
+  }
+
   func testSessionSwitcher() {
     let app = launch()
     defer { app.terminate() }
@@ -189,9 +212,8 @@ import XCTest
     let current = app.buttons["switcher-row-ses_scroll_0000"]
     XCTAssertTrue(current.waitForExistence(timeout: 10))
     XCTAssertTrue(current.isSelected)
-    app.navigationBars["Sessões"].swipeUp()
     shot("session-switcher-open")
-    let search = app.searchFields["Buscar sessão"]
+    let search = app.textFields["switcher-search"]
     XCTAssertTrue(search.waitForExistence(timeout: 5))
     search.tap()
     search.typeText("contraste")
@@ -202,7 +224,7 @@ import XCTest
   func testSettings() {
     let app = launch()
     defer { app.terminate() }
-    app.tabBars.buttons["Você"].tap()
+    app.openYou()
     tap("settings-themes", app)
     shot("you-themes-default")
     app.navigationBars.buttons.firstMatch.tap()
@@ -335,7 +357,7 @@ import XCTest
   func testSubscriptions() {
     let app = launch()
     defer { app.terminate() }
-    app.tabBars.buttons["Você"].tap()
+    app.openYou()
     tap("proxy-settings-codex", app)
     XCTAssertTrue(app.otherElements["proxy-pool-header"].waitForExistence(timeout: 10))
     shot("you-subscriptions-default")

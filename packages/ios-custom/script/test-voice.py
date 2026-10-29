@@ -17,7 +17,8 @@ import uuid
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
 server = os.environ.get("OPENCODE_VOICE_SERVER_URL", "http://127.0.0.1:4177")
 address = urllib.parse.urlparse(server)
-assert address.hostname == "127.0.0.1" and address.port in (4177, 4180)
+# Any owned loopback sandbox, never production (4096/4178).
+assert address.hostname == "127.0.0.1" and address.port not in (None, 4096, 4178)
 home = Path(os.environ.get("OPENCODE_VOICE_HOME", temporary / f"custom-sandbox-{address.port}"))
 derived = Path(os.environ.get("OPENCODE_VOICE_DERIVED", temporary / "ios-voz-derived"))
 evidence = Path(os.environ.get("OPENCODE_VOICE_EVIDENCE", temporary / "ios-voz-prints"))

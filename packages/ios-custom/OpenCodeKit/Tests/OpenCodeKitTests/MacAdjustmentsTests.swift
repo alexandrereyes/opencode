@@ -25,7 +25,7 @@ import Testing
         {"session":{"id":"\(id)","projectID":"p","title":"\(id)","location":{"directory":"/repo"},
          "time":{"created":1,"updated":1}},"messageAt":1}
         """.utf8))
-      return try #require(SessionList.rows(entries: [entry], projects: [], active: [], pins: [], muted: [],
+      return try #require(SessionList.rows(entries: [entry], projects: [], active: [], pins: [], notify: [],
         autoApprove: false, ranks: [:], chatRoot: nil).first)
     }
     let sections = [

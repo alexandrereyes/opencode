@@ -141,6 +141,23 @@ runs behind and merges. A read whose messages and execution activity are unchang
 tail no longer overlaps the retained messages (more than a page arrived while away), the store reads back with the
 cursor until it does, at most five pages, and otherwise starts again from the tail like a fresh opening, so a retained
 history never has a silent gap. A memory warning releases everything off the stack and drops fetched tool output.
+The transcript view itself is retained with its conversation, so a return shows the very view that was left; a cold
+opening shows nothing until it is laid out at the saved place, for at most 400 ms (2.5 s with an indicator while
+history pages toward that place), and a failed or empty load shows at once.
+The header session switcher captures the source place and replaces the route only after its sheet dismisses;
+the destination uses this same registry. Successful archive and deletion, including batch selection, evict the
+affected retained family. Failed requests keep it; archiving keeps durable reading positions and drafts.
+The switcher reuses the main Sessões chips, grouping, headers and rows. Its search/chip and collapse state are local;
+it opens on Todas (Chats for a chat), always at the top; the current row is marked but never a scroll target.
+Reopening, changing the chip or changing the search starts at the top as well. Its header's +
+uses the selected chip for Nova sessão, while the conversation menu still inherits the conversation's origin.
+Both native Lists defer automatic reordering and section moves until scrolling is idle. Current data and request
+actions keep updating, and selection uses the displayed IDs. This is independent of transcript scroll ownership.
+Todas now includes ordinary chats in the same attention/activity/date groups as repository sessions. Mixed lists
+use the shared chat avatar; the local Chats filter uses each chat's own avatar. The bell represents the server's
+"Avisar ao terminar" preference, not a mute filter.
+Tables keep their horizontal position in `TranscriptMemory`: a reconstructed native table restores that position
+after measuring its content width. Grid separators and cells share the scrolling content coordinate space.
 
 The PWA similarly renders an available tail independently of catalogs/family. Its server-scoped data store retains
 messages across navigation and deduplicates `sync` reads until invalidated; the home page's first-two prefetch warms
@@ -293,7 +310,10 @@ Web projection sources: `packages/session-ui-custom/src/timeline/{projection,det
 `packages/app-custom/src/session/timeline/virtualizer.tsx` (`data-sticky-user`).
 
 - A backend step is one assistant message / one LLM call. The web can group adjacent activity **across** assistant
-  messages; “Usou” is a display group, not a separate API object or an LLM call count.
+  messages; the activity card is a display group, not a separate API object or an LLM call count. The iOS transcript
+  hosts the shared `ConversationActivityCard` and `ConversationTimeline` with the “Atividade” header, categories,
+  tool count and elapsed time. Group, detail, filename and diff disclosures participate in cached cell heights;
+  fetched outputs remain in per-key transcript memory across navigation.
 - Count tool/direct-shell entries, not reasoning parts. If there are only reasoning parts, count those instead.
   Deduplicate localized tool names in first appearance order. Notices do not increment the tool count.
 - Keep content order; reasoning duration is its own `time.completed - time.created` when available. Do not guess
@@ -316,8 +336,10 @@ Web projection sources: `packages/session-ui-custom/src/timeline/{projection,det
   message. Preserve identity and selection anchors while scrolling.
 - `Hoje`/`Ontem` are local-calendar grouping of `time.created`; never sort the history by that date. Like the custom
   web, there is no unread-message count, frozen boundary, divider or upward jump. One ↓ **Ir para a mais recente**
-  control appears beyond `max(400, viewport height)` points from the bottom (overflow > 1). It resumes following the
-  end, not a message boundary; prompt submission also resumes following. Route entry acknowledges the session's
+  control appears beyond `max(400, viewport height)` points from the bottom, or beyond 24 points once content was
+  added below the end the reader last saw (growth, arrivals, even while hidden). It scrolls to the end once; nothing
+  follows growth (iOS, 27 October): sending moves the sent prompt to the top of the transcript, and its answer grows
+  below it without moving the screen. Route entry acknowledges the session's
   observed idle independently of position, transcript paging and catalogs, including child sessions, through the
   unchanged `POST /api/session/:id/view` payload `{idle}` on installed `1de0005…`. No API moves viewed backwards.
 
@@ -392,11 +414,19 @@ inbox delivery and control events create their respective projected messages. In
    known current message. End events carry authoritative complete text. Batch UI updates; do not fetch per token.
 3. On missing target, structural change, completion/failure/interruption, or terminal tool event, debounce/refetch the
    tail and affected snapshots. Merge by message ID; do not replace already-loaded older pages with the tail.
-4. On every reconnection/foreground return refetch authoritative state. A tail refetch also restores final phase,
+4. A tail read of a **running** message lacks the text its deltas already streamed (the server keeps a part's text
+   when the part ends), and deltas arriving while a read is in flight are not applied. iOS records text/reasoning
+   deltas as they arrive (`ConversationStreamLog`) and extends each read part to the streamed text that begins with
+   it, so a refresh never takes text back or leaves a gap. Retained conversations keep recording while off screen
+   (from the app's single event connection, without publishing), so a return mid-answer is complete and live. A part
+   already running before any log saw it shows the deltas that arrive after a `…` marker, and its `.ended` event
+   carries the whole text. After a real disconnection, deltas sent meanwhile are lost: a part that lost some keeps its
+   text and takes no more deltas until its `.ended` event.
+5. On every reconnection/foreground return refetch authoritative state. A tail refetch also restores final phase,
    snapshot and error data that a simplified delta reducer may omit. Preserve the pre-view unread boundary.
    iOS keeps its conversation event loop across background and foreground (only leaving the screen ends it); the
    reconnection that follows a return merges the tail and republishes nothing when it is unchanged.
-5. Maintain execution activity separately from latest message's completion: the root can be idle while children run,
+6. Maintain execution activity separately from latest message's completion: the root can be idle while children run,
    and a completed background subagent tool can refer to a running child.
 
 The web applies deltas to its cache, batching at 16 ms, with reconnect revalidation. Its reducer often targets the

@@ -38,6 +38,17 @@ import SwiftUI
 
   func existing(_ id: String) -> ConversationStore? { stores[id] }
 
+  /// Retained conversations keep their stream logs while off screen.
+  func record(_ frame: EventHub.Frame) {
+    switch frame.event {
+    case .update(let event):
+      guard event.type.hasPrefix("session.text.") || event.type.hasPrefix("session.reasoning."),
+        let owner = event.data.owner else { return }
+      stores[owner]?.recordOffScreen(frame)
+    case .connected, .disconnected: stores.values.forEach { $0.recordOffScreen(frame) }
+    }
+  }
+
   func remove(_ ids: Set<String>) {
     for id in ids {
       // The retained view refers back to its store; dropping it lets both go.
@@ -45,6 +56,15 @@ import SwiftUI
       stores[id] = nil
     }
     recent.removeAll { ids.contains($0) }
+  }
+
+  /// Archive cascades on the server. Drop every retained member we know, including children not present in
+  /// the session list, so a later opening cannot revive a stale controller or keep collecting its deltas.
+  func removeFamily(_ id: String, sessions: [Session] = []) {
+    let known = sessions + stores.values.flatMap { store in
+      (store.session.map { [$0] } ?? []) + store.children
+    }
+    remove(SessionDeletionPlan(sessionID: id, sessions: known).ids)
   }
 
   /// Under memory pressure, conversations off the stack go; those on it drop what they can fetch again.

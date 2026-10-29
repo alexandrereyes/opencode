@@ -90,6 +90,11 @@ import UniformTypeIdentifiers
   @ObservationIgnored private var requestedView: Double?
   @ObservationIgnored private var replaceHistory = false
   @ObservationIgnored private var snapshotSequence = 0
+  /// Text and reasoning streamed into running messages, so a read that lacks it never takes it back.
+  @ObservationIgnored private var streams = ConversationStreamLog()
+  @ObservationIgnored private var streamBroken = false
+  /// The screen's event loop is running; off screen, `SessionStore` feeds the stream log instead.
+  @ObservationIgnored private var live = false
   @ObservationIgnored private var composerCatalog: ComposerSources?
   private(set) var composerLocation: String?
   private(set) var composerProjectID: String?
@@ -722,7 +727,13 @@ import UniformTypeIdentifiers
     #endif
     generation += 1
     let current = generation
+    live = true
     let events = hub.events()
+    // Disconnected while off screen: parts that lost deltas wait for their end.
+    if streamBroken {
+      streams.interrupt(messages)
+      streamBroken = false
+    }
     await refresh()
     scheduleResources()
     syncQuotes()
@@ -730,11 +741,16 @@ import UniformTypeIdentifiers
       if Task.isCancelled { break }
       switch frame.event {
       case .connected:
+        // Deltas sent while disconnected are gone: running parts wait for their end instead of showing a gap.
+        if streamBroken {
+          streams.interrupt(messages)
+          streamBroken = false
+        }
         // Reconnection (including after the background) merges the tail; it never rebuilds the transcript.
         scheduleRefresh()
         scheduleResources()
         syncQuotes()
-      case .disconnected: break
+      case .disconnected: streamBroken = true
       case .update(let event) where event.type == QuoteServer.updated:
         // Quote edits are per Session and revision: never a transcript refresh, and never another Session's.
         if event.data.sessionID == id, let revision = event.data.revision { quotes.updated(revision: revision) }
@@ -746,6 +762,8 @@ import UniformTypeIdentifiers
           continue
         }
         if event.type.hasPrefix("session.revert.") { replaceHistory = true }
+        // Recorded on arrival, even when not applied now: a read in flight may not carry it.
+        if event.data.owner == id { streams.record(event, sequence: frame.sequence) }
         // Snapshot and stream race: buffered deltas may already be in the snapshot.
         // Never append them twice; revalidate once more to cover the read's in-flight window.
         if refreshing || frame.sequence <= snapshotSequence {
@@ -762,6 +780,7 @@ import UniformTypeIdentifiers
       }
     }
     guard generation == current else { return }
+    live = false
     refreshTask?.cancel()
     refreshTask = nil
     batchTask?.cancel()
@@ -901,11 +920,33 @@ import UniformTypeIdentifiers
       let events = pending
       pending.removeAll()
       batchTask = nil
-      for event in events {
+      for event in events where streams.accepts(event) {
         if !ConversationReducer.apply(event, to: &messages) { scheduleRefresh() }
       }
+      // A part without its beginning shows what arrived since, after a marker.
+      let headless = streams.headlessMessages
+      if !headless.isEmpty { messages = messages.map { headless.contains($0.id) ? streams.reconcile($0) : $0 } }
       revision += 1
     }
+  }
+  /// Off screen, a retained conversation keeps recording its stream (only the log: nothing is published or laid
+  /// out), so returning mid-answer shows all of it and continues live. Frames the screen's loop also saw are
+  /// recorded once.
+  func recordOffScreen(_ frame: EventHub.Frame) {
+    switch frame.event {
+    case .update(let event): streams.record(event, sequence: frame.sequence)
+    case .disconnected: if !live { streamBroken = true }
+    case .connected:
+      guard !live, streamBroken else { return }
+      streams.interrupt(messages)
+      streamBroken = false
+    }
+  }
+  private func reconcileStreams() {
+    let next = messages.map { $0.type == "assistant" ? streams.reconcile($0) : $0 }
+    guard next != messages else { return }
+    messages = next
+    revision += 1
   }
   private func scheduleRefresh() {
     dirty = true
@@ -938,6 +979,8 @@ import UniformTypeIdentifiers
       refreshing = false
       loading = false
       snapshotSequence = hub.sequence
+      // Deltas that arrived during the read were recorded but not applied.
+      reconcileStreams()
     }
     do {
       async let health = client.info()
@@ -997,6 +1040,7 @@ import UniformTypeIdentifiers
         cursor = older.data.isEmpty || older.cursor?.next == current ? nil : older.cursor?.next
         hasOlder = cursor != nil
       }
+      nextMessages = nextMessages.map { $0.type == "assistant" ? streams.reconcile($0) : $0 }
       let directory = infoValue.location.directory
       let nextActive = Set(runningValue.filter { $0.value.isRunning }.map(\.key))
       // An unchanged snapshot (a return, a reconnection) publishes nothing the transcript could lay out again.

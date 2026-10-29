@@ -10,11 +10,16 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 import uuid
 
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
+# Overrides let an isolated worker use its own sandbox (never 4096/4178).
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4177")
+home = Path(os.environ.get("OPENCODE_TEST_HOME", temporary / "custom-sandbox-4177"))
+address = urllib.parse.urlparse(server)
+assert address.hostname in ("127.0.0.1", "localhost") and address.port not in (None, 4096, 4178), "Use an isolated loopback sandbox"
 derived = Path(os.environ.get("OPENCODE_SETTINGS_DERIVED", os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-sessoes-derived")))
 evidence = Path(os.environ.get("OPENCODE_SETTINGS_EVIDENCE", os.environ.get("OPENCODE_TEST_EVIDENCE", temporary / "ios-onda8-prints")))
 device_name = os.environ.get("OPENCODE_SETTINGS_SIMULATOR", "OpenCode Sessoes")
@@ -31,7 +36,7 @@ result = temporary / ("onda8-" + token + ".xcresult")
 sessions = []
 
 def api(path, body=None, method="POST"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path,
+    request = urllib.request.Request(server + path,
         data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read()
@@ -57,16 +62,16 @@ try:
              "content": [{"type": "text", "text": "## Aparência nativa\n\nO tema muda ao vivo, sem reiniciar a conversa.\n\n- Cores semânticas\n- Rascunhos preservados\n\n```swift\nlet app = OpenCode()\n```"}]}]})
         sessions.append(session)
     pairing = api("/api/pair")
-    payload = ("http://127.0.0.1:4177/auth/connect/" + pairing["code"] if theme.endswith("light")
-               else json.dumps({"code": pairing["code"], "urls": ["http://127.0.0.1:4177"]}))
+    payload = (server + "/auth/connect/" + pairing["code"] if theme.endswith("light")
+               else json.dumps({"code": pairing["code"], "urls": [server]}))
     run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
     environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password,
                    "OPENCODE_TEST_THEME": theme, "OPENCODE_TEST_CHILD": child, "OPENCODE_TEST_RUN_ID": token[:5],
-                   "OPENCODE_TEST_PAIRING": payload}
+                   "OPENCODE_TEST_PAIRING": payload, "OPENCODE_TEST_SERVER_URL": server}
     targets = [t for c in run["TestConfigurations"] for t in c["TestTargets"]] if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"]
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update(environment)
-        target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", server]
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
     devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))

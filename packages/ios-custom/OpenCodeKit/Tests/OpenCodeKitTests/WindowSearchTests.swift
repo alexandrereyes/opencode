@@ -21,7 +21,7 @@ private func searchProjects() throws -> [Project] {
 }
 
 private func searchRows(_ entries: [NavigationEntry]) throws -> [SessionRow] {
-  SessionList.rows(entries: entries, projects: try searchProjects(), active: [], pins: [], muted: [],
+  SessionList.rows(entries: entries, projects: try searchProjects(), active: [], pins: [], notify: [],
     autoApprove: false, ranks: [:], chatRoot: "/chats")
 }
 

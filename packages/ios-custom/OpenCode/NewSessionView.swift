@@ -13,9 +13,10 @@ struct NewSessionView: View {
     case project, directory, base, add
     var id: String { rawValue }
   }
-  init(sessions: SessionStore, origin: NewSessionOrigin? = nil, startInChats: Bool = false) {
+  init(sessions: SessionStore, origin: NewSessionOrigin? = nil, startInChats: Bool = false,
+    filter: SessionListFilter? = nil) {
     _store = State(
-      initialValue: NewSessionStore(sessions: sessions, origin: origin, startInChats: startInChats))
+      initialValue: NewSessionStore(sessions: sessions, origin: origin, startInChats: startInChats, filter: filter))
   }
   var body: some View {
     VStack(spacing: 0) {
@@ -88,7 +89,7 @@ struct NewSessionView: View {
       }
     }
     .background(theme.color(.background)).tint(theme.color(.primary))
-    .toolbar(.hidden, for: .navigationBar, .tabBar)
+    .toolbar(.hidden, for: .navigationBar)
     .background(
       ConversationBackGesture(
         capture: { store.draft.focused = false }, appeared: {}, enabled: !store.draft.sending)

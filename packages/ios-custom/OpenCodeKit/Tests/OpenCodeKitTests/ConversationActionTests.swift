@@ -701,4 +701,6 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
   #expect(ModelReference(selector: "llm-proxy/gpt-6-luna#low") == ModelReference(id: "gpt-6-luna", providerID: "llm-proxy", variant: "low"))
   #expect(ModelReference(selector: "openrouter/anthropic/claude") == ModelReference(id: "anthropic/claude", providerID: "openrouter"))
   #expect(ModelReference(selector: "nonsense") == nil && ModelReference(selector: "p/") == nil)
+  #expect(ModelReference(selector: "") == nil && ModelReference(selector: "#") == nil)
+  #expect(ModelReference(selector: "#provider/model") == nil)
 }

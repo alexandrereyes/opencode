@@ -46,6 +46,43 @@ import XCTest
     }
   }
 
+  /// Opened at the end, the last answer's footer is whole on screen, even though some of its rows settle their
+  /// height after the first frame.
+  func testOpeningAtTheEndShowsTheLastFooterWhole() throws {
+    for theme in ["openchamber-dark", "openchamber-light"] {
+      let app = XCUIApplication()
+      app.launchArguments = [
+        "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollFixture", "conversation",
+        "-OpenCodeTheme", theme, "-OpenCodeFixturePosition", "tail",
+      ]
+      app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
+      app.launch()
+      let transcript = app.collectionViews["conversation-transcript"]
+      XCTAssertTrue(transcript.waitForExistence(timeout: 20))
+      let ready = expectation(for: NSPredicate(format: "value != 'Restaurando leitura'"), evaluatedWith: transcript)
+      XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
+      RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+      let footers = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'read-aloud-message-'"))
+        .allElementsBoundByIndex.map(\.frame).filter { $0.minY < transcript.frame.maxY }
+      let last = try XCTUnwrap(footers.max { $0.maxY < $1.maxY })
+      XCTAssertLessThanOrEqual(last.maxY, transcript.frame.maxY + 0.5, "the last footer is cut at \(last) in \(transcript.frame)")
+      XCTAssertFalse(app.buttons["Ir para a mais recente"].exists)
+      // The keyboard shrinks the viewport from the end: the end stays in view, like any chat.
+      let cells = transcript.cells.allElementsBoundByIndex.filter { $0.frame.minY < transcript.frame.maxY }
+      let end = try XCTUnwrap(cells.max { $0.frame.maxY < $1.frame.maxY }?.identifier)
+      app.textViews["conversation-composer"].tap()
+      XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+      RunLoop.current.run(until: Date().addingTimeInterval(1))
+      let keyboard = app.keyboards.firstMatch.frame
+      let raised = transcript.cells[end].frame
+      XCTAssertLessThan(transcript.frame.maxY, keyboard.minY + 0.5)
+      XCTAssertLessThanOrEqual(raised.maxY, transcript.frame.maxY + 0.5, "the end \(raised) is below \(transcript.frame)")
+      XCTAssertGreaterThan(raised.maxY, transcript.frame.maxY - 30, "the end \(raised) left the bottom of \(transcript.frame)")
+      XCTAssertFalse(app.buttons["Ir para a mais recente"].exists)
+      app.terminate()
+    }
+  }
+
   /// Growth never scrolls the transcript, not even at the end: the offset stays put while the content grows,
   /// and ↓ appears for what is now below.
   func testGrowthNeverMovesTheScreenInBothThemes() throws {
@@ -97,7 +134,7 @@ import XCTest
     guard environment["OPENCODE_FOLLOW_LIVE"] == "1" else { throw XCTSkip("Explicit live replay only") }
     let app = XCUIApplication()
     app.launchArguments = [
-      "-OpenCodeServerURL", TestSandbox.url, "-OpenCodeScrollDiagnostics",
+      "-OpenCodeServerURL", TestSandbox.url,
       "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark",
       "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_FOLLOW_PARENT"]),
     ]

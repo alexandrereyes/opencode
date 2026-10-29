@@ -15,6 +15,9 @@ struct SessionsView: View {
   @State private var appliedLaunch = false
   @State private var proxyProvider: SubscriptionProvider?
   @State private var selection = SessionSelection()
+  @State private var presentation = SessionListPresentation()
+  @State private var viewport = CGRect.zero
+  @State private var returnPlace: (id: String, anchor: UnitPoint, size: CGSize)?
   @State private var bulkDelete: [SessionRow]?
   @AppStorage("OpenCodeSessionSections") private var collapse = SessionSectionCollapse()
 
@@ -27,6 +30,7 @@ struct SessionsView: View {
 
   var body: some View {
     NavigationStack(path: $store.conversationPath) {
+      ScrollViewReader { proxy in
       List {
         VStack(spacing: 16) {
           SessionQuotaRings(quota: store.quota) { proxyProvider = $0 }
@@ -58,8 +62,14 @@ struct SessionsView: View {
         }
 
         SessionColumnSections(
-          store: store,
+          collapse: $collapse, store: store, rows: store.filtered,
+          scope: SessionListFilter(project: store.selectedProject, state: store.filter), presentation: presentation,
           open: { store.conversationPath.append(.init(id: $0.id)) },
+          openingFrame: { id, frame in
+            let height = viewport.height - frame.height
+            guard height > 0 else { return }
+            returnPlace = (id, UnitPoint(x: 0, y: (frame.minY - viewport.minY) / height), viewport.size)
+          },
           archived: { showArchived = true },
           selection: selection,
           toggle: { row in
@@ -81,23 +91,14 @@ struct SessionsView: View {
         }
       }
       .listStyle(.plain)
+      .sessionListScrolling(presentation, store: store)
+      .onGeometryChange(for: CGRect.self) { geometry in
+        geometry.frame(in: .global)
+      } action: { viewport = $0 }
+      .onAppear { restoreListPlace(proxy) }
+      .onChange(of: viewport) { _, _ in restoreListPlace(proxy) }
       // The shared column header replaces the navigation bar's large title and toolbar.
-      .safeAreaBar(edge: .top) {
-        SessionColumnHeader(
-          voiceActive: floatingVoice?.visible(voice) == true,
-          voice: {
-            if let floatingVoice { floatingVoice.toggle(voice, sessions: store) }
-            else { voice?.toggle(sessions: store) }
-          },
-          settings: settings,
-          newSession: {
-            // Sessões starts new work in Chats; projects and worktrees remain one tap away.
-            store.conversationPath.append(
-              .init(id: "draft_" + UUID().uuidString, newSession: true, startInChats: true))
-          },
-          newSessionDisabled: store.preferences == nil,
-          selection: selectionActions)
-      }
+      .safeAreaBar(edge: .top) { header }
       .environment(\.defaultMinListRowHeight, 0)
       .scrollContentBackground(.hidden)
       .background(theme.color(.background))
@@ -110,6 +111,7 @@ struct SessionsView: View {
       .scrollEdgeEffectStyle(.soft, for: .top)
       .scrollEdgeEffectStyle(.hard, for: .bottom)
       .floatingVoiceInset(sessions: store)
+      .safeAreaInset(edge: .bottom, spacing: 0) { SessionMasterBar(store: store) }
       .refreshable {
         async let sessions: Void = store.reload()
         await store.quota.refresh()
@@ -127,7 +129,7 @@ struct SessionsView: View {
             Text("Conversa indisponível.").foregroundStyle(theme.color(.textSecondary))
           }
         } else if route.newSession {
-          NewSessionView(sessions: store, origin: route.origin, startInChats: route.startInChats)
+          NewSessionView(sessions: store, origin: route.origin, startInChats: route.startInChats, filter: route.startFilter)
             .id(route.id)
         } else {
           // The switcher replaces this route in place; a new identity rebuilds the conversation's state.
@@ -226,25 +228,52 @@ struct SessionsView: View {
             : "Isso altera apenas os filtros. O repositório e suas sessões não serão excluídos.")
       }
     }
-    .sessionRowTimeline(active: store.selectedTab == 3 && !store.conversationOpen && !showArchived)
+      }
+    .sessionRowTimeline(active: !store.settingsOpen && !store.conversationOpen && !showArchived)
   }
 
-  /// Settings stay in Você on iOS; only the Mac passes this action. A DEBUG fixture renders that variant.
+  private var header: some View {
+    SessionColumnHeader(
+      voiceActive: floatingVoice?.visible(voice) == true,
+      voice: {
+        if let floatingVoice { floatingVoice.toggle(voice, sessions: store) }
+        else { voice?.toggle(sessions: store) }
+      },
+      settings: settings,
+      account: { store.settingsOpen = true },
+      newSession: {
+        // Sessões starts new work in Chats; projects and worktrees remain one tap away.
+        store.conversationPath.append(
+          .init(id: "draft_" + UUID().uuidString, newSession: true, startInChats: true))
+      },
+      newSessionDisabled: store.preferences == nil,
+      selection: selectionActions)
+  }
+
+  /// A List covered by a conversation can be laid out with another viewport and clamp a bottom-aligned position.
+  /// Restore once its normal viewport is back, using the tapped row and its relative position, not a saved offset.
+  private func restoreListPlace(_ proxy: ScrollViewProxy) {
+    guard !store.conversationOpen, let place = returnPlace,
+      viewport.width != place.size.width || viewport.height <= place.size.height + 1 else { return }
+    returnPlace = nil
+    proxy.scrollTo(place.id, anchor: place.anchor)
+  }
+
+  /// The iPhone opens Você from its avatar; only the Mac passes the gear. A DEBUG fixture renders that variant.
   private var settings: (() -> Void)? {
     #if DEBUG
-    if ScreenCatalogFixture.settingsButton { return { store.selectedTab = 4 } }
+    if ScreenCatalogFixture.settingsButton { return { store.settingsOpen = true } }
     #endif
     return nil
   }
 
   /// Rows of the expanded sections, in display order; "Selecionar todas" and the selection use only these.
   private var visibleIDs: [String] {
-    SessionSections.group(store.filtered, now: .now)
-      .filter { !collapse.collapsed($0.kind) }.flatMap(\.rows).map(\.id)
+    presentation.order?.visibleIDs(collapsed: collapse) ?? []
   }
 
   private var selectedRows: [SessionRow] {
-    let rows = Dictionary(store.filtered.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let rows = Dictionary(store.rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     return selection.ids.compactMap { rows[$0] }
   }
 
@@ -333,5 +362,45 @@ struct SessionsView: View {
       Haptics.play(.warning)
       deleteCandidate = row.session
     }
+  }
+}
+
+/// Where the tab bar was, above the home indicator: the Sessão mestra and what needs Alexandre. A bottom inset of
+/// the Sessões list (outside the voice bar's), so the list scrolls its last row above it; pushed screens cover it.
+private struct SessionMasterBar: View {
+  @Environment(\.appTheme) private var theme
+  let store: SessionStore
+
+  var body: some View {
+    Button {
+      store.conversationPath.append(.init(id: "master", master: true))
+    } label: {
+      HStack(spacing: 8) {
+        Image(systemName: "point.3.connected.trianglepath.dotted").appSymbol(.action).foregroundStyle(
+          theme.color(.accent))
+        Text("Sessão mestra").fontWeight(.medium)
+          .lineLimit(1).minimumScaleFactor(0.45)
+        Spacer(minLength: 4)
+        Text(store.masterAvailability == .available
+          ? (store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
+          : store.masterAvailability.label)
+          .foregroundStyle(theme.color(.glassSecondary))
+          .lineLimit(1).minimumScaleFactor(0.45)
+        Image(systemName: "arrow.right").appSymbol(.inline).foregroundStyle(theme.color(.icon))
+      }
+      .appFont(.caption).monospacedDigit()
+      .foregroundStyle(theme.color(.textStrong))
+      .padding(.horizontal, 20)
+      .frame(maxWidth: .infinity, minHeight: 52)
+      .contentShape(Capsule())
+      .accessibilityElement(children: .combine)
+    }
+    .buttonStyle(.plain)
+    .glassEffect(.regular.interactive(), in: .capsule)
+    .accessibilityIdentifier("master-accessory")
+    // The floating voice bar's inset: during a call it stacks right above, at the same width.
+    .padding(.horizontal, 21)
+    .padding(.top, 6)
+    .padding(.bottom, 4)
   }
 }

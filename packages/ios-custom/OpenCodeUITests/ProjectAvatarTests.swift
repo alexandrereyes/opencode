@@ -19,9 +19,9 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
     defer { app.terminate() }
-    XCTAssertTrue(app.tabBars.buttons["Sessões"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 20))
     try app.requireSandbox()
-    app.tabBars.buttons["Sessões"].tap()
+    app.showSessions()
     XCTAssertTrue(app.sessionsTitle.waitForExistence(timeout: 30))
 
     // Rows: the icon replaces the monogram, under the running arc; a project without icon keeps its monogram.
@@ -63,7 +63,7 @@ import XCTest
 
     // So does the session switcher, through the same compact row.
     app.buttons["conversation-switcher"].tap()
-    let search = app.searchFields.firstMatch
+    let search = app.textFields["switcher-search"]
     XCTAssertTrue(search.waitForExistence(timeout: 10))
     search.tap()
     search.typeText(svg[0])
