@@ -8,13 +8,16 @@ import UniformTypeIdentifiers
 import WebKit
 
 struct FileOpenAction {
+  /// The presenting view's identity. Copies from one host present the same state and compare equal, so they do
+  /// not re-render the transcript; a new host (the conversation screen rebuilt after navigating) is a new value.
+  /// Equal-for-all made the retained transcript keep the previous screen's action, whose viewer state was gone.
+  let owner: UUID
   let open: (String) -> Void
   /// A folder link opens the file explorer; without it a folder falls back to `open`.
   var folder: ((String) -> Void)? = nil
 }
-/// The handler only presents the host's viewer state, so any two copies are interchangeable.
 extension FileOpenAction: Equatable {
-  static func == (lhs: Self, rhs: Self) -> Bool { true }
+  static func == (lhs: Self, rhs: Self) -> Bool { lhs.owner == rhs.owner }
 }
 extension EnvironmentValues {
   @Entry var openFile: FileOpenAction? = nil
@@ -22,10 +25,12 @@ extension EnvironmentValues {
 
 /// Opens a chat image (Markdown, tool output or attachment) in the conversation-level viewer.
 struct ImageOpenAction {
+  /// See `FileOpenAction.owner`.
+  let owner: UUID
   let open: (_ source: String, _ name: String, _ context: ConversationImageContext) -> Void
 }
 extension ImageOpenAction: Equatable {
-  static func == (lhs: Self, rhs: Self) -> Bool { true }
+  static func == (lhs: Self, rhs: Self) -> Bool { lhs.owner == rhs.owner }
 }
 extension EnvironmentValues {
   @Entry var openImage: ImageOpenAction? = nil
@@ -36,6 +41,7 @@ extension EnvironmentValues {
 struct FileViewerHost: ViewModifier {
   @Environment(\.conversationImages) private var context
   @State private var selection: Selection?
+  @State private var owner = UUID()
   private enum Selection: Identifiable {
     case file(String)
     case folder(String)
@@ -49,8 +55,8 @@ struct FileViewerHost: ViewModifier {
     }
   }
   func body(content: Content) -> some View {
-    content.environment(\.openFile, FileOpenAction(open: { selection = .file($0) }, folder: { selection = .folder($0) }))
-      .environment(\.openImage, ImageOpenAction(open: { selection = .image(source: $0, name: $1, context: $2) }))
+    content.environment(\.openFile, FileOpenAction(owner: owner, open: { selection = .file($0) }, folder: { selection = .folder($0) }))
+      .environment(\.openImage, ImageOpenAction(owner: owner, open: { selection = .image(source: $0, name: $1, context: $2) }))
       .fullScreenCover(item: $selection) { selection in
         Group {
           switch selection {
@@ -301,6 +307,7 @@ struct FileViewer: View {
   @State private var showSource = false
   /// The HTML preview starts on local files for every opened file; the internet is allowed per file.
   @State private var htmlInternet = false
+  @State private var linkOwner = UUID()
   init(source: String, context: ConversationImageContext, name: String? = nil, exact: Bool = false) {
     _store = State(initialValue: FileViewerStore(source: source, context: context, name: name, exact: exact))
   }
@@ -370,7 +377,7 @@ struct FileViewer: View {
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .environment(\.openFile, FileOpenAction(open: follow))
+      .environment(\.openFile, FileOpenAction(owner: linkOwner, open: follow))
       // Images inside a file resolve against it and present over this viewer, not the conversation.
       .environment(\.openImage, nil)
       // A new file always starts with fresh viewer state, including zoom.

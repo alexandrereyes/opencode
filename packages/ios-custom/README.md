@@ -1297,6 +1297,15 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
 - **Permitir internet** in the mode bar reloads the page alone with the network (the previous mode, without local
   files); **Usar arquivos locais** returns. The choice is not remembered between files.
 
+#### Links after navigating — 29 October
+
+- The transcript view is retained with the conversation, but the conversation screen and its `FileViewerHost`
+  are rebuilt after navigating (Sessões, another session, Você). `FileOpenAction`/`ImageOpenAction` compared equal
+  for every value, so the retained cells kept the previous host's action, whose viewer state no longer existed:
+  links stopped opening until a relaunch. The actions now compare by their host (`owner`), and native text cells
+  call the action through the transcript context at tap time. `testLinksKeepOpeningAfterLeavingAndReturning`
+  covers file, folder and image links after a round trip through Sessões, another session and Você.
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).

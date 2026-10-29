@@ -16,6 +16,7 @@ import XCTest
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
     XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 25))
+    try app.requireSandbox()
     return app
   }
   /// Joined response prose exposes no per-link accessibility elements, so each link has its own session whose
@@ -596,6 +597,61 @@ import XCTest
     XCTAssertEqual(mode.label, "Arquivos locais, sem internet")
     screenshot("html-live-activities")
     app.terminate()
+  }
+
+  /// Taps the first link of an already open conversation whose whole message is that link.
+  private func tapLink(_ label: String, app: XCUIApplication) {
+    let text = app.collectionViews["conversation-transcript"].descendants(matching: .any).matching(NSPredicate(
+      format: "value CONTAINS %@ OR label CONTAINS %@", label, label)).firstMatch
+    XCTAssertTrue(text.waitForExistence(timeout: 25), label)
+    text.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 30, dy: 10)).tap()
+  }
+
+  private func openRow(_ session: String, app: XCUIApplication) {
+    let row = app.buttons.matching(identifier: "session-row-" + session).firstMatch
+    // Opening a conversation moves it in the list, often above the rows left on screen.
+    for _ in 0..<4 where !row.isHittable { app.collectionViews.firstMatch.swipeDown(velocity: .fast) }
+    app.revealSessionRow(row)
+    row.tap()
+    XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 25), session)
+  }
+
+  /// The reported bug: after closing a viewer and moving through the app, the same link stopped opening until
+  /// a relaunch. The retained transcript kept actions of a conversation screen that no longer existed.
+  func testLinksKeepOpeningAfterLeavingAndReturning() throws {
+    let other = try XCTUnwrap(environment["OPENCODE_VIEWER_LINK_MD"])
+    for (role, label, opened) in [("LINK_PNG", "Abrir PNG", "a-imagem.png"), ("LINK_PASTA", "Abrir pasta", ""),
+      ("FEED", "", "Quadro")] {
+      let session = try XCTUnwrap(environment["OPENCODE_VIEWER_" + role])
+      let app = try launch(role)
+      func openAndClose(_ round: Int) {
+        if role == "FEED" {
+          let thumbnail = app.buttons["feed-image-Quadro"]
+          XCTAssertTrue(thumbnail.waitForExistence(timeout: 25))
+          thumbnail.tap()
+        } else { tapLink(label, app: app) }
+        if role == "LINK_PASTA" {
+          XCTAssertTrue(app.staticTexts["file-explorer-path"].waitForExistence(timeout: 20), "\(role) round \(round)")
+        } else {
+          XCTAssertTrue(app.navigationBars[opened].waitForExistence(timeout: 20), "\(role) round \(round)")
+        }
+        app.buttons["Fechar"].firstMatch.tap()
+        XCTAssertTrue(app.collectionViews["conversation-transcript"].waitForExistence(timeout: 10))
+      }
+      openAndClose(0)
+      // One round trip per link kind: the reported failure happened on the first return.
+      for round in 1...1 {
+        // Sessões, another conversation, Você, and back to this conversation.
+        app.showSessions()
+        openRow(other, app: app)
+        app.openYou()
+        app.showSessions()
+        openRow(session, app: app)
+        openAndClose(round)
+      }
+      screenshot("links-after-navigation-" + role.lowercased())
+      app.terminate()
+    }
   }
 
   func testFileKinds() throws {

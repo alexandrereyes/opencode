@@ -30,8 +30,11 @@ final class TranscriptTextCell: UICollectionViewCell, TranscriptMessageCell {
       block: prose.block, messageID: part.messageID, partID: part.partID, theme: context.theme, prose: prose,
       source: part.source, actions: context.selection, selectionChanged: context.selectionChanged?.selected,
       highlights: context.search, rasters: context.rasters(part), openNote: { context.openNote(part, $0) },
-      fileContextOverride: context.images, fileOpenOverride: context.openFile?.open,
-      folderOpenOverride: context.openFile?.folder, filesStableOverride: part.stable,
+      // Through the context at tap time: a configured cell can outlive the conversation screen that set them.
+      fileContextOverride: context.images, fileOpenOverride: { context.openFile?.open($0) },
+      folderOpenOverride: context.openFile?.folder == nil ? nil : { path in
+        if let folder = context.openFile?.folder { folder(path) } else { context.openFile?.open(path) }
+      }, filesStableOverride: part.stable,
       contentSizeOverride: traitCollection.preferredContentSizeCategory, quotesOverride: context.responseQuotes(part)
     ).configure(text, coordinator: coordinator)
     setNeedsLayout()
