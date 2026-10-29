@@ -132,6 +132,10 @@ private struct MacFixtureServer: Sendable {
         return #"{"data":{"output":\#(encoded),"cursor":\#(data.count),"size":\#(data.count),"truncated":false}}"#
       }
       if path.hasPrefix("/api/session/"), path.hasSuffix("/inbox") { return #"{"data":[]}"# }
+      if path.hasPrefix("/api/session/"), path.hasSuffix("/view") {
+        MacBellChecks.view(String(path.dropFirst("/api/session/".count).dropLast("/view".count)))
+        return "{}"
+      }
       // Pergunta paralela: a local Markdown answer, never a model.
       if path.hasPrefix("/api/session/"), path.hasSuffix("/generate") {
         return #"{"data":{"text":"Comece pelos **filtros de projetos**.\n\n1. Compare os caminhos mais usados.\n2. Faça uma mudança pequena em `MacChatColumn.swift`.\n3. Valide a navegação nos temas claro e escuro.\n\nA conversa principal continua no mesmo ponto."}}"#
@@ -245,7 +249,7 @@ private struct MacFixtureServer: Sendable {
     let title: String
     let directory: String
     let project: String
-    let minutes: Double
+    var minutes: Double
     var outcome: String? = nil
     var viewed = true
     var permission = false
@@ -256,7 +260,23 @@ private struct MacFixtureServer: Sendable {
     // Yesterday's rows sit before today's midnight, whatever time the fixture runs.
     let today = Date(timeIntervalSince1970: now / 1000)
     let midnight = (now - Calendar.current.startOfDay(for: today).timeIntervalSince1970 * 1000) / minute
-    return [
+    guard let arrival = MacBellChecks.arrival else { return fixedRoots(midnight: midnight) }
+    // `-OpenCodeMacFixtureBell <s>`: two answers wait unread at launch and Conversas Android answers `s` seconds
+    // later; a session opened records its view, like the server.
+    let arrived = Date.now.timeIntervalSince1970 * 1000 >= now + arrival * 1000
+    return fixedRoots(midnight: midnight).map { root in
+      var root = root
+      if ["ses_mac_live", "ses_mac_ios"].contains(root.id) || (root.id == "ses_mac_android" && arrived) {
+        root.outcome = "succeeded"
+        root.viewed = MacBellChecks.viewed(root.id)
+      }
+      if root.id == "ses_mac_android", arrived { root.minutes = -arrival / 60 }
+      return root
+    }
+  }
+
+  private func fixedRoots(midnight: Double) -> [Root] {
+    [
       Root(id: MacFixture.rootID, title: "App Mac", directory: root, project: "prj_opencode2", minutes: 5),
       Root(id: "ses_mac_live", title: "Live activity", directory: home + "/Dev/abacato-v2", project: "prj_abacato",
         minutes: 12),
