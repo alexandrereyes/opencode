@@ -3140,6 +3140,15 @@ separate track.
   question; mutes and deduplication included) also becomes a macOS notification (`MacNotifications`), and clicking
   it opens that session. The Dock icon shows `requestCount` (permissions and questions), like the iPhone's tab badge.
   The fixture never asks for the notification permission nor posts anything.
+- **Bell (`MacNotificationBell`, rev. 29/10)**: no state of its own. Its count and **Não lidas** are the rows with
+  Sessões' orange dot (`SessionRow.unread`, the server's `viewed`) or a pending permission or question, one line per
+  session, so reading a conversation on any device clears its line. **Anteriores** are recent answers already read,
+  dimmed; Limpar hides only them. A new line (a dot or a request appears, never for the conversation on screen)
+  bounces the bell, fills it orange until read and, in the key window with no sheet, search or palette over it,
+  opens the list for 4.5 s (longer under the pointer) with the line highlighted. The list is a nonactivating child
+  panel that cannot become key, so the composer keeps typing; opening it never marks anything read. Check:
+  `-OpenCodeMacFixture contexto -OpenCodeMacFixtureBell 12 [-OpenCodeMacBellShot <png>]` (`MacBellChecks`, in the
+  background and off-screen) prints `MacBellChecks ok|FAIL …` and exits 0 or 1.
 - **Menus and shortcuts**: Arquivo (Nova sessão ⌘N, Nova janela ⌥⌘N, Atualizar ⌘R), Visualizar (Contexto ⌥⌘I,
   Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
   Marcar como lida, Arquivar ⇧⌘A, Excluir ⌥⌘⌫, the selection's actions, Reiniciar Sessão mestra), Editar (Buscar
