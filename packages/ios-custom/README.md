@@ -204,7 +204,10 @@ app, without the web's "Projetos" and "Worktrees" groups.
   | 4 | Hoje, Ontem, Esta semana (neutral) | the rest by local day of `interactionAt`; "Esta semana" is 2–6 days ago | `SessionList.rows` |
   | 5 | Anteriores (neutral, collapsed by default) | older than the seven local days (the web's `localDays`) | `SessionList.rows` |
 
-  The discreet **Arquivadas N** row closes the list and opens the archived sheet. Since 28 October every section
+  The discreet **Arquivadas N** row closes the list and opens the archived sheet. A filter (repository, Chats, state)
+  or a server without sessions shows no placeholder (29/10): only "Arquivadas N", or nothing without archives. The
+  former "Nenhuma sessão" view depended on `loading`, so every reload (one per server event) removed and restored it
+  and moved "Arquivadas" with it; only the first load (before any preferences arrive) shows "Carregando sessões…". Since 28 October every section
   mixes chats with repository sessions under "Todas" (before, only "Precisa de você" did); the Chats chip still lists
   only chats.
 - **Chat avatar when mixed:** wherever chats sit beside repository sessions ("Todas", a state filter, the session
@@ -243,7 +246,7 @@ files in `OpenCode/SessionColumn/` import only SwiftUI and OpenCodeKit and use n
 | `SessionColumnHeader.swift` | Title, voice, optional Configurações (`settings: (() -> Void)?`) and Nova sessão |
 | `SessionQuotaRings.swift` | The provider rings |
 | `SessionChips.swift` | Filter chips (moved unchanged from `SessionsView`) |
-| `SessionColumnSections.swift` | Section headers, rows by section, Negar/Permitir, empty state and "Arquivadas N"; a `decorate` closure lets the host add platform actions |
+| `SessionColumnSections.swift` | Section headers, rows by section, Negar/Permitir, first-load progress and "Arquivadas N"; a `decorate` closure lets the host add platform actions |
 | `SessionRowView.swift` | Three-line and compact rows, avatar and running arc |
 | `SessionDirectoryLine.swift` | `path · branch` and the shared row clock |
 
