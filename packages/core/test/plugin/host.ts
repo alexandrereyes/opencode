@@ -102,6 +102,9 @@ export function host(overrides: Overrides = {}): Plugin.Context {
         status: () => Effect.die("unused integration.connection.status"),
       },
     },
+    job: overrides.job ?? {
+      background: () => Effect.die("unused job.background"),
+    },
     message: overrides.message ?? {
       list: () => Effect.die("unused message.list"),
     },

@@ -2,6 +2,7 @@ import { expect } from "bun:test"
 import { Context, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { Bus } from "@opencode/core/bus"
+import { Job } from "@opencode/core/job"
 import { KV } from "@opencode/core/kv"
 import { PersistentPty } from "@opencode/core/persistent-pty"
 import { SessionFamily } from "@opencode/core/session/family"
@@ -30,6 +31,7 @@ for (const failure of ["defect", "interrupt"] as const) {
         LayerNode.group([
           LocationServiceMap.node,
           Bus.node,
+          Job.node,
           KV.node,
           Session.node,
           SessionFamily.node,

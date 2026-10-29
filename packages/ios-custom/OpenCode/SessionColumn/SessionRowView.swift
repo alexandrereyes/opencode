@@ -16,7 +16,7 @@ struct SessionRowView: View {
   var detail: String? = nil
 
   private var status: (text: String, tint: ThemeRole)? {
-    if row.state == .running { return ("trabalhando · \(preview.activity ?? "pensando")", .success) }
+    if row.state == .running { return (row.workingStatus(activity: preview.activity), .success) }
     if let detail, let tint = row.state.tint { return (detail, tint) }
     return nil
   }

@@ -6,7 +6,8 @@ import Testing
 private func entry(
   _ id: String, parent: String? = nil, updated: Double = 100,
   idle: Double? = nil, viewed: Double? = nil, permission: Bool = false,
-  question: Bool = false, archived: Bool = false, directory: String = "/repo"
+  question: Bool = false, archived: Bool = false, directory: String = "/repo",
+  background: (count: Int, command: String)? = nil
 ) throws -> NavigationEntry {
   var session: [String: JSONValue] = [
     "id": .string(id), "projectID": .string("project"), "title": .string(id),
@@ -25,6 +26,10 @@ private func entry(
   var row: [String: JSONValue] = ["session": .object(session)]
   if permission { row["permissionAt"] = .number(300) }
   if question { row["questionAt"] = .number(300) }
+  if let background {
+    row["backgroundCount"] = .number(Double(background.count))
+    row["backgroundTitle"] = .string(background.command)
+  }
   return try JSONDecoder().decode(NavigationEntry.self, from: JSONEncoder().encode(row))
 }
 
@@ -58,6 +63,31 @@ private func entry(
   #expect(rows.first?.requestCount == 2)
   #expect(rows.first?.unread == false)
   #expect(rows.first?.activeChildren == 1)
+}
+
+@Test func backgroundShellsKeepTheFamilyWorkingAfterItsTurn() throws {
+  let rows = SessionList.rows(
+    entries: [
+      try entry("ses_root", idle: 500, background: (1, "bun test")),
+      try entry("ses_child_shell", parent: "ses_family", background: (2, "bun run dev")),
+      try entry("ses_family", idle: 500),
+      try entry("ses_both", background: (1, "bun test")),
+      try entry("ses_asking", permission: true, background: (1, "bun test")),
+      try entry("ses_idle", idle: 500),
+    ], projects: [], active: ["ses_both"], pins: [], notify: [], autoApprove: false,
+    ranks: [:], chatRoot: nil)
+  let row = { (id: String) in rows.first { $0.id == id } }
+  #expect(row("ses_root")?.state == .running)
+  #expect(row("ses_root")?.workingStatus(activity: nil) == "trabalhando · em segundo plano · bun test")
+  #expect(row("ses_family")?.state == .running)
+  #expect(row("ses_family")?.background == "bun run dev")
+  #expect(row("ses_family")?.activeChildren == 0)
+  // An executing turn describes the row itself; its background shell only keeps it working afterwards.
+  #expect(row("ses_both")?.workingStatus(activity: "rodando ls") == "trabalhando · rodando ls")
+  #expect(row("ses_asking")?.state == .permission)
+  #expect(row("ses_asking")?.working == true)
+  #expect(row("ses_idle")?.state == .unread)
+  #expect(row("ses_idle")?.working == false)
 }
 
 @Test func pinsThenActivityAndViewedWatermark() throws {

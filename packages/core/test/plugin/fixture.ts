@@ -14,6 +14,7 @@ import { FSUtil } from "@opencode/util/fs-util"
 import { Form } from "@opencode/core/form"
 import { Generate } from "@opencode/core/generate"
 import { Integration } from "@opencode/core/integration"
+import { Job } from "@opencode/core/job"
 import { KV } from "@opencode/core/kv"
 import { Location } from "@opencode/core/location"
 import { ManagedPolicy } from "@opencode/core/managed-policy"
@@ -95,6 +96,7 @@ export const makePluginTestLayer = (permission = permissionLayer, extra: LayerNo
       Model.node,
       Command.node,
       Integration.node,
+      Job.node,
       KV.node,
       ManagedPolicy.node,
       Mcp.node,

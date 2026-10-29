@@ -265,15 +265,18 @@ describe("Job", () => {
       })
 
       expect((yield* jobs.pendingBackground).find((item) => item.id === job.id)).toBeUndefined()
+      expect((yield* jobs.backgrounded).find((item) => item.id === job.id)).toBeUndefined()
       const background = yield* jobs.background(job.id)
 
       const running = (yield* jobs.pendingBackground).find((item) => item.id === job.id)
       expect(running).toMatchObject({ id: job.id, recovery, status: "running" })
       expect(running?.notificationID).toStartWith("msg_")
       expect(background?.notificationID).toBe(running?.notificationID)
+      expect((yield* jobs.backgrounded).find((item) => item.id === job.id)).toMatchObject({ recovery, type: "shell" })
 
       yield* Deferred.succeed(latch, undefined)
       yield* jobs.wait({ id: job.id })
+      expect((yield* jobs.backgrounded).find((item) => item.id === job.id)).toBeUndefined()
 
       const completed = (yield* jobs.pendingBackground).find((item) => item.id === job.id)
       expect(completed).toMatchObject({

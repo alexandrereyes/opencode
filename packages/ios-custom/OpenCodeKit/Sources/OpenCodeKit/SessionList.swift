@@ -16,6 +16,10 @@ public struct SessionRow: Sendable, Identifiable {
   public let notify: Bool
   public let activeChildren: Int
   public let requestCount: Int
+  /// The family executes or a background shell of it still runs, even when a request outranks `.running`.
+  public let working: Bool
+  /// Set when only background shells keep the family working: a member's newest command (empty without one).
+  public let background: String?
   public let rank: Double
   /// A managed `custom.chats` conversation: listed in Todas and Chats, never under a repository filter.
   public var chat = false
@@ -31,6 +35,11 @@ public struct SessionRow: Sendable, Identifiable {
   /// A chat listed beside repository sessions (every list but the Chats filter) shares one chat avatar and reads
   /// "Chats" as its second line; under the Chats filter each chat keeps its own avatar.
   public func sharesChatAvatar(mixed: Bool) -> Bool { chat && mixed }
+  /// The status line of a working row: its current activity, or the background command it waits on.
+  public func workingStatus(activity: String?) -> String {
+    guard let background else { return "trabalhando · \(activity ?? "pensando")" }
+    return background.isEmpty ? "trabalhando · em segundo plano" : "trabalhando · em segundo plano · \(background)"
+  }
 }
 
 public enum SessionFilter: String, CaseIterable, Identifiable, Sendable {
@@ -84,7 +93,10 @@ public enum SessionList {
       let questions = members.reduce(0) {
         $0 + ($1.questionAt == nil ? 0 : ($1.questionCount ?? 1))
       }
-      let running = members.contains { active.contains($0.session.id) }
+      let executing = members.contains { active.contains($0.session.id) }
+      // A background shell outlives its turn without any Session state; the server counts it per Session.
+      let shells = members.filter { ($0.backgroundCount ?? 0) > 0 }
+      let running = executing || !shells.isEmpty
       let idle =
         session.outcome == .succeeded || session.outcome == .failed ? session.time.idle : nil
       let unread = max(entry.unreadAt ?? 0, idle ?? 0) > (session.time.viewed ?? 0)
@@ -102,7 +114,9 @@ public enum SessionList {
         activeChildren: members.filter {
           $0.session.parentID != nil && active.contains($0.session.id)
         }.count,
-        requestCount: permissions + questions, rank: ranks[session.id] ?? session.time.updated,
+        requestCount: permissions + questions, working: running,
+        background: executing ? nil : shells.first.map { $0.backgroundTitle ?? "" },
+        rank: ranks[session.id] ?? session.time.updated,
         chat: chatRoot.map { session.location.directory.hasPrefix($0 + "/") } ?? false)
     }.sorted { left, right in
       if left.pinned != right.pinned { return left.pinned }

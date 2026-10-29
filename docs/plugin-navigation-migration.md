@@ -49,6 +49,9 @@ The plugin requests unarchived sessions and classifies attention:
   durable completion and projected idle.
 - Only forms of kind `question` or `websearch.provider` count as questions.
 - Reduce outstanding permission/question timestamps per session.
+- `backgroundCount` counts the session's running background jobs from `ctx.job.background()` except subagents (a
+  running subagent keeps its child session active); `backgroundTitle` is the newest one's title (a shell command).
+  The apps treat a family with such work as working.
 
 The UI keeps its existing descendant aggregation, live-event invalidation,
 ordering and display. Replace the navigation HTTP call/types with this RPC,
