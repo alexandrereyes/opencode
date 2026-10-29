@@ -48,6 +48,8 @@ import Testing
     #expect(state.sessions.count <= 4 && state.attention.count <= 3)
     #expect(state.sessions.allSatisfy { $0.status != .unknown })
     #expect(state.focus == nil || state.counts.working > 0)
+    // `needs` (rev. 2026-10-29) lists the first three of `forYou`.
+    #expect((state.needs ?? []).count == min(state.forYou, 3))
   }
 
   @Test func convertsEpochMillisecondsToDates() throws {
@@ -126,89 +128,107 @@ import Testing
   }
 
   @Test func compactTrailing() throws {
-    #expect(try Self.state("state-one-question").compact
-      == [AgentsSegment("1", .warning), AgentsSegment("/4", .textSecondary)])
-    #expect(try Self.state("state-working").compact == [AgentsSegment("2", .success)])
+    // Option A (29/10): what needs Alexandre, in an orange pill; the active total only when nothing does.
+    #expect(try Self.state("state-one-question").compact == [AgentsSegment("4", .primary)])
+    #expect(try Self.state("state-working").compact == [AgentsSegment("1", .primary)])
+    var calm = try Self.state("state-working")
+    calm.counts.unread = 0
+    #expect(calm.compact == [AgentsSegment("2", .success)])
   }
 
   @Test func expandedHeader() throws {
     func text(_ name: String) throws -> String { try Self.state(name).header.map(\.text).joined() }
-    #expect(try text("state-one-question") == "4 ativas · 1 precisa de você")
-    #expect(try text("state-two-questions") == "4 ativas · 2 precisam de você")
-    #expect(try text("state-mixed") == "3 ativas · 2 precisam de você · 2 com erro")
-    #expect(try text("state-working") == "2 ativas")
-    #expect(try text("state-failed-only") == "0 ativas · 1 com erro")
+    #expect(try text("state-one-question") == "4 para você · 3 trabalhando")
+    #expect(try text("state-two-questions") == "5 para você · 2 trabalhando")
+    #expect(try text("state-mixed") == "5 para você · 1 trabalhando")
+    #expect(try text("state-working") == "1 para você · 2 trabalhando")
+    #expect(try text("state-failed-only") == "3 para você")
     let mixed = try Self.state("state-mixed").header
-    #expect(mixed[2].role == .warning && mixed[4].role == .error)
-    var one = try Self.state("state-working")
-    one.activeTotal = 1
-    #expect(one.header.map(\.text).joined() == "1 ativa")
+    #expect(mixed.map(\.role) == [.primary, .textSecondary])
+    var calm = try Self.state("state-working")
+    calm.counts.unread = 0
+    #expect(calm.header.map(\.text).joined() == "2 ativas")
+    calm.activeTotal = 1
+    #expect(calm.header.map(\.text).joined() == "1 ativa")
   }
 
-  @Test func countersPluralsAndOrder() throws {
+  @Test func countersPutAttentionFirstAndWorkLast() throws {
     func text(_ state: AgentsState) -> [String] { state.counters.map { "\($0.count) \($0.label)" } }
-    #expect(try text(Self.state("state-one-question")) == ["3 trabalhando", "1 pergunta", "3 não lidas"])
-    #expect(try text(Self.state("state-two-questions")) == ["2 trabalhando", "2 perguntas", "3 não lidas"])
+    #expect(try text(Self.state("state-one-question")) == ["1 pergunta", "3 não lidas", "3 trabalhando"])
+    #expect(try text(Self.state("state-two-questions")) == ["2 perguntas", "3 não lidas", "2 trabalhando"])
     var plural = try Self.state("state-mixed")
     plural.counts = AgentsState.Counts(working: 0, question: 1, permission: 3, failed: 0, idle: 1, unread: 1)
     #expect(text(plural) == ["1 pergunta", "3 permissões", "1 não lida"])
     plural.counts.permission = 1
     #expect(text(plural)[1] == "1 permissão")
     let mixed = try Self.state("state-mixed").counters
-    #expect(mixed.map(\.role) == [.success, .accent, .warning, .error])
-    #expect(try Self.state("state-working").counters.last == AgentsCounter(count: 1, label: "não lida",
-      role: .primary, emphasized: false))
+    #expect(mixed.map(\.role) == [.accent, .warning, .error, .primary])
+    let working = try Self.state("state-working").counters
+    #expect(working.first == AgentsCounter(count: 1, label: "não lida", role: .primary, emphasized: true))
+    #expect(working.last == AgentsCounter(count: 2, label: "trabalhando", role: .textSecondary, emphasized: false))
+    // Nothing for Alexandre: the green work line, as before.
+    var calm = try Self.state("state-working")
+    calm.counts.unread = 0
+    #expect(calm.counters == [AgentsCounter(count: 2, label: "trabalhando", role: .success, emphasized: true)])
   }
 
-  @Test func countersStopAtFourDroppingRecentlyFinishedFirst() throws {
+  @Test func countersStopAtFourDroppingTheWorkFirst() throws {
     // state-mixed has all five counts non-zero.
     let mixed = try Self.state("state-mixed")
-    #expect(mixed.counts.unread ?? 0 > 0)
-    #expect(mixed.counters.map(\.label) == ["trabalhando", "pergunta", "permissão", "com erro"])
+    #expect(mixed.counts.unread ?? 0 > 0 && mixed.counts.working > 0)
+    #expect(mixed.counters.map(\.label) == ["pergunta", "permissão", "com erro", "não lida"])
     #expect(mixed.counters.count == AgentsLayout.lockMaxCounters)
   }
 
   @Test func failedOnlyCard() throws {
     let state = try Self.state("state-failed-only")
-    #expect(state.activeTotal == 0 && state.gaugeLabel == "ativas")
+    #expect(state.activeTotal == 0 && state.gaugeNumber == 3 && state.gaugeLabel == "para você")
     #expect(state.counters.map { "\($0.count) \($0.label)" } == ["1 com erro", "2 não lidas"])
     let arcs = state.gauge(gap: 0)
     #expect(arcs.map(\.role) == [.error, .primary] && arcs.map(\.dim) == [false, false])
-    #expect(state.attentionLine == nil)
+    let line = try #require(state.attentionLine)
+    #expect(line.title == "Deploy no Swarm" && line.kind == "erro" && line.role == .error && line.more == 2)
+    #expect(line.since == Date(timeIntervalSince1970: 1_793_104_740))
   }
 
-  @Test func gaugeArcsAreProportionalInContractOrder() throws {
-    let arcs = try Self.state("state-one-question").gauge(gap: 0)
-    // 3 working, 1 question, 3 unread out of 7.
-    #expect(arcs.map(\.role) == [.success, .accent, .primary])
-    #expect(abs(arcs[0].to - 3.0 / 7) < 1e-9 && abs(arcs[1].from - 3.0 / 7) < 1e-9 && abs(arcs[1].to - 4.0 / 7) < 1e-9)
-    #expect(arcs.last?.to == 1)
-    let gapped = try Self.state("state-one-question").gauge(gap: 0.04)
-    #expect(abs(gapped[0].from - 0.02) < 1e-9 && abs(gapped[0].to - (3.0 / 7 - 0.02)) < 1e-9)
+  @Test func gaugeDrawsOnlyWhatNeedsAlexandre() throws {
+    let state = try Self.state("state-one-question")
+    #expect(state.gaugeNumber == 4 && state.gaugeLabel == "para você")
+    let arcs = state.gauge(gap: 0)
+    // 1 question and 3 unread out of 4; the 3 working sessions draw no arc.
+    #expect(arcs.map(\.role) == [.accent, .primary])
+    #expect(abs(arcs[0].to - 1.0 / 4) < 1e-9 && arcs.last?.to == 1)
+    let gapped = state.gauge(gap: 0.04)
+    #expect(abs(gapped[0].from - 0.02) < 1e-9 && abs(gapped[0].to - (1.0 / 4 - 0.02)) < 1e-9)
     var single = try Self.state("state-working")
     single.counts.unread = 0
     #expect(single.gauge(gap: 0.04) == [AgentsGaugeArc(role: .success, dim: false, from: 0, to: 1)])
+    #expect(single.gaugeNumber == 2 && single.gaugeLabel == "ativas")
     single.counts.working = 0
     #expect(single.gauge(gap: 0.04).isEmpty)
     // A tiny share never draws backwards.
-    single.counts = AgentsState.Counts(working: 200, question: 1, permission: 0, failed: 0, idle: 0, unread: 0)
-    #expect(single.gauge(gap: 0.05).allSatisfy { $0.to >= $0.from })
+    single.counts = AgentsState.Counts(working: 200, question: 0, permission: 0, failed: 0, idle: 1)
+    #expect(single.gauge(gap: 0.05).count == 2 && single.gauge(gap: 0.05).allSatisfy { $0.to >= $0.from })
   }
 
-  @Test func attentionLineWithMore() throws {
-    let one = try Self.state("state-one-question").attentionLine
-    #expect(one?.title == "Escolher banco do cache" && one?.role == .accent && one?.more == nil)
-    #expect(one?.since == Date(timeIntervalSince1970: 1_793_104_680))
-    #expect(try Self.state("state-two-questions").attentionLine?.more == 1)
+  @Test func attentionLineShowsTheFirstNeedWithItsKind() throws {
+    let one = try #require(try Self.state("state-one-question").attentionLine)
+    #expect(one.title == "Escolher banco do cache" && one.role == .accent && one.kind == "pergunta")
+    #expect(one.since == Date(timeIntervalSince1970: 1_793_104_680) && one.more == 3)
+    #expect(try Self.state("state-two-questions").attentionLine?.more == 4)
+    let unread = try #require(try Self.state("state-working").attentionLine)
+    #expect(unread.title == "Revisar navegação" && unread.kind == "respondeu" && unread.role == .primary)
+    // An older backend without `needs`: its requests first, then its failed rows without a time.
     var mixed = try Self.state("state-mixed")
-    #expect(mixed.attentionLine?.more == 1)
-    // The backend trims `attention`; `attentionTotal` still counts every request.
-    mixed.attention.removeLast()
-    mixed.attentionTotal = 5
-    #expect(mixed.attentionLine?.more == 4)
+    mixed.needs = nil
+    #expect(mixed.needItems.map(\.kind) == [.question, .permission, .failed, .failed])
+    #expect(mixed.needItems.last?.date == nil && mixed.attentionLine?.more == 4)
     mixed.attention[0].kind = .permission
     #expect(mixed.attentionLine?.role == .warning)
-    #expect(try Self.state("state-working").attentionLine == nil)
+    var calm = try Self.state("state-working")
+    calm.counts.unread = 0
+    calm.needs = []
+    #expect(calm.attentionLine == nil)
   }
 
   @Test func rowLabelsAndProgress() throws {
@@ -243,9 +263,17 @@ import Testing
     #expect(AgentsDeepLink.card(try Self.state("state-one-question"), serverKey: "k")
       == .session(serverKey: "k", sessionID: "ses_01JZCACHEDATABASE000000002", directory: "/Users/alexandremartins/Dev/opencode2"))
     #expect(AgentsDeepLink.card(try Self.state("state-working"), serverKey: "k")
+      == .session(serverKey: "k", sessionID: "ses_01JZNAVIGATIONREVIEW000004", directory: "/Users/alexandremartins/Dev/opencode2"))
+    var calm = try Self.state("state-working")
+    calm.needs = []
+    #expect(AgentsDeepLink.card(calm, serverKey: "k")
       == .session(serverKey: "k", sessionID: "ses_01JZLIVEACTIVITY0000000001",
         directory: "/Users/alexandremartins/Worktrees/opencode2-live-activity"))
-    #expect(AgentsDeepLink.card(try Self.state("state-failed-only"), serverKey: "k") == .sessions(serverKey: "k"))
+    #expect(AgentsDeepLink.card(try Self.state("state-failed-only"), serverKey: "k")
+      == .session(serverKey: "k", sessionID: "ses_01JZDEPLOYSWARM00000000005", directory: "/Users/alexandremartins/Dev/core-infra"))
+    var idle = try Self.state("state-failed-only")
+    idle.needs = []
+    #expect(AgentsDeepLink.card(idle, serverKey: "k") == .sessions(serverKey: "k"))
   }
 
   @Test func changedEventDecodesStateOrNull() throws {
@@ -303,12 +331,22 @@ import Testing
     let island = AgentsLayout.island(state)
     #expect(island.height <= AgentsLayout.islandCeiling)
     #expect(AgentsLayout.islandCeiling < AgentsLayout.islandRegion)
-    #expect(island.rows == min(state.sessions.count, 3))
-    #expect(island.more == (state.sessions.count > 3 ? state.sessions.count - 3 : nil))
+    #expect(island.rows == min(state.islandRows.count, 3))
+    #expect(island.more == (state.islandTotal > island.rows ? state.islandTotal - island.rows : nil))
+  }
+
+  @Test func islandShowsTwoNeedsAndCountsTheOthers() throws {
+    let state = try AgentsActivityTests.state("state-one-question")
+    #expect(state.islandRows.map(\.title) == ["Escolher banco do cache", "Revisar navegação"])
+    #expect(state.islandRows.map { state.statusLabel($0) } == ["Pergunta", "Não lida"])
+    #expect(AgentsLayout.island(state) == AgentsLayout.Island(rows: 2, more: 2, height: 74))
   }
 
   @Test func islandKeepsTheMoreLineOnlyWhenItFits() throws {
     var state = try AgentsActivityTests.state("state-one-question")
+    // Nothing for Alexandre: the session rows, as before.
+    state.counts.question = 0
+    state.counts.unread = 0
     #expect(AgentsLayout.island(state) == AgentsLayout.Island(rows: 3, more: 1, height: 94))
     state.sessions = Array(state.sessions.prefix(3))
     #expect(AgentsLayout.island(state) == AgentsLayout.Island(rows: 3, more: nil, height: 82))
@@ -323,7 +361,7 @@ import Testing
   func lockScreenFitsTheLimit(_ name: String) throws {
     let state = try AgentsActivityTests.state(name)
     #expect(AgentsLayout.lockHeight(state) <= AgentsLayout.lockLimit)
-    #expect(AgentsLayout.lockHeight(state) == (state.attention.isEmpty ? 121 : 150))
+    #expect(AgentsLayout.lockHeight(state) == (state.attentionLine == nil ? 121 : 150))
     #expect(state.counters.count <= AgentsLayout.lockMaxCounters)
   }
 
@@ -383,7 +421,11 @@ import Testing
     #expect(mixed.watchRows.map(\.title) == ["Escolher banco do cache", "Corrigir login OAuth"])
     #expect(mixed.asked(mixed.watchRows[0]) == mixed.attention[0].asked)
     #expect(mixed.asked(mixed.watchRows[1]) == mixed.attention[1].asked)
-    #expect(mixed.asked(mixed.sessions[2]) == nil)
+    // `needs` carries a time for failures too; the fourth row is past its three items.
+    #expect(mixed.asked(mixed.sessions[2]) == Date(timeIntervalSince1970: 1_793_104_740))
+    #expect(mixed.asked(mixed.sessions[3]) == nil)
+    let working = try AgentsActivityTests.state("state-working")
+    #expect(working.watchRows.map(\.title) == ["Revisar navegação", "Live Activity no iOS"])
   }
 }
 
@@ -422,9 +464,9 @@ import Testing
   @Test func countersUseUnreadWithPlurals() throws {
     func text(_ state: AgentsState) -> [String] { state.counters.map { "\($0.count) \($0.label)" } }
     let one = try withUnread("state-working", 1)
-    #expect(text(one) == ["2 trabalhando", "1 não lida"])
-    #expect(one.counters.last == AgentsCounter(count: 1, label: "não lida", role: .primary, emphasized: false))
-    #expect(text(try withUnread("state-working", 3)) == ["2 trabalhando", "3 não lidas"])
+    #expect(text(one) == ["1 não lida", "2 trabalhando"])
+    #expect(one.counters.first == AgentsCounter(count: 1, label: "não lida", role: .primary, emphasized: true))
+    #expect(text(try withUnread("state-working", 3)) == ["3 não lidas", "2 trabalhando"])
     // Zero unread hides the line even though `idle` is non-zero.
     #expect(text(try withUnread("state-working", 0)) == ["2 trabalhando"])
     // Without `unread`, the fallback is unchanged.
@@ -435,9 +477,9 @@ import Testing
     #expect(text(plural).last == "3 concluídas há pouco")
   }
 
-  @Test func fiveCountsDropUnreadFirst() throws {
+  @Test func fiveCountsDropTheWorkFirst() throws {
     let mixed = try withUnread("state-mixed", 2)
-    #expect(mixed.counters.map(\.label) == ["trabalhando", "pergunta", "permissão", "com erro"])
+    #expect(mixed.counters.map(\.label) == ["pergunta", "permissão", "com erro", "não lidas"])
   }
 
   @Test func failedOnlyWithUnread() throws {
@@ -449,9 +491,10 @@ import Testing
 
   @Test func gaugeUsesTheOrangeArcForUnread() throws {
     let state = try withUnread("state-one-question", 3)
-    #expect(state.gauge(gap: 0).map(\.role) == [.success, .accent, .primary])
-    let old = try legacy("state-one-question").gauge(gap: 0).last
-    #expect(old?.role == .textSecondary && old?.dim == true)
+    #expect(state.gauge(gap: 0).map(\.role) == [.accent, .primary])
+    // An older backend's recently finished sessions stay gray beside the work.
+    let old = try legacy("state-working").gauge(gap: 0)
+    #expect(old.map(\.role) == [.success, .textSecondary] && old.last?.dim == true)
     let failed = try legacy("state-failed-only")
     #expect(failed.counters.map(\.label) == ["com erro", "concluídas há pouco"])
   }
@@ -466,14 +509,16 @@ import Testing
   }
 
   @Test func watchRingUsesOrangeForUnreadAndGrayAsFallback() {
+    // Option A: only what needs Alexandre draws, and its count is the orange number.
     let unread = WatchRing(counts: .init(working: 3, question: 1, permission: 0, failed: 0, idle: 4, unread: 1))
-    #expect(unread.arcs.map(\.role) == [.success, .accent, .primary])
-    #expect(unread.arcs.map(\.start) == [0, 0.6, 0.8])
-    let old = WatchRing(counts: .init(working: 3, question: 1, permission: 0, failed: 0, idle: 1))
-    #expect(old.arcs.map(\.role) == [.success, .accent, .border])
+    #expect(unread.arcs.map(\.role) == [.accent, .primary])
+    #expect(unread.arcs.map(\.start) == [0, 0.5])
+    #expect(unread.number == 2 && unread.numberRole == .primary)
+    let old = WatchRing(counts: .init(working: 3, question: 0, permission: 0, failed: 0, idle: 1))
+    #expect(old.arcs.map(\.role) == [.success, .border] && old.number == 3 && old.numberRole == .textStrong)
     let onlyUnread = WatchRing(counts: .init(working: 0, question: 0, permission: 0, failed: 0, idle: 0, unread: 2))
-    #expect(onlyUnread.arcs == [.init(role: .primary, start: 0, end: 1)] && !onlyUnread.idle)
+    #expect(onlyUnread.arcs == [.init(role: .primary, start: 0, end: 1)] && !onlyUnread.idle && onlyUnread.number == 2)
     let none = WatchRing(counts: .init(working: 0, question: 0, permission: 0, failed: 0, idle: 3, unread: 0))
-    #expect(none.idle)
+    #expect(none.idle && none.number == 0)
   }
 }

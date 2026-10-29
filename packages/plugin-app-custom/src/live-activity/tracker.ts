@@ -17,6 +17,7 @@ export const limits = {
   text: 120,
   rows: 4,
   attention: 3,
+  needs: 3,
   /** Transcript messages a rebuild reads per session to find unfinished background shells. */
   shellMessages: 100,
 }
@@ -146,8 +147,15 @@ export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
 
 export type TrackerContext = {
   session: Pick<Plugin.Context["session"], "get" | "scan" | "active" | "family">
-  /** From `custom.preferences`: "Avisar ao terminar" session IDs (`notifySessions`) and `settings.autoApprove`. */
-  marks: () => Effect.Effect<{ readonly notify: readonly string[]; readonly autoApprove: boolean }>
+  /**
+   * From `custom.preferences`: "Avisar ao terminar" session IDs (`notifySessions`), `settings.autoApprove` and the
+   * current Sessão mestra (`masterSessions.local`), which Sessões never lists, so its answers are never unread here.
+   */
+  marks: () => Effect.Effect<{
+    readonly notify: readonly string[]
+    readonly autoApprove: boolean
+    readonly master?: string
+  }>
   message: Pick<Plugin.Context["message"], "list">
   request: Pick<Plugin.Context["request"], "pending">
 }
@@ -243,12 +251,13 @@ export function makeTracker(ctx: TrackerContext) {
   const shells = new Map<string, Shell>()
   const firstSeen = new Map<string, number>()
   const watched = new Set<string>()
-  const settings = { autoApprove: false }
+  const settings = { autoApprove: false, master: undefined as string | undefined }
   const refreshMarks = Effect.fn("LiveActivity.refreshMarks")(function* () {
     const marks = yield* ctx.marks()
     watched.clear()
     for (const id of marks.notify) watched.add(id)
     settings.autoApprove = marks.autoApprove
+    settings.master = marks.master
   })
   const state = { requests: [] as Request[], focus: undefined as string | undefined }
 
@@ -637,11 +646,14 @@ export function makeTracker(ctx: TrackerContext) {
           .filter((request) => request.kind === kind)
           .toSorted((a, b) => a.since - b.since || a.id.localeCompare(b.id))[0]
         const rollup = family(entry)
+        // Like the Sessões row (rev. 2026-10-29): a working family outranks its failure.
         const status: LiveActivity.RowStatus | undefined =
           kind ??
-          (failed(entry) ? "failed" : rollup.running ? "working" : idle(entry) || unseen(entry) ? "idle" : undefined)
+          (rollup.running ? "working" : failed(entry) ? "failed" : idle(entry) || unseen(entry) ? "idle" : undefined)
         if (!status) return []
-        return [{ entry, status, oldest, ref: ref(entry), rollup, unread: status === "idle" && unseen(entry) }]
+        // Sessões never lists the current Sessão mestra, so its answers do not count as unread.
+        const unread = status === "idle" && unseen(entry) && entry.id !== settings.master
+        return [{ entry, status, oldest, ref: ref(entry), rollup, unread }]
       })
     const of = (status: LiveActivity.RowStatus) => rows.filter((row) => row.status === status)
     const working = of("working")
@@ -664,6 +676,10 @@ export function makeTracker(ctx: TrackerContext) {
       (a.oldest?.since ?? 0) - (b.oldest?.since ?? 0) || a.entry.id.localeCompare(b.entry.id)
     const byEnded = (a: (typeof rows)[number], b: (typeof rows)[number]) =>
       (b.entry.ended?.at ?? 0) - (a.entry.ended?.at ?? 0) || a.entry.id.localeCompare(b.entry.id)
+    // Idle rows are unread sessions only (rev. 2026-10-28), newest output first.
+    const unread = of("idle")
+      .filter((row) => row.unread)
+      .toSorted((a, b) => unreadAt(b.entry) - unreadAt(a.entry) || a.entry.id.localeCompare(b.entry.id))
     const ordered = [
       ...of("question").toSorted(bySince),
       ...of("permission").toSorted(bySince),
@@ -672,11 +688,22 @@ export function makeTracker(ctx: TrackerContext) {
       ...working
         .filter((row) => row !== focused)
         .toSorted((a, b) => b.rollup.activityAt - a.rollup.activityAt || a.entry.id.localeCompare(b.entry.id)),
-      // Idle rows are unread sessions only (rev. 2026-10-28), newest output first.
-      ...of("idle")
-        .filter((row) => row.unread)
-        .toSorted((a, b) => unreadAt(b.entry) - unreadAt(a.entry) || a.entry.id.localeCompare(b.entry.id)),
+      ...unread,
     ]
+    // Everything that needs Alexandre (rev. 2026-10-29), the sessions behind `counts.forYou` on iOS.
+    const needs = [
+      ...of("question").toSorted(bySince),
+      ...of("permission").toSorted(bySince),
+      ...of("failed").toSorted(byEnded),
+      ...unread,
+    ]
+      .slice(0, limits.needs)
+      .map((row): LiveActivity.Need => {
+        if (row.status === "question" || row.status === "permission")
+          return { ...row.ref, kind: row.status, since: row.oldest?.since ?? now }
+        if (row.status === "failed") return { ...row.ref, kind: "failed", since: row.entry.ended?.at ?? now }
+        return { ...row.ref, kind: "unread", since: unreadAt(row.entry) }
+      })
     const counts = {
       working: working.length,
       question: of("question").length,
@@ -737,6 +764,7 @@ export function makeTracker(ctx: TrackerContext) {
           const rowProgress = row.status === "working" ? progress(row) : undefined
           return { ...row.ref, status: row.status, ...(rowProgress ? { progress: rowProgress } : {}) }
         }),
+        needs,
       },
       marks,
       ...(expiries.length > 0 ? { wakeAt: Math.min(...expiries) } : {}),

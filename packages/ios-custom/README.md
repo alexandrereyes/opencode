@@ -200,7 +200,7 @@ app, without the web's "Projetos" and "Worktrees" groups.
 
   | Order | Section | Rows | Order inside |
   | --- | --- | --- | --- |
-  | 1 | Precisa de você (`primary` dot) | permission, question or failure, chats included | permissions, questions, then failures by `time.idle` (newest first) |
+  | 1 | Precisa de você (`primary` dot) | permission, question, failure or unread answer (29/10), chats and pins included | permissions, questions, then failures, then unread answers, both by `time.idle` (newest first) |
   | 2 | Trabalhando (`success`) | running, nothing pending | `SessionList.rows` |
   | 3 | Fixadas (pin icon) | other pinned rows | pin order |
   | 4 | Hoje, Ontem, Esta semana (neutral) | the rest by local day of `interactionAt`; "Esta semana" is 2–6 days ago | `SessionList.rows` |
@@ -235,8 +235,18 @@ app, without the web's "Projetos" and "Worktrees" groups.
   (`interrupted`) is not a failure — the Live Activity contract's "Failed" rule. The message comes from the preview:
   the app now decodes `idle` transcript messages (`TranscriptMessage.idle`), and `SessionPreview.failure` holds
   `error.message` when the latest message is a failed `idle`. Without it the line says `erro · parou com erro`; the
-  elapsed time comes from `time.idle`. The "Precisa de você" filter includes failures; the tab badge and chip request
-  counts still count only permissions and questions. No server change was needed.
+  elapsed time comes from `time.idle`. The "Precisa de você" filter includes failures; the chip request counts still
+  count only permissions and questions. No server change was needed.
+- **Attention first (29/10, mock `.agent-artifacts/atencao/sessoes-precisa-de-voce.png`):** an unread root that is not
+  working (`SessionState.unread`; a background shell keeps it `.running`) joins "Precisa de você" after the failures.
+  Its row keeps the existing unread look (bold title, orange dot) and its colored line reads `respondeu · <first line of
+  the answer>` in `primary`; an unread failure stays one failure. **One count** (`SessionAttention.count`, one per
+  root) feeds the section header, the Mac bell, the Dock and the Sessão mestra bar, and matches `counts.forYou` of the
+  Live Activity and the watch. **Nothing jumps while you read:** opening a failure or an unread answer marks it viewed;
+  `SessionAttentionHold` (in `SessionStore`, fed by the iPhone's `conversationPath` and every Mac window's selection
+  through `shownConversations`) keeps that row in its place, without the dot and without counting, until no open
+  conversation shows it, it works again or a newer run ends. `SessionSections.group(_:now:held:)` takes it, so the
+  scroll hold of `SessionListPresentation`, the Mac neighbors and ⌘1…⌘9 see the same order.
 
 **Reuse on the Mac.** Logic lives in OpenCodeKit (iOS 27 + macOS 15) with Swift Testing coverage
 (`SessionSectionsTests`): `SessionList.rows` (failure state and precedence), `SessionSections` (grouping, order, days,
@@ -3171,17 +3181,19 @@ separate track.
 - **Alerts and notifications**: the in-app banner (`SessionAlertCenter`) stays silent for the session on screen
   while the app is in front. While the app is not in front, each banner (answered or finished, failed, permission,
   question; mutes and deduplication included) also becomes a macOS notification (`MacNotifications`), and clicking
-  it opens that session. The Dock icon shows `requestCount` (permissions and questions), like the iPhone's tab badge.
+  it opens that session. The Dock icon shows the count of "Precisa de você" (`SessionAttention.count`, 29/10).
   The fixture never asks for the notification permission nor posts anything.
-- **Bell (`MacNotificationBell`, rev. 29/10)**: no state of its own. Its count and **Não lidas** are the rows with
-  Sessões' orange dot (`SessionRow.unread`, the server's `viewed`) or a pending permission or question, one line per
-  session, so reading a conversation on any device clears its line. **Anteriores** are recent answers already read,
+- **Bell (`MacNotificationBell`, rev. 29/10)**: no state of its own. Its count and **Não lidas** are the rows of
+  "Precisa de você" in its order (`SessionAttention.ordered`: requests, failures, unread answers of sessions that are
+  not working, against the server's `viewed`), one line per session, so reading a conversation on any device clears
+  its line. **Anteriores** are recent answers already read,
   dimmed; Limpar hides only them. A new line (a dot or a request appears, never for the conversation on screen)
   bounces the bell, fills it orange until read and, in the key window with no sheet, search or palette over it,
   opens the list for 4.5 s (longer under the pointer) with the line highlighted. The list is a nonactivating child
   panel that cannot become key, so the composer keeps typing; opening it never marks anything read. Check:
   `-OpenCodeMacFixture contexto -OpenCodeMacFixtureBell 12 [-OpenCodeMacBellShot <png>]` (`MacBellChecks`, in the
-  background and off-screen) prints `MacBellChecks ok|FAIL …` and exits 0 or 1.
+  background and off-screen) prints `MacBellChecks ok|FAIL …` and exits 0 or 1. It also checks that the bell equals
+  "Precisa de você" and that the line it opens stays there while open (a second shot, `<png>-aberta.png`).
 - **Menus and shortcuts**: Arquivo (Nova sessão ⌘N, Nova janela ⌥⌘N, Atualizar ⌘R), Visualizar (Contexto ⌥⌘I,
   Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
   Marcar como lida, Arquivar ⌥⌘⌫, Excluir ⌘⌫, both confirmed and acting on the selection while there is one, Reiniciar Sessão mestra), Editar (Buscar
@@ -4064,6 +4076,16 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   island, the Smart Stack card and the watch Painel; the watch complication and Painel ring use the same orange arc.
   Without `unread` (older backends) everything keeps `idle`: gray arc, `concluídas há pouco`, `Concluída`
   (`AgentsState.Counts.finished`, `AgentsState.statusLabel(_:)`).
+- **Attention first (29/10, Option A of `.agent-artifacts/atencao/live-atencao.png`):** small changes to the same
+  views. While `counts.forYou` (questions + permissions + failures + unread, the Sessões count) is above zero, the
+  ring draws only those arcs with `N`/`para você` in the centre, the counters list them first and `N trabalhando` last
+  in gray (dropped first beyond four lines), the bottom line shows the first of `needs` with its kind (`pergunta`,
+  `permissão`, `erro`, `respondeu`), its time and `+K`, the compact island shows the number in an orange pill, and the
+  expanded island reads `N para você · M trabalhando` over the first two `needs` (each opens its session). With
+  nothing for you everything is as before (green ring, `N ativas`). Older backends without `needs` fall back to
+  `attention` and the failed/unread rows, without times (`AgentsState.needItems`). Left out, as bigger layout changes:
+  the second bottom line of the card (it would pass 160 points), the thin outer work arc and Responder/Abrir buttons
+  (the Live Activity has no intents). The Smart Stack card lists `needs` first too.
 - **Apple Watch:** the Lock Screen closure branches on `activityFamily`; `.supplementalActivityFamilies([.small])`
   shows the mascot inside a segmented subagent ring (up to 8 segments, a continuous arc above), the minimal island's
   `!N`/`?N`/hand badge and the first two sessions, in fixed metrics for the smallest Smart Stack (152 × 69.5 points).
@@ -4141,6 +4163,13 @@ watch's own Wi-Fi or cellular. The contract with the backend is
 - **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
   mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
   state in the same Keychain group and reloads on WidgetKit push, when the app updates it, and otherwise every hour.
+- **Attention first (29/10, Option A of `.agent-artifacts/atencao/watch-atencao.png`):** while `counts.forYou` is
+  above zero, `WatchRing` draws only questions, permissions, failures and unread answers, with the orange number; the
+  rectangular line reads `N para você` over a dimmed `1 pergunta · 2 não lidas · 6 trabalhando`; the corner shows the
+  same number. Otherwise the green ring and `N trabalhando · nada para você`. The Painel lists `needs` first (requests
+  still open Responder; failures and answers show their kind and time) and then a collapsed `Trabalhando N` that
+  expands to the working sessions. The gateway now answers a state while only unread answers wait, so the watch counts
+  what Sessões counts. The thin inner work arc of the mock was left out.
 - **Sync within the WidgetKit budget (rev. 29/10).** WidgetKit counts every complication reload outside the app in
   front (push, timeline or background request) against one daily budget, 40 to 70 for a widget looked at often; the
   server's 150 pushes a day plus a 15-minute timeline exhausted it, so only opening the app updated the complication.

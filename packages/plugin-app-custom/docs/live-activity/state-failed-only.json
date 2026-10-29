@@ -35,5 +35,31 @@
       "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
       "status": "idle"
     }
+  ],
+  "needs": [
+    {
+      "sessionID": "ses_01JZDEPLOYSWARM00000000005",
+      "title": "Deploy no Swarm",
+      "project": "core-infra",
+      "directory": "/Users/alexandremartins/Dev/core-infra",
+      "kind": "failed",
+      "since": 1793104740000
+    },
+    {
+      "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+      "title": "Revisar navegação",
+      "project": "app",
+      "directory": "/Users/alexandremartins/Dev/opencode2",
+      "kind": "unread",
+      "since": 1793104560000
+    },
+    {
+      "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+      "title": "Live Activity no iOS",
+      "project": "ios-custom",
+      "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+      "kind": "unread",
+      "since": 1793104380000
+    }
   ]
 }

@@ -13,6 +13,8 @@ public struct AgentsState: Codable, Hashable, Sendable {
   public var attention: [Attention]
   public var attentionTotal: Int
   public var sessions: [Row]
+  /// Everything that needs Alexandre, in order (rev. 2026-10-29); absent from older backends (see `needItems`).
+  public var needs: [Need]?
 
   public struct Counts: Codable, Hashable, Sendable {
     public var working: Int
@@ -37,6 +39,10 @@ public struct AgentsState: Codable, Hashable, Sendable {
     public var finished: Finished {
       unread.map { Finished(count: $0, unread: true) } ?? Finished(count: idle, unread: false)
     }
+
+    /// "N para você": the sessions that need Alexandre, one each by the backend's precedence, the same rule as
+    /// Sessões' "Precisa de você" (`SessionAttention`). Older backends without `unread` count requests and failures.
+    public var forYou: Int { question + permission + failed + (unread ?? 0) }
   }
 
   public struct Finished: Equatable, Sendable {
@@ -102,6 +108,25 @@ public struct AgentsState: Codable, Hashable, Sendable {
     public var directory: String
     public var status: Status
     public var progress: Progress?
+  }
+
+  public enum NeedKind: String, Codable, Hashable, Sendable {
+    case question, permission, failed, unread, unknown
+    public init(from decoder: any Decoder) throws {
+      self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+    }
+  }
+
+  /// One session that needs Alexandre: a pending request, a failure or an unread answer.
+  public struct Need: Codable, Hashable, Sendable {
+    public var sessionID: String
+    public var title: String
+    public var project: String
+    public var directory: String
+    public var kind: NeedKind
+    /// When it started needing him (asked, failed, answered); nil when built from an older backend's rows.
+    public var since: Double?
+    public var date: Date? { since.map { Date(timeIntervalSince1970: $0 / 1000) } }
   }
 
   public var updated: Date { Date(timeIntervalSince1970: updatedAt / 1000) }
@@ -193,16 +218,78 @@ public struct AgentsGaugeArc: Equatable, Sendable {
   public let to: Double
 }
 
-/// The Lock Screen card's bottom line: the first pending request and how many others wait.
+/// The Lock Screen card's bottom line: the first session that needs Alexandre and how many others do.
 public struct AgentsAttentionLine: Equatable, Sendable {
   public let role: ThemeRole
   public let title: String
-  public let since: Date
-  /// `+K`: the other pending requests, when there are any.
+  /// `pergunta`, `permissão`, `erro` or `respondeu`.
+  public let kind: String
+  /// Nil from an older backend's failed or unread rows, which carry no time.
+  public let since: Date?
+  /// `+K`: the others that need him, when there are any.
   public let more: Int?
 }
 
+public extension AgentsState.NeedKind {
+  var role: ThemeRole {
+    switch self {
+    case .question: .accent
+    case .permission: .warning
+    case .failed: .error
+    case .unread: .primary
+    case .unknown: .textSecondary
+    }
+  }
+  /// The list's words: `pergunta`, `permissão`, `erro`, `respondeu`.
+  var label: String {
+    switch self {
+    case .question: "pergunta"
+    case .permission: "permissão"
+    case .failed: "erro"
+    case .unread: "respondeu"
+    case .unknown: ""
+    }
+  }
+  /// The matching row status, for the views that draw rows.
+  var status: AgentsState.Status {
+    switch self {
+    case .question: .question
+    case .permission: .permission
+    case .failed: .failed
+    case .unread: .idle
+    case .unknown: .unknown
+    }
+  }
+}
+
 public extension AgentsState {
+  /// Option A (29/10): attention first. `counts.forYou`, the same number as Sessões' "Precisa de você".
+  var forYou: Int { counts.forYou }
+
+  /// What needs Alexandre, in order: the backend's `needs`, or from an older one its requests (oldest first), then
+  /// the other rows that need him (requests without an attention item, failures, unread answers), without times.
+  var needItems: [Need] {
+    if let needs { return needs }
+    let requests = attention.map {
+      Need(sessionID: $0.sessionID, title: $0.title, project: $0.project, directory: $0.directory,
+        kind: $0.kind == .permission ? .permission : .question, since: $0.since)
+    }
+    let listed = Set(requests.map { "\($0.kind.rawValue)|\($0.sessionID)" })
+    let rows = sessions.compactMap { row -> Need? in
+      let kind: NeedKind? =
+        switch row.status {
+        case .question: .question
+        case .permission: .permission
+        case .failed: .failed
+        case .idle: counts.unread == nil ? nil : .unread
+        case .working, .unknown: nil
+        }
+      guard let kind, !listed.contains("\(kind.rawValue)|\(row.sessionID)") else { return nil }
+      return Need(sessionID: row.sessionID, title: row.title, project: row.project, directory: row.directory, kind: kind)
+    }
+    return requests + rows
+  }
+
   var minimal: AgentsMinimal {
     if counts.failed > 0 { return .failed(counts.failed) }
     if counts.question > 0 { return .question(counts.question) }
@@ -210,36 +297,35 @@ public extension AgentsState {
     return .mascot
   }
 
-  /// Compact trailing: `attentionTotal/activeTotal` while something needs Alexandre, otherwise `activeTotal`.
+  /// Compact trailing: `forYou` while something needs Alexandre (the view fills a pill with its role), otherwise
+  /// `activeTotal`.
   var compact: [AgentsSegment] {
-    attentionTotal > 0
-      ? [AgentsSegment("\(attentionTotal)", .warning), AgentsSegment("/\(activeTotal)", .textSecondary)]
-      : [AgentsSegment("\(activeTotal)", .success)]
+    forYou > 0 ? [AgentsSegment("\(forYou)", .primary)] : [AgentsSegment("\(activeTotal)", .success)]
   }
 
-  /// Expanded island header: `4 ativas · 1 precisa de você · 2 com erro`.
+  /// Expanded island header: `4 para você · 6 trabalhando`, or `4 ativas` when nothing needs Alexandre.
   var header: [AgentsSegment] {
-    var parts = [AgentsSegment("\(activeTotal) \(activeTotal == 1 ? "ativa" : "ativas")", .textStrong)]
-    if attentionTotal > 0 {
-      parts.append(AgentsSegment(" · ", .textSecondary))
-      parts.append(AgentsSegment("\(attentionTotal) \(attentionTotal == 1 ? "precisa" : "precisam") de você", .warning))
-    }
-    if counts.failed > 0 {
-      parts.append(AgentsSegment(" · ", .textSecondary))
-      parts.append(AgentsSegment("\(counts.failed) com erro", .error))
+    guard forYou > 0 else { return [AgentsSegment("\(activeTotal) \(activeTotal == 1 ? "ativa" : "ativas")", .textStrong)] }
+    var parts = [AgentsSegment("\(forYou) para você", .primary)]
+    if counts.working > 0 {
+      parts.append(AgentsSegment(" · \(counts.working) trabalhando", .textSecondary))
     }
     return parts
   }
 
-  /// The ring's arcs in contract order (working, question, permission, failed, unread or the `idle` fallback),
-  /// proportional to the counts,
-  /// with `gap` (a fraction of the circle) between them. A single non-zero count closes the circle; none draws no
-  /// arc (the view shows only the track).
+  /// The ring's arcs, proportional to the counts, with `gap` (a fraction of the circle) between them. While
+  /// something needs Alexandre only those counts draw (question, permission, failed, unread); otherwise the contract
+  /// order (working, then the `idle` fallback of older backends). A single non-zero count closes the circle; none
+  /// draws no arc (the view shows only the track).
   func gauge(gap: Double) -> [AgentsGaugeArc] {
-    let parts: [(Int, ThemeRole, Bool)] = [
+    let attention: [(Int, ThemeRole, Bool)] = [
+      (counts.question, .accent, false), (counts.permission, .warning, false), (counts.failed, .error, false),
+      (counts.unread ?? 0, .primary, false),
+    ]
+    let parts = (forYou > 0 ? attention : [
       (counts.working, .success, false), (counts.question, .accent, false), (counts.permission, .warning, false),
       (counts.failed, .error, false), (counts.finished.count, counts.finished.role, !counts.finished.unread),
-    ].filter { $0.0 > 0 }
+    ]).filter { $0.0 > 0 }
     let total = Double(parts.reduce(0) { $0 + $1.0 })
     guard total > 0 else { return [] }
     if parts.count == 1 { return [AgentsGaugeArc(role: parts[0].1, dim: parts[0].2, from: 0, to: 1)] }
@@ -252,39 +338,67 @@ public extension AgentsState {
     }
   }
 
-  /// `ativas` below the ring's number.
-  var gaugeLabel: String { activeTotal == 1 ? "ativa" : "ativas" }
+  /// The ring's centre: `N para você` while something needs Alexandre, otherwise `N ativas`.
+  var gaugeNumber: Int { forYou > 0 ? forYou : activeTotal }
+  var gaugeLabel: String { forYou > 0 ? "para você" : activeTotal == 1 ? "ativa" : "ativas" }
 
-  /// One line per non-zero count, at most `AgentsLayout.lockMaxCounters`; with all five, `não lidas` (or the
-  /// `concluídas há pouco` fallback) goes first.
+  /// One line per non-zero count, at most `AgentsLayout.lockMaxCounters`. While something needs Alexandre those
+  /// lines come first and `trabalhando` follows in gray, dropped first when they do not fit; otherwise the contract
+  /// order, where `não lidas` (or the `concluídas há pouco` fallback) is dropped first.
   var counters: [AgentsCounter] {
-    let all = [
-      AgentsCounter(count: counts.working, label: "trabalhando", role: .success, emphasized: true),
-      AgentsCounter(count: counts.question, label: counts.question == 1 ? "pergunta" : "perguntas", role: .accent,
-        emphasized: true),
-      AgentsCounter(count: counts.permission, label: counts.permission == 1 ? "permissão" : "permissões",
-        role: .warning, emphasized: true),
-      AgentsCounter(count: counts.failed, label: "com erro", role: .error, emphasized: true),
-      AgentsCounter(count: counts.finished.count, label: counts.finished.label, role: counts.finished.role,
-        emphasized: false),
-    ].filter { $0.count > 0 }
-    return all.count > AgentsLayout.lockMaxCounters ? all.filter(\.emphasized) : all
+    let question = AgentsCounter(count: counts.question, label: counts.question == 1 ? "pergunta" : "perguntas",
+      role: .accent, emphasized: true)
+    let permission = AgentsCounter(count: counts.permission,
+      label: counts.permission == 1 ? "permissão" : "permissões", role: .warning, emphasized: true)
+    let failed = AgentsCounter(count: counts.failed, label: "com erro", role: .error, emphasized: true)
+    let finished = AgentsCounter(count: counts.finished.count, label: counts.finished.label,
+      role: counts.finished.role, emphasized: forYou > 0 && counts.finished.unread)
+    guard forYou > 0 else {
+      let all = [
+        AgentsCounter(count: counts.working, label: "trabalhando", role: .success, emphasized: true), question,
+        permission, failed, finished,
+      ].filter { $0.count > 0 }
+      return all.count > AgentsLayout.lockMaxCounters ? all.filter(\.emphasized) : all
+    }
+    let working = AgentsCounter(count: counts.working, label: "trabalhando", role: .textSecondary, emphasized: false)
+    let lines = counts.finished.unread
+      ? [question, permission, failed, finished, working] : [question, permission, failed, working, finished]
+    return Array(lines.filter { $0.count > 0 }.prefix(AgentsLayout.lockMaxCounters))
   }
 
-  /// The first pending request, with `+K` for the others; none without attention.
+  /// The first session that needs Alexandre, with `+K` for the others; none when nothing does.
   var attentionLine: AgentsAttentionLine? {
-    guard let first = attention.first else { return nil }
-    let others = max(attentionTotal, attention.count) - 1
-    return AgentsAttentionLine(role: first.kind.role, title: first.title, since: first.asked,
+    let items = needItems
+    guard let first = items.first else { return nil }
+    let others = max(forYou, items.count) - 1
+    return AgentsAttentionLine(role: first.kind.role, title: first.title, kind: first.kind.label, since: first.date,
       more: others > 0 ? others : nil)
   }
 
-  /// Session opened by tapping the Lock Screen card: the first attention item, else the focus, else none
+  /// Session opened by tapping the Lock Screen card: the first that needs Alexandre, else the focus, else none
   /// (the Sessões list).
   var tapTarget: (sessionID: String, directory: String)? {
-    if let first = attention.first { return (first.sessionID, first.directory) }
+    if let first = needItems.first { return (first.sessionID, first.directory) }
     if let focus { return (focus.sessionID, focus.directory) }
     return nil
+  }
+
+  /// The expanded island's rows: the first two that need Alexandre, or the sessions when nothing does.
+  var islandRows: [Row] {
+    let items = needItems
+    return forYou > 0 && !items.isEmpty ? items.prefix(2).map(\.row) : sessions
+  }
+
+  /// What the island's rows stand for, so its `+N` counts the ones they leave out.
+  var islandTotal: Int {
+    let items = needItems
+    return forYou > 0 && !items.isEmpty ? max(forYou, items.count) : sessions.count
+  }
+}
+
+public extension AgentsState.Need {
+  var row: AgentsState.Row {
+    AgentsState.Row(sessionID: sessionID, title: title, project: project, directory: directory, status: kind.status)
   }
 }
 
@@ -356,10 +470,17 @@ public extension AgentsState {
   /// Badge below the ring: the minimal island's priority, none without attention or failure.
   var watchBadge: AgentsMinimal? { minimal == .mascot ? nil : minimal }
 
-  /// The watch shows the first two rows; questions and permissions add `há N min` from their attention item.
-  var watchRows: [AgentsState.Row] { Array(sessions.prefix(2)) }
+  /// The watch shows two rows, what needs Alexandre first, then the sessions; those that need him add `há N min`.
+  var watchRows: [AgentsState.Row] {
+    let first = needItems.map(\.row)
+    let listed = Set(first.map(\.sessionID))
+    return Array((first + sessions.filter { !listed.contains($0.sessionID) }).prefix(2))
+  }
 
   func asked(_ row: AgentsState.Row) -> Date? {
+    if let need = needs?.first(where: { $0.sessionID == row.sessionID && $0.kind.status == row.status }) {
+      return need.date
+    }
     guard row.status == .question || row.status == .permission else { return nil }
     let kind: Kind = row.status == .question ? .question : .permission
     return attention.first { $0.sessionID == row.sessionID && $0.kind == kind }?.asked

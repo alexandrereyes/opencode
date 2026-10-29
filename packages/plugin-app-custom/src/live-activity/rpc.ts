@@ -89,6 +89,19 @@ export const Row = Schema.Struct({
   progress: optional(Progress),
 }).annotate({ identifier: "LiveActivity.Row" })
 
+export const NeedKind = Schema.Literals(["question", "permission", "failed", "unread"]).annotate({
+  identifier: "LiveActivity.NeedKind",
+})
+export type NeedKind = typeof NeedKind.Type
+
+/** rev. 2026-10-29: one session that needs Alexandre, as in the Sessões "Precisa de você" section. */
+export interface Need extends Schema.Schema.Type<typeof Need> {}
+export const Need = Schema.Struct({
+  ...SessionRef,
+  kind: NeedKind,
+  since: Schema.Number,
+}).annotate({ identifier: "LiveActivity.Need" })
+
 export interface Counts extends Schema.Schema.Type<typeof Counts> {}
 export const Counts = Schema.Struct({
   working: Schema.Int,
@@ -111,6 +124,8 @@ export const AgentsState = Schema.Struct({
   attention: Schema.Array(Attention),
   attentionTotal: Schema.Int,
   sessions: Schema.Array(Row),
+  /** rev. 2026-10-29; optional so older builds and backends keep decoding. */
+  needs: optional(Schema.Array(Need)),
 }).annotate({ identifier: "LiveActivity.AgentsState" })
 
 const DeviceID = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))

@@ -58,6 +58,16 @@
           "directory": "/Users/alexandremartins/Dev/opencode2",
           "status": "idle"
         }
+      ],
+      "needs": [
+        {
+          "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+          "title": "Revisar navegação",
+          "project": "app",
+          "directory": "/Users/alexandremartins/Dev/opencode2",
+          "kind": "unread",
+          "since": 1793104560000
+        }
       ]
     },
     "stale-date": 1793105760,

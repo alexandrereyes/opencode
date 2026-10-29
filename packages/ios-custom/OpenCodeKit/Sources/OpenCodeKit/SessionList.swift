@@ -26,8 +26,8 @@ public struct SessionRow: Sendable, Identifiable {
   public var id: String { entry.session.id }
   public var session: Session { entry.session }
   public var interactionAt: Double { entry.messageAt ?? session.time.created }
-  /// A pending permission or question, or an unseen failure: the rows of "Precisa de você".
-  public var needsYou: Bool { state == .permission || state == .question || state == .failed }
+  /// A pending permission or question, an unseen failure or an unread answer: the rows of "Precisa de você".
+  public var needsYou: Bool { SessionAttention.reason(self) != nil }
   public var projectName: String {
     if chat { return session.displayTitle }
     return project?.displayName ?? URL(fileURLWithPath: session.location.directory).lastPathComponent

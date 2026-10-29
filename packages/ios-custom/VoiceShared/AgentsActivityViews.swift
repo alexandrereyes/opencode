@@ -8,8 +8,9 @@ import WidgetKit
 /// Heights are deterministic: every block has a fixed frame from `AgentsLayout`, never measured with `ViewThatFits`
 /// (the system clips instead of proposing its limit).
 
-/// Lock Screen card, "ring and counters": the ring of every count with `activeTotal` in the centre, one counter line
-/// per non-zero count, and the first pending request. It summarizes all sessions and never singles one out.
+/// Lock Screen card, "ring and counters" (Option A, 29/10: attention first): while something needs Alexandre, the
+/// ring of those counts with `N para você`, their lines before `trabalhando` and the first of them; otherwise the
+/// ring of the work with `activeTotal`. It summarizes all sessions and never singles one out.
 struct AgentsLockScreenView: View {
   let attributes: AgentsActivityAttributes
   let state: AgentsState
@@ -53,7 +54,7 @@ struct AgentsLockScreenView: View {
   }
 }
 
-/// The closed ring of the Lock Screen card, with `activeTotal` and `ativas` in the centre.
+/// The closed ring of the Lock Screen card, with `N para você` or `N ativas` in the centre.
 struct AgentsGaugeView: View {
   let attributes: AgentsActivityAttributes
   let state: AgentsState
@@ -72,7 +73,7 @@ struct AgentsGaugeView: View {
           .padding(width / 2)
       }
       VStack(spacing: -2) {
-        Text(verbatim: "\(state.activeTotal)").font(.system(size: 26, weight: .bold)).monospacedDigit()
+        Text(verbatim: "\(state.gaugeNumber)").font(.system(size: 26, weight: .bold)).monospacedDigit()
           .foregroundStyle(attributes.color(.textStrong))
         Text(state.gaugeLabel).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary))
       }
@@ -95,8 +96,8 @@ struct AgentsCounterLine: View {
   }
 }
 
-/// `● Escolher banco do cache · há 3 min. +1`: the title truncates first. Each run is its own view, and the
-/// system-updated date never gets `fixedSize`: the Lock Screen then failed to archive the card and showed it empty.
+/// `● Escolher banco do cache · pergunta · há 3 min. +1`: the title truncates first. Each run is its own view, and
+/// the system-updated date never gets `fixedSize`: the Lock Screen then failed to archive the card and showed it empty.
 struct AgentsAttentionRow: View {
   let attributes: AgentsActivityAttributes
   let line: AgentsAttentionLine
@@ -106,12 +107,16 @@ struct AgentsAttentionRow: View {
       Circle().fill(attributes.color(line.role)).frame(width: 8, height: 8).padding(.trailing, 8)
       Text(line.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
         .lineLimit(1).truncationMode(.tail)
-      Text(verbatim: " · ").font(.system(size: 12)).foregroundStyle(attributes.color(.textSecondary))
-        .layoutPriority(1)
-      // On the Lock Screen a system-updated date claims all free width, so it gets a fixed one ("há 59 min.").
-      Text(.currentDate, format: AgentsText.ago(since: line.since)).font(.system(size: 12))
-        .foregroundStyle(attributes.color(.textSecondary)).lineLimit(1).minimumScaleFactor(0.8)
-        .frame(width: AgentsLayout.lockAgo, alignment: .leading)
+      Text(verbatim: " · \(line.kind)").font(.system(size: 12)).foregroundStyle(attributes.color(.textSecondary))
+        .lineLimit(1).layoutPriority(1)
+      if let since = line.since {
+        Text(verbatim: " · ").font(.system(size: 12)).foregroundStyle(attributes.color(.textSecondary))
+          .layoutPriority(1)
+        // On the Lock Screen a system-updated date claims all free width, so it gets a fixed one ("há 59 min.").
+        Text(.currentDate, format: AgentsText.ago(since: since)).font(.system(size: 12))
+          .foregroundStyle(attributes.color(.textSecondary)).lineLimit(1).minimumScaleFactor(0.8)
+          .frame(width: AgentsLayout.lockAgo, alignment: .leading)
+      }
       if let more = line.more {
         // Neutral: the others may be of the other kind.
         Text(verbatim: "  +\(more)").font(.system(size: 12, weight: .semibold))
@@ -141,8 +146,16 @@ struct AgentsCompactTrailing: View {
   let attributes: AgentsActivityAttributes
   let state: AgentsState
   var body: some View {
-    AgentsSegments(attributes: attributes, segments: state.compact)
-    .font(.system(size: 15, weight: .semibold)).monospacedDigit()
+    if state.forYou > 0 {
+      // `N para você`: the number in an orange pill, like the watch card's badge.
+      Text(verbatim: "\(state.forYou)").font(.system(size: 15, weight: .bold)).monospacedDigit()
+        .foregroundStyle(attributes.color(.background))
+        .padding(.horizontal, 7).frame(minWidth: 24, minHeight: 20)
+        .background(Capsule().fill(attributes.color(.primary)))
+    } else {
+      AgentsSegments(attributes: attributes, segments: state.compact)
+        .font(.system(size: 15, weight: .semibold)).monospacedDigit()
+    }
   }
 }
 
@@ -176,8 +189,9 @@ struct AgentsMinimalView: View {
   }
 }
 
-/// The expanded island: header and single-line session rows in the bottom region, at fixed heights. The row
-/// count comes from `AgentsLayout.island`, so the content never passes the region's measured limit.
+/// The expanded island: header and single-line rows in the bottom region, at fixed heights: the first two that
+/// need Alexandre, or the sessions when nothing does. Each row opens its session. The row count comes from
+/// `AgentsLayout.island`, so the content never passes the region's measured limit.
 struct AgentsIslandExpanded: View {
   let attributes: AgentsActivityAttributes
   let state: AgentsState
@@ -191,7 +205,7 @@ struct AgentsIslandExpanded: View {
           .font(.system(size: 14, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.75)
       }.frame(height: AgentsLayout.islandHeader)
       if layout.rows > 0 { Spacer().frame(height: AgentsLayout.islandGap) }
-      ForEach(Array(state.sessions.prefix(layout.rows).enumerated()), id: \.element.sessionID) { _, row in
+      ForEach(Array(state.islandRows.prefix(layout.rows).enumerated()), id: \.element.sessionID) { _, row in
         Link(destination: AgentsDeepLink.session(serverKey: attributes.serverKey, sessionID: row.sessionID,
           directory: row.directory).url) { line(row) }
           .frame(height: AgentsLayout.islandRow)

@@ -104,7 +104,7 @@ import SwiftUI
         }
         alertInbox.record(message)
       }
-      MacNotifications.shared.badge(store.requestCount)
+      MacNotifications.shared.badge(store.attentionCount)
       if let id = store.conversationPath.last?.id {
         Task { @MainActor [weak self] in
           self?.front?.select(id)

@@ -4,8 +4,8 @@ import UserNotifications
 
 /// The Mac's side of the session alerts: while the app is not in front, each in-app banner of `SessionAlertCenter`
 /// (an answer, a failure, a permission or a question, with its mutes and deduplication) also becomes a macOS
-/// notification; clicking it brings the app forward on that session. The Dock icon counts the permissions and
-/// questions waiting, like the iPhone's tab badge. The fixture never asks for permission or posts anything.
+/// notification; clicking it brings the app forward on that session. The Dock icon shows the count of "Precisa de
+/// você" (`SessionAttention`), the same as the bell. The fixture never asks for permission or posts anything.
 @MainActor final class MacNotifications: NSObject, UNUserNotificationCenterDelegate {
   static let shared = MacNotifications()
   private var authorized: Bool?

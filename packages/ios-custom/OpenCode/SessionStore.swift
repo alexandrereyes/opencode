@@ -93,7 +93,17 @@ final class SessionStore {
       #if DEBUG && os(iOS)
       if let id = conversationPath.last?.id, id != oldValue.last?.id { ConversationOpeningMetrics.begin(id) }
       #endif
+      holdOpenAttention()
     }
+  }
+  /// "Precisa de você" rows open in a conversation (the iPhone's stack or any Mac window) keep their place there.
+  private(set) var attentionHold = SessionAttentionHold()
+  /// The one count of "Precisa de você", the bell, the Dock and the Sessão mestra bar.
+  var attentionCount: Int { SessionAttention.count(rows) }
+  private func holdOpenAttention() {
+    var next = attentionHold
+    next.update(open: Set(conversationPath.map(\.id) + shownConversations), rows: rows)
+    if next != attentionHold { attentionHold = next }
   }
   /// Você (settings) as a sheet over Sessões, opened from the header avatar.
   var settingsOpen = false
@@ -101,7 +111,7 @@ final class SessionStore {
   /// and returning to one finds it as it was left.
   @ObservationIgnored let conversations = ConversationRegistry()
   /// Conversations a Mac window shows (a root and the subagent opened over it), kept like the iPhone's stack.
-  @ObservationIgnored var shownConversations: [String] = []
+  @ObservationIgnored var shownConversations: [String] = [] { didSet { holdOpenAttention() } }
   @ObservationIgnored private var memoryWarning: NSObjectProtocol?
   /// Called while SwiftUI builds a destination view: it creates a missing store but never mutates an observed one.
   func conversation(_ id: String, master: Bool = false) -> ConversationStore {

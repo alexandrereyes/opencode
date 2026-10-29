@@ -216,3 +216,73 @@ private func rows(
   let silent = Data(#"[{"type":"idle","outcome":"failed","time":{"created":40}}]"#.utf8)
   #expect(SessionPreview(messages: try JSONDecoder().decode([TranscriptMessage].self, from: silent)).failure == nil)
 }
+
+@Test func precisaDeVoceListsUnreadAnswersAfterFailuresNewestFirst() throws {
+  let list = rows([
+    try entry("ses_reply_old", message: at(27, 9, 10), outcome: "succeeded", idle: at(27, 9, 10)),
+    try entry("ses_question", message: at(27, 9), question: true),
+    try entry("ses_failed", message: at(27, 9), outcome: "failed", idle: at(27, 9)),
+    try entry("ses_reply_new", message: at(27, 9, 30), outcome: "succeeded", idle: at(27, 9, 30)),
+    try entry("ses_permission", message: at(27, 8), permission: true),
+    try entry("ses_pinned_reply", message: at(27, 9, 20), outcome: "succeeded", idle: at(27, 9, 20)),
+    // Working (a new run, or a background shell) outranks the unread answer.
+    try entry("ses_running_unread", message: at(27, 9, 40), outcome: "succeeded", idle: at(27, 9, 40)),
+    try entry("ses_read", message: at(27, 9), outcome: "succeeded", idle: at(27, 9), viewed: at(27, 9)),
+  ], active: ["ses_running_unread"], pins: ["ses_pinned_reply"])
+  let sections = SessionSections.group(list, now: now, calendar: calendar)
+  #expect(sections.map(\.kind) == [.attention, .running, .today])
+  #expect(sections[0].rows.map(\.id) == [
+    "ses_permission", "ses_question", "ses_failed", "ses_reply_new", "ses_pinned_reply", "ses_reply_old",
+  ])
+  #expect(sections[1].rows.map(\.id) == ["ses_running_unread"])
+  #expect(sections[2].rows.map(\.id) == ["ses_read"])
+  // One per root: the unread failure counts once, the working unread session not at all.
+  let failed = try #require(list.first { $0.id == "ses_failed" })
+  #expect(failed.unread && SessionAttention.reason(failed) == .failed)
+  #expect(SessionAttention.count(list) == 6 && SessionAttention.ordered(list).map(\.id) == sections[0].rows.map(\.id))
+  #expect(list.filter(SessionFilter.attention.includes).count == 6)
+  let reply = try #require(list.first { $0.id == "ses_reply_new" })
+  #expect(SessionSections.detail(reply, permission: nil, question: nil, failure: nil, reply: "Os testes passaram")
+    == "respondeu · Os testes passaram")
+  #expect(SessionSections.detail(reply, permission: nil, question: nil, failure: nil, reply: "") == "respondeu")
+}
+
+@Test func anOpenAnswerKeepsItsPlaceUntilItsConversationCloses() throws {
+  let failed = try entry("ses_failed", message: at(27, 9), outcome: "failed", idle: at(27, 9))
+  let read = try entry("ses_read", message: at(27, 8), outcome: "succeeded", idle: at(27, 8), viewed: at(27, 8))
+  let replyA = { (viewed: Double?) in
+    try entry("ses_a", message: at(27, 9, 30), outcome: "succeeded", idle: at(27, 9, 30), viewed: viewed)
+  }
+  let replyB = { (idle: Double, viewed: Double?) in
+    try entry("ses_b", message: idle, outcome: "succeeded", idle: idle, viewed: viewed)
+  }
+  let before = rows([failed, try replyA(nil), try replyB(at(27, 9, 10), nil), read])
+  var hold = SessionAttentionHold()
+  hold.update(open: ["ses_a"], rows: before)
+  // Opening marks it viewed: without the dot it stays where it was, and no longer counts.
+  let reading = rows([failed, try replyA(at(27, 9, 30)), try replyB(at(27, 9, 10), nil), read])
+  let a = try #require(reading.first { $0.id == "ses_a" })
+  #expect(!a.unread && a.state == .stopped && hold.reason(a) == .replied)
+  let held = SessionSections.group(reading, now: now, held: hold, calendar: calendar)
+  #expect(held.map(\.kind) == [.attention, .today])
+  #expect(held[0].rows.map(\.id) == ["ses_failed", "ses_a", "ses_b"])
+  #expect(SessionAttention.count(held[0].rows) == 2)
+  #expect(SessionSections.detail(a, reason: hold.reason(a), permission: nil, question: nil, failure: nil, reply: "Pronto")
+    == "respondeu · Pronto")
+  // Without the hold (another list, or after closing) it follows the normal flow.
+  #expect(SessionSections.group(reading, now: now, calendar: calendar)[0].rows.map(\.id) == ["ses_failed", "ses_b"])
+  // Opening another conversation lets it go; the new one is held. A read row opened from Hoje is never held.
+  hold.update(open: ["ses_b", "ses_read"], rows: reading)
+  let switched = rows([failed, try replyA(at(27, 9, 30)), try replyB(at(27, 9, 10), at(27, 9, 10)), read])
+  let sections = SessionSections.group(switched, now: now, held: hold, calendar: calendar)
+  #expect(sections[0].rows.map(\.id) == ["ses_failed", "ses_b"])
+  #expect(Set(sections[1].rows.map(\.id)) == ["ses_a", "ses_read"])
+  // Running again releases it, and a newer run that finishes while it is open is read, not held.
+  #expect(SessionSections.group(rows([failed, try replyB(at(27, 9, 10), at(27, 9, 10))], active: ["ses_b"]),
+    now: now, held: hold, calendar: calendar).map(\.kind) == [.attention, .running])
+  let rerun = rows([failed, try replyB(at(27, 9, 50), at(27, 9, 50))])
+  #expect(SessionSections.group(rerun, now: now, held: hold, calendar: calendar)[0].rows.map(\.id) == ["ses_failed"])
+  // Closing every conversation lets everything go.
+  hold.update(open: [], rows: switched)
+  #expect(hold == SessionAttentionHold())
+}

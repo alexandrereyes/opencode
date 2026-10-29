@@ -35,7 +35,8 @@ struct WatchMascot: View {
 }
 
 /// The approved ring (`opcao-1-anel-estados.png`): proportional arcs with a gap at the bottom where the mascot
-/// sits, and the active count in the centre. With nothing active, the mascot alone over a gray ring.
+/// sits. Option A (29/10): while something needs Alexandre, its count in orange and only its arcs; otherwise the
+/// active count over the green work. With nothing active, the mascot alone over a gray ring.
 struct WatchRingView: View {
   let state: AgentsState?
   var lineWidth: CGFloat = 5
@@ -43,7 +44,6 @@ struct WatchRingView: View {
 
   var body: some View {
     let ring = WatchRing(counts: state?.counts)
-    let active = state?.activeTotal ?? 0
     GeometryReader { proxy in
       let side = min(proxy.size.width, proxy.size.height)
       ZStack {
@@ -52,10 +52,10 @@ struct WatchRingView: View {
             .stroke(Color.watch(arc.role), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             .widgetAccentable(arc.role != .border)
         }
-        if active > 0 {
-          Text(verbatim: "\(active)")
+        if ring.number > 0 {
+          Text(verbatim: "\(ring.number)")
             .font(.system(size: numberSize, weight: .bold, design: .rounded)).monospacedDigit()
-            .foregroundStyle(Color.watch(.textStrong))
+            .foregroundStyle(Color.watch(ring.numberRole))
             .minimumScaleFactor(0.5)
             .offset(y: -side * 0.06)
           WatchMascot().frame(width: side * 0.42).offset(y: side * 0.36)
@@ -67,8 +67,7 @@ struct WatchRingView: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel(state.map { [$0.activeLabel, $0.attentionLabel].compactMap { $0 }.joined(separator: ", ") }
-      ?? "Nenhuma sessão ativa")
+    .accessibilityLabel(state?.summaryLabel ?? "Nenhuma sessão ativa")
   }
 }
 
@@ -106,17 +105,17 @@ struct ComplicationCircular: View {
 struct ComplicationCorner: View {
   let state: AgentsState?
   var body: some View {
-    let active = state?.activeTotal ?? 0
+    let ring = WatchRing(counts: state?.counts)
     ZStack {
-      if active > 0 {
-        Text(verbatim: "\(active)").font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
-          .foregroundStyle(Color.watch(.textStrong))
+      if ring.number > 0 {
+        Text(verbatim: "\(ring.number)").font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
+          .foregroundStyle(Color.watch(ring.numberRole))
       } else {
         WatchMascot().padding(6)
       }
     }
     .widgetLabel {
-      Text(state?.attentionLabel ?? state?.activeLabel ?? "OpenCode")
+      Text(state?.complicationLine ?? "OpenCode")
     }
   }
 }
@@ -156,7 +155,11 @@ struct ComplicationRectangular: View {
         }
         Text(state.map(\.complicationLine) ?? "Nenhuma sessão ativa")
           .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.watch(.textStrong))
-          .lineLimit(2).minimumScaleFactor(0.8)
+          .lineLimit(state?.complicationDetail == nil ? 2 : 1).minimumScaleFactor(0.8)
+        if let detail = state?.complicationDetail {
+          Text(detail).font(.system(size: 11)).foregroundStyle(Color.watch(.textSecondary))
+            .lineLimit(2).minimumScaleFactor(0.7)
+        }
       }
       Spacer(minLength: 0)
     }

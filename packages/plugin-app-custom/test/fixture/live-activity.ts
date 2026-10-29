@@ -121,7 +121,7 @@ export function world() {
   const prompts = new Map<string, number>()
   const transcripts = new Map<string, SessionMessage.Info[]>()
   const watched = new Set<string>()
-  const settings = { autoApprove: false }
+  const settings: { autoApprove: boolean; master?: string } = { autoApprove: false }
   const reads: string[] = []
   const ctx: TrackerContext = {
     session: {
@@ -149,7 +149,8 @@ export function world() {
           }
         }),
     },
-    marks: () => Effect.sync(() => ({ notify: [...watched], autoApprove: settings.autoApprove })),
+    marks: () =>
+      Effect.sync(() => ({ notify: [...watched], autoApprove: settings.autoApprove, master: settings.master })),
     message: {
       list: ({ sessionID, type }) =>
         Effect.sync(() => {
