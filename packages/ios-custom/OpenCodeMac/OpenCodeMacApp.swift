@@ -232,6 +232,15 @@ private struct MacCommands: Commands {
             runtime.voicePresentation.toggle(runtime.app.audio.voice, sessions: store)
           }
           .disabled(runtime.app.audio.voice.busy)
+          // ⌥1…⌥9: Todas, then the project rail's chips in the order it shows them now.
+          Divider()
+          Section("Projetos da faixa") {
+            let keys = [nil] + runtime.railOrder.prefix(8).map(Optional.some)
+            ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
+              Button(railName(key, store: store)) { MacProjectRail.choose(key, store: store) }
+                .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .option)
+            }
+          }
           // ⌘1…⌘9: the first sessions in the order Sessões shows them, with its filter and collapsed sections.
           let rows = SessionNavigation.numbered(
             SessionSections.group(store.filtered, now: .now), collapse: collapse)
@@ -247,5 +256,10 @@ private struct MacCommands: Commands {
         }
       }
     }
+  }
+
+  private func railName(_ key: String?, store: SessionStore) -> String {
+    guard let key else { return "Todas as sessões" }
+    return store.selectedProjects.first { $0.project.id == key }?.project.displayName ?? "Chats"
   }
 }

@@ -3154,7 +3154,7 @@ separate track.
   Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
   Marcar como lida, Arquivar ⌥⌘⌫, Excluir ⌘⌫, both confirmed and acting on the selection while there is one, Reiniciar Sessão mestra), Editar (Buscar
   na conversa ⌘F), Ir (Buscar projetos e sessões ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓,
-  Sessão mestra ⇧⌘M, Conversar por voz, and the first nine sessions of the list, ⌘1…⌘9) and Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
+  Sessão mestra ⇧⌘M, Conversar por voz, the first nine sessions of the list, ⌘1…⌘9, and Todas then the project rail's chips in the order it shows them, ⌥1…⌥9) and Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
   to ⌥⌘↑/⌥⌘↓, up and down Sessões. The title bar's `…` shows the same session actions and Buscar na conversa.
   Shortcuts avoid the text editing keys (⌘A, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓); ⌘⌫ typed
   in an editable field (`MacTextKeys`) still deletes to the start of the line there instead of excluding the session.

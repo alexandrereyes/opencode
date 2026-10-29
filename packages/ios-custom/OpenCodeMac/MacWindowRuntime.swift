@@ -45,6 +45,8 @@ import SwiftUI
   var shortcutsVisible = false
   var sessionSelection = SessionSelection()
   var bulkRequest: MacBulkRequest?
+  /// The project rail's chips after Todas, in the order it shows them now (it reorders after a pause): ⌥2…⌥9.
+  var railOrder: [String] = []
   var newSessionRequest: MacNewSessionRequest?
   var renameRequest: SessionRow?
   var deleteRequest: Session?

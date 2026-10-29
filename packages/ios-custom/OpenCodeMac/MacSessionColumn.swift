@@ -37,7 +37,9 @@ struct MacSessionColumn: View {
     HStack(spacing: 0) {
       MacProjectRail(store: store) { name, intent in
         projectAction = ProjectAction(name: name, intent: intent)
-      } add: { showProjects = true } shortcuts: { runtime.shortcutsVisible = true }
+      } add: { showProjects = true } shortcuts: { runtime.shortcutsVisible = true } shownOrder: { order in
+        if runtime.railOrder != order { runtime.railOrder = order }
+      }
       sessionList
     }
   }
