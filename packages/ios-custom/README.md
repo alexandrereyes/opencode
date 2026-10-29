@@ -3595,6 +3595,22 @@ the search panel check of `test-mac-window.sh` and the ⌘1–⌘9 check (menu c
 with the right geometry; failures now print whether the app and the window were in front. The base build
 (`fadcd1420a`) failed the same way in 2 of 3 runs under those conditions.
 
+### Pergunta paralela — 29 October
+
+- **Entry points:** the selected text's right-click menu in an answer (**Pergunta paralela…** right after Comentar…,
+  wherever Comentar is offered), the title bar's `…`, Sessão ▸ Pergunta paralela… and **⌥⌘B** (`MacShortcut.sideQuestion`,
+  listed in ⌘/). They all call `MacWindowRuntime.askSideQuestion(quote:text:submit:)`, which presents over that window
+  only and never over another sheet. `/btw` still sets the shared `ConversationStore.sideQuestion`; the key window
+  showing that conversation moves it into its runtime, so a second window on the same Session does not open it too.
+- **Sheet** (`OpenCodeMac/MacSideQuestionSheet.swift`): the iPhone's `SideQuestionState` and `SideQuestionBubble`
+  (`SideQuestionSheet.swift`, now shared; its iPhone view stays in `#if os(iOS)`), so the request, history, Parar,
+  retry and toast are the iPhone's. A selection prefills the field with its blockquote, shown as a `QuotedPassage` in
+  the sent bubble; answers use the chat's Markdown (`MacMarkdownText`) with Copiar resposta. The field is
+  `MacReplyField` (Return asks, Shift+Return breaks the line, Esc closes); Fechar, Esc and a click outside discard
+  the thread. Like the iPhone, `POST /generate` answers at once (no stream) and nothing reaches the conversation.
+- **Fixture:** `/generate` returns a local Markdown answer; `-OpenCodeMacSideQuestion <question>` opens the sheet
+  about a sample passage for the capture pipeline.
+
 ## Platform and distribution
 
 - **Only the latest iOS.** The deployment target is always the current major version (iOS 27 today) and moves up with

@@ -130,6 +130,10 @@ import SwiftUI
         value: MacShellOutputWindow.Target(shellID: shell, directory: directory, command: "bun run dev --port 4177"))
       extra.append(("saida", { $0.identifier?.rawValue.hasPrefix(MacShellOutputWindow.id) == true }))
     }
+    // `-OpenCodeMacSideQuestion <question>`: Pergunta paralela about a passage, answered by the fixture.
+    if let question = MacFixture.value("-OpenCodeMacSideQuestion") {
+      runtime.askSideQuestion(quote: "Juízes do smoke: a skill usa juízes em paralelo.", text: question, submit: true)
+    }
     if let tab = MacFixture.value("-OpenCodeMacSettings") {
       UserDefaults.standard.set(tab, forKey: "OpenCodeMacSettingsTab")
       openSettings()

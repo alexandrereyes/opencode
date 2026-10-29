@@ -254,7 +254,7 @@ import SwiftUI
 
 /// A response's prose: one selectable TextKit 2 text view across its paragraphs, headings, list items, quotes and
 /// rules, which draws the quote borders and rules itself. Links to files open Arquivos; a selection offers
-/// Copiar and Comentar (a quote attached to the next prompt).
+/// Copiar, Comentar (a quote attached to the next prompt) and Pergunta paralela (about the passage).
 final class MacResponseTextView: NSTextView {
   var prose: MarkdownProse?
   var part: TranscriptPart?
@@ -426,6 +426,7 @@ final class MacResponseTextView: NSTextView {
       menu.addItem(withTitle: "Copiar", action: #selector(copy(_:)), keyEquivalent: "")
       if context != nil, quote() != nil {
         menu.addItem(withTitle: "Comentar…", action: #selector(comment), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Pergunta paralela…", action: #selector(sideQuestion), keyEquivalent: "").target = self
       }
     }
     menu.addItem(withTitle: "Selecionar tudo", action: #selector(selectAll(_:)), keyEquivalent: "")
@@ -449,6 +450,12 @@ final class MacResponseTextView: NSTextView {
     guard let quote = quote() else { return }
     setSelectedRange(NSRange(location: selectedRange().location, length: 0))
     context?.comment(quote)
+  }
+
+  @objc private func sideQuestion() {
+    guard let quote = quote() else { return }
+    setSelectedRange(NSRange(location: selectedRange().location, length: 0))
+    context?.sideQuestion(quote.text)
   }
 
   override func keyDown(with event: NSEvent) {

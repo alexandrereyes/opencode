@@ -1,15 +1,20 @@
 import AppKit
 import SwiftUI
 
-/// A question's own answer ("Outra resposta…") on the Mac: a native text view that a click focuses, where Return
-/// sends (`submit`), Shift+Return or Option+Return break the line and Esc leaves the field. It grows to six lines,
-/// then scrolls. A SwiftUI `TextField` ends editing on Return without sending, and inside the transcript's hosted
-/// rows it did not reliably take the focus.
+/// A question's own answer ("Outra resposta…") and Pergunta paralela's field on the Mac: a native text view that a
+/// click focuses, where Return sends (`submit`), Shift+Return or Option+Return break the line and Esc leaves the
+/// field (or runs `cancel`). It grows to six lines, then scrolls. A SwiftUI `TextField` ends editing on Return
+/// without sending, and inside the transcript's hosted rows it did not reliably take the focus.
 struct MacReplyField: NSViewRepresentable {
   @Environment(\.appTheme) private var theme
   @Binding var text: String
   let placeholder: String
   let submit: () -> Void
+  /// Esc runs this instead of leaving the field (a sheet's Fechar).
+  var cancel: (() -> Void)? = nil
+  /// Takes the keyboard when it enters its window, with the caret at the end of the text.
+  var focusOnAppear = false
+  var identifier = "question-reply"
 
   func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -34,7 +39,8 @@ struct MacReplyField: NSViewRepresentable {
     view.autoresizingMask = [.width]
     view.disableAutomaticCorrections()
     view.setAccessibilityLabel(placeholder)
-    view.setAccessibilityIdentifier("question-reply")
+    view.setAccessibilityIdentifier(identifier)
+    view.focusOnWindow = focusOnAppear
     scroll.documentView = view
     return scroll
   }
@@ -43,6 +49,7 @@ struct MacReplyField: NSViewRepresentable {
     context.coordinator.parent = self
     guard let view = scroll.documentView as? MacReplyTextView else { return }
     view.submit = submit
+    view.cancel = cancel
     view.placeholder = placeholder
     let font = NSFont.systemFont(ofSize: AppTextStyle.preview.size)
     view.font = font
@@ -76,6 +83,8 @@ struct MacReplyField: NSViewRepresentable {
 final class MacReplyTextView: NSTextView {
   static let lineHeight = ceil(AppTextStyle.preview.size * 1.35)
   var submit: (() -> Void)?
+  var cancel: (() -> Void)?
+  var focusOnWindow = false
   var placeholder = "" { didSet { needsDisplay = true } }
   var placeholderColor = NSColor.secondaryLabelColor
   let paragraph: NSParagraphStyle = {
@@ -105,10 +114,22 @@ final class MacReplyTextView: NSTextView {
       return
     }
     if event.keyCode == 53 {
+      if let cancel { return cancel() }
       window?.makeFirstResponder(nil)
       return
     }
     super.keyDown(with: event)
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    guard focusOnWindow, window != nil else { return }
+    focusOnWindow = false
+    DispatchQueue.main.async { [weak self] in
+      guard let self, let window = self.window else { return }
+      window.makeFirstResponder(self)
+      self.setSelectedRange(NSRange(location: (self.string as NSString).length, length: 0))
+    }
   }
 
   override func draw(_ dirtyRect: NSRect) {

@@ -177,6 +177,9 @@ private struct MacCommands: Commands {
       Button("Escolher modelo e esforço…") { runtime?.openModelPalette() }
         .shortcut(.model)
         .disabled(runtime == nil)
+      Button("Pergunta paralela…") { runtime?.askSideQuestion() }
+        .shortcut(.sideQuestion)
+        .disabled(runtime?.selection.sessionID == nil)
       if let runtime, let store = runtime.store {
         MacSessionMenuItems(store: store, runtime: runtime, shortcuts: true)
         Divider()

@@ -132,6 +132,10 @@ private struct MacFixtureServer: Sendable {
         return #"{"data":{"output":\#(encoded),"cursor":\#(data.count),"size":\#(data.count),"truncated":false}}"#
       }
       if path.hasPrefix("/api/session/"), path.hasSuffix("/inbox") { return #"{"data":[]}"# }
+      // Pergunta paralela: a local Markdown answer, never a model.
+      if path.hasPrefix("/api/session/"), path.hasSuffix("/generate") {
+        return #"{"data":{"text":"Comece pelos **filtros de projetos**.\n\n1. Compare os caminhos mais usados.\n2. Faça uma mudança pequena em `MacChatColumn.swift`.\n3. Valide a navegação nos temas claro e escuro.\n\nA conversa principal continua no mesmo ponto."}}"#
+      }
       if path.hasPrefix("/api/session/") {
         let id = String(path.dropFirst("/api/session/".count))
         return sessions[id].map { "{\"data\":\($0)}" }

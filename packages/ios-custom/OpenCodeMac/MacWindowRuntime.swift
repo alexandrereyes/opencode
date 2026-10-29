@@ -54,6 +54,8 @@ import SwiftUI
   let modelPalette = MacModelPalette()
   var newSessionPalette: (() -> Void)?
   var archiveRequest: SessionRow?
+  /// Pergunta paralela over the shown conversation, presented by this window only (`askSideQuestion`).
+  var sideQuestion: SideQuestionLaunch?
   /// The widths the columns got in the last layout, for checks (not observed).
   @ObservationIgnored var measuredContextWidth: CGFloat = 0
   @ObservationIgnored var measuredChatWidth: CGFloat = 0
@@ -186,6 +188,14 @@ import SwiftUI
       view.textView.scrollRangeToVisible(end)
     }
     draft.focused = true
+  }
+
+  /// Pergunta paralela on the shown conversation (root or subagent), the one entry point of the selection menu,
+  /// `…`, Sessão ▸ Pergunta paralela… (⌥⌘B) and the composer's `/btw`: `quote` (a selected passage) becomes the
+  /// question's blockquote, as on the iPhone; `submit` sends `text` at once. Nothing opens over another sheet.
+  func askSideQuestion(quote: String? = nil, text: String = "", submit: Bool = false) {
+    guard selection.sessionID != nil, sideQuestion == nil, window?.attachedSheet == nil else { return }
+    sideQuestion = SideQuestionLaunch(text: (quote.map(SideQuestionRequest.quote) ?? "") + text, submit: submit)
   }
 
   func backToParent() {

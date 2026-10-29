@@ -79,6 +79,8 @@ struct MacSessionActions: View {
     Menu {
       MacSessionMenuItems(store: store, runtime: runtime)
       Divider()
+      Button("Pergunta paralela…", systemImage: "bubble.left.and.text.bubble.right") { runtime.askSideQuestion() }
+        .disabled(runtime.selection.sessionID == nil)
       Button("Buscar na conversa", systemImage: "magnifyingglass") {
         NotificationCenter.default.post(name: .macSearchConversation, object: runtime.id)
       }

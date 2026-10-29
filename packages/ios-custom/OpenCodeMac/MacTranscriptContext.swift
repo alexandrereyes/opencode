@@ -62,6 +62,8 @@ struct MacTranscriptAvatar: Equatable {
   @ObservationIgnored var revealTurn: (String) -> Bool = { _ in false }
   @ObservationIgnored var revert: (ConversationMessage) -> Void = { _ in }
   @ObservationIgnored var comment: (ChatQuote) -> Void = { _ in }
+  /// Pergunta paralela about a selected passage (its source text).
+  @ObservationIgnored var sideQuestion: (String) -> Void = { _ in }
   @ObservationIgnored var readAloud: (String) -> Void = { _ in }
   /// The image shown, its name and its source (to read the original).
   @ObservationIgnored var openImage: (CGImage, String, String) -> Void = { _, _, _ in }
