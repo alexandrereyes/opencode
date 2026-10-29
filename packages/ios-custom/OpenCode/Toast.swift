@@ -49,6 +49,7 @@ private struct ToastOverlay: ViewModifier {
         .adaptiveGlass(Capsule()).padding(12)
         .accessibilityElement(children: .combine).accessibilityIdentifier("action-toast")
         .allowsHitTesting(message.retry != nil)
+        .voiceCaptureHidden()
       }
     }
     .task(id: center.message?.id) {

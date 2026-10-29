@@ -9,13 +9,14 @@ private actor VoiceMasterHTTP {
   var promptID: String?
   var deleted: Set<String> = []
   var created = 0
+  var uploads: [(URL, Data)] = []
   let failsPrompt: Bool
   init(masterID: String? = nil, failsPrompt: Bool = false) { self.masterID = masterID; self.failsPrompt = failsPrompt }
   func delete(_ id: String) { deleted.insert(id) }
   func respond(_ request: URLRequest) throws -> (Data, URLResponse) {
     requests.append(request)
     let path = request.url!.path
-    let input = try request.httpBody.map { try JSONDecoder().decode(JSONValue.self, from: $0) }
+    let input = request.httpBody.flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }
     let value: JSONValue
     var status = 200
     switch path {
@@ -32,6 +33,12 @@ private actor VoiceMasterHTTP {
     case "/api/rpc/custom.chats/info": value = .object(["output": .object(["root": .string("/fake")])])
     case "/api/model/default": value = .object(["data": .null])
     case "/api/session/active": value = .object(["data": .object([:])])
+    case "/api/info": value = .object(["version": .string("0.0.0-test"), "paths": .object(["tmp": .string("/fake/tmp")])])
+    case "/api/model":
+      value = .object(["data": .array([.object(["id": .string("fake"), "providerID": .string("fake"), "name": .string("Fake"),
+        "limit": .object(["context": .number(1000)]),
+        "capabilities": .object(["input": .array([.string("text"), .string("image")])])])])])
+    case "/api/experimental/fs/write": uploads.append((request.url!, request.httpBody ?? Data())); value = .object([:])
     case "/api/rpc/custom.transcript/list":
       value = .object(["output": .object(["data": .array([
         .object(["id": .string("answer"), "type": .string("assistant"),
@@ -108,6 +115,47 @@ private actor VoiceMasterHTTP {
     await master.receive(completed)
     guard case .finished(let result) = updates.last else { return XCTFail("Missing final answer") }
     XCTAssertEqual(result, "Resposta final confirmada.")
+    master.stop()
+  }
+  func testScreenGoesToTheMasterAsTheComposerImageAttachment() async throws {
+    let http = VoiceMasterHTTP(masterID: "ses_existing")
+    let config = ServerConfiguration(url: URL(string: "http://127.0.0.1:4177")!)
+    let client = OpenCodeClient(configuration: config) { try await http.respond($0) }
+    let master = VoiceMaster(sessions: SessionStore(configuration: config, client: client)) { _ in }
+    let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 0xFF, 0xD9])
+    try await master.ask(VoiceMasterRequest(#"{"text":"Dá uma olhada nessa tela","screen":true}"#),
+      screen: VoiceScreenShot(jpeg: jpeg, sessionID: "ses_aberta"))
+    let uploads = await http.uploads
+    XCTAssertEqual(uploads.count, 1)
+    XCTAssertEqual(uploads.first?.1, jpeg)
+    let target = try XCTUnwrap(URLComponents(url: XCTUnwrap(uploads.first?.0), resolvingAgainstBaseURL: false))
+    XCTAssertTrue(target.queryItems?.first { $0.name == "path" }?.value?.hasPrefix("/fake/tmp/uploads/") == true)
+    XCTAssertTrue(target.queryItems?.first { $0.name == "path" }?.value?.hasSuffix("/tela-opencode.jpg") == true)
+    XCTAssertEqual(target.queryItems?.first { $0.name == "location[directory]" }?.value, "/fake/chat")
+    let requests = await http.requests
+    let body = try XCTUnwrap(requests.first { $0.url!.path.hasSuffix("/prompt") }?.httpBody)
+    let prompt = try JSONDecoder().decode(JSONValue.self, from: body).object
+    let text = try XCTUnwrap(prompt?["text"]?.string)
+    XCTAssertTrue(text.hasPrefix("Dá uma olhada nessa tela\n\n[Captura da tela do app OpenCode anexada. Sessão aberta no app: ses_aberta]"))
+    let file = try XCTUnwrap(prompt?["files"]?.array?.first?.object)
+    XCTAssertEqual(file["name"]?.string, "tela-opencode.jpg")
+    XCTAssertEqual(file["uri"]?.string, "data:image/jpeg;base64," + jpeg.base64EncodedString())
+    XCTAssertEqual(prompt?["metadata"]?.object?["agent"]?.string, "mestra")
+    master.stop()
+  }
+  func testDelegationWithoutScreenUploadsNothing() async throws {
+    let http = VoiceMasterHTTP(masterID: "ses_existing")
+    let config = ServerConfiguration(url: URL(string: "http://127.0.0.1:4177")!)
+    let client = OpenCodeClient(configuration: config) { try await http.respond($0) }
+    let master = VoiceMaster(sessions: SessionStore(configuration: config, client: client)) { _ in }
+    try await master.ask(VoiceMasterRequest("Só texto"))
+    let uploads = await http.uploads
+    XCTAssertTrue(uploads.isEmpty)
+    let requests = await http.requests
+    let body = try XCTUnwrap(requests.first { $0.url!.path.hasSuffix("/prompt") }?.httpBody)
+    let prompt = try JSONDecoder().decode(JSONValue.self, from: body).object
+    XCTAssertEqual(prompt?["text"]?.string, "Só texto")
+    XCTAssertNil(prompt?["files"])
     master.stop()
   }
   func testMasterDeletedDuringCallIsReplacedOnce() async throws {

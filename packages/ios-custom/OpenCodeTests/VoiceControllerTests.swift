@@ -26,8 +26,9 @@ import XCTest
   var update: ((VoiceMasterUpdate) -> Void)?
   var asked: (() -> Void)?
   var stopped = false
-  func ask(_ request: VoiceMasterRequest) async throws {
-    requests.append(request); update?(.progress("Consultando a sessão de teste.", narrate: false)); asked?()
+  var screens: [VoiceScreenShot?] = []
+  func ask(_ request: VoiceMasterRequest, screen: VoiceScreenShot?) async throws {
+    requests.append(request); screens.append(screen); update?(.progress("Consultando a sessão de teste.", narrate: false)); asked?()
   }
   func stop() { stopped = true }
 }
@@ -176,6 +177,18 @@ private actor LiveFlakyHTTP {
   }
 }
 
+/// Raw data-channel events of a probe, truncated, with no audio.
+@MainActor private final class LiveEventRecorder {
+  var events: [String] = []
+  var ready = false
+  func receive(_ event: VoiceTransportEvent) {
+    guard case .data(let data) = event else { return }
+    let text = String(decoding: data.prefix(600), as: UTF8.self)
+    events.append(text)
+    if text.contains("\"session.started\"") { ready = true }
+  }
+}
+
 private actor LiveMemoryHTTP {
   struct Metrics: Codable, Sendable {
     var creates = 0
@@ -251,7 +264,8 @@ private actor LiveMemoryHTTP {
     let prompts = try offers.map {
       try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap($0.httpBody)).object?["session"]?.object?["instructions"]?.string
     }
-    XCTAssertEqual(prompts, ["Prompt do servidor 1", "Prompt do servidor 2"])
+    // The edited server prompt is used as is; the app adds only its fixed screen capability.
+    XCTAssertEqual(prompts, ["Prompt do servidor 1", "Prompt do servidor 2"].map(VoiceProtocol.withScreen))
     XCTAssertNil(controller.toast.message)
   }
   func testUnavailableServerPromptDoesNotReachProxy() async {
@@ -412,10 +426,67 @@ private actor LiveMemoryHTTP {
     let requests = await http.requests
     let offer = try XCTUnwrap(requests.first { $0.url?.path.hasSuffix("/calls") == true })
     let session = try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap(offer.httpBody)).object?["session"]?.object
-    XCTAssertEqual(session?["instructions"]?.string, "Instruções da fixture de voz.")
+    XCTAssertEqual(session?["instructions"]?.string, VoiceProtocol.withScreen("Instruções da fixture de voz."))
     XCTAssertTrue(session?["initial_items"]?.array?.first?.object?["content"]?.array?.first?.object?["text"]?.string?.contains("pitanga violeta") == true)
     await controller.end()
     await memory.stop()
+  }
+
+  // MARK: Screen for the master
+
+  private func screenController(_ transport: VoiceTestTransport, _ master: VoiceTestMaster, _ http: VoiceTestHTTP,
+    screen: @escaping @MainActor (String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot) -> VoiceController {
+    VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
+      master: { update in master.update = update; return master }, request: { try await http.respond($0) }, screen: screen))
+  }
+
+  func testScreenDelegationAttachesTheCaptureTakenWhenGPTLiveDelegated() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    var captured: [String?] = []
+    let controller = screenController(transport, master, http) { id throws(VoiceScreenRefusal) in
+      captured.append(id); return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 9]), sessionID: id)
+    }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    let asked = expectation(description: "asked")
+    master.asked = { asked.fulfill() }
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"s1","content":[{"type":"input_text","text":"{\"text\":\"Dá uma olhada nessa tela\",\"screen\":true}"}]}}"#.utf8)))
+    XCTAssertEqual(captured.count, 1, "the capture starts synchronously with the delegation")
+    await fulfillment(of: [asked], timeout: 3)
+    XCTAssertEqual(master.requests.map(\.text), ["Dá uma olhada nessa tela"])
+    XCTAssertEqual(master.screens.first??.jpeg, Data([0xFF, 0xD8, 9]))
+    // A normal delegation still goes without any capture.
+    let plain = expectation(description: "plain")
+    master.asked = { plain.fulfill() }
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"s2","content":[{"type":"input_text","text":"Só texto"}]}}"#.utf8)))
+    await fulfillment(of: [plain], timeout: 3)
+    XCTAssertEqual(captured.count, 1)
+    XCTAssertEqual(master.screens.count, 2)
+    XCTAssertNil(master.screens.last!)
+    await controller.end()
+  }
+
+  func testRefusedScreenReachesOnlyGPTLiveWithAClearReason() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    let controller = screenController(transport, master, http) { _ throws(VoiceScreenRefusal) in throw .background }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"s3","content":[{"type":"input_text","text":"{\"text\":\"O que é isso aqui?\",\"screen\":true}"}]}}"#.utf8)))
+    let deadline = Date.now.addingTimeInterval(3)
+    while transport.frames.isEmpty, Date.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+    XCTAssertTrue(master.requests.isEmpty, "nothing reaches the master")
+    let frame = try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap(transport.frames.first)).object
+    XCTAssertEqual(frame?["type"]?.string, "delegation.context.append")
+    XCTAssertEqual(frame?["delegation_item_id"]?.string, "s3")
+    let spoken = transport.frames.compactMap { try? JSONDecoder().decode(JSONValue.self, from: $0).object?["content"]?.array?.first?.object?["text"]?.string }.joined()
+    XCTAssertEqual(spoken, VoiceScreenRefusal.background.localizedDescription)
+    XCTAssertEqual(controller.toast.message?.text, VoiceScreenRefusal.background.localizedDescription)
+    XCTAssertEqual(controller.state.phase, .listening)
+    await controller.end()
   }
 
   // MARK: Network recovery
@@ -666,6 +737,55 @@ private actor LiveMemoryHTTP {
     XCTAssertTrue(metrics.initialItems > 0 && metrics.initialItems <= 128)
     XCTAssertLessThanOrEqual(metrics.initialTokens, 8192)
     XCTAssertEqual(metrics.roles, ["assistant", "user"])
+    #else
+    throw XCTSkip("No physical device live probing in this suite.")
+    #endif
+  }
+
+  /// Asks the real GPT Live whether it takes an image: one muted call, one `conversation.item.create` with
+  /// `input_image`, then the raw events. Opt-in only.
+  func testExplicitSilentLiveImageInput() async throws {
+    #if targetEnvironment(simulator)
+    guard ProcessInfo.processInfo.environment["OPENCODE_TEST_LIVE_VOICE_IMAGE"] == "1" else {
+      throw XCTSkip("Explicit one-call muted simulator image probe only.")
+    }
+    let recorder = LiveEventRecorder()
+    let transport = SilentLiveTransport { event in recorder.receive(event) }
+    let signal = VoiceSignaling()
+    let sdp = try await transport.offer()
+    let (lease, reservation) = try await URLSession.shared.data(for: signal.leaseRequest(method: "POST"))
+    _ = try signal.parseLease(lease, status: (reservation as? HTTPURLResponse)?.statusCode ?? 0)
+    do {
+      let (data, result) = try await URLSession.shared.data(for: signal.offerRequest(sdp: sdp,
+        instructions: "Teste silencioso de entrada de imagem. Não fale."))
+      try await transport.answer(VoiceSignaling.parseAnswer(data, response: XCTUnwrap(result as? HTTPURLResponse)))
+      for _ in 0..<100 where !recorder.ready { try await Task.sleep(for: .milliseconds(100)) }
+      XCTAssertTrue(recorder.ready)
+      let pixel = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+      let image = JSONValue.object(["type": .string("input_image"), "image_url": .string("data:image/jpeg;base64," + pixel)])
+      // The Realtime item and the only context event this protocol lists, each with an image.
+      let attempts = [
+        JSONValue.object(["type": .string("conversation.item.create"), "item": .object([
+          "type": .string("message"), "role": .string("user"), "content": .array([image])])]),
+        JSONValue.object(["type": .string("session.context.append"), "content": .array([image])]),
+      ]
+      let before = recorder.events.count
+      for attempt in attempts {
+        try await transport.send(JSONEncoder().encode(attempt))
+        try await Task.sleep(for: .seconds(4))
+      }
+      let after = Array(recorder.events.dropFirst(before))
+      let evidence = XCTAttachment(data: try JSONEncoder().encode(["before": recorder.events.prefix(before).map { $0 },
+        "after": after]), uniformTypeIdentifier: "public.json")
+      evidence.name = "voice-image-live"; evidence.lifetime = .keepAlways; add(evidence)
+    } catch {
+      await transport.close()
+      _ = try? await URLSession.shared.data(for: signal.leaseRequest(method: "DELETE"))
+      throw error
+    }
+    await transport.close()
+    let (_, release) = try await URLSession.shared.data(for: signal.leaseRequest(method: "DELETE"))
+    XCTAssertEqual((release as? HTTPURLResponse)?.statusCode, 204)
     #else
     throw XCTSkip("No physical device live probing in this suite.")
     #endif

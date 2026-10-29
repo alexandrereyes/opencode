@@ -79,6 +79,22 @@ public enum VoiceEvent: Equatable, Sendable {
 }
 
 public enum VoiceProtocol {
+  /// Appended by the iPhone app to whatever prompt the server returns, so screen delegation keeps working
+  /// after Alexandre edits voice.md. GPT Live's delegation tool has no editable description.
+  public static let screenInstructions = """
+    Capacidade fixa do app OpenCode no iPhone: quando Alexandre pedir para olhar, ver ou conferir a tela
+    ("dá uma olhada nessa tela", "o que é isso aqui?"), delegue à mestra com JSON
+    {"text":"pedido de Alexandre","screen":true} (com "delivery":"queue" se ele pedir para enfileirar).
+    O app anexa uma foto da tela atual do OpenCode, tirada nesse momento, e o ID da sessão aberta.
+    Você não recebe a imagem: não descreva nem adivinhe a tela; espere o retorno da mestra.
+    Se o retorno disser que não foi possível ver a tela, diga que só consegue ver a tela do próprio
+    OpenCode, aberto e com o iPhone desbloqueado, nunca a de outros apps.
+    """
+  /// The fixed screen capability, unless the served prompt already documents it.
+  public static func withScreen(_ instructions: String) -> String {
+    instructions.contains("\"screen\":true") ? instructions : instructions + "\n\n" + screenInstructions
+  }
+
   public static func decode(_ data: Data) throws -> VoiceEvent {
     guard data.count <= 256 * 1024 else { throw VoiceWireError.oversized }
     let root = try JSONDecoder().decode(JSONValue.self, from: data).object
@@ -139,12 +155,19 @@ public enum VoiceProtocol {
 public struct VoiceMasterRequest: Sendable, Equatable {
   public let text: String
   public let delivery: PromptDelivery
+  /// GPT Live asked to attach a capture of the OpenCode screen (`"screen": true`).
+  public let screen: Bool
   public init(_ input: String) {
-    let value = try? JSONDecoder().decode(JSONValue.self, from: Data(input.utf8))
-    if let text = value?.object?["text"]?.string, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      self.text = text
-      delivery = value?.object?["delivery"]?.string == "queue" ? .queue : .steer
-    } else { text = input; delivery = .steer }
+    let object = (try? JSONDecoder().decode(JSONValue.self, from: Data(input.utf8)))?.object
+    let screen = object?["screen"]?.bool == true
+    let text = object?["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    guard let object, !text.isEmpty || screen else {
+      self.text = input; delivery = .steer; self.screen = false
+      return
+    }
+    self.text = text.isEmpty ? "Dê uma olhada nesta tela do app." : text
+    delivery = object["delivery"]?.string == "queue" ? .queue : .steer
+    self.screen = screen
   }
 }
 
