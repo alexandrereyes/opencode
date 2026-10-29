@@ -56,7 +56,16 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
       _ = Self.ssl
       try activate()
       installObservers()
+      #if os(macOS)
+      // The input chosen in Ajustes → Voz, when it is not the default (Automático: the built-in microphone
+      // instead of a Bluetooth headset's, which would drop the headset into the call profile).
+      let custom = MacVoiceAudioDevice.needed
+      Self.log.notice("phase=mac-audio-device custom=\(custom, privacy: .public)")
+      factory = custom ? RTCPeerConnectionFactory(encoderFactory: nil, decoderFactory: nil, audioDevice: MacVoiceAudioDevice())
+        : RTCPeerConnectionFactory()
+      #else
       factory = RTCPeerConnectionFactory()
+      #endif
       let configuration = RTCConfiguration()
       configuration.sdpSemantics = .unifiedPlan
       configuration.bundlePolicy = .maxBundle
