@@ -78,21 +78,41 @@ public enum VoiceEvent: Equatable, Sendable {
   case delegation(id: String, text: String), failure, ignored
 }
 
+public enum VoiceScreenPlatform: Sendable { case iPhone, mac }
+
 public enum VoiceProtocol {
-  /// Appended by the iPhone app to whatever prompt the server returns, so screen delegation keeps working
-  /// after Alexandre edits voice.md. GPT Live's delegation tool has no editable description.
-  public static let screenInstructions = """
-    Capacidade fixa do app OpenCode no iPhone: quando Alexandre pedir para olhar, ver ou conferir a tela
-    ("dá uma olhada nessa tela", "o que é isso aqui?"), delegue à mestra com JSON
-    {"text":"pedido de Alexandre","screen":true} (com "delivery":"queue" se ele pedir para enfileirar).
-    O app anexa uma foto da tela atual do OpenCode, tirada nesse momento, e o ID da sessão aberta.
-    Você não recebe a imagem: não descreva nem adivinhe a tela; espere o retorno da mestra.
-    Se o retorno disser que não foi possível ver a tela, diga que só consegue ver a tela do próprio
-    OpenCode, aberto e com o iPhone desbloqueado, nunca a de outros apps.
-    """
-  /// The fixed screen capability, unless the served prompt already documents it.
-  public static func withScreen(_ instructions: String) -> String {
-    instructions.contains("\"screen\":true") ? instructions : instructions + "\n\n" + screenInstructions
+  /// Appended by the app to whatever prompt the server returns, so screen delegation keeps working after
+  /// Alexandre edits voice.md. GPT Live's delegation tool has no editable description.
+  public static func screenInstructions(_ platform: VoiceScreenPlatform) -> String {
+    switch platform {
+    case .iPhone: """
+      Capacidade fixa do app OpenCode no iPhone: quando Alexandre pedir para olhar, ver ou conferir a tela
+      ("dá uma olhada nessa tela", "o que é isso aqui?"), delegue à mestra com JSON
+      {"text":"pedido de Alexandre","screen":true} (com "delivery":"queue" se ele pedir para enfileirar).
+      O app anexa uma foto da tela atual do OpenCode, tirada nesse momento, e o ID da sessão aberta.
+      Você não recebe a imagem: não descreva nem adivinhe a tela; espere o retorno da mestra.
+      Se o retorno disser que não foi possível ver a tela, diga que só consegue ver a tela do próprio
+      OpenCode, aberto e com o iPhone desbloqueado, nunca a de outros apps.
+      """
+    case .mac: """
+      Capacidade fixa do app OpenCode no Mac: quando Alexandre pedir para olhar, ver ou conferir algo na tela,
+      delegue à mestra com JSON e o campo screen, escolhido pela fala:
+      - "olha essa página", "dá uma olhada nessa tela", "o que é isso aqui?": {"text":"pedido de Alexandre","screen":"front"}
+        (a janela da frente);
+      - um app pelo nome ("olha o simulador", "olha o Chrome"): {"text":"pedido de Alexandre","screen":"app","screen_app":"Simulator"},
+        com o nome do app como aparece no Mac (Simulator, Google Chrome, Safari, Xcode, Finder, Terminal…);
+      - a tela toda ("olha minha tela toda"): {"text":"pedido de Alexandre","screen":"display"}.
+      Acrescente "delivery":"queue" se ele pedir para enfileirar. O app anexa a foto tirada nesse momento.
+      Você não recebe a imagem: não descreva nem adivinhe a tela; espere o retorno da mestra.
+      Se o retorno trouxer um aviso ou uma falha (app não aberto, nenhuma janela, permissão de Gravação de Tela),
+      repita-o com naturalidade, incluindo onde liberar a permissão.
+      """
+    }
+  }
+  /// The fixed screen capability, unless the served prompt already documents this platform's form.
+  public static func withScreen(_ instructions: String, for platform: VoiceScreenPlatform = .iPhone) -> String {
+    let marker = platform == .mac ? "\"screen_app\"" : "\"screen\":true"
+    return instructions.contains(marker) ? instructions : instructions + "\n\n" + screenInstructions(platform)
   }
 
   public static func decode(_ data: Data) throws -> VoiceEvent {
@@ -155,14 +175,14 @@ public enum VoiceProtocol {
 public struct VoiceMasterRequest: Sendable, Equatable {
   public let text: String
   public let delivery: PromptDelivery
-  /// GPT Live asked to attach a capture of the OpenCode screen (`"screen": true`).
-  public let screen: Bool
+  /// GPT Live asked to attach a capture of the screen (`"screen"`, `"screen_app"`); nil for a plain request.
+  public let screen: VoiceScreenTarget?
   public init(_ input: String) {
     let object = (try? JSONDecoder().decode(JSONValue.self, from: Data(input.utf8)))?.object
-    let screen = object?["screen"]?.bool == true
+    let screen = VoiceScreenTarget(screen: object?["screen"], app: object?["screen_app"])
     let text = object?["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    guard let object, !text.isEmpty || screen else {
-      self.text = input; delivery = .steer; self.screen = false
+    guard let object, !text.isEmpty || screen != nil else {
+      self.text = input; delivery = .steer; self.screen = nil
       return
     }
     self.text = text.isEmpty ? "Dê uma olhada nesta tela do app." : text

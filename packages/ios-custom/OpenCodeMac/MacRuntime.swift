@@ -150,5 +150,8 @@ struct MacNewSessionRequest: Identifiable {
 }
 
 enum MacLaunch {
+  /// A fixture or an offline check: no notifications, finish banners or real voice. The voice screen check
+  /// talks to an isolated sandbox server instead of the in-memory fixture.
   static let fixture = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFixture")
+    || ProcessInfo.processInfo.arguments.contains("-OpenCodeMacVoiceScreenCheck")
 }
