@@ -2904,20 +2904,31 @@ thread), `MacDiskCleaner.swift` and `MacDiskSheet.swift`.
   orange below 15%, red below 5% (`volumeAvailableCapacityForImportantUsage`, every 3 min, on opening the sheet
   and after cleaning). A click, ⇧⌘D or Janela ▸ Espaço em disco opens the sheet.
 - **Worktrees**: linked worktrees of the projects' repositories (`git worktree list`) plus every folder of
-  `~/Worktrees`. Live (unarchived) sessions whose `location.directory` is inside, a process working there (`lsof`
-  cwd, `ps` arguments), a remote server (its `/api/info` `paths.tmp` is not in this user's temporary folder), clones
-  and plain folders lock a row. Archived sessions do not hold a worktree ("Só sessões arquivadas"). Uncommitted
-  files or commits on no remote need a confirmation and are never marked by default; changes within 24 h are not
-  marked either. Removal is `git worktree remove` (`--force` only for confirmed uncommitted files) and `prune`;
-  branches stay.
-- **Sujeira dos agentes** (`$TMPDIR/opencode`): DerivedData (up to three levels down, with its `WorkspacePath`),
-  `.xcresult`, copied `.app` and logs are removable when no process uses them and nothing changed for 24 h.
-  Captures, uploads, other temporary items, simulators (except `simctl delete unavailable`), AVDs, OpenCode
-  snapshots, Xcode's DerivedData and caches only show their size and a Finder button.
-- Limpar shows a preview, checks each item again (sessions reloaded, processes, git, recent changes), and logs
-  every result to `~/Library/Logs/OpenCode/limpeza-de-disco.log`. Sizes are cached in `disk-sizes.json`.
-- **Checks**: `script/test-mac-disk.sh` builds a throwaway fixture (fake repositories, worktrees, sessions and
-  temporary folder, two `sleep` processes), runs `MacDiskChecks` against it and deletes it. DEBUG
+  `~/Worktrees`. Live (unarchived) sessions whose `location.directory` is inside (resolved through the nearest
+  existing folder), a process working there (the kernel's arguments and working folders, `KERN_PROCARGS2` and
+  `PROC_PIDVNODEPATHINFO`, so paths with spaces count), initialized submodules, a remote server (its `/api/info`
+  `paths.tmp` is not in this user's temporary folder), clones and plain folders lock a row. Archived sessions do not
+  hold a worktree ("Só sessões arquivadas"). Uncommitted files, commits on no remote and ignored files nothing
+  regenerates (`.env`, local databases; `node_modules`, `build`, `dist`, caches and the like do not count) need a
+  confirmation tied to that exact state (HEAD, status, unsent count) and are never marked by default; cancelling the
+  preview voids it. Changes within 24 h are not marked either. Removal is `git worktree remove` (`--force` only for
+  confirmed uncommitted files) and `prune`; branches stay.
+- **Sujeira dos agentes** (`$TMPDIR/opencode`): DerivedData (`Build/`, logs or index, an `info.plist` with
+  `WorkspacePath`; up to three levels down), `.xcresult` and copied `.app` bundles (with their `Info.plist`) and logs
+  are removable when no process uses them, everything inside could be read and nothing changed for 24 h. A checkout
+  (`.git`) is never classified nor entered. Captures, uploads, other temporary items, simulators (except
+  `simctl delete unavailable`), AVDs, OpenCode snapshots, Xcode's DerivedData and caches only show their size and a
+  Finder button. Sizes count hard links once and are estimates.
+- Limpar shows a preview and goes one item at a time. Before each worktree it reads the sessions from the server
+  again (a failed read, another connection or a server no longer on this Mac stops the run), the processes and git;
+  before each leftover, the processes, the whole tree's newest change and the path itself (no link on the way, same
+  device and inode). Git runs without fsmonitor, with timeouts, and Parar ends the run. The result shows the volume's
+  free space before and after; every item goes to `~/Library/Logs/OpenCode/limpeza-de-disco.log`. Sizes are cached
+  in `disk-sizes.json`.
+- **Checks**: `script/test-mac-disk.sh` builds a throwaway fixture (fake repositories, worktrees, submodule,
+  sessions and temporary folder, processes standing in for work) and runs `MacDiskChecks` against it, including
+  changes made in the middle of the cleanup (a new session, a new process, an edit inside a bundle, a link swapped
+  into the path, a change after a confirmation, a server that stops answering); then it deletes it. DEBUG
   `-OpenCodeMacDiskSurvey <folder>` reads this Mac's real folders with `clean` disabled.
 
 ### Chat (polish 1) — 27 October

@@ -37,8 +37,13 @@ import SwiftUI
   var confirming: (worktree: DiskCleanup.Worktree, intent: Intent)?
   var plan: MacDiskPlan?
   private(set) var progress: MacDiskProgress?
-  @ObservationIgnored private(set) var confirmed: Set<String> = []
+  /// Worktree path → the state (`fingerprint`) whose loss Alexandre confirmed. Another state, or cancelling the
+  /// preview, voids it.
+  @ObservationIgnored private(set) var confirmed: [String: String] = [:]
   @ObservationIgnored private var touched: Set<String> = []
+  /// The sessions store (so the connection) the lists were read with.
+  @ObservationIgnored private var scanned: ObjectIdentifier?
+  @ObservationIgnored private var cleaning: Task<Void, Never>?
   @ObservationIgnored private var sizes: [String: Int64]
   @ObservationIgnored private var skips: [String: [String]] = [:]
   /// Leftover path → its index, for the thousands of sizes that arrive in batches.
@@ -67,16 +72,34 @@ import SwiftUI
     volume = Volume(free: value.free, total: value.total, at: .now)
   }
 
-  /// Opening the sheet: the volume now, and a new scan when the last one is more than ten minutes old.
+  /// Opening the sheet: the volume now, and a new scan when the last one is more than ten minutes old or was read
+  /// through another connection.
   func open(sessions: SessionStore) {
     Task { await refreshVolume() }
-    guard !scanning, scannedAt.map({ Date.now.timeIntervalSince($0) > 600 }) ?? true else { return }
+    let stale = scanned != ObjectIdentifier(sessions) || scannedAt.map { Date.now.timeIntervalSince($0) > 600 } ?? true
+    guard stale, !scanning || scanned != ObjectIdentifier(sessions) else { return }
     rescan(sessions: sessions)
   }
 
   func rescan(sessions: SessionStore) {
+    guard progress.map(\.finished) ?? true else { return }
+    if scanned != ObjectIdentifier(sessions) { forget() }
     scan?.cancel()
+    scanned = ObjectIdentifier(sessions)
     scan = Task { await run(sessions) }
+  }
+
+  /// Another connection: nothing read or confirmed through the previous one holds.
+  private func forget() {
+    worktrees = []
+    projects = [:]
+    selected = []
+    confirmed = [:]
+    touched = []
+    confirming = nil
+    plan = nil
+    local = false
+    scannedAt = nil
   }
 
   // MARK: Selection
@@ -86,22 +109,28 @@ import SwiftUI
   /// A worktree with pending work asks first (`confirming`); a locked one never changes.
   func toggle(_ worktree: DiskCleanup.Worktree) {
     touched.insert(worktree.path)
-    if selected.remove(worktree.path) != nil { return }
+    if selected.remove(worktree.path) != nil {
+      confirmed[worktree.path] = nil
+      return
+    }
     switch verdict(worktree) {
     case .locked: return
-    case .confirm where !confirmed.contains(worktree.path): confirming = (worktree, .select)
+    case .confirm where !DiskCleanup.confirmed(worktree, by: confirmed[worktree.path]): confirming = (worktree, .select)
     case .confirm, .free: selected.insert(worktree.path)
     }
   }
 
+  /// The confirmation holds for the state the dialog showed; if git has seen another since, it asks again.
   func confirm() {
     guard let request = confirming else { return }
     confirming = nil
-    confirmed.insert(request.worktree.path)
     touched.insert(request.worktree.path)
+    guard let current = worktrees.first(where: { $0.path == request.worktree.path }),
+      current.fingerprint == request.worktree.fingerprint, let fingerprint = current.fingerprint else { return }
+    confirmed[current.path] = fingerprint
     switch request.intent {
-    case .select: selected.insert(request.worktree.path)
-    case .remove: preview(only: request.worktree)
+    case .select: selected.insert(current.path)
+    case .remove: preview(only: current)
     }
   }
 
@@ -115,24 +144,46 @@ import SwiftUI
   /// The preview of Limpar: the marked worktrees, every removable leftover of the chosen kinds and, when chosen,
   /// the unavailable simulators. `only` previews a single worktree (its Remover).
   func preview(only worktree: DiskCleanup.Worktree? = nil) {
+    guard let scanned else { return }
     if let worktree {
       switch verdict(worktree) {
       case .locked: return
-      case .confirm where !confirmed.contains(worktree.path):
+      case .confirm where !DiskCleanup.confirmed(worktree, by: confirmed[worktree.path]):
         confirming = (worktree, .remove)
         return
       case .confirm, .free: break
       }
-      plan = MacDiskPlan(worktrees: [worktree], leftovers: [], simulators: nil, confirmed: confirmed)
+      plan = MacDiskPlan(worktrees: [worktree], leftovers: [], simulators: nil, confirmed: confirmed, store: scanned)
       return
     }
     plan = MacDiskPlan(worktrees: worktrees.filter { selected.contains($0.path) },
       leftovers: leftovers.filter { kinds.contains($0.kind) && DiskCleanup.removable($0, now: .now) },
-      simulators: simulators ? unavailableSimulators : nil, confirmed: confirmed)
+      simulators: simulators ? unavailableSimulators : nil, confirmed: confirmed, store: scanned)
   }
 
-  /// Runs the approved plan: the sessions are read again, each item is checked once more, the results go to the log,
-  /// and the bar and the sheet are refreshed.
+  /// Cancelar in the preview: the confirmations given for its worktrees end with it.
+  func cancelPreview() {
+    for worktree in plan?.worktrees ?? [] where worktree.pending {
+      confirmed[worktree.path] = nil
+      selected.remove(worktree.path)
+    }
+    plan = nil
+  }
+
+  /// Apagar in the preview; Parar (`stop`) ends it before the next item.
+  func startCleaning(_ plan: MacDiskPlan, sessions: SessionStore) {
+    guard cleaning == nil else { return }
+    cleaning = Task {
+      await clean(plan, sessions: sessions)
+      cleaning = nil
+    }
+  }
+
+  func stop() { cleaning?.cancel() }
+
+  /// Runs the approved plan one item at a time. Before each worktree the sessions are read from the server again
+  /// (a failed read stops everything), the server must still be this Mac's, and the processes are read again; each
+  /// leftover gets a fresh process list too. The results go to the log; the bar and the sheet are refreshed.
   func clean(_ plan: MacDiskPlan, sessions: SessionStore) async {
     #if DEBUG
     // The survey reads this Mac's real folders: it never removes anything.
@@ -140,38 +191,61 @@ import SwiftUI
     #endif
     guard progress?.finished ?? true else { return }
     progress = MacDiskProgress(total: plan.count)
-    if !roots.fixture { await sessions.reload() }
-    let unresolved = links(sessions)
-    let links = await MacDiskProbe.off { unresolved.map(\.resolved) }
-    let processes = await MacDiskProbe.off { MacDiskProbe.processes() }
-    let local = local
+    await refreshVolume()
+    progress?.freeBefore = volume?.free
     let root = roots.temp
-    for worktree in plan.worktrees {
-      progress?.current = worktree.name
-      if roots.fixture, !DiskCleanup.contains(roots.userTemp, worktree.path) {
-        record(MacDiskCleaner.Line(kind: "worktree", path: worktree.path, bytes: 0, removed: false, reason: "fora do fixture"))
-        continue
+    var queue = plan.worktrees.map { MacDiskItem.worktree($0) } + plan.leftovers.map { MacDiskItem.leftover($0) }
+    if let simulators = plan.simulators, !roots.fixture { queue.append(.simulators(simulators)) }
+    for (index, item) in queue.enumerated() {
+      progress?.current = item.name
+      #if DEBUG
+      await MacDiskFixture.beforeRemoval?(item.path)
+      #endif
+      if let reason = await interruption(plan, sessions: sessions) {
+        progress?.stopped = reason
+        for rest in queue[index...] { record(rest.kept(reason)) }
+        break
       }
-      record(await MacDiskCleaner.remove(worktree, confirmed: plan.confirmed.contains(worktree.path), links: links,
-        processes: processes, local: local))
+      guard let processes = await MacDiskProbe.off({ MacDiskProbe.processes() }) else {
+        progress?.stopped = "não deu para ler os processos deste Mac"
+        for rest in queue[index...] { record(rest.kept("parado: não deu para ler os processos")) }
+        break
+      }
+      switch item {
+      case .worktree(let worktree):
+        if roots.fixture, !DiskCleanup.contains(roots.userTemp, worktree.path) {
+          record(item.kept("fora do fixture"))
+          continue
+        }
+        let links: [DiskCleanup.SessionLink]
+        do { links = try await currentLinks(sessions) } catch {
+          let reason = "não deu para ler as sessões do servidor"
+          progress?.stopped = reason
+          for rest in queue[index...] { record(rest.kept("parado: \(reason)")) }
+          break
+        }
+        guard await isLocal(sessions) else {
+          let reason = "o servidor não está mais neste Mac ou não respondeu"
+          progress?.stopped = reason
+          for rest in queue[index...] { record(rest.kept("parado: \(reason)")) }
+          break
+        }
+        record(await MacDiskCleaner.remove(worktree, confirmed: plan.confirmed[worktree.path], links: links,
+          processes: processes))
+      case .leftover(let leftover):
+        record(await MacDiskCleaner.remove(leftover, root: root, processes: processes))
+      case .simulators(let simulators):
+        record(await MacDiskCleaner.removeUnavailableSimulators(simulators))
+      }
+      if progress?.stopped != nil { break }
     }
     let repositories = Set(plan.worktrees.compactMap(\.repository))
     await MacDiskCleaner.prune(Array(repositories))
-    for leftover in plan.leftovers {
-      progress?.current = URL(fileURLWithPath: leftover.path).lastPathComponent
-      record(await MacDiskCleaner.remove(leftover, root: root, processes: processes))
-    }
-    if let simulators = plan.simulators, !roots.fixture {
-      progress?.current = "Simuladores indisponíveis"
-      record(await MacDiskCleaner.removeUnavailableSimulators(simulators))
-    }
     let lines = progress?.lines ?? []
     MacDiskCleaner.log(lines, to: roots.log)
     let removed = Set(lines.filter(\.removed).map(\.path))
     selected.subtract(removed)
-    confirmed.subtract(removed)
-    progress?.current = nil
-    progress?.finished = true
+    for path in plan.worktrees.map(\.path) { confirmed[path] = nil }
     // The server's worktree inventory drops checkouts removed outside OpenCode on refresh.
     if !roots.fixture {
       for project in sessions.projects where repositories.contains(MacDiskProbe.real(project.canonical)) {
@@ -179,7 +253,17 @@ import SwiftUI
       }
     }
     await refreshVolume()
+    progress?.freeAfter = volume?.free
+    progress?.current = nil
+    progress?.finished = true
     rescan(sessions: sessions)
+  }
+
+  /// Parar, or a connection other than the one the plan was read with.
+  private func interruption(_ plan: MacDiskPlan, sessions: SessionStore) async -> String? {
+    if Task.isCancelled { return "interrompido por você" }
+    if plan.store != ObjectIdentifier(sessions) || scanned != plan.store { return "a conexão com o servidor mudou" }
+    return nil
   }
 
   func finish() {
@@ -211,26 +295,34 @@ import SwiftUI
     let links = await MacDiskProbe.off { unresolved.map(\.resolved) }
     // The DEBUG fixture's projects name real repositories: its scan stays inside the fixture folder.
     let repositories = roots.fixture ? [] : Array(Set(sessions.projects.flatMap { [$0.canonical] + $0.sandboxes }))
+    // Without a process list everything counts as in use.
     let processes = await MacDiskProbe.off { MacDiskProbe.processes() }
+    let used: @Sendable (String) -> Bool = { processes?.uses($0) ?? true }
     // The temporary folder takes longer to list: the worktrees show (and git runs) meanwhile.
     async let temp = MacDiskProbe.off { MacDiskProbe.leftovers(root: roots.temp) }
-    async let extra = MacDiskProbe.off { MacDiskProbe.extras(roots, processes: processes) }
+    async let extra = MacDiskProbe.off {
+      MacDiskProbe.extras(roots, processes: processes ?? MacDiskProcesses(commands: [], directories: []))
+    }
     let found = await MacDiskProbe.off { MacDiskProbe.worktrees(folder: roots.worktrees, repositories: repositories) }
     guard !Task.isCancelled else { return }
 
+    // The previous facts show until git answers again; a confirmation still needs the fingerprint to match.
     let previous = Dictionary(worktrees.map { ($0.path, $0) }, uniquingKeysWith: { a, _ in a })
     worktrees = found.map { found in
       var worktree = found
       if let old = previous[found.path] {
         worktree.dirty = old.dirty
         worktree.unpushed = old.unpushed
+        worktree.ignored = old.ignored
+        worktree.submodules = old.submodules
+        worktree.fingerprint = old.fingerprint
         worktree.integrated = old.integrated
         worktree.lastChange = old.lastChange
         worktree.size = old.size
       }
       worktree.size = worktree.size ?? sizes[found.path]
       worktree.sessions = DiskCleanup.sessions(of: found.path, links)
-      worktree.inUse = processes.uses(found.path)
+      worktree.inUse = used(found.path)
       return worktree
     }
     projects = Dictionary(worktrees.compactMap { worktree in
@@ -257,7 +349,7 @@ import SwiftUI
       discovered.0.items.map { found in
         var leftover = found
         leftover.size = cached[found.path]
-        leftover.inUse = processes.uses(found.path)
+        leftover.inUse = used(found.path)
         return leftover
       }
     }
@@ -300,6 +392,9 @@ import SwiftUI
       var worktree = worktrees[index]
       worktree.dirty = fresh.dirty
       worktree.unpushed = fresh.unpushed
+      worktree.ignored = fresh.ignored
+      worktree.submodules = fresh.submodules
+      worktree.fingerprint = fresh.fingerprint
       worktree.integrated = fresh.integrated
       worktree.gitLocked = fresh.gitLocked
       worktree.lastChange = [worktree.lastChange, fresh.lastChange].compactMap { $0 }.max()
@@ -328,6 +423,7 @@ import SwiftUI
         guard let index = positions[job.path], leftovers.indices.contains(index) else { continue }
         leftovers[index].size = measure.bytes
         leftovers[index].newest = measure.newest ?? .distantPast
+        leftovers[index].complete = measure.complete
         sizes[job.path] = measure.bytes
         measuring.remove(job.path)
       case .extra(let kind):
@@ -352,13 +448,17 @@ import SwiftUI
   }
 
   /// Keeps only selectable rows marked, and marks the ones that became fully known (git and size) and qualify, unless
-  /// Alexandre already touched them.
+  /// Alexandre already touched them. A confirmation given for another state is dropped with its mark.
   private func reconcile() {
     let now = Date.now
     for worktree in worktrees {
       switch verdict(worktree) {
-      case .locked: selected.remove(worktree.path)
-      case .confirm where !confirmed.contains(worktree.path): selected.remove(worktree.path)
+      case .locked:
+        selected.remove(worktree.path)
+        confirmed[worktree.path] = nil
+      case .confirm where !DiskCleanup.confirmed(worktree, by: confirmed[worktree.path]):
+        selected.remove(worktree.path)
+        confirmed[worktree.path] = nil
       case .confirm: break
       case .free:
         guard !touched.contains(worktree.path), !measuring.contains(worktree.path) else { continue }
@@ -388,10 +488,71 @@ import SwiftUI
     }
   }
 
+  /// Read from the server now, never from the store's last list (which may be old, or loading, or have failed):
+  /// any failure throws, and the cleanup stops.
+  private func currentLinks(_ sessions: SessionStore) async throws -> [DiskCleanup.SessionLink] {
+    #if DEBUG
+    if roots.fixture {
+      if MacDiskFixture.sessionsFail { throw ClientError.operation("fixture") }
+      return MacDiskFixture.links(roots)
+    }
+    #endif
+    let client = sessions.client
+    async let navigation = client.navigation()
+    async let archived = client.archivedSessions()
+    async let active = client.active()
+    let (entries, archives, states) = try await (navigation, archived, active)
+    let running = Set(states.filter { $0.value.isRunning }.map(\.key))
+    let links = entries.map(\.session).map { session in
+      DiskCleanup.SessionLink(id: session.id, directory: session.location.directory, root: session.parentID == nil,
+        archived: session.time.archived != nil, running: running.contains(session.id))
+    } + archives.map { session in
+      DiskCleanup.SessionLink(id: session.id, directory: session.location.directory, root: session.parentID == nil,
+        archived: true, running: false)
+    }
+    return await MacDiskProbe.off { links.map(\.resolved) }
+  }
+
   private func isLocal(_ sessions: SessionStore) async -> Bool {
     if roots.fixture { return true }
     guard let info = try? await sessions.client.info() else { return false }
     return DiskCleanup.local(serverTemp: info.paths.map { MacDiskProbe.real($0.tmp) }, userTemp: roots.userTemp)
+  }
+}
+
+/// One item of a cleanup, in order: worktrees, leftovers, then the unavailable simulators.
+private enum MacDiskItem {
+  case worktree(DiskCleanup.Worktree)
+  case leftover(DiskCleanup.Leftover)
+  case simulators(MacDiskExtra)
+
+  var path: String {
+    switch self {
+    case .worktree(let worktree): worktree.path
+    case .leftover(let leftover): leftover.path
+    case .simulators(let extra): "\(extra.unavailable.count) aparelhos"
+    }
+  }
+
+  var name: String {
+    switch self {
+    case .worktree(let worktree): worktree.name
+    case .leftover(let leftover): URL(fileURLWithPath: leftover.path).lastPathComponent
+    case .simulators: "Simuladores indisponíveis"
+    }
+  }
+
+  func kept(_ reason: String) -> MacDiskCleaner.Line {
+    switch self {
+    case .worktree(let worktree):
+      MacDiskCleaner.Line(kind: "worktree", path: worktree.path, bytes: worktree.size ?? 0, removed: false, reason: reason)
+    case .leftover(let leftover):
+      MacDiskCleaner.Line(kind: leftover.kind.rawValue, path: leftover.path, bytes: leftover.size ?? 0, removed: false,
+        reason: reason)
+    case .simulators(let extra):
+      MacDiskCleaner.Line(kind: "simuladores indisponíveis", path: path, bytes: extra.unavailableSize ?? 0,
+        removed: false, reason: reason)
+    }
   }
 }
 
@@ -407,6 +568,10 @@ extension DiskCleanup.SessionLink {
 /// (`[{"id","directory","archived","running"}]`), instead of the server's.
 enum MacDiskFixture {
   struct Entry: Decodable { let id: String; let directory: String; let archived: Bool; let running: Bool }
+  /// The fixture's server stops answering for sessions (`MacDiskChecks`).
+  @MainActor static var sessionsFail = false
+  /// Runs before each item's checks during a cleanup, so `MacDiskChecks` can change the world mid-run.
+  @MainActor static var beforeRemoval: (@MainActor (String) async -> Void)?
 
   static func links(_ roots: MacDiskRoots) -> [DiskCleanup.SessionLink] {
     let url = URL(fileURLWithPath: roots.userTemp + "/sessions.json")
