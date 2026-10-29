@@ -313,7 +313,8 @@ struct FileViewer: View {
   }
   private var position: Int? { store.path.flatMap { siblings?.firstIndex(of: $0) } }
   private func neighbor(_ step: Int) -> String? {
-    guard let position, let siblings, siblings.indices.contains(position + step) else { return nil }
+    let arrows = FileSiblings.arrows(position: position, count: siblings?.count ?? 0)
+    guard let position, let siblings, step < 0 ? arrows.previous : arrows.next else { return nil }
     return siblings[position + step]
   }
   private func page(_ step: Int) {
@@ -383,17 +384,22 @@ struct FileViewer: View {
       // A new file always starts with fresh viewer state, including zoom.
       .id(store.source)
       .gesture(FilePageSwipe(previous: neighbor(-1) != nil, next: neighbor(1) != nil, page: page))
-      .overlay {
+      // Paging is the horizontal swipe; the corners only hint that more files lie that way.
+      .overlay(alignment: .bottom) {
         HStack {
           if neighbor(-1) != nil {
-            pageButton(-1, symbol: "chevron.left", label: "Arquivo anterior", identifier: "file-previous")
+            pageHint(-1, symbol: "chevron.left", label: "Há arquivo anterior", identifier: "file-previous")
           }
           Spacer(minLength: 0)
           if neighbor(1) != nil {
-            pageButton(1, symbol: "chevron.right", label: "Próximo arquivo", identifier: "file-next")
+            pageHint(1, symbol: "chevron.right", label: "Há próximo arquivo", identifier: "file-next")
           }
-        }.padding(.horizontal, 10)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, hintClearance)
       }
+      .accessibilityAction(named: "Arquivo anterior") { page(-1) }
+      .accessibilityAction(named: "Próximo arquivo") { page(1) }
       .background(theme.color(.background)).foregroundStyle(theme.color(.text))
       .navigationTitle(store.name).navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -434,15 +440,31 @@ struct FileViewer: View {
     }
     .onDisappear { store.suspend() }
   }
-  private func pageButton(_ step: Int, symbol: String, label: String, identifier: String) -> some View {
-    Button { page(step) } label: {
-      Image(systemName: symbol).font(.title3.weight(.semibold)).frame(width: 44, height: 44)
-    }
-    .buttonStyle(.glass).buttonBorderShape(.circle)
-    .accessibilityLabel(label)
-    .accessibilityValue(position.map { "\($0 + 1 + step) de \(siblings?.count ?? 0)" } ?? "")
-    .accessibilityIdentifier(identifier)
+  /// A small translucent chevron, never a touch target: touches reach the image, page or player beneath it.
+  private func pageHint(_ step: Int, symbol: String, label: String, identifier: String) -> some View {
+    Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
+      .foregroundStyle(.white.opacity(0.7))
+      .frame(width: 20, height: 20)
+      .background(.black.opacity(0.22), in: Circle())
+      .allowsHitTesting(false)
+      .accessibilityElement()
+      .accessibilityLabel(label)
+      .accessibilityValue(position.map { "\($0 + 1 + step) de \(siblings?.count ?? 0)" } ?? "")
+      .accessibilityHint("Deslize para o lado ou use a ação para abrir.")
+      .accessibilityAction { page(step) }
+      .accessibilityIdentifier(identifier)
   }
+  /// Above what each kind keeps at its bottom edge: the player's timeline and buttons, the HTML mode bar, the
+  /// read-aloud controls. AVKit has no public signal for its controls' visibility to hide the hints with them.
+  private var hintClearance: CGFloat {
+    switch store.kind {
+    case .audiovisual: 112
+    case .html where !showSource: 64
+    case .preview where store.markdown && !showSource: 76  // the read-aloud controls
+    default: 12
+    }
+  }
+
   @ViewBuilder private func loaded(_ file: URL) -> some View {
     switch store.kind {
     case .image:
@@ -669,6 +691,7 @@ private struct FilePDFPreview: UIViewRepresentable {
 }
 
 private struct FileAVPlayer: UIViewControllerRepresentable {
+  @Environment(\.voiceController) private var voice
   let file: URL
   func makeCoordinator() -> Coordinator { Coordinator() }
   func makeUIViewController(context: Context) -> AVPlayerViewController {
@@ -679,16 +702,30 @@ private struct FileAVPlayer: UIViewControllerRepresentable {
       let value = player.timeControlStatus == .playing ? "Reproduzindo" : player.timeControlStatus == .paused ? "Pausado" : "Carregando"
       Task { @MainActor in controller?.view.accessibilityValue = value }
     }
-    player.play()
+    let audio = context.coordinator.audio
+    let busy = voice?.sessionID != nil
+    // The session is set before playing: AVPlayer activates it with whatever category it finds.
+    context.coordinator.starting = Task { @MainActor [weak player] in
+      await audio.prepare(file, appAudioActive: busy)
+      guard !Task.isCancelled else { return }
+      player?.play()
+    }
     return controller
   }
   func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {}
   static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
+    coordinator.starting?.cancel()
     coordinator.observation = nil
     controller.player?.pause()
     controller.player = nil
+    let audio = coordinator.audio
+    Task { @MainActor in await audio.restore() }
   }
-  final class Coordinator { var observation: NSKeyValueObservation? }
+  final class Coordinator {
+    var observation: NSKeyValueObservation?
+    var starting: Task<Void, Never>?
+    let audio = FileVideoAudio()
+  }
 }
 
 private struct FileQuickLook: UIViewControllerRepresentable {

@@ -99,6 +99,16 @@ try:
     (folder / "i-documento.pdf").write_bytes(pdf())
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=24", "-t", "30", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "32", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(folder / "j-video.mp4")], check=True)
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440", "-t", "30", str(folder / "k-audio.wav")], check=True)
+    # The same short picture without and with an audio track, for the audio-session tests (not viewer siblings).
+    media = root / "video-audio"
+    media.mkdir()
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=12", "-t", "3",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(media / "sem-audio.mp4")], check=True)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=12", "-f", "lavfi",
+        "-i", "sine=frequency=330", "-t", "3", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+        str(media / "com-audio.mp4")], check=True)
+    environment["OPENCODE_VIEWER_VIDEO_SILENT"] = str(media / "sem-audio.mp4")
+    environment["OPENCODE_VIEWER_VIDEO_SOUND"] = str(media / "com-audio.mp4")
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=660", "-t", "30", "-c:a", "aac", str(folder / "l-audio.m4a")], check=True)
     (folder / "m-binario.opaque").write_bytes(bytes(range(256)))
     (folder / "n-texto.txt").write_text("Texto simples do visualizador.\n", encoding="utf8")

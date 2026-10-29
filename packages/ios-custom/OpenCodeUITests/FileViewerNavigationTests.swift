@@ -97,13 +97,13 @@ import XCTest
     let app = try launch("LINKS")
     open("Abrir PNG", app: app)
     title(app, "a-imagem.png")
-    let previous = app.buttons["file-previous"]
-    let next = app.buttons["file-next"]
+    let previous = app.descendants(matching: .any).matching(identifier: "file-previous").firstMatch
+    let next = app.descendants(matching: .any).matching(identifier: "file-next").firstMatch
     XCTAssertTrue(next.waitForExistence(timeout: 15))
     XCTAssertFalse(previous.exists)
     XCTAssertEqual(next.value as? String, "2 de 13")
     screenshot("first-sibling")
-    next.tap()
+    drag(app, dx: -220)
     title(app, "b-foto.jpg")
     XCTAssertTrue(previous.waitForExistence(timeout: 10))
     let image = app.images["fullscreen-image"]
@@ -125,7 +125,7 @@ import XCTest
     expect(image, value: "Ajustada à tela")
     drag(app, dx: -220)
     title(app, "c-animacao.gif")
-    previous.tap()
+    drag(app, dx: 220)
     title(app, "b-foto.jpg")
     XCTAssertTrue(image.waitForExistence(timeout: 20))
     expect(image, value: "Ajustada à tela", timeout: 5, "a new file starts without zoom")
@@ -175,14 +175,14 @@ import XCTest
     embedded.tap()
     XCTAssertTrue(data.images["fullscreen-image"].waitForExistence(timeout: 20))
     Thread.sleep(forTimeInterval: 2)
-    XCTAssertFalse(data.buttons["file-next"].exists || data.buttons["file-previous"].exists)
+    XCTAssertFalse(data.descendants(matching: .any).matching(identifier: "file-next").firstMatch.exists || data.descendants(matching: .any).matching(identifier: "file-previous").firstMatch.exists)
     data.terminate()
 
     let feed = try launch("FEED")
     openFeedImage(feed)
     title(feed, "Quadro")
-    XCTAssertTrue(feed.buttons["file-next"].waitForExistence(timeout: 15))
-    feed.buttons["file-next"].tap()
+    XCTAssertTrue(feed.descendants(matching: .any).matching(identifier: "file-next").firstMatch.waitForExistence(timeout: 15))
+    drag(feed, dx: -220)
     title(feed, "b-foto.jpg")
     feed.terminate()
   }
@@ -210,9 +210,11 @@ import XCTest
     drag(app, dx: -220)
     Thread.sleep(forTimeInterval: 1)
     XCTAssertTrue(app.navigationBars["a-imagem.png"].exists)
-    let next = app.buttons["file-next"]
+    let next = app.descendants(matching: .any).matching(identifier: "file-next").firstMatch
     XCTAssertTrue(next.waitForExistence(timeout: 10))
-    next.tap()
+    image.doubleTap()
+    expect(image, value: "Ajustada à tela")
+    drag(app, dx: -220)
     title(app, "b-foto.jpg")
     screenshot("explorer-sibling")
     app.navigationBars["b-foto.jpg"].buttons["Fechar"].tap()
@@ -224,10 +226,10 @@ import XCTest
     title(app, "acima.png")
     XCTAssertTrue(next.waitForExistence(timeout: 15))
     XCTAssertEqual(next.value as? String, "2 de 2")
-    XCTAssertFalse(app.buttons["file-previous"].exists)
+    XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "file-previous").firstMatch.exists)
     drag(app, dx: -220)
     title(app, "acima.txt")
-    XCTAssertTrue(app.buttons["file-previous"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "file-previous").firstMatch.waitForExistence(timeout: 5))
     screenshot("explorer-above-root")
     app.navigationBars["acima.txt"].buttons["Fechar"].tap()
     app.terminate()
@@ -317,9 +319,9 @@ import XCTest
     title(app, "a-formatacao.md")
     XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Formatação'")).firstMatch.waitForExistence(timeout: 20))
     screenshot("markdown-explorer")
-    let next = app.buttons["file-next"]
+    let next = app.descendants(matching: .any).matching(identifier: "file-next").firstMatch
     XCTAssertTrue(next.waitForExistence(timeout: 15))
-    next.tap()
+    drag(app, dx: -220)
     title(app, "b-readme.md")
     XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'OpenCode iOS (custom)'")).firstMatch.waitForExistence(timeout: 60))
     drag(app, dx: -220)
@@ -458,10 +460,10 @@ import XCTest
     screenshot("html-source")
     toggle.tap()
     XCTAssertTrue(webText(app, "Página estática do visualizador"))
-    // A single-file report built by its own script, reached with the paging arrow.
-    let next = app.buttons["file-next"]
+    // A single-file report built by its own script, reached with the paging swipe.
+    let next = app.descendants(matching: .any).matching(identifier: "file-next").firstMatch
     XCTAssertTrue(next.waitForExistence(timeout: 15))
-    next.tap()
+    drag(app, dx: -220)
     title(app, "b-relatorio.html")
     XCTAssertTrue(webText(app, "3 testes, 2 passaram"), "script-built report")
     screenshot("html-report")
@@ -652,6 +654,62 @@ import XCTest
       screenshot("links-after-navigation-" + role.lowercased())
       app.terminate()
     }
+  }
+
+  func testSiblingHintsAreSmallCornerChevronsOnlyTowardASibling() throws {
+    let app = try launch("LINKS")
+    open("Abrir MP4", app: app)
+    title(app, "j-video.mp4")
+    let player = app.otherElements["file-player"]
+    XCTAssertTrue(player.waitForExistence(timeout: 20))
+    expect(player, value: "Reproduzindo", timeout: 15)
+    let previous = app.descendants(matching: .any).matching(identifier: "file-previous").firstMatch
+    let next = app.descendants(matching: .any).matching(identifier: "file-next").firstMatch
+    XCTAssertTrue(previous.waitForExistence(timeout: 15))
+    XCTAssertTrue(next.exists)
+    XCTAssertEqual(next.label, "Há próximo arquivo")
+    XCTAssertEqual(next.value as? String, "11 de 13")
+    let window = app.windows.firstMatch.frame
+    // Small chevrons in the lower corners, not buttons over the middle of the picture. (VoiceOver can activate
+    // them, so AX reports them as buttons; touches pass through, checked below.)
+    for hint in [previous, next] {
+      XCTAssertLessThanOrEqual(hint.frame.width, 22)
+      XCTAssertLessThanOrEqual(hint.frame.height, 22)
+      XCTAssertGreaterThan(hint.frame.minY, window.height * 0.75)
+    }
+    XCTAssertLessThanOrEqual(previous.frame.minX - window.minX, 14)
+    XCTAssertLessThanOrEqual(window.maxX - next.frame.maxX, 14)
+    // With the player's controls shown, the hints stay above its timeline.
+    player.tap()
+    let timeline = app.sliders.firstMatch
+    if timeline.waitForExistence(timeout: 5) {
+      XCTAssertLessThan(next.frame.maxY, timeline.frame.minY, "\(next.frame) over \(timeline.frame)")
+    }
+    screenshot("hints-video-controls")
+    // A touch on a hint reaches the content: no paging.
+    next.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    Thread.sleep(forTimeInterval: 1)
+    XCTAssertTrue(app.navigationBars["j-video.mp4"].exists)
+    // Paging is the swipe, over the video too.
+    drag(app, dx: -220)
+    title(app, "k-audio.wav")
+    drag(app, dx: 220)
+    title(app, "j-video.mp4")
+    app.buttons["Fechar"].firstMatch.tap()
+    // First and last files show one hint; a file alone in its folder shows none.
+    open("Abrir PNG", app: app)
+    title(app, "a-imagem.png")
+    XCTAssertTrue(next.waitForExistence(timeout: 15))
+    XCTAssertFalse(previous.exists)
+    screenshot("hints-image")
+    app.buttons["Fechar"].firstMatch.tap()
+    open("Abrir LIVE", app: app)
+    title(app, "index.html")
+    XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20))
+    Thread.sleep(forTimeInterval: 3)
+    XCTAssertFalse(next.exists || previous.exists, "a single file")
+    screenshot("hints-single-file")
+    app.terminate()
   }
 
   func testFileKinds() throws {

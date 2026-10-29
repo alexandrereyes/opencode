@@ -1306,6 +1306,18 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
   call the action through the transcript context at tap time. `testLinksKeepOpeningAfterLeavingAndReturning`
   covers file, folder and image links after a round trip through Sessões, another session and Você.
 
+#### Viewer arrows and video audio — 29 October
+
+- Paging is the horizontal swipe. A 20-pt translucent chevron in a lower corner (`FileSiblings.arrows`) only hints
+  that a sibling exists on that side, for every file kind; it takes no touches. It sits above each kind's bottom
+  controls (the player's timeline, the HTML mode bar, the read-aloud controls), since AVKit has no public signal
+  to hide it with its controls. VoiceOver can activate it, and the viewer has "Arquivo anterior/Próximo arquivo"
+  actions.
+- A video **without an audio track** (`VideoAudioPolicy`) sets the session to `.ambient` + `.mixWithOthers` before
+  AVPlayer activates it, so other apps keep playing; leaving restores the previous category and deactivates with
+  `.notifyOthersOnDeactivation`. A video with an audio track, even a silent one, keeps the normal player
+  behaviour. During a voice call or a reading the session is not touched.
+
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates
 and removes its own fixture directory and sessions (no model calls).
