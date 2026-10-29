@@ -25,6 +25,8 @@ struct UserBubble: View {
   @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsible = true
   @State private var localExpanded = false
   @State private var localTruncated = false
+  @State private var toggleFrame = CGRect.zero
+  private static let space = "user-bubble"
   /// The conversation's memory keeps the reader's choice when the bubble is rebuilt.
   private var expanded: Bool { memory?.bubble(message.id) ?? localExpanded }
   /// Measured asynchronously by the prompt; remembered so a rebuilt bubble starts at its known height.
@@ -85,10 +87,16 @@ struct UserBubble: View {
           // Folded bubbles omit image thumbnails; their expansion control below reveals them.
           UserMessageAttachmentsView(attachments: UserMessageAttachments(message, includesImages: !folded))
           if collapsible && (expanded || truncated || hasContext) {
-            Button(expanded ? "Mostrar menos" : "Mostrar mensagem completa") {
-              setExpanded(!expanded)
-            }.appFont(.path).foregroundStyle(theme.color(.userBubbleSecondary))
-              .buttonStyle(.plain).accessibilityValue(expanded ? "Expandido" : "Recolhido")
+            // Not a Button: the bubble's tap takes it at the control's exact frame. A gesture's touch area reaches
+            // a few points beyond its view, over the gap above it and the bubble's bottom padding, where a pinned
+            // bubble's tap must return to its turn instead.
+            Text(expanded ? "Mostrar menos" : "Mostrar mensagem completa")
+              .appFont(.path).foregroundStyle(theme.color(.userBubbleSecondary))
+              .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(UserBubble.space)) } action: { toggleFrame = $0 }
+              .onDisappear { toggleFrame = .zero }
+              .accessibilityAddTraits(.isButton)
+              .accessibilityAction { setExpanded(!expanded) }
+              .accessibilityValue(expanded ? "Expandido" : "Recolhido")
               .accessibilityIdentifier("user-prompt-toggle-\(message.id)")
           }
         }
@@ -105,7 +113,11 @@ struct UserBubble: View {
         .background { UserMessageCopyMenu(message: message, toast: toast).frame(width: 0, height: 0) }
         // Its buttons and the prompt's own tap take precedence; the actions below the bubble are outside it.
         .contentShape(RoundedRectangle(cornerRadius: 16))
-        .onTapGesture { _ = promptJump?.perform(message.id) }
+        .coordinateSpace(.named(UserBubble.space))
+        .onTapGesture { location in
+          if toggleFrame.contains(location) { return setExpanded(!expanded) }
+          _ = promptJump?.perform(message.id)
+        }
         HStack(spacing: 8) {
           if let pendingInput {
             pendingActions(pendingInput)

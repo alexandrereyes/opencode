@@ -375,7 +375,9 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   turn's start only plays a selection haptic. An inline bubble keeps its old taps, so its truncated text expands;
   pinned, expansion is the **Mostrar mensagem completa** control. Its buttons (**Mostrar mensagem completa**,
   **Ir ao trecho citado**, context cards, image thumbnails) and the actions below the bubble (redefinir, copiar) keep their
-  own behavior, as does the long-press menu. VoiceOver offers **Ir para o começo da resposta** on the prompt text. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
+  own behavior, as does the long-press menu. **Alexandre, 29/10:** **Mostrar mensagem completa** answers only at its
+  text's exact frame (the bubble's tap tells it apart), since a SwiftUI button's touch area reached the gap above it
+  and the bubble's bottom padding, where a pinned bubble expanded instead of returning to its turn. VoiceOver offers **Ir para o começo da resposta** on the prompt text. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
   actions stay outside it. Attachments use 48-point square image thumbnails in a horizontal strip, no repeated image
   filename, and wrapping one-line file chips (filename up to 140 points). **Alexandre, 24/10:** while the bubble is
   folded (so **Mostrar mensagem completa** is shown), image thumbnails are hidden; expanding reveals them. File/PDF
