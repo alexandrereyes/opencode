@@ -134,11 +134,15 @@ struct MacSessionMenuItems: View {
     }
     .disabled(row?.unread != true)
     Divider()
+    // With sessions selected, the shortcuts belong to the menu's Arquivar and Excluir selecionadas.
     Button("Arquivar…", systemImage: "archivebox") { runtime.archiveRequest = row }
-      .shortcut(.archive, enabled: shortcuts)
+      .shortcut(.archive, enabled: shortcuts && !runtime.sessionSelection.active)
       .disabled(row == nil)
-    Button("Excluir sessão…", systemImage: "trash", role: .destructive) { runtime.deleteRequest = row?.session }
-      .shortcut(.delete, enabled: shortcuts)
+    Button("Excluir sessão…", systemImage: "trash", role: .destructive) {
+      if MacTextKeys.deleteToLineStart() { return }
+      runtime.deleteRequest = row?.session
+    }
+      .shortcut(.delete, enabled: shortcuts && !runtime.sessionSelection.active)
       .disabled(row == nil || runtime.sessionSelection.active)
   }
 }

@@ -188,9 +188,14 @@ private struct MacCommands: Commands {
           runtime.bulkRequest = .selectAll
         }
         .shortcut(.selectAll)
-        Button("Arquivar selecionadas") { runtime.bulkRequest = .archive }
+        Button("Arquivar selecionadas…") { runtime.bulkRequest = .archive }
+          .shortcut(.archive, enabled: runtime.sessionSelection.active)
           .disabled(!runtime.sessionSelection.active)
-        Button("Excluir selecionadas…") { runtime.bulkRequest = .delete }
+        Button("Excluir selecionadas…") {
+          if MacTextKeys.deleteToLineStart() { return }
+          runtime.bulkRequest = .delete
+        }
+          .shortcut(.delete, enabled: runtime.sessionSelection.active)
           .disabled(!runtime.sessionSelection.active)
         Button("Encerrar seleção") { runtime.sessionSelection.clear() }
           .disabled(!runtime.sessionSelection.active)

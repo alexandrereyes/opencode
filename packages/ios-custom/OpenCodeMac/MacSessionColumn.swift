@@ -18,6 +18,7 @@ struct MacSessionColumn: View {
   @State private var showArchived = false
   @State private var showProjects = false
   @State private var bulkDelete: [SessionRow]?
+  @State private var bulkArchive: [SessionRow]?
   @AppStorage("OpenCodeSessionSections") private var collapse = SessionSectionCollapse()
   /// Holds the rows' order and sections still while the list scrolls, like the iPhone's Sessões.
   @State private var presentation = SessionListPresentation()
@@ -129,6 +130,19 @@ struct MacSessionColumn: View {
         master: rows.contains { $0.session.agent == "mestra" }))
     }
     .confirmationDialog(
+      bulkArchive?.count == 1 ? "Arquivar 1 sessão?" : "Arquivar \(bulkArchive?.count ?? 0) sessões?",
+      isPresented: Binding(get: { bulkArchive != nil }, set: { if !$0 { bulkArchive = nil } }),
+      presenting: bulkArchive
+    ) { rows in
+      Button("Arquivar", role: .destructive) {
+        bulkArchive = nil
+        archiveSelection(rows)
+      }
+      Button("Cancelar", role: .cancel) { bulkArchive = nil }
+    } message: { _ in
+      Text("As sessões sairão de Recentes e ficarão na lista de arquivadas. Não há opção de desarquivar nesta versão.")
+    }
+    .confirmationDialog(
       projectAction?.removes == true
         ? "Remover dos filtros?" : projectAction?.name == "Chats" ? "Reordenar Chats?" : "Reordenar repositório?",
       isPresented: Binding(get: { projectAction != nil }, set: { if !$0 { projectAction = nil } })
@@ -166,7 +180,8 @@ struct MacSessionColumn: View {
       runtime.bulkRequest = nil
       switch request {
       case .selectAll: selectionActions?.selectAll()
-      case .archive: selectionActions?.archive()
+      // From the menu or ⌥⌘⌫ it confirms first, like one session's Arquivar…; the bar's button archives at once.
+      case .archive: if !selectedRows.isEmpty { bulkArchive = selectedRows }
       case .delete: selectionActions?.delete()
       }
     }
@@ -221,11 +236,11 @@ struct MacSessionColumn: View {
         .accessibilityLabel("Selecionar todas")
       Button(action: selection.archive) { MacToolbarIcon(symbol: "archivebox") }
         .disabled(selection.count == 0)
-        .help("Arquivar (\(selection.count)) (⇧⌘A)")
+        .help("Arquivar (\(selection.count))")
         .accessibilityLabel("Arquivar")
       Button(action: selection.delete) { MacToolbarIcon(symbol: "trash", role: .error) }
         .disabled(selection.count == 0)
-        .help("Excluir (\(selection.count)) (⌥⌘⌫)")
+        .help("Excluir (\(selection.count)) (⌘⌫)")
         .accessibilityLabel("Excluir")
       Button(action: selection.cancel) { MacToolbarIcon(symbol: "xmark") }
         .help("Concluir a seleção")

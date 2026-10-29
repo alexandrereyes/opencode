@@ -57,8 +57,9 @@ struct MacShortcut: Identifiable {
   static let fromThis = MacShortcut(.sessions, "Nova sessão a partir desta", "n", [.shift, .command])
   static let rename = MacShortcut(.sessions, "Renomear sessão", "r", [.shift, .command])
   static let pin = MacShortcut(.sessions, "Fixar ou desafixar", "p", [.shift, .command])
-  static let archive = MacShortcut(.sessions, "Arquivar sessão", "a", [.shift, .command])
-  static let delete = MacShortcut(.sessions, "Excluir sessão", .delete, [.option, .command])
+  // Both confirm first; with sessions selected they act on the selection.
+  static let archive = MacShortcut(.sessions, "Arquivar sessão", .delete, [.option, .command])
+  static let delete = MacShortcut(.sessions, "Excluir sessão", .delete)
   static let selectAll = MacShortcut(.sessions, "Selecionar todas as sessões", "a", [.option, .command])
 
   // Conversa
@@ -114,6 +115,17 @@ struct MacShortcut: Identifiable {
     case .space: "Espaço"
     default: String(key.character).uppercased()
     }
+  }
+}
+
+/// ⌘⌫ is also the text system's "delete to the start of the line": typed in an editable field (the composer, the
+/// search), it edits the text instead of running the menu item that has it as its key equivalent.
+@MainActor enum MacTextKeys {
+  static func deleteToLineStart() -> Bool {
+    guard NSApp.currentEvent?.type == .keyDown,
+      let text = NSApp.keyWindow?.firstResponder as? NSTextView, text.isEditable else { return false }
+    text.deleteToBeginningOfLine(nil)
+    return true
   }
 }
 

@@ -3152,11 +3152,12 @@ separate track.
   background and off-screen) prints `MacBellChecks ok|FAIL …` and exits 0 or 1.
 - **Menus and shortcuts**: Arquivo (Nova sessão ⌘N, Nova janela ⌥⌘N, Atualizar ⌘R), Visualizar (Contexto ⌥⌘I,
   Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
-  Marcar como lida, Arquivar ⇧⌘A, Excluir ⌥⌘⌫, the selection's actions, Reiniciar Sessão mestra), Editar (Buscar
+  Marcar como lida, Arquivar ⌥⌘⌫, Excluir ⌘⌫, both confirmed and acting on the selection while there is one, Reiniciar Sessão mestra), Editar (Buscar
   na conversa ⌘F), Ir (Buscar projetos e sessões ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓,
   Sessão mestra ⇧⌘M, Conversar por voz, and the first nine sessions of the list, ⌘1…⌘9) and Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
   to ⌥⌘↑/⌥⌘↓, up and down Sessões. The title bar's `…` shows the same session actions and Buscar na conversa.
-  Shortcuts avoid the text editing keys (⌘A, ⌘⌫, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓).
+  Shortcuts avoid the text editing keys (⌘A, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓); ⌘⌫ typed
+  in an editable field (`MacTextKeys`) still deletes to the start of the line there instead of excluding the session.
 - **Restoration**: each window has a stable scene UUID and restores its own session, subagent, Arquivos folder/file,
   sidebar visibility, Contexto visibility and width, per server (`OpenCodeMacWindow.<uuid>.<server>`); a window
   without saved state opens Contexto at the last width dragged in any window (`OpenCodeMacContextWidth`). A deleted or
