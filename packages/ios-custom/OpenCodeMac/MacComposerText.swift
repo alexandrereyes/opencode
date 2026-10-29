@@ -110,8 +110,7 @@ final class ComposerInputView: NSScrollView {
     textView.isVerticallyResizable = true
     textView.isHorizontallyResizable = false
     textView.autoresizingMask = [.width]
-    textView.isAutomaticQuoteSubstitutionEnabled = false
-    textView.isAutomaticDashSubstitutionEnabled = false
+    textView.disableAutomaticCorrections()
     textView.setAccessibilityLabel("Mensagem")
     textView.setAccessibilityIdentifier("conversation-composer")
     documentView = textView
@@ -186,6 +185,23 @@ extension NSTextView {
 }
 
 /// Return, Shift+Return, Esc, the suggestion panel's arrows, and pasting images or composer tokens.
+extension NSTextView {
+  /// Mac composers keep what is typed: no autocorrection, capitalization, text replacement, smart quotes or dashes,
+  /// and no inline predictions. Misspellings are only underlined. (The iPhone keeps the system's corrections.)
+  func disableAutomaticCorrections() {
+    enabledTextCheckingTypes = NSTextCheckingResult.CheckingType.spelling.rawValue
+    isAutomaticSpellingCorrectionEnabled = false
+    isAutomaticTextReplacementEnabled = false
+    isAutomaticTextCompletionEnabled = false
+    isAutomaticQuoteSubstitutionEnabled = false
+    isAutomaticDashSubstitutionEnabled = false
+    isAutomaticDataDetectionEnabled = false
+    isAutomaticLinkDetectionEnabled = false
+    isGrammarCheckingEnabled = false
+    inlinePredictionType = .no
+  }
+}
+
 final class ComposerTextNSView: NSTextView {
   weak var input: ComposerInputView?
   var submit: (() -> Void)?

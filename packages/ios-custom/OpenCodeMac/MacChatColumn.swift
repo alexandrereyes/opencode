@@ -651,7 +651,7 @@ private struct MacSideQuestionSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
       }
       HStack {
-        TextField("Pergunte algo sem interromper a conversa…", text: $question).textFieldStyle(.roundedBorder)
+        TextField("Pergunte algo sem interromper a conversa…", text: $question).textFieldStyle(.roundedBorder).autocorrectionDisabled()
           .onSubmit(ask)
         Button("Perguntar", action: ask).disabled(asking || question.trimmingCharacters(in: .whitespaces).isEmpty)
       }

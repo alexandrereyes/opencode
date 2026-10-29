@@ -32,7 +32,7 @@ struct MacReplyField: NSViewRepresentable {
     view.isVerticallyResizable = true
     view.isHorizontallyResizable = false
     view.autoresizingMask = [.width]
-    view.isAutomaticQuoteSubstitutionEnabled = false
+    view.disableAutomaticCorrections()
     view.setAccessibilityLabel(placeholder)
     view.setAccessibilityIdentifier("question-reply")
     scroll.documentView = view
