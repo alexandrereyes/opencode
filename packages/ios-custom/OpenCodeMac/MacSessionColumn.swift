@@ -29,6 +29,9 @@ struct MacSessionColumn: View {
   }
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacSessionColumn")
+    #endif
     HStack(spacing: 0) {
       MacProjectRail(store: store) { name, intent in
         projectAction = ProjectAction(name: name, intent: intent)
@@ -40,7 +43,7 @@ struct MacSessionColumn: View {
   private var sessionList: some View {
     List {
       VStack(spacing: 14) {
-        SessionQuotaRings(quota: store.quota) { provider in runtime.showProxy(.provider(provider)) }
+        MacQuotaRings(quota: store.quota, runtime: runtime)
         if let selection = selectionActions { selectionBar(selection) }
       }
       .padding(.horizontal, AppLayout.margin)
@@ -71,21 +74,10 @@ struct MacSessionColumn: View {
           withAnimation(.snappy(duration: 0.2)) { runtime.sessionSelection.toggle(row.id) }
         }
       ) { row, content in
-        VStack(spacing: 0) {
-          content
-            .background {
-              if !runtime.sessionSelection.active && runtime.selection.sessionID == row.id {
-                RoundedRectangle(cornerRadius: 12).fill(theme.color(.highlight)).padding(-7)
-              }
-            }
-            // The hairline between rows ends with the row's text, like the mock, not at the column's edge.
-            .alignmentGuide(.listRowSeparatorTrailing) { $0.width }
-            .contextMenu { if !runtime.sessionSelection.active { rowActions(row) } }
-            .disabled(store.busy.contains(row.id))
-          if !runtime.sessionSelection.active {
-            MacSubagentTree(store: store, runtime: runtime, rootID: row.id)
-          }
-        }
+        #if DEBUG
+        let _ = MacPerf.count("SessionRow")
+        #endif
+        MacSessionRowCell(store: store, runtime: runtime, row: row, content: content) { rowActions(row) }
       }
     }
     .listStyle(.plain)
@@ -288,6 +280,46 @@ struct MacSessionColumn: View {
   }
 }
 
+/// A row of Sessões with its highlight, right-click menu and opened subagents. The List builds this value for every
+/// row whenever the rows change; its body, and what it reads, run only for the rows on screen.
+private struct MacSessionRowCell<Menu: View>: View {
+  @Environment(\.appTheme) private var theme
+  let store: SessionStore
+  let runtime: MacWindowRuntime
+  let row: SessionRow
+  let content: SessionColumnRow
+  @ViewBuilder let menu: () -> Menu
+
+  var body: some View {
+    VStack(spacing: 0) {
+      content
+        .background {
+          if !runtime.sessionSelection.active && runtime.selection.sessionID == row.id {
+            RoundedRectangle(cornerRadius: 12).fill(theme.color(.highlight)).padding(-7)
+          }
+        }
+        // The hairline between rows ends with the row's text, like the mock, not at the column's edge.
+        .alignmentGuide(.listRowSeparatorTrailing) { $0.width }
+        .contextMenu { if !runtime.sessionSelection.active { menu() } }
+        .disabled(store.busy.contains(row.id))
+      if !runtime.sessionSelection.active {
+        MacSubagentTree(store: store, runtime: runtime, rootID: row.id)
+      }
+    }
+  }
+}
+
+/// The LLM proxy rings atop Sessões. Built here, from references only, so a list change re-evaluating the column
+/// does not rebuild them: a new `open` closure would, and each ring projects every account's quota.
+private struct MacQuotaRings: View {
+  let quota: SubscriptionStore
+  let runtime: MacWindowRuntime
+
+  var body: some View {
+    SessionQuotaRings(quota: quota) { provider in runtime.showProxy(.provider(provider)) }
+  }
+}
+
 /// The iPhone's "Sessão mestra" tab accessory at the foot of Sessões: the current master opens in the middle
 /// column; without one, Nova sessão opens in its master mode and the first message creates it.
 private struct MacMasterAccessory: View {
@@ -297,6 +329,9 @@ private struct MacMasterAccessory: View {
   @State private var hovering = false
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacMasterAccessory")
+    #endif
     Button { runtime.openMaster() } label: {
       HStack(spacing: 8) {
         Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 13, weight: .medium))

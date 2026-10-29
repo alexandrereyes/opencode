@@ -270,11 +270,26 @@ private struct MacFixtureServer: Sendable {
         project: "prj_ios", minutes: max(midnight + 60, 18 * 60)),
       Root(id: "ses_mac_android", title: "Conversas Android", directory: home + "/Dev/android-chat",
         project: "prj_android", minutes: max(midnight + 120, 22 * 60)),
-    ]
+    ] + perfRoots
+  }
+
+  /// `-OpenCodeMacPerf`: a long history (`-OpenCodeMacPerfSessions <n>`, 200 by default) across the projects.
+  private var perfRoots: [Root] {
+    guard MacPerf.enabled else { return [] }
+    let count = MacFixture.value("-OpenCodeMacPerfSessions").flatMap(Int.init) ?? 200
+    let places = [(root, "prj_opencode2"), (home + "/Dev/abacato-v2", "prj_abacato"),
+      (home + "/Dev/ios-live-activity", "prj_ios"), (home + "/Dev/android-chat", "prj_android")]
+    return (0..<count).map { index in
+      Root(id: String(format: "ses_mac_h%03d", index), title: "Sessão antiga \(index)",
+        directory: places[index % places.count].0, project: places[index % places.count].1,
+        minutes: 30 + Double(index) * 47)
+    }
   }
 
   private func rootSession(_ value: Root) -> String {
-    let at = now - value.minutes * minute
+    // `-OpenCodeMacPerf`: the streaming roots were just updated, as a real server's are on every step.
+    let at = MacPerf.enabled && MacPerf.streaming.contains(value.id) ? Date.now.timeIntervalSince1970 * 1000
+      : now - value.minutes * minute
     let isMain = value.id == MacFixture.rootID
     let tokens = isMain ? #"{"input":1200,"output":24000,"reasoning":0,"cache":{"read":2378000,"write":10700}}"# : #"{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}"#
     let context = isMain ? #","context":{"id":"msg_root","tokens":{"input":1400,"output":3200,"reasoning":0,"cache":{"read":274000,"write":0}},"model":{"id":"opus-5.5","providerID":"llm-proxy"}}"# : ""
@@ -324,13 +339,16 @@ private struct MacFixtureServer: Sendable {
   private func transcript(_ id: String) -> String {
     if let child = Self.live.first(where: { $0.id == id }) {
       let tool = child.activity.map { #",{"type":"tool","id":"call_\#(id)",\#($0.dropFirst())"# } ?? ""
-      return #"{"data":[{"id":"msg_\#(id)_a","type":"assistant","time":{"created":\#(now - minute)},"content":[{"type":"text","text":"Trabalhando em \#(child.title)."}\#(tool)]}]}"#
+      return #"{"data":[{"id":"msg_\#(id)_a","type":"assistant","time":{"created":\#(now - minute)},"content":[{"type":"text","text":"Trabalhando em \#(child.title)\#(perfTick)."}\#(tool)]}]}"#
     }
     guard id == MacFixture.rootID else {
-      return #"{"data":[{"id":"msg_\#(id)","type":"assistant","time":{"created":\#(now - 30 * minute)},"content":[{"type":"text","text":"Resumo sintético da sessão."}]}]}"#
+      return #"{"data":[{"id":"msg_\#(id)","type":"assistant","time":{"created":\#(now - 30 * minute)},"content":[{"type":"text","text":"Resumo sintético da sessão\#(MacPerf.streaming.contains(id) ? perfTick : "")."}]}]}"#
     }
     return #"{"data":[\#(rootMessages.reversed().joined(separator: ","))]}"#
   }
+
+  /// `-OpenCodeMacPerf`: previews of streaming sessions change as their text grows.
+  private var perfTick: String { MacPerf.enabled ? " · \(Int(Date.now.timeIntervalSince1970 * 4))" : "" }
 
   /// Two turns, oldest first: the first ended (its answer, an activity card of 15 calls and the footer); the
   /// second runs the four live subagents, with one prompt waiting in the queue (`/inbox`).

@@ -10,6 +10,9 @@ struct MacContextColumn: View {
   @Bindable var runtime: MacWindowRuntime
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacContextColumn")
+    #endif
     if runtime.selection.files != nil {
       MacFilesView(context: store, runtime: runtime)
     } else {
@@ -33,6 +36,9 @@ struct ContextColumnSections: View {
   let runtime: MacWindowRuntime
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("ContextColumnSections")
+    #endif
     VStack(alignment: .leading, spacing: 0) {
       if let error = store.error {
         Label(error, systemImage: "exclamationmark.triangle").appFont(.caption)
@@ -396,14 +402,9 @@ private struct SubagentLine: View {
 /// A small gray ring turning while a subagent runs.
 private struct ContextSpinner: View {
   @Environment(\.appTheme) private var theme
-  @State private var turning = false
   var body: some View {
-    Circle().trim(from: 0, to: 0.72)
-      .stroke(theme.color(.textSecondary), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+    MacSpinningArc(from: 0, to: 0.72, color: theme.nsColor(.textSecondary), lineWidth: 1.5, period: 1.1)
       .frame(width: 10, height: 10)
-      .rotationEffect(.degrees(turning ? 360 : 0))
-      .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: turning)
-      .onAppear { turning = true }
   }
 }
 

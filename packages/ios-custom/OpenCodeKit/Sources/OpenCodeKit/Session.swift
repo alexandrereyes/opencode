@@ -98,7 +98,7 @@ public struct Project: Codable, Sendable, Identifiable, Hashable {
   }
 }
 
-public struct LocatedDirectory: Codable, Sendable {
+public struct LocatedDirectory: Codable, Sendable, Equatable {
   public let directory: String
   public let worktree: String
   public let canonical: String

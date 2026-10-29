@@ -69,6 +69,8 @@ final class ComposerInputView: NSScrollView {
   weak var representedDraft: ConversationDraft?
   var composerOwner: UUID?
   var representedRevision = -1
+  /// The height last given to SwiftUI for the field's own width (`MacComposerEditor.sizeThatFits`).
+  var measuredHeight: CGFloat?
   var composerTheme = AppTheme.selected
   var composerFont = ComposerDocument.editorFont
   /// The message role's reading line height (20 pt at 14 pt), the same as a prompt or an answer. Every line is

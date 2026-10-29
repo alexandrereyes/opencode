@@ -64,6 +64,9 @@ struct MacSubagentTree: View {
     return SubagentNavigation.path(root: rootID, child: child, sessions: Array(sessions.values))
   }
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacSubagentTree")
+    #endif
     VStack(spacing: 3) {
       ForEach(Array(path.enumerated()), id: \.element.id) { depth, session in
         Button { runtime.selection.childID = session.id } label: {

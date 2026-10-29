@@ -23,16 +23,30 @@ public enum ContextColumn {
 
   /// A subagent's cost, including the subagents it started in turn.
   public static func cost(of childID: String, members: [Session]) -> Double? {
-    let costs = members.filter { $0.id == childID || branch(of: $0.id, rootID: childID, members: members) != nil }
-      .compactMap(\.cost)
-    return costs.isEmpty ? nil : costs.reduce(0, +)
+    cost(of: childID, members: members, parents: parents(members))
   }
 
   /// The direct child of `rootID` that `sessionID` belongs to (itself, or the child it descends from).
   public static func branch(of sessionID: String, rootID: String, members: [Session]) -> String? {
-    let parents = Dictionary(members.map { ($0.id, $0.parentID) }, uniquingKeysWith: { first, _ in first })
+    branch(of: sessionID, rootID: rootID, parents: parents(members), limit: members.count)
+  }
+
+  // The family's parents are indexed once per projection: rebuilding them for every member made the subagent list
+  // cubic in the family's size.
+  private static func parents(_ members: [Session]) -> [String: String?] {
+    Dictionary(members.map { ($0.id, $0.parentID) }, uniquingKeysWith: { first, _ in first })
+  }
+
+  private static func cost(of childID: String, members: [Session], parents: [String: String?]) -> Double? {
+    let costs = members.filter {
+      $0.id == childID || branch(of: $0.id, rootID: childID, parents: parents, limit: members.count) != nil
+    }.compactMap(\.cost)
+    return costs.isEmpty ? nil : costs.reduce(0, +)
+  }
+
+  private static func branch(of sessionID: String, rootID: String, parents: [String: String?], limit: Int) -> String? {
     var current = sessionID
-    for _ in 0..<members.count + 1 {
+    for _ in 0..<limit + 1 {
       guard let parent = parents[current] ?? nil else { return nil }
       if parent == rootID { return current }
       current = parent
@@ -101,11 +115,12 @@ public enum ContextColumn {
     permissions: [PermissionRequest], forms: [PendingForm], resources: [SessionResource]
   ) -> Subagents {
     let sessions = Dictionary(members.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let parents = parents(members)
     let rows = work.filter { $0.kind == .agent }.map { work -> Subagent in
       let child = work.sessionID
       let owns = { (id: String) -> Bool in
         guard let child else { return false }
-        return id == child || branch(of: id, rootID: child, members: members) != nil
+        return id == child || branch(of: id, rootID: child, parents: parents, limit: members.count) != nil
       }
       let permission = permissions.first { owns($0.sessionID) }
       let status: Status =
@@ -118,7 +133,7 @@ public enum ContextColumn {
         work: work, session: session, status: status,
         usage: context.flatMap { ContextUsage(tokens: $0.tokens, limit: ContextUsage.limit($0.model, models: models)) },
         cacheHit: ContextUsage.cacheHit(session?.tokens ?? context?.tokens),
-        cost: child.flatMap { cost(of: $0, members: members) },
+        cost: child.flatMap { cost(of: $0, members: members, parents: parents) },
         permission: permission,
         resources: resources.filter { resource in
           inUse(resource) && resource.owner.map { owns($0.sessionID) } == true
