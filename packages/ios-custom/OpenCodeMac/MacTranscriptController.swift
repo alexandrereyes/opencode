@@ -1007,9 +1007,46 @@ final class MacTranscriptDocument: NSView {
 
 final class MacTranscriptScrollView: NSScrollView {
   var userScrolled: ((NSEvent) -> Void)?
+  private var wheelMonitor: Any?
+
   override func scrollWheel(with event: NSEvent) {
     userScrolled?(event)
     super.scrollWheel(with: event)
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
+    wheelMonitor = nil
+    guard window != nil else { return }
+    wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+      guard let self, self.forwardsWheel(event) else { return event }
+      self.scrollWheel(with: event)
+      return nil
+    }
+  }
+
+  /// Tables and code blocks scroll sideways in their own horizontal scroll views, which fill the column's width.
+  /// AppKit turns a mouse wheel's vertical turn into sideways scrolling there, so over a table (or the empty space
+  /// beside it) the wheel did nothing. A vertical mouse-wheel turn over such a view scrolls the conversation;
+  /// Shift+wheel and trackpad gestures keep scrolling the table, and vertical inner views (a long prompt) keep theirs.
+  private func forwardsWheel(_ event: NSEvent) -> Bool {
+    guard let window, event.window === window, !event.hasPreciseScrollingDeltas,
+      abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
+      let content = window.contentView,
+      var view = content.hitTest(content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow)
+    else { return false }
+    var nested = false
+    while view !== self {
+      if let scroll = view as? NSScrollView {
+        let height = scroll.documentView?.frame.height ?? 0
+        if height > scroll.contentView.bounds.height + 1 { return false }
+        nested = true
+      }
+      guard let parent = view.superview else { return false }
+      view = parent
+    }
+    return nested
   }
 }
 
