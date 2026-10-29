@@ -9,16 +9,17 @@ import UserNotifications
 @MainActor @Observable
 final class SessionStore {
   let acceptsLaunchSession: Bool
-  private(set) var entries: [NavigationEntry] = []
-  private(set) var projects: [Project] = []
-  private(set) var preferences: Preferences?
+  // The inputs of `rows`: each change drops the rows built from them.
+  private(set) var entries: [NavigationEntry] = [] { didSet { derived = nil } }
+  private(set) var projects: [Project] = [] { didSet { derived = nil } }
+  private(set) var preferences: Preferences? { didSet { derived = nil } }
   let quota: SubscriptionStore
   private(set) var previews: [String: SessionPreview] = [:]
   private(set) var permissions: [PermissionRequest] = []
   private(set) var forms: [PendingForm] = []
-  private(set) var archived: [Session] = []
+  private(set) var archived: [Session] = [] { didSet { derived = nil } }
   private(set) var directoryMetadata = SessionDirectoryCache()
-  private(set) var active: Set<String> = []
+  private(set) var active: Set<String> = [] { didSet { derived = nil } }
   private(set) var loading = false
   private(set) var connected = false
   private(set) var serverVersion: String?
@@ -66,9 +67,9 @@ final class SessionStore {
   private(set) var deletedIDs: Set<String> = []
   var error: String?
   private(set) var notice: ConversationNotice?
-  var filter = SessionFilter.all
+  var filter = SessionFilter.all { didSet { derived?.filtered = nil } }
   /// A selected repository's project ID, or `chatsSelection` for managed chats.
-  var selectedProject: String?
+  var selectedProject: String? { didSet { derived?.filtered = nil } }
   static let chatsSelection = SessionListFilter.chats
   var chatsSelected: Bool { selectedProject == Self.chatsSelection }
   struct ConversationRoute: Hashable {
@@ -136,8 +137,11 @@ final class SessionStore {
   @ObservationIgnored let quoteModes = QuoteModes()
   @ObservationIgnored let expansions = ConversationExpansionMemory()
   @ObservationIgnored let reversions = ConversationReverts()
-  @ObservationIgnored private var order = RecentOrder()
-  private(set) var chatRoot: String?
+  @ObservationIgnored private var order = RecentOrder() { didSet { derived = nil } }
+  private(set) var chatRoot: String? { didSet { derived = nil } }
+  /// `rows` and `filtered`, built once per change of their inputs instead of on every read: windows, rows and
+  /// toolbars read them many times per update.
+  @ObservationIgnored private var derived: (rows: [SessionRow], filtered: [SessionRow]?)?
   @ObservationIgnored private var reloadPending = false
   @ObservationIgnored private var scheduled: Task<Void, Never>?
   @ObservationIgnored private var lastReloadStarted: ContinuousClock.Instant?
@@ -238,11 +242,17 @@ final class SessionStore {
   }
 
   var rows: [SessionRow] {
-    SessionList.rows(
+    // Every input is read on each call, so observers track the same properties as when the rows were rebuilt.
+    let masterID = masterID
+    let entries = entries, projects = projects, active = active, preferences = preferences, chatRoot = chatRoot
+    if let derived { return derived.rows }
+    let rows = SessionList.rows(
       entries: entries.filter { $0.session.id != masterID }, projects: projects, active: active,
       pins: preferences?.data.pinnedSessions ?? [], notify: preferences?.data.notifySessions ?? [],
       autoApprove: preferences?.data.settings.autoApprove ?? false, ranks: order.ranks,
       chatRoot: chatRoot)
+    derived = (rows, nil)
+    return rows
   }
   var filtered: [SessionRow] {
     #if DEBUG && os(iOS)
@@ -251,7 +261,13 @@ final class SessionStore {
       return rows.filter { $0.id == id }
     }
     #endif
-    return SessionListFilter(project: selectedProject, state: filter).rows(rows, label: directoryLabel)
+    let scope = SessionListFilter(project: selectedProject, state: filter)
+    let rows = rows
+    if let filtered = derived?.filtered { return filtered }
+    // An empty query never reads the directory labels.
+    let filtered = scope.rows(rows, label: directoryLabel)
+    derived?.filtered = filtered
+    return filtered
   }
   var requestCount: Int { rows.reduce(0) { $0 + $1.requestCount } }
   var selectedProjects: [(directory: String, project: Project)] {
@@ -495,7 +511,9 @@ final class SessionStore {
       guard visible.contains(id) else { continue }
       previewing.insert(id)
       Task {
-        if let preview = try? await client.preview(id), visible.contains(id), !deletedIDs.contains(id) { previews[id] = preview }
+        // An unchanged preview is not written: every row showing a preview observes the whole dictionary.
+        if let preview = try? await client.preview(id), visible.contains(id), !deletedIDs.contains(id),
+          previews[id] != preview { previews[id] = preview }
         previewing.remove(id)
         if previewDirty.remove(id) != nil { enqueuePreview(id) }
         drainPreviews()

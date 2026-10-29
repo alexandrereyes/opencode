@@ -27,6 +27,9 @@ struct MacProjectRail: View {
   }
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacProjectRail")
+    #endif
     let items = items
     let desired = items.map(\.id)
     let order = shown.filter(desired.contains) + desired.filter { !shown.contains($0) }

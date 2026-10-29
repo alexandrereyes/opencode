@@ -11,7 +11,6 @@ struct MacWindow: View {
   @Bindable var store: SessionStore
   @Bindable var runtime: MacWindowRuntime
   @State private var context: ContextColumnStore?
-  @State private var restored = false
   @State private var detailWidth: CGFloat = 860
   @State private var windowWidth: CGFloat = 1500
   @State private var windowHeight: CGFloat = 940
@@ -24,6 +23,9 @@ struct MacWindow: View {
   private var chatMinimum: CGFloat { !runtime.state.sidebarVisible && !runtime.contextVisible ? 840 : 460 }
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacWindow")
+    #endif
     NavigationSplitView(columnVisibility: $runtime.columns) {
       MacSessionColumn(store: store, runtime: runtime)
         .navigationSplitViewColumnWidth(min: 352, ideal: 382, max: 532)
@@ -104,7 +106,51 @@ struct MacWindow: View {
       context = next
       await next.run()
     }
-    .onChange(of: store.rows.map(\.id), initial: true) { _, ids in
+    // In a view of its own: reading the rows here would re-evaluate the whole window on every list change.
+    .background(MacSelectionKeeper(store: store, runtime: runtime))
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      runtime.app.syncShown()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+      runtime.app.syncShown()
+    }
+    .onAppear { runtime.app.syncShown() }
+    #if DEBUG
+    .task {
+      if MacProxyLaunch.pane != nil, MacCapture.folder != nil { runtime.showProxy() }
+      await MacCapture.window(context: { context }, runtime: runtime, theme: theme, openWindow: openWindow,
+        openSettings: openSettings)
+    }
+    .task { await MacStress.run(runtime: runtime, openWindow: openWindow) }
+    .task { await MacPerf.run(runtime: runtime) }
+    #endif
+  }
+
+  /// Contexto, at the width the divider beside it sets.
+  private var inspector: some View {
+    Group {
+      if let context {
+        MacContextColumn(store: context, runtime: runtime)
+      } else {
+        ContentUnavailableView("Nenhuma sessão", systemImage: "sidebar.right",
+          description: Text("Escolha uma sessão para ver o contexto."))
+          .foregroundStyle(theme.color(.textSecondary))
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(theme.color(.background))
+  }
+
+}
+
+/// Keeps the window on a session as the list changes: the one it reopens on while it still exists, else the first row.
+private struct MacSelectionKeeper: View {
+  let store: SessionStore
+  let runtime: MacWindowRuntime
+  @State private var restored = false
+
+  var body: some View {
+    Color.clear.onChange(of: store.rows.map(\.id), initial: true) { _, ids in
       guard !ids.isEmpty else { return }
       #if DEBUG
       if runtime.selection.sessionID == nil, let id = MacFixture.value("-OpenCodeMacSession") {
@@ -134,38 +180,7 @@ struct MacWindow: View {
       runtime.selection.sessionID = SessionSections.group(store.filtered, now: .now)
         .first?.rows.first?.id
     }
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-      runtime.app.syncShown()
-    }
-    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
-      runtime.app.syncShown()
-    }
-    .onAppear { runtime.app.syncShown() }
-    #if DEBUG
-    .task {
-      if MacProxyLaunch.pane != nil, MacCapture.folder != nil { runtime.showProxy() }
-      await MacCapture.window(context: { context }, runtime: runtime, theme: theme, openWindow: openWindow,
-        openSettings: openSettings)
-    }
-    .task { await MacStress.run(runtime: runtime, openWindow: openWindow) }
-    #endif
   }
-
-  /// Contexto, at the width the divider beside it sets.
-  private var inspector: some View {
-    Group {
-      if let context {
-        MacContextColumn(store: context, runtime: runtime)
-      } else {
-        ContentUnavailableView("Nenhuma sessão", systemImage: "sidebar.right",
-          description: Text("Escolha uma sessão para ver o contexto."))
-          .foregroundStyle(theme.color(.textSecondary))
-      }
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(theme.color(.background))
-  }
-
 }
 
 /// The hairline between the chat and Contexto; dragging it resizes Contexto within `range`, and the width it ends

@@ -45,7 +45,7 @@ public struct SessionDirectoryLabel: Sendable, Equatable {
 }
 
 /// A server-bound snapshot: render-time reads never issue requests. Refresh only with the list throttle.
-public struct SessionDirectoryCache: Sendable {
+public struct SessionDirectoryCache: Sendable, Equatable {
   public private(set) var home: String?
   public private(set) var locations: [String: LocatedDirectory] = [:]
   public init() {}

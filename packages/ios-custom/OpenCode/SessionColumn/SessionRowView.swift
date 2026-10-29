@@ -206,6 +206,12 @@ struct RunningArc: View {
   @State private var rotating = false
 
   var body: some View {
+    #if os(macOS)
+    // Core Animation turns it on the Mac: a SwiftUI `repeatForever` re-renders the whole window every frame.
+    MacSpinningArc(from: 0.05, to: 0.5, color: theme.nsColor(.success), lineWidth: filled ? 1 : 1.7, period: 3,
+      animated: !reduceMotion, fill: filled ? theme.nsColor(.success) : nil, fillInset: 1.5)
+      .frame(width: size, height: size)
+    #else
     ZStack {
       if filled { Circle().fill(theme.color(.success)).padding(1.5) }
       Circle().trim(from: 0.05, to: 0.5)
@@ -219,6 +225,7 @@ struct RunningArc: View {
     }
     .frame(width: size, height: size)
     .onAppear { rotating = true }
+    #endif
   }
 }
 

@@ -2751,10 +2751,10 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
   the composer (`MacComposer.swift`, `MacComposerText.swift`), `MacConversationSupport.swift`, `MacNewSession.swift`,
   `ContextColumnStore.swift`, `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` +
   `MacCodeView.swift`, `MacResourceWindow.swift`, `MacShellOutput.swift`, `MacNotifications.swift`,
-  `MacProxyWindow.swift`, `MacSettingsView.swift`, `MacAssets.xcassets` (the app icon and `OpenCodeMascot`, the
-  icon beside answers), and the DEBUG-only
-  `MacFixture.swift`, `MacFixtureProxy.swift`, `MacCapture.swift`, `MacStress.swift`, `MacScrollFixture.swift` and
-  `MacScrollDriver.swift`.
+  `MacProxyWindow.swift`, `MacSettingsView.swift`, `MacSpinner.swift`, `MacAssets.xcassets` (the app icon and
+  `OpenCodeMascot`, the icon beside answers), and the DEBUG-only
+  `MacFixture.swift`, `MacFixtureProxy.swift`, `MacCapture.swift`, `MacStress.swift`, `MacPerf.swift`,
+  `MacScrollFixture.swift` and `MacScrollDriver.swift`.
 - iPhone files enter the Mac target through the `OpenCode` folder's membership exceptions for `OpenCodeMac`
   (`PBXFileSystemSynchronizedBuildFileExceptionSet` `D…024`), never by copying. To share another file, add it to that
   list, keeping it in alphabetical order. The themes (`Resources/Themes/*.json`),
@@ -2793,6 +2793,7 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
 | `NewSessionComponents.swift` (new) | `ProjectAvatar`, `ChatsAvatar`, `GitBranchIcon`, `MCPChip`, `MCPFlowLayout`, moved unchanged out of `NewSessionView.swift` |
 | `ModelVisibilityView.swift` | Generic over `ModelVisibilitySource` (the conversation's `ConversationStore` on iOS, `MacModelCatalog` on the Mac); macOS shows a search field instead of `.searchable` |
 | `ThemePicker.swift` (new) | `ThemePicker` and its preview, moved unchanged out of `SettingsView.swift`; plain buttons on macOS |
+| `SessionColumn/SessionRowView.swift` (`RunningArc`) | On macOS the turning arc is `MacSpinningArc` (Core Animation); iOS keeps the SwiftUI rotation |
 | `SessionResources/ResourceViewer*.swift`, `ResourceSurface.swift`, the three kind views | `ResourceImage` frames (CGImage decoded off the main actor on macOS); on macOS `ResourceTouchOverlay` is a pointer and keyboard surface and `ResourceKeyboard` is empty; the on-screen keyboard buttons and the share sheet are iOS-only (the Mac saves the simulator capture with `NSSavePanel`); a DEBUG `fixtureFrame` hook for offline captures |
 
 The iPhone target keeps its behavior: every change is either a no-op on iOS (`#if`) or a move. OpenCodeKit gained
@@ -3648,6 +3649,51 @@ with the right geometry; failures now print whether the app and the window were 
   the thread. Like the iPhone, `POST /generate` answers at once (no stream) and nothing reaches the conversation.
 - **Fixture:** `/generate` returns a local Markdown answer; `-OpenCodeMacSideQuestion <question>` opens the sheet
   about a sample passage for the capture pipeline.
+
+### Main-thread cost with sessions streaming — 29 October
+
+Typing lagged slightly with many agents streaming; a 3-s `sample` of the installed app showed its main thread busy
+about 70% of the time, mostly laying the window out and updating SwiftUI, with `SessionStore.rows` rebuilt by every
+reader (`MacChatTitle` alone read it eight times per update). What it did:
+
+- **Repeating SwiftUI animations** re-rendered the whole window's hosting view every frame, even idle: the running
+  rows' and chips' `RunningArc` and Contexto's subagent spinner. They are now `MacSpinningArc`, a layer animation the
+  render server runs (`MacSpinner.swift`).
+- **Every key re-laid the window out:** `textDidChange` invalidated the composer's size on each key. It now does so
+  only when the height SwiftUI was given for the field's width (`ComposerInputView.measuredHeight`) changes.
+- **List reloads re-evaluated too much:** `SessionStore.rows` and `filtered` are built once per change of their inputs
+  (each input's `didSet` drops them; every read still touches the inputs, so observation is unchanged); the window
+  reads the rows only in `MacSelectionKeeper`; the chat column no longer builds its title's values (`MacChatTitle` reads
+  them, and only `MacChatAvatar` reads the usage, which every delta changes); the LLM proxy rings sit in a view without
+  closures, so a list change does not rebuild their projections; each Sessões row is a `MacSessionRowCell`, whose body
+  (highlight, menu, subagent tree) runs only for rows on screen; equal previews are not rewritten, and
+  `SessionDirectoryCache`/`LocatedDirectory` are `Equatable`, so an unchanged reload publishes nothing.
+- **Each streamed delta re-evaluated the conversation view**, which read `revision` for the search; that is now the
+  background `MacSearchFollower`.
+- `ContextColumn.subagents` indexed the family's parents for every member it checked (cubic in the family's size);
+  it indexes them once (same results).
+
+`-OpenCodeMacPerf` (DEBUG, with the fixture) measures it: 207 sessions, then six sessions (three roots, three subagents
+of the shown root; `-OpenCodeMacPerfShown` adds the shown root) streaming text at 25 Hz each through
+`EventHub.inject`, with one structural event per session a second. Phases: quiet, streaming, 50 keys through
+`window.sendEvent`, and 50 keys while streaming. Each prints the main thread's CPU share (`thread_info`), the lateness
+of a 10-ms main-queue ping, the `body` evaluations per second (or per key) of the main views, and per key the CPU and
+wall time of `sendEvent` plus the layout and display it leaves; `-OpenCodeMacPerfHold <s>` lengthens the phases for a
+`sample`, `-OpenCodeMacPerfKeys <n>` the typing. Medians of three interleaved Debug runs per side on the shared Mac
+(load 9–190), before → after:
+
+| Phase | Main-thread CPU | Ping p95 | Per key (CPU p50/p95) |
+| --- | --- | --- | --- |
+| Quiet | 24% → 1% | 1.7 → 0.1 ms | |
+| Streaming | 34% → 10% | 36 → 2.3 ms | |
+| Typing | 33% → 5% | 7.3 → 0.7 ms | 8.1/9.7 → 1.3/1.8 ms |
+| Typing while streaming | 41% → 13% | 276 → 15 ms | 5.9/10.9 → 1.4/1.9 ms |
+| Shown root streaming too | 50% → 41% | 28 → 8 ms | |
+
+A key re-evaluates no `body` of `MacWindow`, `MacChatColumn`, `MacConversationView`, Sessões or Contexto, before or
+after. While streaming, `MacWindow` went from 0.3 evaluations a second to none and, with the shown root streaming,
+`MacConversationView` from 23 to 1.5 and the transcript host's update from 23 to 2; what remains there is the
+transcript's own rebuild of the growing answer. These are shared-machine Debug samples, comparable with each other only.
 
 ## Platform and distribution
 

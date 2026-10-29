@@ -71,6 +71,10 @@ import OpenCodeKit
     #endif
     publish(.disconnected)
   }
+  #if DEBUG
+  /// Fixtures without a server feed synthetic events through the same path as the connection's.
+  func inject(_ event: ServerEvent) { publish(event) }
+  #endif
   private func publish(_ event: ServerEvent) {
     sequence += 1
     let receivedAt = Date.now.timeIntervalSince1970 * 1000

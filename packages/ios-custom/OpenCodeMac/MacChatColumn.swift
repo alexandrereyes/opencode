@@ -16,9 +16,11 @@ struct MacChatColumn: View {
   @State private var deleteCandidate: Session?
 
   private var shownID: String? { runtime.selection.childID ?? runtime.selection.sessionID }
-  private var row: SessionRow? { store.rows.first { $0.id == runtime.selection.sessionID } }
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacChatColumn")
+    #endif
     Group {
       if let id = shownID {
         let master = runtime.selection.master && runtime.selection.childID == nil
@@ -43,15 +45,9 @@ struct MacChatColumn: View {
       if let id = shownID { store.conversations.touch(id) }
     }
     .toolbar {
+      // The title reads the rows and the live conversation itself, so their changes leave this column alone.
       MacPlainToolbarItem(placement: .navigation) {
-        let conversation = shownID.flatMap { store.liveConversation($0) }
-        MacChatTitle(
-          store: store, runtime: runtime,
-          title: runtime.selection.master && runtime.selection.childID == nil ? "Sessão mestra"
-            : conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode",
-          usage: conversation?.sessionUsage, width: titleWidth,
-          running: conversation?.working ?? (row?.state == .running || shownID.map(store.active.contains) == true))
-        .padding(.leading, 6)
+        MacChatTitle(store: store, runtime: runtime, width: titleWidth).padding(.leading, 6)
       }
       MacToolbarFlexibleSpace()
       MacPlainToolbarItem {
@@ -116,6 +112,9 @@ struct MacConversationView: View {
   }
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacConversationView")
+    #endif
     VStack(spacing: 0) {
       if let parentID { childHeader(parentID) }
       if let notice = conversation.notice {
@@ -204,7 +203,8 @@ struct MacConversationView: View {
       search.cancelPaging()
       search.update(conversation, reset: true)
     }
-    .onChange(of: conversation.revision) { _, _ in if search.open { search.update(conversation) } }
+    // Each streamed delta bumps the revision: only this background view, not the conversation, observes it.
+    .background(MacSearchFollower(search: search, conversation: conversation))
     .onReceive(NotificationCenter.default.publisher(for: .macSearchConversation)) { note in
       if note.object as? UUID == runtime.id { openSearch() }
     }
@@ -425,6 +425,16 @@ struct MacConversationView: View {
       }
       runtime.showFiles(at: URL(fileURLWithPath: path).deletingLastPathComponent().path, file: path)
     }
+  }
+}
+
+/// Keeps an open search's matches current as the transcript changes.
+private struct MacSearchFollower: View {
+  let search: ConversationSearchState
+  let conversation: ConversationStore
+
+  var body: some View {
+    Color.clear.onChange(of: conversation.revision) { _, _ in if search.open { search.update(conversation) } }
   }
 }
 

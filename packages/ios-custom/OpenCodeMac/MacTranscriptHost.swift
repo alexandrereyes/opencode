@@ -28,6 +28,9 @@ struct MacTranscriptHost: NSViewControllerRepresentable {
   }
 
   func updateNSViewController(_ controller: MacTranscriptController, context: Context) {
+    #if DEBUG
+    MacPerf.count("MacTranscriptHost")
+    #endif
     controller.update(theme: theme, quotes: quotes, search: search, bottomPadding: bottomPadding,
       collapsible: collapsible)
     configure(controller.context)

@@ -52,6 +52,9 @@ struct MacComposer: View {
   }
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacComposer")
+    #endif
     VStack(spacing: 7) {
       if let trigger {
         ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn, highlight: highlight) {
@@ -443,6 +446,9 @@ struct MacComposerEditor: NSViewRepresentable {
   }
 
   func updateNSView(_ view: ComposerInputView, context: Context) {
+    #if DEBUG
+    MacPerf.count("MacComposerEditor")
+    #endif
     _ = draft.editorRefresh
     context.coordinator.parent = self
     view.composerOwner = owner
@@ -496,10 +502,18 @@ struct MacComposerEditor: NSViewRepresentable {
   /// is smaller (three lines at least), then the text scrolls inside the field, following the caret.
   func sizeThatFits(_ proposal: ProposedViewSize, nsView: ComposerInputView, context: Context) -> CGSize? {
     guard let width = proposal.width, width > 0 else { return nil }
-    let line = nsView.lineHeight
-    let window = nsView.window.map { max(3, floor($0.contentLayoutRect.height * 0.4 / line)) } ?? .infinity
+    let height = Self.height(nsView, width: width)
+    if let container = nsView.textView.textContainer, abs(container.size.width - width) < 0.5 {
+      nsView.measuredHeight = height
+    }
+    return CGSize(width: width, height: height)
+  }
+
+  static func height(_ view: ComposerInputView, width: CGFloat) -> CGFloat {
+    let line = view.lineHeight
+    let window = view.window.map { max(3, floor($0.contentLayoutRect.height * 0.4 / line)) } ?? .infinity
     let maximum = line * min(ComposerInputView.maximumLines, window)
-    return CGSize(width: width, height: min(max(line, nsView.contentHeight(width: width)), maximum))
+    return min(max(line, view.contentHeight(width: width)), maximum)
   }
 
   final class Coordinator: NSObject, NSTextViewDelegate {
@@ -514,7 +528,11 @@ struct MacComposerEditor: NSViewRepresentable {
         let input = (notification.object as? ComposerTextNSView)?.input else { return }
       parent.draft.receiveEditor(input)
       input.textView.typingAttributes = input.plainAttributes
-      input.invalidateIntrinsicContentSize()
+      // Only a change of height asks SwiftUI to lay the window out again; most keys leave the line count alone.
+      if let width = input.textView.textContainer?.size.width,
+        input.measuredHeight != MacComposerEditor.height(input, width: width) {
+        input.invalidateIntrinsicContentSize()
+      }
       let now = MacAttachments.cited(in: input.textStorage)
       for id in cited.subtracting(now) {
         if let attachment = parent.draft.attachments.first(where: { $0.id == id }) { parent.draft.remove(attachment) }

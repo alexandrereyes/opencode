@@ -50,6 +50,9 @@ struct MacSessionActions: View {
   @Bindable var runtime: MacWindowRuntime
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacSessionActions")
+    #endif
     HStack(spacing: 2) {
       MacNotificationBell(store: store, runtime: runtime)
       if runtime.selection.master && runtime.selection.childID == nil {
@@ -146,21 +149,27 @@ struct MacChatTitle: View {
   @Environment(\.appTheme) private var theme
   @Bindable var store: SessionStore
   @Bindable var runtime: MacWindowRuntime
-  let title: String
-  let usage: ContextUsage?
   let width: CGFloat
-  let running: Bool
 
-  private var row: SessionRow? { store.rows.first { $0.id == runtime.selection.sessionID } }
   private var master: Bool { runtime.selection.master }
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacChatTitle")
+    #endif
+    let shownID = runtime.selection.childID ?? runtime.selection.sessionID
+    let row = store.rows.first { $0.id == runtime.selection.sessionID }
+    let conversation = shownID.flatMap { store.liveConversation($0) }
+    let title = master && runtime.selection.childID == nil ? "Sessão mestra"
+      : conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode"
+    let running = conversation?.working ?? (row?.state == .running || shownID.map(store.active.contains) == true)
+    let subtitle = subtitle(row)
     HStack(spacing: 9) {
-      ConversationAvatar(
-        context: usage?.fraction, master: master,
+      MacChatAvatar(
+        conversation: conversation, master: master,
         colors: theme.avatar(SessionList.avatarColor(row?.project, fallback: row?.session.projectID ?? "")),
         monogram: SessionList.monogram(row?.projectName ?? title),
-        icon: row.flatMap { $0.chat ? nil : ProjectIcon.of($0.project) }, size: 30)
+        icon: row.flatMap { $0.chat ? nil : ProjectIcon.of($0.project) })
       ConversationTitle(
         title: master ? "Sessão mestra" : title, subtitle: subtitle,
         status: running ? "trabalhando…" : "", waiting: row?.state == .permission || row?.state == .question)
@@ -176,8 +185,23 @@ struct MacChatTitle: View {
   }
 
   /// The worktree folder's name, like the iPhone header.
-  private var subtitle: String {
+  private func subtitle(_ row: SessionRow?) -> String {
     guard let row, let label = store.directoryLabel(row.session) else { return "" }
     return URL(fileURLWithPath: label.path).lastPathComponent
+  }
+}
+
+/// The title's avatar in its context ring. The ring's usage is read from the transcript, which every streamed delta
+/// changes: only this view observes it, not the whole title.
+private struct MacChatAvatar: View {
+  let conversation: ConversationStore?
+  let master: Bool
+  let colors: (background: Color, text: Color)
+  let monogram: String
+  let icon: ProjectIcon?
+
+  var body: some View {
+    ConversationAvatar(context: conversation?.sessionUsage?.fraction, master: master, colors: colors,
+      monogram: monogram, icon: icon, size: 30)
   }
 }
