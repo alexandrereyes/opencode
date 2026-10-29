@@ -82,6 +82,7 @@ struct MacShortcut: Identifiable {
   // NavigationSplitView's own sidebar command.
   static let sidebar = MacShortcut(.window, "Mostrar ou ocultar Sessões", caps: ["⌃", "⌘", "S"])
   static let proxy = MacShortcut(.window, "LLM proxy", "l", [.shift, .command])
+  static let disk = MacShortcut(.window, "Espaço em disco", "d", [.shift, .command])
 
   // Imagem: the image viewer's window. MacImageScrollView handles the zoom keys (⌘= too) and the arrows there,
   // ahead of the menus, so ⌘1 is Tamanho real in it.
@@ -96,7 +97,7 @@ struct MacShortcut: Identifiable {
     search, newSession, newWindow, reload, compose, settings, shortcuts, searchNext, searchPrevious,
     numbered, railProjects, previous, next, back, master, fromThis, rename, pin, archive, delete, selectAll,
     find, model, sideQuestion, send, newline, dictationKey, dictationEditor, createSession,
-    context, files, previousFile, nextFile, sidebar, proxy,
+    context, files, previousFile, nextFile, sidebar, proxy, disk,
     copyImage, zoomIn, zoomOut, zoomFit, zoomActual, panImage,
   ]
 

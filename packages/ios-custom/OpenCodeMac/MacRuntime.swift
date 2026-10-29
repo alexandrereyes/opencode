@@ -17,6 +17,8 @@ import SwiftUI
   var windows: [UUID: MacWindowRuntime] = [:]
   /// The bell's list in every window (`MacNotificationBell`).
   let alertInbox = MacAlertInbox()
+  /// Espaço em disco: the rail's bar and the sheet, shared by every window.
+  let disk = MacDiskStore()
   weak var front: MacWindowRuntime?
   var initialSelection: MacSelection?
   var pendingNotification: (id: String, server: String?)?

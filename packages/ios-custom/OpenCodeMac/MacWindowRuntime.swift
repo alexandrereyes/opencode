@@ -43,6 +43,8 @@ import SwiftUI
   var proxyVisible = false
   /// Atalhos do teclado (⌘/, the keyboard in the project rail).
   var shortcutsVisible = false
+  /// Espaço em disco (⇧⌘D, Janela ▸ Espaço em disco, the disk bar in the project rail).
+  var diskVisible = false
   var sessionSelection = SessionSelection()
   var bulkRequest: MacBulkRequest?
   /// The project rail's chips after Todas, in the order it shows them now (it reorders after a pause): ⌥2…⌥9.

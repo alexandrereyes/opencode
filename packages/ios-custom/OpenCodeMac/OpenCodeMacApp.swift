@@ -126,7 +126,7 @@ private struct MacWindowScene: View {
 
 /// The menu bar: Arquivo (Nova sessão, Nova janela, Atualizar), Visualizar (Contexto, Arquivos, the state filters),
 /// Sessão (the selected session's actions and the selection mode), Ir (search, back, previous/next, Sessão mestra,
-/// voice, ⌘1…⌘9) and the LLM proxy modal in Janela.
+/// voice, ⌘1…⌘9) and the LLM proxy and Espaço em disco modals in Janela.
 private struct MacCommands: Commands {
   @Environment(\.openWindow) private var openWindow
   @FocusedValue(\.macWindow) private var runtime
@@ -171,6 +171,9 @@ private struct MacCommands: Commands {
       Divider()
       Button("LLM proxy") { runtime?.showProxy() }
         .shortcut(.proxy)
+        .disabled(runtime?.store == nil)
+      Button("Espaço em disco") { runtime?.diskVisible = true }
+        .shortcut(.disk)
         .disabled(runtime?.store == nil)
     }
     CommandMenu("Sessão") {

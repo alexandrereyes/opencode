@@ -7,9 +7,11 @@ struct MacProjectRail: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.openSettings) private var openSettings
   let store: SessionStore
+  let disk: MacDiskStore
   let action: (String, PreferenceIntent) -> Void
   let add: () -> Void
   let shortcuts: () -> Void
+  let space: () -> Void
   /// The chips' order as shown, for ⌥2…⌥9 (`MacWindowRuntime.railOrder`).
   var shownOrder: ([String]) -> Void = { _ in }
   @State private var shown: [String] = []
@@ -46,9 +48,10 @@ struct MacProjectRail: View {
     .onChange(of: order, initial: true) { _, value in shownOrder(value) }
   }
 
-  /// Pinned to the rail's foot, outside the scrolling projects: Atalhos do teclado above Ajustes.
+  /// Pinned to the rail's foot, outside the scrolling projects: the disk bar, Atalhos do teclado and Ajustes.
   private var footer: some View {
     VStack(spacing: 9) {
+      MacDiskIndicator(disk: disk, action: space)
       Button(action: shortcuts) { tile(name: "Atalhos do teclado", symbol: "keyboard", selected: false, count: 0) }
         .help("Atalhos do teclado (⌘/)").accessibilityLabel("Atalhos do teclado")
         .accessibilityIdentifier("rail-shortcuts")

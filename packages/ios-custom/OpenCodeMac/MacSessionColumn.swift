@@ -35,9 +35,11 @@ struct MacSessionColumn: View {
     let _ = MacPerf.count("MacSessionColumn")
     #endif
     HStack(spacing: 0) {
-      MacProjectRail(store: store) { name, intent in
+      MacProjectRail(store: store, disk: runtime.app.disk) { name, intent in
         projectAction = ProjectAction(name: name, intent: intent)
-      } add: { showProjects = true } shortcuts: { runtime.shortcutsVisible = true } shownOrder: { order in
+      } add: { showProjects = true } shortcuts: { runtime.shortcutsVisible = true } space: {
+        runtime.diskVisible = true
+      } shownOrder: { order in
         if runtime.railOrder != order { runtime.railOrder = order }
       }
       sessionList
