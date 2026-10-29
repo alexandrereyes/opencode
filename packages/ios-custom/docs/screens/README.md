@@ -63,6 +63,7 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Sessões · Chats | Sessões → Chats | [PNG](sessions-list-chats-dark.png) | [PNG](sessions-list-chats-light.png) |
 | Sessões · chats em Todas | Filtro Todas; chat e projeto na mesma lista, com avatares distintos | [PNG](sessions-chats-mixed-dark.png) | [PNG](sessions-chats-mixed-light.png) |
 | Sessões · repositório | Sessões → Projeto Exemplo 0 | [PNG](sessions-list-repository-dark.png) | [PNG](sessions-list-repository-light.png) |
+| Sessões · projeto vazio | Sessões → Projeto Exemplo 1; sem sessões do repositório, apenas Arquivadas | [PNG](sessions-project-empty-dark.png) | — |
 | Chips · não lida | Sessões; Projeto Exemplo 3 com ponto laranja, antes de Chats e dos projetos lidos | [PNG](sessions-chips-unread-dark.png) | [PNG](sessions-chips-unread-light.png) |
 | Chips · em execução | Todas → Projeto Exemplo 0 rodando → Projeto Exemplo 3 não lido → ordem manual | [PNG](sessions-chips-running-dark.png) | [PNG](sessions-chips-running-light.png) |
 | Chats · ordem manual | Manter pressionado Chats; primeiro por padrão, com Mover para depois disponível | [PNG](sessions-chats-order-menu-dark.png) | — |
@@ -102,9 +103,9 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Scripts · em execução | Agentes e tarefas → Scripts (1); comando sintético e ação Parar | [PNG](session-agents-scripts-dark.png) | — |
 | Scripts · vazio | Agentes e tarefas → Scripts (0); “Nenhum script em segundo plano.” | [PNG](session-agents-scripts-empty-dark.png) | — |
 | Explorador de arquivos | Detalhes → Diretório de trabalho | [PNG](files-explorer-default-dark.png) | — |
-| Arquivo Markdown | Explorador → README.md; renderização e player de leitura | [PNG](files-markdown-default-dark.png) | — |
-| Arquivo de imagem | Explorador → preview.png; imagem sintética | [PNG](files-image-default-dark.png) | — |
-| Prévia HTML offline | Explorador → index.html; página e theme.css sintéticos no modo Arquivos locais, sem internet | [PNG](files-html-preview-dark.png) | — |
+| Arquivo Markdown | Explorador → README.md; player e chevron inferior para o próximo arquivo | [PNG](files-markdown-default-dark.png) | — |
+| Arquivo de imagem | Explorador → preview.png; imagem sintética e chevron inferior para o anterior | [PNG](files-image-default-dark.png) | — |
+| Prévia HTML offline | Explorador → index.html; página/CSS locais e chevrons inferiores dos dois vizinhos | [PNG](files-html-preview-dark.png) | — |
 | Sessão mestra | Faixa Sessão mestra; estado antes da primeira mensagem | [PNG](master-session-empty-dark.png) | — |
 | Voz | Faixa de voz falando, acima da faixa da mestra | [PNG](sessions-voice-speaking-dark.png) | — |
 | Citação no rascunho | Conversa com citação sintética → Citações · 1 | [PNG](conversation-quote-draft-dark.png) | — |
@@ -113,6 +114,12 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Pergunta paralela | Conversa → enviar `/btw Qual deve ser o primeiro passo?` | [PNG](conversation-side-question-dark.png) | — |
 
 ## Revisão da navegação
+
+Revisão dos arquivos e filtros vazios (base `012d1aaad4`): os visualizadores usam chevrons discretos
+nos cantos inferiores, apenas quando há arquivo vizinho; a fixture inclui Markdown, HTML e imagem
+na mesma pasta (`012d1aaad4`). Projeto Exemplo 1 tem apenas chats, portanto o filtro do repositório
+mostra Arquivadas sem o estado vazio antigo (`4036c61270`). As capturas de atenção foram conferidas
+após `202c953feb`: o transporte é offline e nenhum alerta de permissão do sistema é acionado.
 
 Revisão da margem da mestra e do transcript (base `eb29f1f92c`): a faixa usa **21 pt** de
 margem horizontal, alinhada à faixa de voz (`eb29f1f92c`). As referências de Sessões, conversa
