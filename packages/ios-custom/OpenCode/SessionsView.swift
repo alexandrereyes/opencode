@@ -398,7 +398,8 @@ private struct SessionMasterBar: View {
     .buttonStyle(.plain)
     .glassEffect(.regular.interactive(), in: .capsule)
     .accessibilityIdentifier("master-accessory")
-    .padding(.horizontal, AppLayout.margin)
+    // The floating voice bar's inset: during a call it stacks right above, at the same width.
+    .padding(.horizontal, 21)
     .padding(.top, 6)
     .padding(.bottom, 4)
   }

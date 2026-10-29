@@ -2,7 +2,7 @@ import XCTest
 
 @MainActor final class MasterSessionTests: XCTestCase {
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
-  private var serverURL: String { environment["OPENCODE_TEST_SERVER_URL"] ?? "http://127.0.0.1:4179" }
+  private var serverURL: String { TestSandbox.url }
   private var theme: String { environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
   private func launch(old: Bool = false, session: String? = nil) throws -> XCUIApplication {
     continueAfterFailure = false
@@ -37,10 +37,25 @@ import XCTest
     return data
   }
   func testEmptyFirstSendHiddenAndTrashStartsFresh() async throws {
+    // Start without a master whatever ran before (testDeletedMasterIsRecreatedWhenOpened leaves one), as the trash does.
+    struct Pointer: Decodable {
+      let output: Output
+      struct Output: Decodable { let data: Data }
+      struct Data: Decodable { let masterSessions: [String: String]? }
+    }
+    let pointer = try JSONDecoder().decode(Pointer.self, from: await request("/api/rpc/custom.preferences/get", body: Data(#"{"input":{}}"#.utf8)))
+    if let old = pointer.output.data.masterSessions?["local"] {
+      _ = try await request("/api/rpc/custom.archive/archive", body: Data(#"{"input":{"sessionID":"\#(old)"}}"#.utf8))
+    }
+    _ = try await request("/api/rpc/custom.preferences/mutate", body: Data(#"{"input":{"type":"master.clear","server":"local"}}"#.utf8))
     let app = try launch()
     defer { app.terminate() }
     let accessory = app.buttons["master-accessory"]
     XCTAssertTrue(accessory.waitForExistence(timeout: 30))
+    // The count comes from the loaded rows; the sandbox's own seeded requests count, the master's must not.
+    XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'session-row-'")).firstMatch
+      .waitForExistence(timeout: 30))
+    let requests = accessory.label
     accessory.tap()
     XCTAssertTrue(app.staticTexts["master-empty"].waitForExistence(timeout: 30))
     let input = app.textViews["conversation-composer"]
@@ -114,7 +129,7 @@ import XCTest
     // The fixed master title exists only inside the accessory, never as a session row.
     XCTAssertEqual(app.buttons.matching(identifier: "master-accessory").count, 1)
     XCTAssertFalse(app.buttons["session-row-" + id].exists)
-    XCTAssertTrue(accessory.label.contains("Tudo em dia"))
+    XCTAssertEqual(accessory.label, requests)
     shot("hidden")
     accessory.tap()
     XCTAssertTrue(app.buttons["master-trash"].waitForExistence(timeout: 20))

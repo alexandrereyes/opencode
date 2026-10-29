@@ -37,31 +37,57 @@ def api(path, body=None, method="POST"):
 theme = os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")
 token = uuid.uuid4().hex
 own, missing = "ses_" + uuid.uuid4().hex, "ses_" + uuid.uuid4().hex
-directory = Path(manifest["directory"]) / ("onda5-location-" + token)
+# Outside any Git repository: a vanished non-Git directory offers no move to a root checkout.
+directory = home / "repos" / ("onda5-location-" + token)
 directory.mkdir()
 moved = directory.with_name(directory.name + "-moved")
+# A fake Git project whose worktree `sumiu` (holding a parent and a child Session) is removed, with `outro` left to
+# choose: the relocation offer of testMoveToProjectRootRestoresComposerWithStrandedChild.
+relocate_root = home / "repos" / ("onda5-relocate-" + token)
+relocate_worktrees = relocate_root.with_name(relocate_root.name + "-worktrees")
+relocate, relocate_child = "ses_" + uuid.uuid4().hex, "ses_" + uuid.uuid4().hex
+relocate_created = False
+
+def git(*command):
+    subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture",
+        "-c", "user.email=fixture@example.invalid", *command], cwd=relocate_root, check=True, capture_output=True)
+
+def history(session, title, path, parent=None):
+    info = {"id": session, "title": title, "projectID": "global", "location": {"directory": path}, "agent": "build",
+        "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"},
+        "cost": 0, "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+        "outcome": "succeeded", "time": {"created": now, "updated": now, "idle": now, "viewed": now}}
+    if parent:
+        info["parentID"] = parent
+    api("/api/experimental/session/import", {"info": info, "location": {"directory": path}, "messages": [
+        {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Uma sessão de verificação isolada.", "time": {"created": now - 1000}},
+        {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build",
+         "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"},
+         "time": {"created": now - 900, "completed": now - 800},
+         "finish": "stop", "content": [{"type": "text", "text": "Histórico preservado para conferir os controles nativos."}]}]})
 now = int(time.time() * 1000)
 configuration = derived / ("Build/Products/SessionReading-" + token + ".xctestrun")
 evidence = Path(os.environ.get("OPENCODE_TEST_EVIDENCE", str(temporary / "ios-conversa-prints/onda5")))
 result = temporary / ("onda5-" + theme + "-" + token + ".xcresult")
 try:
-    for session, path in [(own, manifest["directory"]), (missing, str(directory))]:
-        api("/api/experimental/session/import", {
-            "info": {"id": session, "title": "Onda 5 — ações" if session == own else "Onda 5 — diretório ausente",
-                "projectID": "global", "location": {"directory": path}, "agent": "build",
-                "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"},
-                "cost": 0, "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
-                "outcome": "succeeded", "time": {"created": now, "updated": now, "idle": now, "viewed": now}},
-            "location": {"directory": path}, "messages": [
-                {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Uma sessão de verificação isolada.", "time": {"created": now - 1000}},
-                {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build",
-                 "model": {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"},
-                 "time": {"created": now - 900, "completed": now - 800},
-                 "finish": "stop", "content": [{"type": "text", "text": "Histórico preservado para conferir os controles nativos."}]}]})
+    history(own, "Onda 5 — ações", manifest["directory"])
+    history(missing, "Onda 5 — diretório ausente", str(directory))
     directory.rename(moved)
+    relocate_root.mkdir()
+    (relocate_root / "README.md").write_text("Repositório fictício de verificação.\n")
+    git("init", "-b", "main")
+    git("add", ".")
+    git("commit", "-m", "Fixture")
+    git("worktree", "add", "-b", "outro", str(relocate_worktrees / "outro"))
+    git("worktree", "add", "-b", "sumiu", str(relocate_worktrees / "sumiu"))
+    relocate_created = True
+    history(relocate, "Onda 5 — mover para a raiz", str(relocate_worktrees / "sumiu"))
+    history(relocate_child, "Onda 5 — subsessão ilhada", str(relocate_worktrees / "sumiu"), parent=relocate)
+    git("worktree", "remove", str(relocate_worktrees / "sumiu"))
     run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
     environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_TEST_THEME": theme, "OPENCODE_TEST_SERVER_URL": server,
-                   "OPENCODE_TEST_SESSION_ACTIONS": own, "OPENCODE_TEST_SESSION_MISSING": missing}
+                   "OPENCODE_TEST_SESSION_ACTIONS": own, "OPENCODE_TEST_SESSION_MISSING": missing,
+                   "OPENCODE_TEST_SESSION_RELOCATE": relocate}
     for key, role in [("A", "working"), ("C", "history"), ("CHILD", "child-1")]:
         environment["OPENCODE_TEST_" + key] = next(s["id"] for s in manifest["sessions"] if s["role"] == role)
     targets = ([target for c in run["TestConfigurations"] for target in c["TestTargets"]]
@@ -103,3 +129,8 @@ finally:
     if moved.exists():
         moved.rename(directory)
     directory.rmdir()
+    if relocate_created:
+        # The server deletes the child with its parent.
+        api("/api/session/" + relocate, method="DELETE")
+    shutil.rmtree(relocate_worktrees, ignore_errors=True)
+    shutil.rmtree(relocate_root, ignore_errors=True)

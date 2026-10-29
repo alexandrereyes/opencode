@@ -40,7 +40,15 @@ environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": p
 for key, role in [("A", "working"), ("C", "history"), ("CHILD", "child-1")]:
     environment["OPENCODE_TEST_" + key] = next(s["id"] for s in manifest["sessions"] if s["role"] == role)
 tests = sys.argv[1:] or ["OpenCodeUITests/SessionRowsTests", "OpenCodeTests/SessionRowLayoutTests"]
+
+# SessionRowsTests filters by the conversation fixture's repository chip; seed-conversation.ts does not open it.
+chips = api("/api/rpc/custom.preferences/get", {"input": {}}, method="POST")["output"]["data"]
+opened = manifest["directory"] not in [item["worktree"] for item in
+    chips.get("projects", {}).get("local", {}).get("projects", [])]
 try:
+    if opened:
+        api("/api/rpc/custom.preferences/mutate", {"input": {"type": "project.open", "server": "local",
+            "directory": manifest["directory"]}}, method="POST")
     if any("SessionReadingTests" in test for test in tests):
         now = int(time.time() * 1000)
         for role, title, directory in [
@@ -89,6 +97,9 @@ try:
     sys.exit(status)
 finally:
     configured.unlink(missing_ok=True)
+    if opened:
+        api("/api/rpc/custom.preferences/mutate", {"input": {"type": "project.close", "server": "local",
+            "directory": manifest["directory"]}}, method="POST")
     for session in owned:
         api("/api/session/" + session, method="DELETE")
     subprocess.run(["xcrun", "simctl", "terminate", device, "br.com.alexandrem.opencode"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

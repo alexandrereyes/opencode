@@ -117,7 +117,7 @@ import OSLog
     }
     #if DEBUG
     let arguments = ProcessInfo.processInfo.arguments
-    let isolated = sessions.client.configuration.url.host == "127.0.0.1" && [4177, 4180, 4183].contains(sessions.client.configuration.url.port ?? -1)
+    let isolated = sessions.client.configuration.isolatedTestSandbox
     let fixture = isolated && arguments.contains("-OpenCodeVoiceFixture")
     let fakeMaster = isolated && (fixture || arguments.contains("-OpenCodeVoiceFakeMaster"))
     master = testing?.master(updates) ?? (fakeMaster ? VoiceFakeMaster(update: updates) : VoiceMaster(sessions: sessions, update: updates))

@@ -71,18 +71,29 @@ import XCTest
   }
 
   private func selectProject(_ name: String, in app: XCUIApplication) {
+    let strip = app.scrollViews.containing(.button, identifier: "filter-all").firstMatch
     let all = app.buttons["filter-all"]
-    for _ in 0..<40 {
-      if all.isHittable { break }
-      app.collectionViews.firstMatch.swipeDown(velocity: .fast)
-    }
+    reveal(all, in: strip, app: app)
     all.tap()
-    let project = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
-    for _ in 0..<8 {
-      if project.isHittable { break }
-      app.scrollViews.firstMatch.swipeLeft(velocity: .fast)
-    }
-    XCTAssertTrue(project.isHittable)
+    let project = app.buttons["filter-project-" + name]
+    reveal(project, in: strip, app: app)
     project.tap()
+  }
+
+  /// Chips reorder (running and unread first) and the strip keeps the selected chip in view, so a chip can sit off
+  /// either edge: swipe the chip strip toward it. While the list is scrolled down the strip is not on screen (nor in
+  /// the accessibility tree): scroll the list back up first.
+  private func reveal(_ chip: XCUIElement, in strip: XCUIElement, app: XCUIApplication) {
+    for _ in 0..<40 {
+      if chip.exists && chip.isHittable && chip.frame.minX >= 0 && chip.frame.maxX <= app.frame.width { break }
+      if chip.exists && chip.frame.minX < 0 {
+        strip.swipeRight()
+      } else if chip.exists && chip.frame.maxX > app.frame.width {
+        strip.swipeLeft()
+      } else {
+        app.collectionViews.firstMatch.swipeDown(velocity: .fast)
+      }
+    }
+    XCTAssertTrue(chip.isHittable)
   }
 }

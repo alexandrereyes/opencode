@@ -6,7 +6,7 @@ import SwiftUI
   static var mode: String? {
     let args = ProcessInfo.processInfo.arguments
     guard let index = args.firstIndex(of: "-OpenCodeMCPFixture"), args.indices.contains(index + 1),
-      ["http://127.0.0.1:4177", "http://127.0.0.1:4183"].contains(ServerConfiguration.launch().url.absoluteString)
+      ServerConfiguration.launch().isolatedTestSandbox
     else { return nil }
     return args[index + 1]
   }

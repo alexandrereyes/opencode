@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -359,6 +359,16 @@ describe("hub", () => {
 })
 
 describe("hub process", () => {
+  // The hub inherits the server environment; a shell started by the production server carries its fixed hub port,
+  // which is already taken, so the test hub must pick a free one.
+  const inherited = process.env.OPENCODE_RESOURCES_HUB_PORT
+  beforeEach(() => {
+    delete process.env.OPENCODE_RESOURCES_HUB_PORT
+  })
+  afterEach(() => {
+    if (inherited !== undefined) process.env.OPENCODE_RESOURCES_HUB_PORT = inherited
+  })
+
   test("starts once per state directory and answers the plugin client", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-resources-hub-"))
     // The plugin creates the state directory before the hub writes its log there.

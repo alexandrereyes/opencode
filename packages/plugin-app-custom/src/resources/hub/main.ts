@@ -56,19 +56,24 @@ export async function main() {
 
 /** One hub per state directory: the lock file holds the owner's PID; a dead owner's lock is taken over. */
 async function acquire(lock: string): Promise<boolean> {
-  const handle = await fs.open(lock, "wx", 0o600).catch(() => undefined)
-  if (handle) {
-    await handle.writeFile(String(process.pid))
-    await handle.close()
-    return true
-  }
+  // The lock appears with its owner's PID already in it (written aside, then hard-linked into place). Created empty and
+  // filled afterwards, a hub started at the same moment read it as ownerless, took it over, and both hubs served.
+  const claim = `${lock}.${process.pid}`
+  await fs.writeFile(claim, String(process.pid), { mode: 0o600 })
+  const take = () =>
+    fs.link(claim, lock).then(
+      () => true,
+      () => false,
+    )
+  const acquired = (await take()) || ((await abandoned(lock)) && (await take()))
+  await fs.rm(claim, { force: true })
+  return acquired
+}
+
+async function abandoned(lock: string) {
   const owner = Number(await fs.readFile(lock, "utf8").catch(() => "0"))
   if (owner > 0 && owner !== process.pid && alive(owner)) return false
   await fs.rm(lock, { force: true })
-  const retry = await fs.open(lock, "wx", 0o600).catch(() => undefined)
-  if (!retry) return false
-  await retry.writeFile(String(process.pid))
-  await retry.close()
   return true
 }
 

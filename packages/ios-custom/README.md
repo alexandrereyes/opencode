@@ -30,7 +30,8 @@ and Nova sessão.
   (themes, servers, pairing). **Fechar** (`settings-close`) or a swipe down closes it. Choosing another server
   rebuilds the store and reopens Você on the new one, as the tab did.
 - **Sessão mestra bar:** a glass capsule in a bottom `safeAreaInset`, above the home indicator where the tab bar
-  was; the list scrolls its last row (Arquivadas) above it and the floating voice bar stacks over it. It hides
+  was; the list scrolls its last row (Arquivadas) above it and the floating voice bar stacks over it, at the same
+  width (both inset 21 pt, like the former tab accessory). It hides
   while a conversation, the master or Nova sessão is on the stack, as the tab accessory did.
 - **Navigation:** Live Activity links, session alerts and the master bar close Você and push onto the Sessões
   stack; voice, `opencode-file://` and folder links, the switcher and Nova sessão never depended on a tab.
@@ -1540,7 +1541,7 @@ See [`docs/voice.md`](docs/voice.md) for the exact proxy contract, WARP requirem
 background ownership, source revisions, limitations, and test commands. The DEBUG-only
 `-OpenCodeVoiceFixture` uses no microphone, GPT Live or master inference (KV appends may trigger
 server compaction above its threshold); `-OpenCodeVoiceFakeMaster` isolates the
-master during physical audio checks. Both require explicit loopback sandbox arguments (4177 or 4180).
+master during physical audio checks. Both require an explicit loopback sandbox URL (any port but 4096/4178).
 `script/test-voice.py` uses the dedicated **OpenCode Voz** simulator and an owned disposable history.
 The TestFlight script also accepts `OPENCODE_DERIVED_DATA` for an isolated archive directory.
 
@@ -1589,7 +1590,8 @@ stay in the same header row. VoiceOver exposes one element with its state/durati
 Reduce Motion stops the waveform; long lines truncate and large Dynamic Type keeps the controls reachable.
 
 The independent DEBUG-only `-OpenCodeVoiceBarFixture <state>` requires explicit
-`-OpenCodeServerURL http://127.0.0.1:4177` (or explicit 4180). States: `listening`, `speaking`, `thinking`, `connecting`,
+`-OpenCodeServerURL` on a loopback sandbox (any port but 4096/4178, `ServerConfiguration.isolatedTestSandbox`; the old
+4177/4180/4183 allowlist hid the bar on agents' own sandbox ports, so `FloatingVoiceBarTests` never saw it). States: `listening`, `speaking`, `thinking`, `connecting`,
 `reconnecting`, `muted`, `error`, `idle` (master idle), `long`, `interrupted`. It never starts the engine,
 microphone, Live Activity or proxy. `script/test-voice-bar.py` imports and deletes one owned history,
 leaves sandbox seeds untouched, and runs on **OpenCode Faixa Voz** (`41015785-0AB5-413B-8CEC-8C986E83BC1E`).
@@ -2167,7 +2169,8 @@ project work), switching projects and Chats in the selector, and an emptied draf
 with two selected projects (`OPENCODE_TEST_CHATS_PROJECT`, default `demo`, and `OPENCODE_TEST_CHATS_OTHER_PROJECT`)
 and an empty or chat new-session draft; it creates one real chat per run. `script/test-new-session.py` accepts
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_HOME`, `OPENCODE_TEST_DERIVED`, `OPENCODE_TEST_SIMULATOR` and
-`OPENCODE_TEST_EVIDENCE` to run `NewSessionTests` against another isolated sandbox and simulator.
+`OPENCODE_TEST_EVIDENCE` to run `NewSessionTests` against another isolated sandbox and simulator (`OPENCODE_TEST_SIMULATOR`
+takes a name or a UDID; a fresh simulator without the app has no draft to clear).
 
 `NewSessionView`/`NewSessionStore` own presentation and navigation; selectors live in `NewSessionSelectors.swift`.
 `OpenCodeKit/NewSession.swift` owns projections and the narrow typed HTTP contracts, and
@@ -2180,10 +2183,12 @@ separate composer copy is created.
 After the simulator `build-for-testing`, run `python3 packages/ios-custom/script/test-new-session.py` and repeat with
 `OPENCODE_TEST_THEME=openchamber-light`. Every app launch/relaunch supplies the explicit sandbox URL/password. The
 runner checks entry with/without a repository filter, project/add-picker switching, root/existing/new directories,
-only safari-devtools live/preview toggles, base-branch selection, keyboard/layout, route replacement and persistent
+live/preview toggles of only one MCP, base-branch selection, keyboard/layout, route replacement and persistent
 draft restoration. An invalid base is injected **only into the stopped simulator app's own draft**, without changing
 Git refs or adding a production test hook. Root/existing/new sends use Luna 6/low/build and tiny no-tool prompts.
-Screenshots and JSON evidence go to
+That MCP is `OPENCODE_TEST_NEW_SESSION_MCP` (default `codex-computer-use`; `safari-devtools` left the configuration on
+19 October): the live toggle goes there and back from whatever state it starts in, and the runner restores it on the
+root checkout if a case fails midway. Screenshots and JSON evidence go to
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-onda9-prints/`.
 The checkout path is opaque: the runner verifies its Git common directory belongs to the fake repository, rather
 than assuming the sandbox's configured strategy creates folders beneath the sandbox home. **No verification checkout
@@ -2595,10 +2600,10 @@ capability. The app probes `custom.master/info` independently of normal session 
 **Atualize o servidor para usar a Sessão mestra** in the accessory and its screen; network/auth failures are not mislabeled
 as old-server support. Other sessions and settings continue working.
 
-Verification is isolated to **OpenCode Mestra** (`EC672074-0EF6-47AB-9299-8AF7FE2658C1`), iOS 27, port **4179**, and
+Verification is isolated to **OpenCode Mestra** (`EC672074-0EF6-47AB-9299-8AF7FE2658C1`), iOS 27, an owned sandbox, and
 `$TMPDIR/opencode/ios-mestra-derived`. After `build-for-testing`, run `python3 packages/ios-custom/script/test-master.py`
 and repeat with `OPENCODE_TEST_THEME=openchamber-light`. Every launch explicitly supplies the sandbox URL/password;
-private xctestrun credentials are removed afterwards. The old-server UI scenario is a DEBUG-only, 127.0.0.1:4179-gated
+private xctestrun credentials are removed afterwards. The old-server UI scenario is a DEBUG-only, loopback-sandbox-gated
 missing-RPC injection; unit transport tests also cover the actual HTTP/RPC error shapes. Live tool verification uses
 `bun packages/plugin-app-custom/script/verify-master.ts` with fake repositories beneath that sandbox's home and Luna/low
 controlled targets. Evidence and the bounded conversation transcript are in
@@ -2610,6 +2615,12 @@ disposable imports under the owned fake repository; it supplies `OPENCODE_TEST_S
 imports afterwards. The action fixture has a short title because the existing rename test taps the field's middle before
 Backspace. The sandbox currently lacks Sol ultrafast, so the live/UI runs verified the honest server-default Astra
 fallback; plugin tests cover preferred Sol/medium registration. Every requested tool completed in the live transcript.
+
+`test-master.py` now defaults to sandbox 4177 (4179 is production's resources hub) and runs on its own: the target of
+`testTargetUserMessageShowsMasterOrigin` is a synthetic import whose user message carries the `custom.master` metadata
+the master's tools write, instead of a recorded `live-transcript.json`. `testEmptyFirstSendHiddenAndTrashStartsFresh`
+archives and clears any current master first, since `testDeletedMasterIsRecreatedWhenOpened` runs before it and leaves
+one.
 
 Review-1 verification: `test-master.py --review-1` adds an ordinary managed-chat header/context/details check and saves
 captures into `ios-mestra-prints/review-1/`. All four master/chat UI cases and the current 26 app-hosted tests pass in both
@@ -2644,10 +2655,10 @@ without it, even though the app never writes), `NSLocationWhenInUseUsageDescript
 enables HealthKit on `br.com.alexandrem.opencode`; the team wildcard profile cannot sign the app anymore.
 
 Verification: `swift test --filter DeviceDataTests` (contract, dispatch, ranges, sleep/motion aggregation, cache
-filter, conversation labels), and against an isolated sandbox with location granted and set on the simulator
-(`simctl privacy <udid> grant location br.com.alexandrem.opencode`, and `simctl location <udid> set …` right before each
-run: a simulated position set long before may yield no fix within the 3-second limit):
-`test-isolated.py … OpenCodeUITests/DeviceDataTests` in both themes. The second case sends one real Mestra prompt and
+filter, conversation labels), and against an isolated sandbox with location granted and set on the simulator:
+`test-isolated.py … --location LAT,LON OpenCodeUITests/DeviceDataTests` in both themes. `--location` installs the
+build, runs `simctl privacy <udid> grant location br.com.alexandrem.opencode` and sets the position right before the
+run (a simulated position set long before may yield no fix within the 3-second limit), so a fresh simulator works. The second case sends one real Mestra prompt and
 checks that `iphone_query` for `device`, `network` and `location` completed with `status: "ok"`. HealthKit, CoreMotion
 and Photos need the physical iPhone 14: a DEBUG launch with `-OpenCodeDeviceProbe` enables every source (answer the
 iOS prompts), collects each once plus the locked-cache answer, and writes `Documents/device-probe.json`.
@@ -3691,6 +3702,9 @@ Session (no model calls) into a worktree and removed it with `git worktree remov
 `testMissingDirectoryKeepsHistoryAndBlocksComposer` (no actions for a non-Git Session) in both themes, and the server
 confirmed both Sessions in the root checkout. `SessionRelocationTests` in OpenCodeKit cover the root rule, the move
 request and its error, the refresh-then-list worktree menu and the paged stranded-descendant filter.
+`test-session-reading.py` now prepares that case itself (a fake repository with worktrees `outro` and a removed `sumiu`
+holding a parent and child, deleted afterwards) and puts the non-Git missing directory outside any repository, so the
+whole `SessionReadingTests` class runs from the script.
 
 ### Reading continuity (wave 6)
 

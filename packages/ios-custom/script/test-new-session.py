@@ -52,6 +52,11 @@ worktrees_before = {w["directory"] for w in api("/api/worktree?projectID=" + pro
 real_worktrees = Path.home() / "Worktrees"
 folders_before = {str(p) for p in real_worktrees.iterdir() if p.is_dir()}
 fake_roots = [p for p in (home / "repos").iterdir() if (p / ".git").exists()]
+# The one MCP the cases toggle live on the root checkout (codex-computer-use: connecting only starts its server).
+mcp = os.environ.get("OPENCODE_TEST_NEW_SESSION_MCP", "codex-computer-use")
+root_query = urllib.parse.urlencode({"location[directory]": project["canonical"]})
+mcp_before = {s["name"]: s["status"]["status"] for s in api("/api/mcp?" + root_query)["data"]}
+assert mcp in mcp_before, "the sandbox has no " + mcp + " MCP"
 
 def fake_checkouts():
     return {line.removeprefix("worktree ") for root in fake_roots
@@ -90,14 +95,15 @@ def cleanup_worktrees():
             report["worktrees"].append(verification)
             ledger_path.write_text(json.dumps(ledger, indent=2))
 devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
-device = next(d["udid"] for group in devices["devices"].values() for d in group if d["name"] == simulator)
+device = next(d["udid"] for group in devices["devices"].values() for d in group if simulator in (d["name"], d["udid"]))
 def draft_path():
     container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, "br.com.alexandrem.opencode", "data"], text=True).strip())
     return container / "Library/Application Support/OpenCode/Drafts" / hashlib.sha256(server.encode()).hexdigest() / "new-session/draft.json"
 
 def run_case(case):
     run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
-    environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme}
+    environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme,
+        "OPENCODE_TEST_NEW_SESSION_MCP": mcp}
     targets = [t for c in run["TestConfigurations"] for t in c["TestTargets"]] if "TestConfigurations" in run else [v for k, v in run.items() if k != "__xctestrun_metadata__"]
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update(environment)
@@ -128,7 +134,10 @@ try:
     for case in cases:
         if case in ["test01SelectorsPreviewAndPersistentDraft", "test04SelectorKeyboardDismissalAndComposerRestoration"]:
             subprocess.run(["xcrun", "simctl", "terminate", device, "br.com.alexandrem.opencode"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            draft_path().unlink(missing_ok=True)
+            # A fresh simulator has no app yet, hence no saved draft.
+            if subprocess.run(["xcrun", "simctl", "get_app_container", device, "br.com.alexandrem.opencode"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                draft_path().unlink(missing_ok=True)
         if case == "test02InvalidBaseKeepsDraftAndShowsToast":
             # No app runs between XCTest cases; persisted tokens, attachments and intent remain intact.
             draft = draft_path()
@@ -150,6 +159,12 @@ try:
 finally:
     configured.unlink(missing_ok=True)
     cleanup_worktrees()
+    # A failed case can leave the live toggle flipped on the root checkout.
+    mcp_after = {s["name"]: s["status"]["status"] for s in api("/api/mcp?" + root_query)["data"]}
+    if (mcp_after[mcp] == "connected") != (mcp_before[mcp] == "connected"):
+        api("/api/experimental/mcp/" + mcp + ("/connect?" if mcp_before[mcp] == "connected" else "/disconnect?") + root_query,
+            method="POST")
+    report["mcp"] = {"name": mcp, "before": mcp_before[mcp], "after": mcp_after[mcp]}
     for session in api("/api/session?limit=500")["data"]:
         if session["id"] in before:
             continue

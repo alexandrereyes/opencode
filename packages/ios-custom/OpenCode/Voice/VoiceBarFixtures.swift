@@ -7,7 +7,7 @@ enum VoiceBarFixtures {
   static let launchState: VoiceBarState? = {
     let arguments = ProcessInfo.processInfo.arguments
     guard let server = arguments.firstIndex(of: "-OpenCodeServerURL"), arguments.indices.contains(server + 1),
-      ["http://127.0.0.1:4177", "http://127.0.0.1:4180", "http://127.0.0.1:4183"].contains(arguments[server + 1]),
+      URL(string: arguments[server + 1]).map { ServerConfiguration(url: $0).isolatedTestSandbox } == true,
       let index = arguments.firstIndex(of: "-OpenCodeVoiceBarFixture"), arguments.indices.contains(index + 1)
     else { return nil }
     return state(arguments[index + 1])

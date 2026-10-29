@@ -21,7 +21,9 @@ parser.add_argument("--label", default="verification")
 parser.add_argument("tests", nargs="*")
 args = parser.parse_args()
 temporary = Path("/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode")
-home = temporary / "custom-sandbox-4177"
+# Overrides let a separate agent use its own sandbox, simulator and build.
+server = os.environ.get("OPENCODE_TEST_SERVER_URL", "http://127.0.0.1:4177")
+home = Path(os.environ.get("OPENCODE_TEST_HOME", temporary / "custom-sandbox-4177"))
 derived = Path(os.environ.get("OPENCODE_TEST_DERIVED", temporary / "ios-chips-derived"))
 evidence = Path(os.environ.get("OPENCODE_TEST_EVIDENCE", temporary / "ios-chips-prints"))
 evidence.mkdir(parents=True, exist_ok=True)
@@ -29,13 +31,14 @@ device = os.environ.get("OPENCODE_TEST_DEVICE", "9C92A4EB-5CD9-4F31-9A79-707A18D
 password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(), "Content-Type": "application/json"}
 theme = os.environ.get("OPENCODE_TEST_THEME", "openchamber-dark")
-environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme}
+environment = {"OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme,
+    "OPENCODE_TEST_SERVER_URL": server}
 owned = []
 folders = []
 report = {"theme": theme, "created": owned, "production": "never used", "liveMutation": "safari-devtools only" if args.live else "none"}
 
 def api(path, body=None, method="GET"):
-    request = urllib.request.Request("http://127.0.0.1:4177" + path,
+    request = urllib.request.Request(server + path,
         data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     with urllib.request.urlopen(request, timeout=60) as response:
         data = response.read()
@@ -64,7 +67,7 @@ try:
     if any("NewSessionTests/test04" in test for test in args.tests):
         subprocess.run(["xcrun", "simctl", "terminate", device, "br.com.alexandrem.opencode"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         container = Path(subprocess.check_output(["xcrun", "simctl", "get_app_container", device, "br.com.alexandrem.opencode", "data"], text=True).strip())
-        draft = container / "Library/Application Support/OpenCode/Drafts" / hashlib.sha256(b"http://127.0.0.1:4177").hexdigest() / "new-session/draft.json"
+        draft = container / "Library/Application Support/OpenCode/Drafts" / hashlib.sha256(server.encode()).hexdigest() / "new-session/draft.json"
         draft.unlink(missing_ok=True)
     manifest = json.loads((home / "seed-conversation.json").read_text())
     directory = manifest["directory"]
@@ -96,8 +99,8 @@ try:
         if "TestConfigurations" in run else [value for key, value in run.items() if key != "__xctestrun_metadata__"])
     for target in targets:
         target.setdefault("EnvironmentVariables", {}).update(environment)
-        target["CommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
-        target["UITargetAppCommandLineArguments"] = ["-OpenCodeServerURL", "http://127.0.0.1:4177"]
+        target["CommandLineArguments"] = ["-OpenCodeServerURL", server]
+        target["UITargetAppCommandLineArguments"] = ["-OpenCodeServerURL", server]
         target.setdefault("UITargetAppEnvironmentVariables", {})["OPENCODE_SERVER_PASSWORD"] = password
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)
