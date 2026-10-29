@@ -168,6 +168,12 @@ struct AppShell: View {
           .allowsHitTesting(false)
           .accessibilityIdentifier("debug-server-url")
       }
+      .overlay(alignment: .topTrailing) {
+        Text(runtime.voice.screenOutcome.isEmpty ? "none" : runtime.voice.screenOutcome)
+          .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1).clipped()
+          .allowsHitTesting(false)
+          .accessibilityIdentifier("voice-screen-outcome")
+      }
       #endif
       .toastOverlay(runtime.voice.toast)
       .sessionAlertOverlay(modal: false)

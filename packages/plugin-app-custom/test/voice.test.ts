@@ -92,6 +92,8 @@ test("voice instructions reload the editable Markdown and reject empty or unread
   const file = `${dir.path}/voice.md`
   const defaults = await Effect.runPromise(loadInstructions(file))
   expect(defaults).toContain("Silêncio durante")
+  expect(defaults).toContain(`{"text":"pedido","screen":true}`)
+  expect(defaults).toContain("nunca a de outros apps")
   await Bun.write(file, "Primeiro prompt")
   expect(await Effect.runPromise(loadInstructions(file))).toBe("Primeiro prompt")
   await Bun.write(file, "Segundo prompt")

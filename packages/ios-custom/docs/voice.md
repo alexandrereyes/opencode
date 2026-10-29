@@ -328,6 +328,41 @@ Pedidos seguintes são admitidos serialmente, mas não aguardam conclusão do mo
 usa `steer`; JSON `{"text":"…","delivery":"queue"}` só é pedido ao GPT Live quando Alexandre
 explicitamente quer enfileirar. ID repetido da mesma delegação não é reenviado.
 
+### Tela para a mestra ("dá uma olhada nessa tela")
+
+O GPT Live privado (`architecture=avas`, delegação `client`) não aceita ferramentas próprias nem
+imagem: a sessão só tem a delegação embutida e o canal só transporta `input_text`
+(`delegation.created`, `delegation.context.append`, `initial_items`); `conversation.item.create`
+e `tools` existem apenas nos protocolos Realtime v1/v2, que esta chamada não usa (conferido em
+`openai/codex`, `codex-api/src/endpoint/realtime_websocket`). Por isso a tela é um **parâmetro da
+delegação**, no mesmo JSON de `delivery`: `{"text":"pedido","screen":true}`, e **o GPT Live não
+recebe a imagem**; só a mestra a vê. O probe opt-in `testExplicitSilentLiveImageInput`
+(`TEST_RUNNER_OPENCODE_TEST_LIVE_VOICE_IMAGE=1`, simulador, uma chamada muda) confirmou em 29/10/2026:
+`conversation.item.create` é rejeitado (`invalid_value`, eventos aceitos: `session.update`,
+`session.context.append`, `response.item.create`, `response.create`, `delegation.context.append`,
+`delegation.function_call_output.create` e outros de áudio/sessão) e `session.context.append` com
+`input_image` falha com `missing_required_parameter: content[0].text`.
+
+- **Descrição fixa:** a delegação embutida não tem descrição editável. O app acrescenta
+  `VoiceProtocol.screenInstructions` ao prompt devolvido pelo servidor (`VoiceProtocol.withScreen`),
+  salvo se o texto já contiver `"screen":true`; vale mesmo com `voice.md` editado. Só o iPhone o faz.
+- **Captura:** `VoiceScreenCapture` começa no próprio evento da delegação (`Task.immediate`), antes de
+  esperar pedidos anteriores. Exige o app ativo na frente e dados protegidos disponíveis (iPhone
+  desbloqueado); renderiza só a janela principal do OpenCode (`drawHierarchy`), a no máximo 2×, JPEG
+  0,72. Nada de ReplayKit, tela inteira ou galeria. Durante ~80 ms a faixa de voz e os toasts ficam
+  com opacidade 0 (`voiceCaptureHidden`), sem mudar o layout; status bar, Live Activity e banners
+  do sistema não fazem parte da janela.
+- **Envio:** mesmo formato do composer: `deliver` grava `tela-opencode.jpg` em `uploads/` do servidor e,
+  se o modelo da mestra lê imagem, o prompt leva o `data:image/jpeg` inline. O texto é o pedido mais
+  uma linha mínima com o que a imagem não mostra:
+  `[Captura da tela do app OpenCode anexada. Sessão aberta no app: ses_…]` (sem sessão aberta, só a
+  primeira parte). Não há descrição da tela.
+- **Recusa:** com outro app na frente, a chamada em segundo plano ou o iPhone bloqueado, nada é
+  capturado nem enviado à mestra. O motivo vai ao GPT Live por `delegation.context.append` (por
+  exemplo “Não consigo ver a tela: o OpenCode não está aberto na frente. Só vejo a tela do próprio
+  OpenCode, nunca a de outros apps. Nada foi enviado à Sessão mestra.”) e aparece num toast do app.
+- O app do Mac não captura; um pedido com `screen` é recusado com motivo próprio.
+
 ## Background e Live Activity
 
 `UIBackgroundModes=audio` preserva a mídia autorizada quando o usuário bloqueia o telefone ou troca
@@ -538,6 +573,18 @@ essa apresentação exige um modelo Pro compatível ou o simulador dedicado.
 - `signing-summary.json` e `testflight-verified.log`: archive e export IPA assinados, sem upload;
   `codesign --verify --strict` passou para o app e para `VoiceActivity.appex`, build `202610231026`.
 - Consumo de modelos desta rodada: **zero**. Nenhum prompt foi enviado ao llm-proxy ou à mestra real.
+
+### Verificação da tela para a mestra — 29/10
+
+Sandbox próprio na porta 4214, simulador **OpenCode Voz Tela** recriado a cada execução.
+`swift test` (Kit) cobre a decisão de captura × recusa, a linha de contexto, o parse de `screen` e a
+descrição fixa; os hospedados cobrem a captura real sem faixa e sem toast (`VoiceScreenCaptureTests`),
+o anexo no formato do composer (`VoiceMasterTests`) e captura no evento, delegação sem tela e recusa
+só para o GPT Live (`VoiceControllerTests`). `script/test-voice-screen.py` (variáveis
+`OPENCODE_VOICE_SERVER_URL`, `_HOME`, `_DERIVED`, `_EVIDENCE`, `_DEVICE`) roda `VoiceScreenUITests`
+com `-OpenCodeVoiceScreenFixture`: GPT Live simulado, mestra real do sandbox. Ele interrompe a mestra
+assim que o prompt chega, confere a parte `image/jpeg` inline e salva a JPEG recebida; com o app em
+segundo plano, nada é enviado (`refused:background`). Nos dois temas.
 
 ### Verificação da recuperação de rede — 24/10
 

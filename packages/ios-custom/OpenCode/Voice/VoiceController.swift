@@ -6,6 +6,9 @@ import OSLog
 #if os(macOS)
 import AVFoundation
 #endif
+#if os(iOS)
+import UIKit
+#endif
 
 @MainActor @Observable final class VoiceController {
   let preferences: VoicePreferences
@@ -58,7 +61,21 @@ import AVFoundation
   @ObservationIgnored private var mediaConnected = false
   @ObservationIgnored private var currentDelegation: String?
   @ObservationIgnored private var handled: Set<String> = []
-  @ObservationIgnored private var delegationQueue: [(String, String)] = []
+  /// A delegation waiting for the master; a screen capture starts when GPT Live delegates, not when sent.
+  private struct Delegation {
+    let id: String
+    let request: VoiceMasterRequest
+    let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>?
+  }
+  @ObservationIgnored private var delegationQueue: [Delegation] = []
+  @ObservationIgnored private weak var sessions: SessionStore?
+  @ObservationIgnored private var captureScreen: @MainActor (String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot = {
+    try await VoiceScreenCapture.capture(sessionID: $0)
+  }
+  #if DEBUG
+  /// Result of the last screen delegation, read by UI tests (`voice-screen-outcome`).
+  private(set) var screenOutcome = ""
+  #endif
   @ObservationIgnored private var narration = VoiceNarration()
   @ObservationIgnored private var userUntil: Double = 0
   @ObservationIgnored private var finalNarration = false
@@ -83,6 +100,7 @@ import AVFoundation
     var policy = VoiceRecoveryPolicy()
     var network: (any VoicePathMonitoring)?
     var cues: (any VoiceCueing)?
+    var screen: (@MainActor (String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot)?
   }
   @ObservationIgnored private var testing: TestDependencies?
   convenience init(testing: TestDependencies, preferences: VoicePreferences = VoicePreferences()) {
@@ -90,6 +108,7 @@ import AVFoundation
     policy = testing.policy; makeTransport = testing.transport
     if let network = testing.network { self.network = network }
     if let cues = testing.cues { self.cues = cues }
+    if let screen = testing.screen { captureScreen = screen }
   }
   #endif
 
@@ -110,6 +129,7 @@ import AVFoundation
     NotificationCenter.default.post(name: .audioCaptureWillStart, object: nil)
     callVoice = preferences.voice
     client = sessions.client
+    self.sessions = sessions
     let token = UUID()
     epoch = token; sessionID = token; ready = false; mediaConnected = false
     recovery = VoiceRecovery(policy: policy); alert = nil
@@ -134,9 +154,30 @@ import AVFoundation
     #else
     let isolated = sessions.client.configuration.isolatedTestSandbox
     #endif
-    let fixture = isolated && arguments.contains("-OpenCodeVoiceFixture")
-    let fakeMaster = isolated && (fixture || arguments.contains("-OpenCodeVoiceFakeMaster"))
+    // The screen fixture keeps the real master of the isolated sandbox and simulates GPT Live asking for the screen.
+    let screenFixture = isolated && arguments.contains("-OpenCodeVoiceScreenFixture")
+    let fixture = isolated && (screenFixture || arguments.contains("-OpenCodeVoiceFixture"))
+    let fakeMaster = isolated && !screenFixture && (fixture || arguments.contains("-OpenCodeVoiceFakeMaster"))
     master = testing?.master(updates) ?? (fakeMaster ? VoiceFakeMaster(update: updates) : VoiceMaster(sessions: sessions, update: updates))
+    if screenFixture {
+      connectedAt = .now; state.apply(.connected); detail = "Demonstração local"; publish()
+      let delay = arguments.firstIndex(of: "-OpenCodeVoiceScreenDelay").flatMap { arguments.indices.contains($0 + 1)
+        ? Double(arguments[$0 + 1]) : nil } ?? 1
+      #if os(iOS)
+      // No audio holds this fixture in the background; keep the process running to the simulated delegation.
+      let background = UIApplication.shared.beginBackgroundTask()
+      #endif
+      connection = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(delay))
+        #if os(iOS)
+        defer { UIApplication.shared.endBackgroundTask(background) }
+        #endif
+        guard let self, epoch == token else { return }
+        handle(.delegation(id: "fixture-screen-" + UUID().uuidString,
+          text: #"{"text":"Dá uma olhada nessa tela","screen":true}"#))
+      }
+      return
+    }
     if fixture {
       connectedAt = .now; state.apply(.connected); detail = "Demonstração local"; publish()
       connection = Task { [weak self] in
@@ -150,7 +191,7 @@ import AVFoundation
           #"{"type":"input_transcript.added","item":{"id":"fixture-barge","text":"Uma correção."}}"#,
           #"{"type":"turn.done","turn":{"id":"fixture-assistant-turn","role":"assistant","transcript":"Vou conferir a demonstração. Este é o texto canônico completo.","interrupted":true}}"#,
         ] { if let event = try? VoiceProtocol.decode(Data(json.utf8)) { handle(event) } }
-        try? await self.master?.ask(VoiceMasterRequest("Demonstração"))
+        try? await self.master?.ask(VoiceMasterRequest("Demonstração"), screen: nil)
       }
       return
     }
@@ -219,10 +260,18 @@ import AVFoundation
   }
   private func instructions() async throws -> String {
     #if DEBUG
-    if let testing { return try await testing.instructions() }
+    if let testing { return Self.served(try await testing.instructions()) }
     #endif
     guard let client else { throw ClientError.operation("Conecte ao OpenCode para carregar o prompt de voz.") }
-    return try await client.voiceInstructions()
+    return Self.served(try await client.voiceInstructions())
+  }
+  /// Only the iPhone can capture its window, so only its calls learn the screen capability.
+  private static func served(_ instructions: String) -> String {
+    #if os(iOS)
+    VoiceProtocol.withScreen(instructions)
+    #else
+    instructions
+    #endif
   }
   private func permission() async -> Bool {
     #if DEBUG
@@ -367,7 +416,20 @@ import AVFoundation
       guard handled.count < 1024, delegationQueue.count < 8 else {
         Task { await fail("Há pedidos demais nesta chamada. Reconecte para continuar.") }; return
       }
-      handled.insert(id); delegationQueue.append((id, text))
+      handled.insert(id)
+      let request = VoiceMasterRequest(text)
+      // Captured now, before awaiting earlier delegations: the screen GPT Live was asked about.
+      #if os(iOS)
+      let current = sessions?.currentSessionID
+      // Immediate: the foreground check and veil run now, inside this delegation event.
+      let screen = request.screen ? Task.immediate { [captureScreen] () -> Result<VoiceScreenShot, VoiceScreenRefusal> in
+        do throws(VoiceScreenRefusal) { return .success(try await captureScreen(current)) } catch { return .failure(error) }
+      } : nil
+      #else
+      let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>? = request.screen
+        ? Task { .failure(.unavailable) } : nil
+      #endif
+      delegationQueue.append(Delegation(id: id, request: request, screen: screen))
       if delegationTask == nil { delegationTask = Task { await pumpDelegations() } }
     case .ignored: break
     }
@@ -391,15 +453,42 @@ import AVFoundation
     let token = epoch
     defer { if epoch == token { delegationTask = nil } }
     while epoch == token, !Task.isCancelled, !delegationQueue.isEmpty {
-      let request = delegationQueue.removeFirst()
-      currentDelegation = request.0
+      let delegation = delegationQueue.removeFirst()
+      currentDelegation = delegation.id
+      var screen: VoiceScreenShot?
+      if let capture = delegation.screen {
+        switch await capture.value {
+        case .success(let shot): screen = shot
+        case .failure(let refusal):
+          guard epoch == token else { return }
+          refuseScreen(refusal)
+          continue
+        }
+        guard epoch == token else { return }
+      }
       state.masterWorking = true; detail = "Enviando à Sessão mestra…"; publish()
-      do { try await master?.ask(VoiceMasterRequest(request.1)) }
-      catch {
+      do {
+        try await master?.ask(delegation.request, screen: screen)
+        #if DEBUG
+        if let screen { screenOutcome = "sent:\(screen.jpeg.count):\(screen.sessionID ?? "-")" }
+        #endif
+      } catch {
         guard epoch == token, !Task.isCancelled else { return }
         receive(.failed("Não foi possível enviar o pedido à Sessão mestra. " + error.localizedDescription))
       }
     }
+  }
+  /// Nothing reaches the master; GPT Live hears why, and the app shows it when he looks.
+  private func refuseScreen(_ refusal: VoiceScreenRefusal) {
+    let message = refusal.localizedDescription
+    VoiceTransport.log.notice("phase=screen-refused")
+    detail = message
+    finalNarration = true; narration.offer(message)
+    toast.show(message, kind: .error)
+    #if DEBUG
+    screenOutcome = "refused:\(refusal)"
+    #endif
+    publish()
   }
   private func receive(_ update: VoiceMasterUpdate) {
     switch update {

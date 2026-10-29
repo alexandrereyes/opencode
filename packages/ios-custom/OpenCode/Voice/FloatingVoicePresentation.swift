@@ -94,6 +94,7 @@ struct FloatingVoiceHost: View {
             retry: { presentation.retry(voice, sessions: sessions) }, resume: { presentation.resume(voice) },
             expand: { presentation.expanded = $0 }, transcript: { transcript = true })
         }
+        .voiceCaptureHidden()
         .alert("Voz sem conexão", isPresented: Binding(get: { showsAlert },
           set: { if !$0 { voice?.dismissAlert() } })) {
           Button("Tentar de novo") { presentation.retry(voice, sessions: sessions) }

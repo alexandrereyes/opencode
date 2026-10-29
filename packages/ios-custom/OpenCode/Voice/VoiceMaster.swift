@@ -6,8 +6,12 @@ enum VoiceMasterUpdate: Sendable {
 }
 
 @MainActor protocol VoiceMasterServing: AnyObject {
-  func ask(_ request: VoiceMasterRequest) async throws
+  /// `screen` is the OpenCode window captured when GPT Live delegated, sent as an image attachment.
+  func ask(_ request: VoiceMasterRequest, screen: VoiceScreenShot?) async throws
   func stop()
+}
+extension VoiceMasterServing {
+  func ask(_ request: VoiceMasterRequest) async throws { try await ask(request, screen: nil) }
 }
 
 @MainActor final class VoiceMaster: VoiceMasterServing {
@@ -26,16 +30,16 @@ enum VoiceMasterUpdate: Sendable {
   init(sessions: SessionStore, update: @escaping @MainActor (VoiceMasterUpdate) -> Void) {
     self.sessions = sessions; self.update = update
   }
-  func ask(_ request: VoiceMasterRequest) async throws {
+  func ask(_ request: VoiceMasterRequest, screen: VoiceScreenShot?) async throws {
     let info = try await sessions.client.masterInfo()
     guard info.version == 1 else { throw ClientError.operation("Atualize o servidor para usar a Sessão mestra.") }
-    do { try await send(request, info: info) } catch ClientError.http(404) where masterID != nil {
+    do { try await send(request, screen: screen, info: info) } catch ClientError.http(404) where masterID != nil {
       // Deleted during the call: ask the server for its replacement once.
       masterID = nil
-      try await send(request, info: info)
+      try await send(request, screen: screen, info: info)
     }
   }
-  private func send(_ request: VoiceMasterRequest, info: MasterSessionInfo) async throws {
+  private func send(_ request: VoiceMasterRequest, screen: VoiceScreenShot?, info: MasterSessionInfo) async throws {
     if masterID == nil {
       // The server reuses the current master, or creates one if it is missing, deleted or archived.
       let fallback = info.model == nil
@@ -54,7 +58,9 @@ enum VoiceMasterUpdate: Sendable {
     admitted = false; terminalPending = false
     revision += 1
     messages = []
-    let prompt = PromptRequest(text: request.text, delivery: request.delivery, agent: "mestra", model: model)
+    let prompt = if let screen {
+      try await Self.request(request, screen: screen, session: session, model: model, client: sessions.client)
+    } else { PromptRequest(text: request.text, delivery: request.delivery, agent: "mestra", model: model) }
     promptID = prompt.id
     try Task.checkCancellation()
     // Durable admission only; execution continues independently and is observed below.
@@ -62,6 +68,17 @@ enum VoiceMasterUpdate: Sendable {
     admitted = true
     update(.progress(request.delivery == .queue ? "Pedido na fila da Sessão mestra." : "Pedido enviado à Sessão mestra."))
     if terminalPending { await reconcile() }
+  }
+  /// The composer's attachment shape: staged upload, inline data URL when the model reads images.
+  static func request(_ request: VoiceMasterRequest, screen: VoiceScreenShot, session: Session, model: ModelReference,
+    client: OpenCodeClient) async throws -> PromptRequest {
+    let directory = session.location.directory
+    let input = try await client.models(directory: directory)
+      .first { $0.id == model.id && $0.providerID == model.providerID }?.capabilities?.input ?? []
+    let attachment = DraftAttachment(name: VoiceScreenShot.name, mime: "image/jpeg", size: screen.jpeg.count)
+    let delivered = try await client.deliver(attachment, bytes: screen.jpeg, directory: directory, input: input)
+    return PromptRequest(document: ComposerDocument(text: screen.prompt(request.text)), delivery: request.delivery,
+      agent: "mestra", model: model, attachments: [delivered])
   }
   private func subscribe() {
     let events = sessions.hub.events()
@@ -146,7 +163,7 @@ enum VoiceMasterUpdate: Sendable {
   let update: @MainActor (VoiceMasterUpdate) -> Void
   private var task: Task<Void, Never>?
   init(update: @escaping @MainActor (VoiceMasterUpdate) -> Void) { self.update = update }
-  func ask(_ request: VoiceMasterRequest) async throws {
+  func ask(_ request: VoiceMasterRequest, screen: VoiceScreenShot?) async throws {
     task?.cancel()
     update(.progress("A mestra está conferindo uma sessão de demonstração."))
     task = Task {
