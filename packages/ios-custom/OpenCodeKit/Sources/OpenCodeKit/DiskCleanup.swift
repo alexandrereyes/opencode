@@ -59,14 +59,19 @@ public enum DiskCleanup {
   }
 
   /// What this Mac's processes use, indexed once for thousands of lookups: a process uses a folder when its working
-  /// folder is inside it or an argument names a path inside it (`-derivedDataPath`, an app's executable). `/var` and
+  /// folder is inside it or an argument names a path inside it (`-derivedDataPath`, an app's executable). Arguments
+  /// keep their real boundaries (one string per argument, spaces included); `--flag=/path` counts too. `/var` and
   /// `/private/var` are the same folder.
   public struct ProcessUse: Sendable {
     private let folders: Set<String>
 
-    public init(arguments: [String], directories: [String]) {
-      let named = arguments.flatMap { $0.split(whereSeparator: { " \t\"'=:,".contains($0) }) }
-        .filter { $0.hasPrefix("/") }.map(String.init)
+    public init(commands: [[String]], directories: [String]) {
+      let named = commands.flatMap { $0 }.compactMap { argument -> String? in
+        if argument.hasPrefix("/") { return argument }
+        guard let equals = argument.firstIndex(of: "="), argument[argument.index(after: equals)...].hasPrefix("/")
+        else { return nil }
+        return String(argument[argument.index(after: equals)...])
+      }
       folders = Set((named + directories).flatMap { DiskCleanup.ancestors(DiskCleanup.normalized($0)) })
     }
 
@@ -147,6 +152,13 @@ public enum DiskCleanup {
     public var dirty: Int?
     /// Commits of HEAD on no remote branch; nil until git answers.
     public var unpushed: Int?
+    /// Ignored files `git worktree remove` would take that nothing regenerates (`.env`, a local database), by path;
+    /// nil until git answers.
+    public var ignored: [String]?
+    /// Initialized submodules: their own git data and commits live in the worktree, so it is never removed here.
+    public var submodules = 0
+    /// HEAD, the status lines and the unsent count when git answered: a confirmation holds only for this state.
+    public var fingerprint: String?
     /// HEAD is already in the base branch.
     public var integrated = false
     public var lastChange: Date?
@@ -164,22 +176,66 @@ public enum DiskCleanup {
     }
 
     public var name: String { URL(fileURLWithPath: path).lastPathComponent }
-    public var known: Bool { kind != .worktree || (dirty != nil && unpushed != nil) }
-    public var pending: Bool { (dirty ?? 0) > 0 || (unpushed ?? 0) > 0 }
+    public var known: Bool { kind != .worktree || (dirty != nil && unpushed != nil && ignored != nil) }
+    public var pending: Bool { (dirty ?? 0) > 0 || (unpushed ?? 0) > 0 || !(ignored ?? []).isEmpty }
   }
 
   public enum Verdict: Sendable, Equatable {
-    /// Never selectable: a live session, a process, a remote server, not a removable worktree, or not checked yet.
+    /// Never selectable: a live session, a process, a remote server, submodules, not a removable worktree, or not
+    /// checked yet.
     case locked
-    /// Selectable only after an explicit confirmation: uncommitted files or unsent commits.
+    /// Selectable only after an explicit confirmation: uncommitted files, unsent commits or ignored files at risk.
     case confirm
     case free
   }
 
   public static func verdict(_ worktree: Worktree, local: Bool) -> Verdict {
     guard local, worktree.kind == .worktree, worktree.repository != nil, !worktree.gitLocked, worktree.known,
-      worktree.sessions.active == 0, !worktree.inUse else { return .locked }
+      worktree.submodules == 0, worktree.sessions.active == 0, !worktree.inUse else { return .locked }
     return worktree.pending ? .confirm : .free
+  }
+
+  /// A confirmation holds for the exact state it was given for: any change in HEAD, the status or the unsent
+  /// commits asks again.
+  public static func confirmed(_ worktree: Worktree, by fingerprint: String?) -> Bool {
+    guard let fingerprint, let current = worktree.fingerprint else { return false }
+    return fingerprint == current
+  }
+
+  /// `git status --porcelain=v1 -z`: changed and untracked paths, and ignored ones (`!!`).
+  public static func porcelain(_ output: String) -> (changed: [String], ignored: [String]) {
+    var changed: [String] = []
+    var ignored: [String] = []
+    var entries = output.split(separator: "\0", omittingEmptySubsequences: true).map(String.init).makeIterator()
+    while let entry = entries.next() {
+      guard entry.count > 3 else { continue }
+      let code = entry.prefix(2)
+      let path = String(entry.dropFirst(3))
+      if code == "!!" {
+        ignored.append(path)
+        continue
+      }
+      changed.append(entry)
+      // A rename or copy is followed by its original path.
+      if code.first == "R" || code.first == "C" { _ = entries.next() }
+    }
+    return (changed, ignored)
+  }
+
+  /// Ignored paths any build or install recreates. Everything else ignored (`.env`, `*.db`, `.venv`, notes) counts as
+  /// work that removing the worktree would lose.
+  public static func regenerable(_ path: String) -> Bool {
+    let parts = path.split(separator: "/").map(String.init)
+    let folders: Set = ["node_modules", ".build", "build", "DerivedData", "dist", ".next", ".nuxt", ".output",
+      ".turbo", ".cache", ".parcel-cache", ".svelte-kit", ".vite", ".angular", "target", ".gradle", "coverage",
+      "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".swiftpm", "Pods", ".expo", "xcuserdata",
+      "bin", "obj", ".astro", ".kotlin"]
+    if parts.dropLast(path.hasSuffix("/") ? 0 : 1).contains(where: folders.contains) { return true }
+    if path.hasPrefix(".husky/_") || path.contains("/.husky/_") { return true }
+    guard let name = parts.last else { return false }
+    // A linked `node_modules` (a symlink) is listed as a file.
+    return name == "node_modules" || name == ".DS_Store" || name.hasSuffix(".pyc") || name.hasSuffix(".tsbuildinfo")
+      || name == ".eslintcache"
   }
 
   /// Marked when the sheet opens: free, measured, and untouched for a day.
@@ -213,16 +269,20 @@ public enum DiskCleanup {
     }
     if worktree.repository == nil { return plain("Repositório sumiu", "remova pelo Finder") }
     if worktree.gitLocked { return plain("Travada no git", "git worktree unlock") }
+    if worktree.submodules > 0 { return plain("Tem submódulos", "remova à mão") }
     if worktree.inUse { return plain("Em uso", "por um processo deste Mac") }
-    guard let dirty = worktree.dirty, let unpushed = worktree.unpushed else { return plain("Verificando…", nil) }
+    guard let dirty = worktree.dirty, let unpushed = worktree.unpushed, let ignored = worktree.ignored
+    else { return plain("Verificando…", nil) }
+    let also = [
+      unpushed > 0 ? "\(commits(unpushed)) não \(unpushed == 1 ? "enviado" : "enviados")" : nil,
+      ignored.isEmpty ? nil : ignoredText(ignored),
+    ].compactMap { $0 }
     if dirty > 0 {
       return Status(title: "\(dirty) \(dirty == 1 ? "arquivo não commitado" : "arquivos não commitados")",
-        detail: unpushed > 0 ? "e \(commits(unpushed)) não \(unpushed == 1 ? "enviado" : "enviados")" : nil,
-        tone: .warning, locked: false)
+        detail: also.isEmpty ? nil : "e " + also.joined(separator: " e "), tone: .warning, locked: false)
     }
-    if unpushed > 0 {
-      return Status(title: "\(commits(unpushed)) não \(unpushed == 1 ? "enviado" : "enviados")", detail: nil,
-        tone: .warning, locked: false)
+    if let first = also.first {
+      return Status(title: first, detail: also.count > 1 ? "e " + also[1] : nil, tone: .warning, locked: false)
     }
     let title = sessions.archived > 0 ? "Só sessões arquivadas" : "Sem sessão"
     if worktree.integrated { return plain(title, "branch já integrada") }
@@ -233,6 +293,12 @@ public enum DiskCleanup {
   }
 
   private static func commits(_ count: Int) -> String { count == 1 ? "1 commit" : "\(count) commits" }
+
+  /// "1 item ignorado (.env)", "3 itens ignorados (.env, data.db…)".
+  public static func ignoredText(_ paths: [String]) -> String {
+    let names = paths.prefix(2).map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", ")
+    return (paths.count == 1 ? "1 item ignorado" : "\(paths.count) itens ignorados") + " (\(names)\(paths.count > 2 ? "…" : ""))"
+  }
 
   // MARK: Agents' leftovers
 
@@ -248,6 +314,10 @@ public enum DiskCleanup {
     public var size: Int64?
     /// The newest change inside it, from this run's measurement (nil until measured).
     public var newest: Date?
+    /// Every entry could be read while measuring; an unreadable one keeps the item.
+    public var complete = true
+    /// Its device and inode when listed: removal checks it is still the same item, reached without links.
+    public var identity: FileIdentity?
     public var inUse = false
     public var id: String { path }
 
@@ -256,6 +326,15 @@ public enum DiskCleanup {
       self.kind = kind
       self.origin = origin
       self.originExists = originExists
+    }
+  }
+
+  public struct FileIdentity: Sendable, Equatable, Hashable {
+    public let device: Int64
+    public let inode: UInt64
+    public init(device: Int64, inode: UInt64) {
+      self.device = device
+      self.inode = inode
     }
   }
 
@@ -268,19 +347,29 @@ public enum DiskCleanup {
     }
   }
 
-  public static func kind(name: String, directory: Bool, derivedData: Bool) -> Leftover.Kind {
+  /// An Xcode DerivedData: `Build/`, its logs, index or module cache, and an `info.plist` naming the workspace it
+  /// built. A checkout (`.git`) never is one, whatever else it holds.
+  public static func derivedData(entries: Set<String>, workspacePath: String?, checkout: Bool) -> Bool {
+    guard !checkout, workspacePath?.isEmpty == false else { return false }
+    return entries.isSuperset(of: ["Build", "info.plist"])
+      && !entries.isDisjoint(with: ["Logs", "Index.noindex", "ModuleCache.noindex", "SourcePackages"])
+  }
+
+  /// `bundle`: the `.app` or `.xcresult` folder has its `Info.plist`, so it is the bundle its name says.
+  public static func kind(name: String, directory: Bool, derivedData: Bool, bundle: Bool = false) -> Leftover.Kind {
     let suffix = URL(fileURLWithPath: name).pathExtension.lowercased()
     if derivedData { return .build }
-    if directory, suffix == "xcresult" { return .tests }
-    if directory, suffix == "app" { return .app }
+    if directory, bundle, suffix == "xcresult" { return .tests }
+    if directory, bundle, suffix == "app" { return .app }
     if !directory, ["log", "trace"].contains(suffix) { return .log }
     if name == "uploads" || ["png", "jpg", "jpeg", "heic", "gif", "mov", "mp4", "webm"].contains(suffix) { return .capture }
     return .other
   }
 
-  /// Removed by Limpar: an automatic kind, measured in this run, used by no process and unchanged for a day.
+  /// Removed by Limpar: an automatic kind, fully read in this run, used by no process and unchanged for a day.
   public static func removable(_ leftover: Leftover, now: Date) -> Bool {
-    guard automatic(leftover.kind), !leftover.inUse, leftover.size != nil, let newest = leftover.newest else { return false }
+    guard automatic(leftover.kind), !leftover.inUse, leftover.complete, leftover.identity != nil, leftover.size != nil,
+      let newest = leftover.newest else { return false }
     return now.timeIntervalSince(newest) >= recent
   }
 

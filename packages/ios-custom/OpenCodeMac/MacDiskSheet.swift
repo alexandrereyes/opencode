@@ -116,6 +116,10 @@ struct MacDiskSheet: View {
         "Tem \(unpushed) \(unpushed == 1 ? "commit não enviado" : "commits não enviados"); a branch \($0) não é apagada e continua com eles."
       } ?? "Tem \(unpushed) \(unpushed == 1 ? "commit não enviado" : "commits não enviados") sem branch: eles ficam soltos no repositório.")
     }
+    if let ignored = worktree.ignored, !ignored.isEmpty {
+      parts.append("Tem \(DiskCleanup.ignoredText(ignored)), ignorados pelo git e que nada recria: se perdem ao remover.")
+    }
+    parts.append("A confirmação vale só para este estado: se algo mudar, ela é pedida de novo.")
     return parts.joined(separator: " ")
   }
 
@@ -631,14 +635,14 @@ struct MacDiskPreview: View {
   private var risky: [DiskCleanup.Worktree] { plan.worktrees.filter(\.pending) }
 
   @ViewBuilder private var preview: some View {
-    Text("Apagar \(DiskCleanup.bytes(plan.total)) deste Mac?").font(.system(size: 18, weight: .semibold))
+    Text("Apagar cerca de \(DiskCleanup.bytes(plan.total)) deste Mac?").font(.system(size: 18, weight: .semibold))
       .foregroundStyle(theme.color(.textStrong))
-    Text("As worktrees saem com git worktree remove e as branches ficam. Antes de cada item, a sessão, os processos e o git são conferidos de novo.")
+    Text("As worktrees saem com git worktree remove e as branches ficam. Antes de cada item, as sessões (lidas de novo no servidor), os processos, o git e as mudanças recentes são conferidos; o que mudou fica.")
       .font(.system(size: 12)).foregroundStyle(theme.color(.textSecondary)).fixedSize(horizontal: false, vertical: true)
     if !risky.isEmpty {
       HStack(alignment: .top, spacing: 8) {
         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(theme.color(.warning))
-        Text("\(risky.count == 1 ? "1 worktree tem" : "\(risky.count) worktrees têm") trabalho pendente que você confirmou: os arquivos não commitados se perdem.")
+        Text("\(risky.count == 1 ? "1 worktree tem" : "\(risky.count) worktrees têm") trabalho pendente que você confirmou: os arquivos não commitados e os ignorados listados se perdem. Se algo mudar até lá, ela fica.")
           .font(.system(size: 12)).foregroundStyle(theme.color(.text)).fixedSize(horizontal: false, vertical: true)
       }
       .padding(10).frame(maxWidth: .infinity, alignment: .leading)
@@ -676,19 +680,25 @@ struct MacDiskPreview: View {
       Text("Total: \(DiskCleanup.bytes(plan.total))").font(.system(size: 13, weight: .semibold))
         .foregroundStyle(theme.color(.textStrong))
       Spacer()
-      Button("Cancelar") { disk.plan = nil }.keyboardShortcut(.cancelAction)
-      Button("Apagar \(DiskCleanup.bytes(plan.total))", role: .destructive) {
-        Task { await disk.clean(plan, sessions: sessions) }
-      }
-      .accessibilityIdentifier("disk-confirm")
+      Button("Cancelar") { disk.cancelPreview() }.keyboardShortcut(.cancelAction)
+      Button("Apagar", role: .destructive) { disk.startCleaning(plan, sessions: sessions) }
+        .accessibilityIdentifier("disk-confirm")
     }
   }
 
   @ViewBuilder private func results(_ progress: MacDiskProgress) -> some View {
     if progress.finished {
       let kept = progress.lines.filter { !$0.removed }
-      Text("\(DiskCleanup.bytes(progress.freed)) liberados").font(.system(size: 18, weight: .semibold))
+      Text("Cerca de \(DiskCleanup.bytes(progress.removed)) removidos").font(.system(size: 18, weight: .semibold))
         .foregroundStyle(theme.color(.textStrong))
+      if let before = progress.freeBefore, let after = progress.freeAfter {
+        Text("Espaço livre: \(DiskCleanup.bytes(before)) → \(DiskCleanup.bytes(after)). Snapshots locais e espaço purgável podem atrasar a diferença.")
+          .font(.system(size: 12)).foregroundStyle(theme.color(.text)).fixedSize(horizontal: false, vertical: true)
+      }
+      if let stopped = progress.stopped {
+        Text("Parou antes do fim: \(stopped).").font(.system(size: 12, weight: .medium))
+          .foregroundStyle(theme.color(.warning))
+      }
       Text("\(progress.lines.count - kept.count) de \(progress.lines.count) itens removidos. Registro em \(MacDiskWorktreeRow.abbreviated(disk.roots.log.path)).")
         .font(.system(size: 12)).foregroundStyle(theme.color(.textSecondary))
       if !kept.isEmpty {
@@ -710,8 +720,13 @@ struct MacDiskPreview: View {
     } else {
       Text("Limpando…").font(.system(size: 18, weight: .semibold)).foregroundStyle(theme.color(.textStrong))
       ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
-      Text("\(progress.done) de \(progress.total)" + (progress.current.map { " · \($0)" } ?? ""))
-        .font(.system(size: 12)).foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
+      HStack {
+        Text("\(progress.done) de \(progress.total)" + (progress.current.map { " · \($0)" } ?? ""))
+          .font(.system(size: 12)).foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
+        Spacer()
+        // Stops before the next item; a git command waiting on something is ended.
+        Button("Parar") { disk.stop() }.accessibilityIdentifier("disk-stop")
+      }
     }
   }
 
