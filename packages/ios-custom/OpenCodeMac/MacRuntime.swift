@@ -145,6 +145,8 @@ struct MacNewSessionRequest: Identifiable {
   let origin: NewSessionOrigin?
   let startInChats: Bool
   var master = false
+  /// The conversation in front when ⌘N opened it: its project (or Chats) wins over the Sessões chips.
+  var front: NewSessionOrigin? = nil
 }
 
 enum MacLaunch {

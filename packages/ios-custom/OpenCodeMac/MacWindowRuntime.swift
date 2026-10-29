@@ -142,8 +142,14 @@ import SwiftUI
     proxyVisible = true
   }
 
+  /// ⌘N and the Nova sessão buttons start in the project of the conversation in front (Chats for a chat), as that
+  /// project's chip would, with its last-used destination and the default model; with none in front, the chips decide.
   func newSession() {
-    newSessionRequest = MacNewSessionRequest(origin: nil, startInChats: true)
+    let session = selection.master ? nil : selectedRow?.session
+    let front = session.flatMap { session in
+      store.flatMap { NewSessionOrigin(session: session, projects: $0.projects, chatRoot: $0.chatRoot, model: nil) }
+    }
+    newSessionRequest = MacNewSessionRequest(origin: nil, startInChats: true, front: front)
   }
 
   func newSession(from id: String) {

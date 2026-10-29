@@ -359,6 +359,7 @@ private struct MacBaseBranchPicker: View {
   private let memoryKey: String
   private let origin: NewSessionOrigin?
   private let startInChats: Bool
+  private let front: NewSessionOrigin?
   private var inheritedModel: ModelReference?
 
   /// Return is a choice for this session; only the palette's explicit ⌘Return writes the shared default.
@@ -374,6 +375,7 @@ private struct MacBaseBranchPicker: View {
     master = request.master
     origin = request.origin
     startInChats = request.startInChats
+    front = request.front
     memoryKey = "OpenCodeNewSession." + sessions.client.configuration.url.absoluteString
     draft = (drafts ?? sessions.drafts).draft(request.master ? "new-session-master" : "new-session")
     #if DEBUG
@@ -466,8 +468,10 @@ private struct MacBaseBranchPicker: View {
     defer { initialized = true }
     if master { return }
     let start = NewSessionProjection.start(
-      projects: projects, origin: origin, chatsAvailable: chatsAvailable, chatsFilter: sessions.chatsSelected,
-      filterProjectID: sessions.selectedProject, startInChats: startInChats, restoredChat: false,
+      projects: projects, origin: origin, chatsAvailable: chatsAvailable,
+      chatsFilter: front.map(\.chat) ?? sessions.chatsSelected,
+      filterProjectID: front.map { $0.chat ? nil : $0.projectID } ?? sessions.selectedProject,
+      startInChats: startInChats, restoredChat: false,
       restoredProjectID: nil, restoredWork: false,
       lastProject: sessions.preferences?.data.projects["local"]?.lastProject, categories: categories)
     switch start {
