@@ -1026,21 +1026,33 @@ final class MacTranscriptScrollView: NSScrollView {
     }
   }
 
+  /// Whether the current trackpad or Magic Mouse gesture goes to the conversation, decided by its first movement.
+  private var gestureForwarded: Bool?
+
   /// Tables and code blocks scroll sideways in their own horizontal scroll views, which fill the column's width.
-  /// AppKit turns a mouse wheel's vertical turn into sideways scrolling there, so over a table (or the empty space
-  /// beside it) the wheel did nothing. A vertical mouse-wheel turn over such a view scrolls the conversation;
-  /// Shift+wheel and trackpad gestures keep scrolling the table, and vertical inner views (a long prompt) keep theirs.
+  /// AppKit turns a vertical scroll there into sideways scrolling (or swallows it), so over a table, or the empty
+  /// space beside it, the conversation did not scroll. A vertical scroll over such a view now scrolls the
+  /// conversation: per event for a mouse wheel, per gesture for a trackpad or Magic Mouse. Shift+wheel and sideways
+  /// gestures keep scrolling the table, and inner views that really scroll vertically (a long prompt) keep theirs.
   private func forwardsWheel(_ event: NSEvent) -> Bool {
-    guard let window, event.window === window, !event.hasPreciseScrollingDeltas,
-      abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX),
-      let content = window.contentView,
+    if event.phase.contains(.began) || event.phase.contains(.mayBegin) { gestureForwarded = nil }
+    guard let window, event.window === window, overHorizontalScroll(event, in: window) else { return false }
+    let vertical = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX)
+    if event.phase.isEmpty && event.momentumPhase.isEmpty { return vertical }
+    if gestureForwarded == nil, event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 { gestureForwarded = vertical }
+    return gestureForwarded ?? false
+  }
+
+  /// The pointer is over an inner scroll view that cannot scroll vertically, inside this transcript.
+  private func overHorizontalScroll(_ event: NSEvent, in window: NSWindow) -> Bool {
+    guard let content = window.contentView,
       var view = content.hitTest(content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow)
     else { return false }
     var nested = false
     while view !== self {
       if let scroll = view as? NSScrollView {
-        let height = scroll.documentView?.frame.height ?? 0
-        if height > scroll.contentView.bounds.height + 1 { return false }
+        let tall = (scroll.documentView?.frame.height ?? 0) > scroll.contentView.bounds.height + 1
+        if scroll.hasVerticalScroller && tall { return false }
         nested = true
       }
       guard let parent = view.superview else { return false }
