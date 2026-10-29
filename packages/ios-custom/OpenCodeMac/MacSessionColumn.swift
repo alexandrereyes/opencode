@@ -4,7 +4,8 @@ import SwiftUI
 
 /// The Mac host of the shared Sessões column (`OpenCode/SessionColumn/`): selection instead of a push, the
 /// iPhone's swipe and long-press actions as a right-click menu, the selection mode (⌘-click or Selecionar) with
-/// its batch actions, and the Sessão mestra accessory at the bottom, like the iPhone's tab accessory.
+/// its batch actions in the column's title bar, and the Sessão mestra accessory at the bottom, like the iPhone's
+/// tab accessory.
 struct MacSessionColumn: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.openWindow) private var openWindow
@@ -42,10 +43,7 @@ struct MacSessionColumn: View {
 
   private var sessionList: some View {
     List {
-      VStack(spacing: 14) {
-        MacQuotaRings(quota: store.quota, runtime: runtime)
-        if let selection = selectionActions { selectionBar(selection) }
-      }
+      MacQuotaRings(quota: store.quota, runtime: runtime)
       .padding(.horizontal, AppLayout.margin)
       .padding(.top, 10).padding(.bottom, 6)
       .macThinScrollers()
@@ -93,19 +91,11 @@ struct MacSessionColumn: View {
     .toolbar {
       MacToolbarFlexibleSpace()
       MacPlainToolbarItem {
-        HStack(spacing: 4) {
-          Button { runtime.voicePresentation.toggle(runtime.app.audio.voice, sessions: store) } label: {
-            MacToolbarIcon(symbol: "waveform", role: runtime.voicePresentation.visible(runtime.app.audio.voice) ? .primary : .text)
-          }
-            .disabled(runtime.app.audio.voice.busy)
-            .help(runtime.voicePresentation.visible(runtime.app.audio.voice) ? "Encerrar conversa por voz" : "Conversar por voz com a Sessão mestra")
-            .accessibilityLabel("Conversar por voz")
-          Button { runtime.newSession() } label: { MacToolbarIcon(symbol: "square.and.pencil") }
-            .disabled(store.preferences == nil)
-            .help("Nova sessão (⌘N)")
-            .accessibilityLabel("Nova sessão")
+        if let selection = selectionActions {
+          selectionTools(selection)
+        } else {
+          columnTools
         }
-        .buttonStyle(.plain)
       }
     }
     .alert("Renomear sessão", isPresented: Binding(
@@ -201,25 +191,48 @@ struct MacSessionColumn: View {
     runtime.selection = MacSelection(sessionID: row.id)
   }
 
-  /// `N selecionadas · Selecionar todas · OK`, then Arquivar (N) and Excluir (N) as plain links.
-  private func selectionBar(_ selection: SessionColumnSelection) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
-      SessionSelectionBar(selection: selection)
-      HStack(spacing: 14) {
-        Button("Arquivar (\(selection.count))", systemImage: "archivebox", action: selection.archive)
-        Button("Excluir (\(selection.count))", systemImage: "trash", role: .destructive, action: selection.delete)
-          .foregroundStyle(theme.color(.error))
-        Spacer(minLength: 0)
-        if selection.working { ProgressView().controlSize(.small) }
+  private var columnTools: some View {
+    HStack(spacing: 4) {
+      Button { runtime.voicePresentation.toggle(runtime.app.audio.voice, sessions: store) } label: {
+        MacToolbarIcon(symbol: "waveform", role: runtime.voicePresentation.visible(runtime.app.audio.voice) ? .primary : .text)
       }
-      .appFont(.caption)
-      .buttonStyle(.plain)
-      .foregroundStyle(theme.color(.text))
-      .disabled(selection.working)
+        .disabled(runtime.app.audio.voice.busy)
+        .help(runtime.voicePresentation.visible(runtime.app.audio.voice) ? "Encerrar conversa por voz" : "Conversar por voz com a Sessão mestra")
+        .accessibilityLabel("Conversar por voz")
+      Button { runtime.newSession() } label: { MacToolbarIcon(symbol: "square.and.pencil") }
+        .disabled(store.preferences == nil)
+        .help("Nova sessão (⌘N)")
+        .accessibilityLabel("Nova sessão")
     }
-    .padding(.horizontal, 8).padding(.vertical, 6)
-    .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 10))
-    .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(theme.color(.border), lineWidth: 0.7) }
+    .buttonStyle(.plain)
+  }
+
+  /// While selecting, the column's title bar holds the batch actions in place of voice and Nova sessão, so they stay
+  /// in view however far the list is scrolled.
+  private func selectionTools(_ selection: SessionColumnSelection) -> some View {
+    HStack(spacing: 4) {
+      if selection.working { ProgressView().controlSize(.small).padding(.trailing, 4) }
+      Text(selection.count == 1 ? "1 selecionada" : "\(selection.count) selecionadas")
+        .appFont(.caption).foregroundStyle(theme.color(.textSecondary)).monospacedDigit()
+        .padding(.trailing, 4)
+      Button(action: selection.selectAll) { MacToolbarIcon(symbol: "checklist") }
+        .disabled(!selection.canSelectAll)
+        .help("Selecionar todas (⌥⌘A)")
+        .accessibilityLabel("Selecionar todas")
+      Button(action: selection.archive) { MacToolbarIcon(symbol: "archivebox") }
+        .disabled(selection.count == 0)
+        .help("Arquivar (\(selection.count)) (⇧⌘A)")
+        .accessibilityLabel("Arquivar")
+      Button(action: selection.delete) { MacToolbarIcon(symbol: "trash", role: .error) }
+        .disabled(selection.count == 0)
+        .help("Excluir (\(selection.count)) (⌥⌘⌫)")
+        .accessibilityLabel("Excluir")
+      Button(action: selection.cancel) { MacToolbarIcon(symbol: "xmark") }
+        .help("Concluir a seleção")
+        .accessibilityLabel("Concluir a seleção")
+    }
+    .buttonStyle(.plain)
+    .disabled(selection.working)
   }
 
   /// Rows of the expanded sections, in display order; "Selecionar todas" and the selection use only these.

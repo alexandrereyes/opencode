@@ -13,7 +13,7 @@ struct SessionColumnSelection {
 }
 
 /// `N selecionadas · Selecionar todas · OK`, under the header while the selection mode is on. The Mac, which has
-/// no header, shows it above its rows with the batch actions beside it.
+/// no header, puts the count and the batch actions in the Sessões column's title bar instead.
 struct SessionSelectionBar: View {
   @Environment(\.appTheme) private var theme
   let selection: SessionColumnSelection
