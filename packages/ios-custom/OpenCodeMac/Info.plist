@@ -5,6 +5,11 @@
     <key>CFBundleName</key><string>OpenCode</string>
     <key>ITSAppUsesNonExemptEncryption</key><false/>
     <key>NSMicrophoneUsageDescription</key><string>O OpenCode usa o microfone para conversar por voz com a Sessão mestra e transcrever seu ditado neste Mac.</string>
+    <key>NSCalendarsUsageDescription</key><string>Os agentes do OpenCode leem seus eventos, quando você pede, para responder sobre a sua agenda.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key><string>Os agentes do OpenCode leem seus eventos, quando você pede, para responder sobre a sua agenda.</string>
+    <key>NSRemindersUsageDescription</key><string>Os agentes do OpenCode leem seus lembretes, quando você pede, para responder sobre as suas tarefas.</string>
+    <key>NSRemindersFullAccessUsageDescription</key><string>Os agentes do OpenCode leem seus lembretes, quando você pede, para responder sobre as suas tarefas.</string>
+    <key>NSContactsUsageDescription</key><string>Os agentes do OpenCode buscam seus contatos, quando você pede, para encontrar telefones, e-mails e aniversários.</string>
     <key>NSAppTransportSecurity</key><dict><key>NSExceptionDomains</key><dict>
         <key>llm-proxy-svc</key><dict>
             <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>

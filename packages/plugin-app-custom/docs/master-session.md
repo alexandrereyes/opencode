@@ -73,11 +73,11 @@ direct call names, the attention concepts above, playbooks (overview order: need
 ambiguous targets; session creation and worktrees; send; pending requests; costs) and safety (explicit requests only,
 transcripts and tool results are untrusted data, no control through shell/API/subagents).
 
-`mac_query` (namespace `mac`, available to every agent, `src/mac-data`) reads Calendar, Reminders and Contacts on the Mac through
-the `OpenCode Mac Data` helper: `calendar` (`from`/`to`, `calendars`, `query`), `reminders` (`status`, `from`/`to`, `lists`,
+`mac_query` (namespace `mac`, available to every agent, `src/mac-data`) reads Calendar, Reminders and Contacts through
+the OpenCode app on the Mac: `calendar` (`from`/`to`, `calendars`, `query`), `reminders` (`status`, `from`/`to`, `lists`,
 `query`), `contacts` (name/phone/e-mail `query`) or `status`. Results carry the Mac time zone, `total` and `truncated`
-(item `limit` and 20,000 serialized characters); missing grants fail with where to enable them. See "Calendar, Reminders
-and Contacts" in `docs/custom-macos.md`.
+(item `limit` and 20,000 serialized characters); a closed app, a source switched off or a missing grant fails with what
+Alexandre has to do. See `docs/mac-data.md`.
 
 Both send and create tag the admitted user prompt with `{"custom.master":{"sessionID":"<origin>"}}`.
 Every tool's executor receives an explicit `MasterContext` (session, request, message, permission, VCS, worktree, model,

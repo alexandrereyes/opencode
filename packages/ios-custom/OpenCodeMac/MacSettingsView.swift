@@ -5,7 +5,8 @@ import SwiftUI
 
 /// The Mac's Ajustes (⌘,): the iPhone's Você in tabs. Servidores (saved servers, add, edit, remove, pair and switch),
 /// Aparência (the shared theme list), Leitura, Modelos (the shared "Gerenciar modelos"), Assinaturas (the LLM proxy
-/// summary), Voz, Transcrição and Sobre. Dados do iPhone and Apple Watch stay on the iPhone.
+/// summary), Voz, Transcrição, Dados do Mac (`MacDataSettings`) and Sobre. Dados do iPhone and Apple Watch stay on
+/// the iPhone.
 struct MacSettingsView: View {
   let runtime: MacRuntime
   /// The tab shown last; the window reopens on it.
@@ -26,6 +27,8 @@ struct MacSettingsView: View {
         .tabItem { Label("Modelos", systemImage: "cpu") }.tag("modelos")
       MacSubscriptionSettings(runtime: runtime)
         .tabItem { Label("Assinaturas", systemImage: "gauge.with.dots.needle.67percent") }.tag("assinaturas")
+      MacDataSettings(agent: .shared)
+        .tabItem { Label("Dados do Mac", systemImage: "calendar") }.tag("dados")
       MacAboutSettings(runtime: runtime)
         .tabItem { Label("Sobre", systemImage: "info.circle") }.tag("sobre")
     }

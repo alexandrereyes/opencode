@@ -7,7 +7,6 @@ import os from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
 import { settings } from "./custom-release"
-import { buildMacData, signingIdentity } from "./custom-signing"
 
 const source = path.resolve(import.meta.dirname, "../../..")
 const args = parseArgs({
@@ -112,20 +111,8 @@ async function up() {
         2,
       ),
     )
-    // Production's certificate gives the sandbox helper the same TCC identity, so grants carry over.
-    const macData =
-      process.platform === "darwin"
-        ? await buildMacData(
-            await signingIdentity(
-              (await Bun.file(path.join(installed, "signing/signing.keychain-db")).exists()) ? installed : home,
-            ),
-            source,
-            path.join(home, "mac-data"),
-          )
-        : undefined
     const runtime = {
       ...environment,
-      ...(macData ? { OPENCODE_MAC_DATA_HELPER: path.join(macData, "Contents/MacOS/opencode-mac-data") } : {}),
       OPENCODE_CUSTOM_HOME: home,
       OPENCODE_CUSTOM_COMMIT: commit,
       OPENCODE_CUSTOM_PORT: String(port),

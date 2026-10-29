@@ -36,12 +36,21 @@ import OpenCodeKit
             DeviceAgent.shared.connected(client)
             AgentsActivityAgent.shared.connected(client)
             SessionNotificationAgent.shared.connected(client)
+            #elseif os(macOS)
+            MacDataAgent.shared.connected(client)
             #endif
           }
           // iPhone data requests go to the device agent only; they must not trigger screen reloads.
           if case .update(let update) = event, update.type.hasPrefix("rpc.custom.device.") {
             #if os(iOS)
             DeviceAgent.shared.receive(update, client: client)
+            #endif
+            continue
+          }
+          // Mac data requests likewise go to the Mac's agent only.
+          if case .update(let update) = event, update.type.hasPrefix("rpc.custom.mac.") {
+            #if os(macOS)
+            MacDataAgent.shared.receive(update, client: client)
             #endif
             continue
           }
@@ -59,6 +68,8 @@ import OpenCodeKit
       connection += 1
       #if os(iOS)
       DeviceAgent.shared.disconnected(stopped: false)
+      #elseif os(macOS)
+      MacDataAgent.shared.disconnected(stopped: false)
       #endif
       publish(.disconnected)
       do { try await Task.sleep(for: .seconds(delay)) } catch { break }
@@ -68,6 +79,8 @@ import OpenCodeKit
     connection += 1
     #if os(iOS)
     DeviceAgent.shared.disconnected(stopped: true)
+    #elseif os(macOS)
+    MacDataAgent.shared.disconnected(stopped: true)
     #endif
     publish(.disconnected)
   }
