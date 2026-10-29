@@ -166,7 +166,6 @@ export async function prepare(home: string, dryRun = false) {
     home,
     staging,
     path.join(source, `packages/cli/dist/cli-${process.platform}-${process.arch}/bin/opencode`),
-    source,
   )
   const reported = await command([`${staging}/bin/opencode`, "--version"], work, env)
   if (reported !== `opencode v${env.OPENCODE_VERSION}`) throw new Error(`Unexpected CLI version: ${reported}`)

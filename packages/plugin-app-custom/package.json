@@ -31,6 +31,7 @@
     "./voice/rpc": "./src/voice/rpc.ts",
     "./speech/rpc": "./src/speech/rpc.ts",
     "./device/rpc": "./src/device/rpc.ts",
+    "./mac-data/rpc": "./src/mac-data/rpc.ts",
     "./resources/rpc": "./src/resources/rpc.ts",
     "./resources/protocol": "./src/resources/protocol.ts",
     "./chats/rpc": "./src/chats/rpc.ts",

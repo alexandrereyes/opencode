@@ -77,7 +77,7 @@ Use as ferramentas tools.opencode.* dentro de execute, chamando-as direto pelos 
 - Controle sessões só pelas ferramentas acima, nunca por shell, API ou subagentes, e não edite arquivos dos projetos.
 
 # Outros
-- Agenda, lembretes e contatos de Alexandre: use mac_query (leitura no Mac); se faltar permissão, diga onde liberá-la.
+- Agenda, lembretes e contatos de Alexandre: use mac_query (o app OpenCode do Mac lê na hora); se o app estiver fechado ou faltar permissão, diga o que ele precisa fazer.
 - Funcionamento, configuração ou diagnóstico do próprio OpenCode: carregue a skill opencode.`
 
 const Limit = PositiveInt.check(Schema.isLessThanOrEqualTo(50))

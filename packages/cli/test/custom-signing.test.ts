@@ -3,7 +3,7 @@ import { mkdtemp, readlink, rm, stat } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { command } from "../script/custom-release"
-import { bundle, bundleRelease, macData, macDataPath } from "../script/custom-signing"
+import { bundle, bundleRelease } from "../script/custom-signing"
 
 const homes: string[] = []
 
@@ -20,20 +20,13 @@ test.skipIf(process.platform !== "darwin")(
     await bundleRelease(home, `${home}/releases/first`, "/usr/bin/true")
     await bundleRelease(home, `${home}/releases/second`, "/usr/bin/false")
 
-    const requirement = (release: string, app = bundle) =>
-      command(["/usr/bin/codesign", "-d", "-r-", `${home}/releases/${release}/${app}`]).then(
+    const requirement = (release: string) =>
+      command(["/usr/bin/codesign", "-d", "-r-", `${home}/releases/${release}/${bundle}`]).then(
         (output) => output.split("\n").find((line) => line.startsWith("designated =>")) ?? "",
       )
     const first = await requirement("first")
     expect(first).toMatch(/^designated => identifier "local\.opencode\.custom" and certificate leaf = H"[a-f0-9]{40}"$/)
     expect(await requirement("second")).toBe(first)
-    const helper = await requirement("first", `${bundle}/Contents/Helpers/${macData}`)
-    expect(helper).toBe(first.replace('"local.opencode.custom"', '"local.opencode.custom.macdata"'))
-    expect(await requirement("second", `${bundle}/Contents/Helpers/${macData}`)).toBe(helper)
-    const status = Bun.spawn([`${home}/releases/first/${bundle}/${macDataPath}`, '{"source":"status"}'], {
-      stdout: "pipe",
-    })
-    expect(JSON.parse(await new Response(status.stdout).text())).toMatchObject({ source: "status" })
     expect(await readlink(`${home}/releases/first/bin/opencode`)).toBe(`../${bundle}/Contents/MacOS/opencode`)
     expect(await Bun.spawn([`${home}/releases/first/bin/opencode`]).exited).toBe(0)
     expect((await stat(`${home}/signing`)).mode & 0o777).toBe(0o700)

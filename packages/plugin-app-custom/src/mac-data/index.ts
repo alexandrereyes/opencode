@@ -1,52 +1,21 @@
 import { Plugin } from "@opencode/plugin/effect"
 import type { ToolEditor } from "@opencode/plugin/effect/tool"
-import { PositiveInt } from "@opencode/schema/schema"
+import { optional } from "@opencode/schema/schema"
 import { Tool } from "@opencode/schema/tool"
-import { Effect, Option, Schema } from "effect"
-import path from "node:path"
+import { Clock, Deferred, Effect, Option, Schema } from "effect"
+import { MacData } from "./rpc.js"
 
 export const toolName = "mac_query"
-// Release layout from packages/cli/script/custom-signing.ts: <release>/plugin/index.js beside the app bundle.
-export const releaseHelper = path.join(
-  import.meta.dirname,
-  "..",
-  "OpenCode Custom.app/Contents/Helpers/OpenCode Mac Data.app/Contents/MacOS/opencode-mac-data",
-)
+export const presenceKey = "mac:presence"
+export const limits = {
+  /** The app renews its presence about every 30 seconds while its event stream is connected. */
+  leaseSeconds: 75,
+  /** Long enough for a first-time macOS permission prompt, which the app waits for. */
+  timeoutSeconds: 60,
+  /** Macs not seen for this long are dropped from presence. */
+  forgetDays: 30,
+}
 const maxCharacters = 20_000
-
-const When = Schema.String.check(
-  Schema.isPattern(/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?$/),
-)
-const Names = Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))).check(
-  Schema.isMaxLength(20),
-)
-const Query = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))
-const Limit = (max: number) => PositiveInt.check(Schema.isLessThanOrEqualTo(max))
-export const Input = Schema.Union([
-  Schema.Struct({
-    source: Schema.Literal("calendar"),
-    from: Schema.optionalKey(When),
-    to: Schema.optionalKey(When),
-    calendars: Schema.optionalKey(Names),
-    query: Schema.optionalKey(Query),
-    limit: Schema.optionalKey(Limit(200)),
-  }),
-  Schema.Struct({
-    source: Schema.Literal("reminders"),
-    status: Schema.optionalKey(Schema.Literals(["pending", "completed", "all"])),
-    from: Schema.optionalKey(When),
-    to: Schema.optionalKey(When),
-    lists: Schema.optionalKey(Names),
-    query: Schema.optionalKey(Query),
-    limit: Schema.optionalKey(Limit(200)),
-  }),
-  Schema.Struct({
-    source: Schema.Literal("contacts"),
-    query: Query,
-    limit: Schema.optionalKey(Limit(50)),
-  }),
-  Schema.Struct({ source: Schema.Literal("status") }),
-])
 
 const Labeled = Schema.Struct({ label: Schema.String, value: Schema.String })
 const Event = Schema.Struct({
@@ -110,18 +79,22 @@ const Contacts = Schema.Struct({
 const Status = Schema.Struct({
   source: Schema.Literal("status"),
   permissions: Schema.Struct({ calendar: Permission, reminders: Permission, contacts: Permission }),
+  /** The switches in the app's Ajustes → Dados do Mac. */
+  enabled: Schema.Struct({ calendar: Schema.Boolean, reminders: Schema.Boolean, contacts: Schema.Boolean }),
 })
-const Reply = Schema.Union([
+/** What the Mac app answers: a result or a failure. */
+export const Reply = Schema.Union([
   Calendar,
   Reminders,
   Contacts,
   Status,
   Schema.Struct({
-    error: Schema.Literals(["denied", "restricted", "notDetermined", "invalid", "failed"]),
+    error: Schema.Literals(["denied", "restricted", "notDetermined", "disabled", "invalid", "failed"]),
     source: Schema.NullOr(Schema.String),
     message: Schema.String,
   }),
 ])
+export type Reply = typeof Reply.Type
 export const Output = Schema.Union([
   Schema.Struct({ ...Calendar.fields, truncated: Schema.Boolean }),
   Schema.Struct({ ...Reminders.fields, truncated: Schema.Boolean }),
@@ -129,71 +102,160 @@ export const Output = Schema.Union([
   Status,
 ])
 
+const Entry = Schema.Struct({
+  deviceID: Schema.String,
+  name: Schema.String,
+  model: optional(Schema.String),
+  system: optional(Schema.String),
+  seenAt: Schema.Number,
+  expiresAt: Schema.Number,
+  detached: Schema.Boolean,
+})
+const Presence = Schema.Array(Entry)
+const decodePresence = (value: Schema.Json | undefined) =>
+  Option.getOrElse(Schema.decodeUnknownOption(Presence)(value ?? []), () => [])
+const encodePresence = Schema.encodeSync(Presence)
+
+export type MacContext = {
+  storage: Pick<Plugin.Context["storage"], "get" | "update">
+  /** The Location of this plugin instance; answers must be routed back to it. */
+  directory: string
+  emit: (request: MacData.Request) => Effect.Effect<void, unknown>
+}
+
 export const registerMacData = Effect.fn("MacData.register")(function* (ctx: Plugin.Context) {
-  if (process.platform !== "darwin") return
-  yield* ctx.tool.transform((editor) => registerTools(editor, process.env.OPENCODE_MAC_DATA_HELPER ?? releaseHelper))
+  const emitter = yield* Deferred.make<(request: MacData.Request) => Effect.Effect<void, unknown>>()
+  const mac = makeMac({
+    storage: ctx.storage,
+    directory: ctx.location.directory,
+    emit: (request) => Deferred.await(emitter).pipe(Effect.flatMap((emit) => emit(request))),
+  })
+  const registration = yield* ctx.rpc
+    .register(MacData.Definition, { attach: mac.attach, detach: mac.detach, respond: mac.respond })
+    .pipe(Effect.orDie)
+  yield* Deferred.succeed(emitter, (request) => registration.events.emit("request", { request }))
+  yield* ctx.tool.transform((editor) => registerTools(editor, mac))
 })
 
-export function registerTools(editor: ToolEditor, helper: string) {
+/**
+ * The OpenCode app on the Mac reads Calendar, Reminders and Contacts, under its own macOS grants, and answers through
+ * `custom.mac` like the iPhone answers `custom.device`: presence lives in plugin storage, shared by every Location's
+ * plugin instance, and pending requests stay in the instance whose Location the request carries.
+ */
+export function makeMac(ctx: MacContext) {
+  const pending = new Map<string, { deviceID: string; answer: Deferred.Deferred<Schema.Json> }>()
+
+  const attach = Effect.fn("MacData.attach")(function* (input: MacData.Attach) {
+    const now = yield* Clock.currentTimeMillis
+    yield* ctx.storage.update(presenceKey, (current) => [
+      encodePresence([
+        {
+          deviceID: input.deviceID,
+          name: input.name,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.system ? { system: input.system } : {}),
+          seenAt: now,
+          expiresAt: now + limits.leaseSeconds * 1000,
+          detached: false,
+        },
+        ...decodePresence(current).filter(
+          (entry) => entry.deviceID !== input.deviceID && now - entry.seenAt < limits.forgetDays * 86_400_000,
+        ),
+      ]),
+      undefined,
+    ])
+    return { leaseSeconds: limits.leaseSeconds }
+  })
+
+  const detach = Effect.fn("MacData.detach")(function* (input: { readonly deviceID: string }) {
+    const now = yield* Clock.currentTimeMillis
+    yield* ctx.storage.update(presenceKey, (current) => [
+      encodePresence(
+        decodePresence(current).map((entry) =>
+          entry.deviceID === input.deviceID ? { ...entry, seenAt: now, detached: true } : entry,
+        ),
+      ),
+      undefined,
+    ])
+    return {}
+  })
+
+  const respond = Effect.fn("MacData.respond")(function* (input: {
+    readonly deviceID: string
+    readonly requestID: string
+    readonly answer: Schema.Json
+  }) {
+    const waiting = pending.get(input.requestID)
+    if (!waiting || waiting.deviceID !== input.deviceID) return { accepted: false }
+    pending.delete(input.requestID)
+    return { accepted: yield* Deferred.succeed(waiting.answer, input.answer) }
+  })
+
+  /** Asks the most recently seen online Mac. */
+  const query = Effect.fn("MacData.query")(function* (input: MacData.Query) {
+    const now = yield* Clock.currentTimeMillis
+    const target = decodePresence(yield* ctx.storage.get(presenceKey))
+      .map((entry) => ({ ...entry, online: !entry.detached && entry.expiresAt > now }))
+      .toSorted((a, b) => Number(b.online) - Number(a.online) || b.seenAt - a.seenAt)[0]
+    if (!target?.online)
+      return yield* new Tool.Error({
+        message: target
+          ? `The OpenCode app is not running on ${target.name} (closed or disconnected since ${new Date(target.seenAt).toISOString()}). Ask Alexandre to open it, then retry.`
+          : "The OpenCode app on the Mac has never connected to this server. Ask Alexandre to open it, then retry.",
+        metadata: { reason: "offline" },
+      })
+    const requestID = crypto.randomUUID()
+    const answer = yield* Deferred.make<Schema.Json>()
+    pending.set(requestID, { deviceID: target.deviceID, answer })
+    const received = yield* ctx
+      .emit({
+        requestID,
+        deviceID: target.deviceID,
+        query: input,
+        deadline: now + limits.timeoutSeconds * 1000,
+        directory: ctx.directory,
+      })
+      .pipe(
+        Effect.mapError((error) => new Tool.Error({ message: "Unable to send the request to the Mac", error })),
+        Effect.andThen(Deferred.await(answer)),
+        Effect.timeoutOption(limits.timeoutSeconds * 1000),
+        Effect.ensuring(Effect.sync(() => pending.delete(requestID))),
+      )
+    if (Option.isNone(received))
+      return yield* new Tool.Error({
+        message: `The OpenCode app on ${target.name} did not answer within ${limits.timeoutSeconds} seconds.`,
+        metadata: { reason: "timeout" },
+      })
+    const reply = Schema.decodeUnknownOption(Reply)(received.value)
+    if (Option.isNone(reply))
+      return yield* new Tool.Error({
+        message: `The OpenCode app on ${target.name} answered in an unexpected format: ${JSON.stringify(received.value).slice(0, 500)}`,
+      })
+    if ("error" in reply.value) return yield* failure(reply.value)
+    return bound(input, reply.value)
+  })
+
+  return { attach, detach, respond, query, pending }
+}
+
+export function registerTools(editor: ToolEditor, mac: ReturnType<typeof makeMac>) {
   editor.namespace({ name: "mac", description: "Alexandre's Calendar, Reminders and Contacts, read on his Mac." })
   editor.add({
     name: toolName,
     description: [
       "Read Alexandre's (the user's) Calendar, Reminders or Contacts from his Mac (iCloud-synced, read-only) when he asks about his schedule, events, reminders/to-dos or a person's phone, e-mail, birthday or address.",
+      "The OpenCode app on the Mac reads them on demand, so it must be open.",
       "Dates are YYYY-MM-DD (a whole local day; `to` is inclusive) or ISO date-times; results carry the Mac time zone and ISO times with offset.",
       "calendar: events in [from, to], default today plus 7 days, at most 366 days; filter by calendar names or a text query.",
       "reminders: status pending (default; from/to filter the due date), completed (completion date, default last 30 days) or all; filter by list names or text.",
       "contacts: search by name, phone or e-mail; returns phones, e-mails, birthday (--MM-DD when the year is unknown) and addresses.",
-      "status: permission state without prompting. Lists are bounded by limit (default 50; contacts 10) and 20,000 characters; check truncated and total.",
-      "Missing access fails with a message saying what to do; relay it instead of guessing: denied (macOS denied access; he enables it in System Settings → Privacy & Security), notDetermined (a macOS permission prompt was not answered; he clicks Allow), restricted (blocked by a device policy).",
+      "status: macOS permission and in-app switch of each source, without prompting. Lists are bounded by limit (default 50; contacts 10) and 20,000 characters; check truncated and total.",
+      "Failures say what to do; relay them instead of guessing: offline (the app is closed on the Mac; he opens it), timeout, disabled (the source is off in the app's Ajustes → Dados do Mac), notDetermined (a macOS permission prompt on the Mac was not answered; he clicks Allow), denied (he enables OpenCode in System Settings → Privacy & Security), restricted (blocked by a device policy).",
     ].join(" "),
-    input: standard(Input),
+    input: standard(MacData.Query),
     output: standard(Output),
     options: { namespace: "mac", codemode: true },
-    execute: (input) =>
-      Effect.gen(function* () {
-        const output = bound(input, yield* query(helper, input))
-        return { output, content: JSON.stringify(output) }
-      }),
-  })
-}
-
-function query(helper: string, input: typeof Input.Type) {
-  return Effect.gen(function* () {
-    const result = yield* Effect.tryPromise({
-      try: async (signal) => {
-        const child = Bun.spawn([helper, JSON.stringify(input)], {
-          signal,
-          stdin: "ignore",
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-        const [code, stdout, stderr] = await Promise.all([
-          child.exited,
-          new Response(child.stdout).text(),
-          new Response(child.stderr).text(),
-        ])
-        return { code, stdout, stderr }
-      },
-      catch: () =>
-        new Tool.Error({
-          message: `Could not run the OpenCode Mac Data helper at ${helper}; it ships with custom:update releases`,
-          metadata: { reason: "unavailable" },
-        }),
-    }).pipe(
-      // The helper waits up to 50 seconds for a first-time permission prompt.
-      Effect.timeoutOrElse({
-        duration: "70 seconds",
-        orElse: () => Effect.fail(new Tool.Error({ message: "The Mac data helper did not answer within 70 seconds" })),
-      }),
-    )
-    const reply = Schema.decodeUnknownOption(Schema.fromJsonString(Reply))(result.stdout.trim())
-    if (Option.isNone(reply))
-      return yield* new Tool.Error({
-        message: `The Mac data helper failed (exit ${result.code}): ${(result.stderr || result.stdout).trim().slice(0, 500)}`,
-      })
-    if ("error" in reply.value) return yield* failure(reply.value)
-    return reply.value
+    execute: (input) => mac.query(input).pipe(Effect.map((output) => ({ output, content: JSON.stringify(output) }))),
   })
 }
 
@@ -211,20 +273,25 @@ function failure(error: { error: string; source: string | null; message: string 
   const metadata = { reason: error.error, source: error.source }
   if (!pane || error.error === "invalid" || error.error === "failed")
     return new Tool.Error({ message: error.message, metadata })
+  if (error.error === "disabled")
+    return new Tool.Error({
+      message: `${pane.name} is turned off in the OpenCode app on the Mac. Ask Alexandre to turn it on in OpenCode → Ajustes → Dados do Mac, then retry.`,
+      metadata,
+    })
   if (error.error === "notDetermined")
     return new Tool.Error({
-      message: `The macOS prompt asking to give "OpenCode Mac Data" access to ${pane.name} was not answered. Ask Alexandre to click Allow on that prompt, then retry.`,
+      message: `The macOS prompt asking to give the OpenCode app access to ${pane.name} was not answered. Ask Alexandre to click Allow on that prompt on the Mac (or in OpenCode → Ajustes → Dados do Mac), then retry.`,
       metadata,
     })
   if (error.error === "restricted")
     return new Tool.Error({ message: `${pane.name} access is restricted by a macOS device policy.`, metadata })
   return new Tool.Error({
-    message: `${pane.name} access is denied for "OpenCode Mac Data". Ask Alexandre to enable it in System Settings → Privacy & Security → ${pane.en} (Ajustes do Sistema → Privacidade e Segurança → ${pane.pt})${pane.full ? " with Full Access" : ""}, then retry.`,
+    message: `${pane.name} access is denied for the OpenCode app. Ask Alexandre to enable "OpenCode" in System Settings → Privacy & Security → ${pane.en} (Ajustes do Sistema → Privacidade e Segurança → ${pane.pt})${pane.full ? " with Full Access" : ""}, then retry.`,
     metadata,
   })
 }
 
-function bound(input: typeof Input.Type, reply: Exclude<typeof Reply.Type, { readonly error: unknown }>) {
+function bound(input: MacData.Query, reply: Exclude<Reply, { readonly error: unknown }>) {
   if (reply.source === "status") return reply
   const limit = ("limit" in input ? input.limit : undefined) ?? (reply.source === "contacts" ? 10 : 50)
   if (reply.source === "calendar") {

@@ -2751,7 +2751,8 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
   the composer (`MacComposer.swift`, `MacComposerText.swift`), `MacConversationSupport.swift`, `MacNewSession.swift`,
   `ContextColumnStore.swift`, `MacContextColumn.swift`, `MacFilesView.swift` + `MacFilePane.swift` +
   `MacCodeView.swift`, `MacResourceWindow.swift`, `MacShellOutput.swift`, `MacNotifications.swift`,
-  `MacProxyWindow.swift`, `MacSettingsView.swift`, `MacSpinner.swift`, `MacAssets.xcassets` (the app icon and
+  `MacProxyWindow.swift`, `MacSettingsView.swift`, `MacDataAgent.swift` + `MacDataCollectors.swift` +
+  `MacDataSettings.swift` (see [Dados do Mac](#dados-do-mac--29-october)), `MacSpinner.swift`, `MacAssets.xcassets` (the app icon and
   `OpenCodeMascot`, the icon beside answers), and the DEBUG-only
   `MacFixture.swift`, `MacFixtureProxy.swift`, `MacCapture.swift`, `MacStress.swift`, `MacPerf.swift`,
   `MacScrollFixture.swift` and `MacScrollDriver.swift`.
@@ -3291,7 +3292,32 @@ since the Mac has no scanner), **Aparência** (Sistema/Claro/Escuro and the shar
 **Leitura** (the same `OpenCodeCollapsibleUserMessages` switch), **Modelos** (the shared "Gerenciar modelos" over the
 server's catalog and `model.visibility`), **Assinaturas** (the LLM proxy summary rows, opening the LLM proxy window)
 and **Sobre** (version, commit, server). **Voz** adds the same next-call voice and rolling transcript; **Transcrição**
-adds the same model download, progress, retry, deletion and licenses. Dados do iPhone and Apple Watch stay on iPhone.
+adds the same model download, progress, retry, deletion and licenses. **Dados do Mac** is described below. Dados do
+iPhone and Apple Watch stay on iPhone.
+
+### Dados do Mac — 29 October
+
+The Mac app reads Calendar, Reminders and Contacts for the agents' `mac_query`, the way the iPhone answers
+`iphone_query` (contract: [`plugin-app-custom/docs/mac-data.md`](../plugin-app-custom/docs/mac-data.md)). It replaced
+the `OpenCode Mac Data` helper nested in the server's bundle, whose grants macOS attributed to the server and therefore
+never applied. `MacDataAgent` keeps a presence lease through `custom.mac/attach` while the `EventHub` is connected
+(every 30 s), detaches when the stream stops for good and on quit, and answers `rpc.custom.mac.request` events, which
+never reach screen subscribers (iOS drops them too). `MacDataCollectors` (an actor) reads EventKit and Contacts off
+the main actor and shows a macOS prompt the first time a source is read; the query waits for the answer within its
+60-second deadline. With the app closed the tool reports `offline` immediately.
+
+Only the installed app (`br.com.alexandrem.opencode.mac`) answers; Debug and fixture runs stay silent unless launched
+with `-OpenCodeMacData`. **Ajustes → Dados do Mac** has one switch per source (all on by default), its permission
+(Permitido, Permissão não pedida, Negado nos Ajustes do Sistema, Restrito) with the last answered query, **Pedir
+permissão** while undetermined and **Abrir Ajustes do Sistema** when denied. Requirements: the Calendars, Reminders
+(normal and Full Access) and Contacts usage descriptions in `OpenCodeMac/Info.plist`, and, because of the hardened
+runtime, the `com.apple.security.personal-information.calendars` and `.addressbook` entitlements. Development
+signing keeps the designated requirement across builds, so a grant survives updates.
+
+Verification: `swift test --filter MacData` (request decoding, disabled sources, deadline, dates, preferences), the
+plugin's `test/mac-data.test.ts`, and against a sandbox (`custom-sandbox.ts up --port 4199`) with a Debug build
+launched with `-OpenCodeMacData`: one real prompt each for `status`, a switched-off source and, after quitting the
+app, the immediate `offline`.
 
 ### Voice on Mac — 28 October
 
