@@ -119,7 +119,8 @@ import SwiftUI
   /// Launched from a shell while the screen is locked, SwiftUI opens no window until the app is activated;
   /// the stress run and the captures open one through Arquivo ▸ Nova janela.
   static func openWindowIfNeeded() {
-    guard enabled || MacPerf.enabled || MacCapture.folder != nil || ScrollFixtures.mode != nil else { return }
+    guard enabled || MacPerf.enabled || MacCapture.folder != nil || ScrollFixtures.mode != nil
+      || MacVoiceScreenCheck.scenario != nil else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
       guard !NSApp.windows.contains(where: \.isVisible) else { return }
       func items(_ menu: NSMenu?) -> [NSMenuItem] { (menu?.items ?? []).flatMap { [$0] + items($0.submenu) } }

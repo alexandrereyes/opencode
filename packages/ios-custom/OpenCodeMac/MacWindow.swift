@@ -122,6 +122,7 @@ struct MacWindow: View {
         openSettings: openSettings)
     }
     .task { await MacStress.run(runtime: runtime, openWindow: openWindow) }
+    .task { await MacVoiceScreenCheck.run(runtime) }
     .task { await MacPerf.run(runtime: runtime) }
     #endif
   }

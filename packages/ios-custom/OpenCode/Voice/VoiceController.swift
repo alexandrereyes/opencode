@@ -4,6 +4,7 @@ import Observation
 import OpenCodeKit
 import OSLog
 #if os(macOS)
+import AppKit
 import AVFoundation
 #endif
 #if os(iOS)
@@ -69,8 +70,14 @@ import UIKit
   }
   @ObservationIgnored private var delegationQueue: [Delegation] = []
   @ObservationIgnored private weak var sessions: SessionStore?
-  @ObservationIgnored private var captureScreen: @MainActor (String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot = {
-    try await VoiceScreenCapture.capture(sessionID: $0)
+  /// The target GPT Live asked for and the conversation open on the iPhone (the Mac reads its own window's).
+  @ObservationIgnored private var captureScreen: @MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal)
+    -> VoiceScreenShot = { target, sessionID throws(VoiceScreenRefusal) in
+    #if os(iOS)
+    try await VoiceScreenCapture.capture(sessionID: sessionID)
+    #else
+    try await MacVoiceScreen.capture(target)
+    #endif
   }
   #if DEBUG
   /// Result of the last screen delegation, read by UI tests (`voice-screen-outcome`).
@@ -100,7 +107,7 @@ import UIKit
     var policy = VoiceRecoveryPolicy()
     var network: (any VoicePathMonitoring)?
     var cues: (any VoiceCueing)?
-    var screen: (@MainActor (String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot)?
+    var screen: (@MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot)?
   }
   @ObservationIgnored private var testing: TestDependencies?
   convenience init(testing: TestDependencies, preferences: VoicePreferences = VoicePreferences()) {
@@ -174,7 +181,9 @@ import UIKit
         #endif
         guard let self, epoch == token else { return }
         handle(.delegation(id: "fixture-screen-" + UUID().uuidString,
-          text: #"{"text":"Dá uma olhada nessa tela","screen":true}"#))
+          text: arguments.firstIndex(of: "-OpenCodeVoiceScreenJSON").flatMap {
+            arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil
+          } ?? #"{"text":"Dá uma olhada nessa tela","screen":true}"#))
       }
       return
     }
@@ -265,12 +274,12 @@ import UIKit
     guard let client else { throw ClientError.operation("Conecte ao OpenCode para carregar o prompt de voz.") }
     return Self.served(try await client.voiceInstructions())
   }
-  /// Only the iPhone can capture its window, so only its calls learn the screen capability.
+  /// Each platform appends its own screen capability: the iPhone sees only OpenCode, the Mac any window.
   private static func served(_ instructions: String) -> String {
     #if os(iOS)
-    VoiceProtocol.withScreen(instructions)
+    VoiceProtocol.withScreen(instructions, for: .iPhone)
     #else
-    instructions
+    VoiceProtocol.withScreen(instructions, for: .mac)
     #endif
   }
   private func permission() async -> Bool {
@@ -419,16 +428,8 @@ import UIKit
       handled.insert(id)
       let request = VoiceMasterRequest(text)
       // Captured now, before awaiting earlier delegations: the screen GPT Live was asked about.
-      #if os(iOS)
       let current = sessions?.currentSessionID
-      // Immediate: the foreground check and veil run now, inside this delegation event.
-      let screen = request.screen ? Task.immediate { [captureScreen] () -> Result<VoiceScreenShot, VoiceScreenRefusal> in
-        do throws(VoiceScreenRefusal) { return .success(try await captureScreen(current)) } catch { return .failure(error) }
-      } : nil
-      #else
-      let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>? = request.screen
-        ? Task { .failure(.unavailable) } : nil
-      #endif
+      let screen = request.screen.map { target in screenTask(target, sessionID: current) }
       delegationQueue.append(Delegation(id: id, request: request, screen: screen))
       if delegationTask == nil { delegationTask = Task { await pumpDelegations() } }
     case .ignored: break
@@ -469,14 +470,34 @@ import UIKit
       state.masterWorking = true; detail = "Enviando à Sessão mestra…"; publish()
       do {
         try await master?.ask(delegation.request, screen: screen)
+        if let notice = screen?.notice { announceScreen(notice) }
         #if DEBUG
-        if let screen { screenOutcome = "sent:\(screen.jpeg.count):\(screen.sessionID ?? "-")" }
+        if let screen { screenOutcome = "sent:\(screen.jpeg.count):\(screen.sessionID ?? "-")" + (screen.notice == nil ? "" : ":notice") }
         #endif
       } catch {
         guard epoch == token, !Task.isCancelled else { return }
         receive(.failed("Não foi possível enviar o pedido à Sessão mestra. " + error.localizedDescription))
       }
     }
+  }
+  /// Starts in this delegation event: the foreground check (iPhone) and window choice (Mac) see the screen
+  /// GPT Live was asked about, not one after earlier delegations.
+  private func screenTask(_ target: VoiceScreenTarget, sessionID: String?) -> Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never> {
+    let capture = captureScreen
+    let operation: @MainActor () async -> Result<VoiceScreenShot, VoiceScreenRefusal> = {
+      do throws(VoiceScreenRefusal) { return .success(try await capture(target, sessionID)) } catch { return .failure(error) }
+    }
+    if #available(iOS 26.0, macOS 26.0, *) { return Task.immediate(operation: operation) }
+    return Task(operation: operation)
+  }
+  /// The capture went out with a caveat (Mac: only OpenCode's window, missing permission): GPT Live says it.
+  private func announceScreen(_ notice: String) {
+    finalNarration = true; narration.offer(notice)
+    #if os(macOS)
+    toast.show(notice, kind: .error, action: "Abrir Ajustes") { NSWorkspace.shared.open(MacVoiceScreen.settingsURL) }
+    #else
+    toast.show(notice, kind: .error)
+    #endif
   }
   /// Nothing reaches the master; GPT Live hears why, and the app shows it when he looks.
   private func refuseScreen(_ refusal: VoiceScreenRefusal) {
