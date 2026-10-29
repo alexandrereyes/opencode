@@ -89,6 +89,9 @@ struct MacSessionColumn: View {
     .scrollContentBackground(.hidden)
     .background(theme.color(.background))
     .safeAreaInset(edge: .bottom, spacing: 0) { MacMasterAccessory(store: store, runtime: runtime) }
+    // The list would scroll under the title bar, beside the traffic lights and the column's items: cut it at the
+    // bar's bottom edge, like the chat's transcript.
+    .clipped()
     // The approved title bar has no sidebar button: Sessões collapses with ⌃⌘S and Visualizar.
     .toolbar(removing: .sidebarToggle)
     // Voice and Nova sessão at the column's right edge, like Mail's and Notes' sidebar items; they hide with the

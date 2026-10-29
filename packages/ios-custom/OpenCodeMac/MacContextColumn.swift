@@ -21,6 +21,9 @@ struct MacContextColumn: View {
           .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 18)
           .macThinScrollers()
       }
+      // On macOS 26 the scroll view reaches under the title bar, where its rows mixed with the bar's items: cut
+      // it at the bar's bottom edge, like the chat's transcript.
+      .clipped()
       .overlay {
         if !store.loaded { ProgressView().controlSize(.small) }
       }

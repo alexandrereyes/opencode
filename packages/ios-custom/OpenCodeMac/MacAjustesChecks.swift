@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -43,6 +43,7 @@ import SwiftUI
       case "jump": try await jump(window: window, runtime: runtime, shot: shot)
       case "master": try await master(window: window, runtime: runtime, shot: shot)
       case "divider": try await divider(window: window, runtime: runtime)
+      case "edge": try await edge(window: window, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -532,6 +533,41 @@ import SwiftUI
     guard abs(runtime.contextWidth - before - 80) < 1 else {
       throw Failure(description: "arrastar 80 pt mudou Contexto de \(before) para \(runtime.contextWidth)")
     }
+  }
+
+  /// The columns' scroll views scrolled down: each one's content is cut at the title bar's bottom edge, like the
+  /// chat's, so nothing scrolls under the bar's items.
+  private static func edge(window: NSWindow, shot: (String) -> Void) async throws {
+    let bar = window.contentLayoutRect.maxY
+    let scrolls = views(window).compactMap { $0 as? NSScrollView }.filter {
+      $0.window != nil && !$0.isHiddenOrHasHiddenAncestor && $0.bounds.height > 200 && $0.hasVerticalScroller
+        && ($0.documentView?.frame.height ?? 0) + $0.contentInsets.top + $0.contentInsets.bottom
+          > $0.contentView.bounds.height + 60
+    }
+    guard !scrolls.isEmpty else { throw Failure(description: "nenhuma lista rolável") }
+    for scroll in scrolls {
+      let clip = scroll.contentView
+      clip.scroll(to: clip.constrainBoundsRect(clip.bounds.offsetBy(dx: 0, dy: clip.isFlipped ? 300 : -300)).origin)
+      scroll.reflectScrolledClipView(clip)
+    }
+    try await Task.sleep(for: .milliseconds(600))
+    shot("rolado")
+    var failures: [String] = []
+    for scroll in scrolls {
+      // What the window shows of the scroll view: its frame cut by every ancestor that clips.
+      var shown = scroll.convert(scroll.bounds, to: nil)
+      var view = scroll.superview
+      while let ancestor = view {
+        if ancestor.clipsToBounds || ancestor.layer?.masksToBounds == true || ancestor.layer?.mask != nil {
+          shown = shown.intersection(ancestor.convert(ancestor.bounds, to: nil))
+        }
+        view = ancestor.superview
+      }
+      let name = "\(type(of: scroll)) x \(Int(shown.minX))–\(Int(shown.maxX))"
+      print("MacAjustes edge: \(name) · topo visível \(Int(window.frame.height - shown.maxY)) · barra \(Int(window.frame.height - bar)) · inset \(Int(scroll.contentInsets.top))")
+      if shown.maxY > bar + 0.5 { failures.append("\(name) passa \(Int(shown.maxY - bar)) pt sob a barra") }
+    }
+    if !failures.isEmpty { throw Failure(description: failures.joined(separator: "; ")) }
   }
 
   // MARK: A8 — dictation in place and the right Option key

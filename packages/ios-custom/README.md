@@ -3677,8 +3677,10 @@ project filter replacing the chips and the highlight of the open subagent.
 
 **Checks.** `MacAdjustmentsTests` (cost format, ⌘1–⌘9 order, archived search, remembered width and its range,
 absolute breadcrumb, run label, model rows, the right Option key's rules). `script/test-mac-ajustes.sh` runs
-`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider`)
-in the fixture through real AppKit events: line heights, wrapping width and scroll position with one line, three,
+`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider|edge`)
+in the fixture through real AppKit events (`edge` scrolls the columns and requires each one cut at the title bar's
+bottom edge, like the chat; Contexto and Sessões are `.clipped()` because macOS 26 extends their scroll views under
+the bar): line heights, wrapping width and scroll position with one line, three,
 tokens and twelve; a click, Shift+Return, Return and Esc in a question; a pending quote opening focused, Return and
 Esc; ⌘C in the viewer (the clipboard is restored afterwards) and the drag provider; the archived search; the Ir
 menu's ⌘1–⌘9 and ⌘2; Contexto at 60% of a 2400-pt window; the right Option key's tap, hold, left Option and
