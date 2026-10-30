@@ -201,6 +201,35 @@ describe("worktrees", () => {
     ])
   })
 
+  test("locates the other checkouts with their branches when a worktree's folder was deleted", async () => {
+    const fixture = await repository("stale")
+    const gone = path.join(path.dirname(fixture.root), "gone")
+    await $`git worktree add -b gone ${gone}`.cwd(fixture.root).quiet()
+    // Deleted outside Git: its entry stays in the list as prunable until someone runs `git worktree prune`.
+    await fs.rm(gone, { recursive: true, force: true })
+    expect(
+      await $`git worktree list --porcelain`
+        .cwd(fixture.root)
+        .env({ ...process.env, LANG: "C" })
+        .text(),
+    ).toContain("prunable")
+    const located = await Effect.runPromise(locateDirectories([fixture.linked, fixture.root]))
+    expect(located).toEqual([
+      {
+        directory: AbsolutePath.make(fixture.linked),
+        worktree: AbsolutePath.make(fixture.linked),
+        canonical: AbsolutePath.make(fixture.root),
+        branch: "feature",
+      },
+      {
+        directory: AbsolutePath.make(fixture.root),
+        worktree: AbsolutePath.make(fixture.root),
+        canonical: AbsolutePath.make(fixture.root),
+        branch: "main",
+      },
+    ])
+  })
+
   test("rejects roots, wrong owners, changed identities, and unsupported strategies", async () => {
     const first = await repository("first")
     const second = await repository("second")

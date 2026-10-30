@@ -67,6 +67,8 @@ export function directoryAvailable(directory: string) {
 
 // Git worktree root, main checkout (as Project.resolve derives them) and branch, without
 // booting a Location (and its MCP processes) per directory. Directories outside Git are omitted.
+// A worktree whose folder was deleted (prunable) is skipped like core does, so it cannot drop the
+// branch and main checkout of every other checkout in the repository.
 export function locateDirectories(directories: readonly string[]) {
   return Effect.tryPromise(async (signal) => {
     const lists = new Map<string, ReturnType<typeof worktreeList>>()
@@ -75,7 +77,7 @@ export function locateDirectories(directories: readonly string[]) {
         const repository = await discover(directory, signal).catch(() => undefined)
         if (!repository) return []
         const worktree = await canonical(repository.worktree)
-        const list = lists.get(repository.commonDirectory) ?? worktreeList(repository, signal)
+        const list = lists.get(repository.commonDirectory) ?? worktreeList(repository, signal, true)
         lists.set(repository.commonDirectory, list)
         const entries = await list.catch(() => [])
         const main = entries.find((entry) => entry.kind === "main")
