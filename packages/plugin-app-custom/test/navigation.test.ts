@@ -115,7 +115,10 @@ test("preserves unread precedence, root policy, pending classification, and wire
 })
 
 test("counts background work other than subagents and names the newest", async () => {
-  const rows = [{ session: session("ses_shells", { idle: 30, outcome: "succeeded" }) }, { session: session("ses_agent", {}) }]
+  const rows = [
+    { session: session("ses_shells", { idle: 30, outcome: "succeeded" }) },
+    { session: session("ses_agent", {}) },
+  ]
   const result = await Effect.runPromise(
     list(
       {
@@ -136,4 +139,33 @@ test("counts background work other than subagents and names the newest", async (
   expect(result.data[1].backgroundCount).toBeUndefined()
   expect(result.data[1].backgroundTitle).toBeUndefined()
   expect(Schema.decodeUnknownSync(Navigation.Page)(result).data[0].backgroundCount).toBe(2)
+})
+
+test("a session's Progresso rides its row while it shows; old clients ignore the field", async () => {
+  const rows = [{ session: session("ses_plan", {}) }, { session: session("ses_none", {}) }]
+  const progress = {
+    done: 1,
+    finished: 2,
+    total: 3,
+    current: "Rodar os testes",
+    todos: [
+      { content: "Ler", status: "completed" as const },
+      { content: "Migrar", status: "cancelled" as const },
+      { content: "Rodar os testes", status: "in_progress" as const },
+    ],
+  }
+  const result = await Effect.runPromise(
+    list(
+      {
+        scan: () => Effect.succeed({ data: rows }),
+        pending: () => Effect.succeed([]),
+        background: () => Effect.succeed([]),
+        progress: (sessionID) => (sessionID === "ses_plan" ? progress : undefined),
+      },
+      {},
+    ),
+  )
+  expect(result.data[0].progress).toEqual(progress)
+  expect(result.data[1]).not.toHaveProperty("progress")
+  expect(Schema.decodeUnknownSync(Navigation.Page)(result).data[0].progress).toEqual(progress)
 })

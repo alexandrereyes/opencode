@@ -12,6 +12,7 @@ import type { SessionScan } from "@opencode/schema/session-scan"
 import { DateTime, Effect, Schema } from "effect"
 import { Preferences } from "../preferences/rpc.js"
 import { Master } from "../master/rpc.js"
+import type { SessionProgress } from "../live-activity/tracker.js"
 
 const agentID = Master.agentID
 
@@ -22,7 +23,16 @@ export type InventoryContext = {
   marks?: () => Effect.Effect<{ pinned: readonly string[]; notify: readonly string[] }>
   /** Root of the managed chats, whose sessions have no project of their own. */
   chats?: () => Effect.Effect<string | undefined>
+  /** A session's Progresso while it shows (`docs/progress.md`); absent in tests without the Live Activity hub. */
+  progress?: (sessionID: string) => SessionProgress | undefined
 }
+
+/** Progresso of a running session: `done` of `total` completed, and the item in hand. */
+export const Progress = Schema.Struct({
+  done: Schema.Number,
+  total: Schema.Number,
+  current: Schema.String,
+})
 
 export const State = Schema.Literals(["running", "needs-you", "idle"])
 
@@ -40,6 +50,7 @@ export const Summary = Schema.Struct({
   completedAt: Schema.optionalKey(Schema.Number),
   pending: Schema.Struct({ questions: Schema.Number, permissions: Schema.Number }),
   subagentsRunning: Schema.optionalKey(Schema.Number),
+  progress: Schema.optionalKey(Progress),
   pinned: Schema.optionalKey(Schema.Literal(true)),
   notify: Schema.optionalKey(Schema.Literal(true)),
   archived: Schema.optionalKey(Schema.Literal(true)),
@@ -57,6 +68,7 @@ export type Inventory = {
   roots: Map<string, Session.ID>
   marks: { pinned: Set<string>; notify: Set<string> }
   projects: Map<string, ProjectInfo>
+  progress: (sessionID: string) => SessionProgress | undefined
 }
 
 export type ProjectInfo = {
@@ -140,6 +152,7 @@ export const inventory = Effect.fn("Sessions.inventory")(function* (ctx: Invento
     roots,
     marks: { pinned: new Set(marks.pinned), notify: new Set(marks.notify) },
     projects: yield* projects(rows, chatsRoot),
+    progress: ctx.progress ?? (() => undefined),
   } satisfies Inventory
 })
 
@@ -229,6 +242,7 @@ export function summary(inventory: Inventory, row: SessionScan.Info): Summary {
   const counts = family(inventory, row.session.id)
   const flags = attention(row)
   const project = inventory.projects.get(row.session.projectID)
+  const progress = inventory.progress(row.session.id)
   return {
     id: row.session.id,
     title: (row.session.title ?? "Sem título").slice(0, 200),
@@ -252,6 +266,7 @@ export function summary(inventory: Inventory, row: SessionScan.Info): Summary {
         : {}),
     pending: { questions: counts.questions, permissions: counts.permissions },
     ...(counts.subagentsRunning ? { subagentsRunning: counts.subagentsRunning } : {}),
+    ...(progress ? { progress: { done: progress.done, total: progress.total, current: progress.current } } : {}),
     ...(inventory.marks.pinned.has(row.session.id) ? { pinned: true as const } : {}),
     ...(inventory.marks.notify.has(row.session.id) ? { notify: true as const } : {}),
     ...(row.session.time.archived ? { archived: true as const } : {}),

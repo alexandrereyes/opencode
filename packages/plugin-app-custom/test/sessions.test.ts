@@ -172,6 +172,7 @@ function fixture(
     worktreeFails?: boolean
     branchFails?: boolean
     profile?: Preferences.Profile
+    progress?: SessionsContext["progress"]
   } = {},
 ) {
   const rows = [...(input.rows ?? [master, root, child])]
@@ -343,6 +344,7 @@ function fixture(
         return Effect.void
       },
     },
+    ...(input.progress ? { progress: input.progress } : {}),
   }
   registerTools(
     {
@@ -769,3 +771,33 @@ it.effect(
     expect(f.calls.interrupted).toEqual([])
   }),
 )
+
+test("list and status carry a running session's Progresso; status lists every item", async () => {
+  const todos = [
+    { content: "Ler o rastreador", status: "completed" as const },
+    { content: "Atualizar a Live Activity", status: "in_progress" as const },
+    { content: "Rodar os testes", status: "pending" as const },
+    { content: "Migrar fixtures", status: "cancelled" as const },
+  ]
+  const f = fixture({
+    rows: [master, root, child, other],
+    active: [root.id],
+    progress: (sessionID) =>
+      sessionID === root.id
+        ? { done: 1, finished: 2, total: 4, current: "Atualizar a Live Activity", todos }
+        : undefined,
+  })
+  const listed = (await f.run("list", {})).output as { sessions: { id: string; progress?: unknown }[] }
+  expect(listed.sessions.find((row) => row.id === root.id)?.progress).toEqual({
+    done: 1,
+    total: 4,
+    current: "Atualizar a Live Activity",
+  })
+  expect(listed.sessions.find((row) => row.id === other.id)).not.toHaveProperty("progress")
+  expect((await f.run("status", { sessionID: root.id })).output).toMatchObject({
+    state: "needs-you",
+    progress: { done: 1, total: 4, current: "Atualizar a Live Activity", items: todos },
+  })
+  // Without a Progresso nothing is added.
+  expect((await f.run("status", { sessionID: other.id })).output).not.toHaveProperty("progress")
+})

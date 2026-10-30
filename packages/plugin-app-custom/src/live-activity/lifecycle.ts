@@ -345,6 +345,15 @@ export function fit(input: BodyInput) {
         }),
       }))
       .toReversed(),
+    // The rows' "Agora: …" goes before any row; the focus keeps its own.
+    (state: LiveActivity.AgentsState) => ({
+      ...state,
+      sessions: state.sessions.map((item) => {
+        if (!item.progress?.current) return item
+        const { current: _, ...progress } = item.progress
+        return { ...item, progress }
+      }),
+    }),
     // The card and the island show two of them.
     (state: LiveActivity.AgentsState) => (state.needs ? { ...state, needs: state.needs.slice(0, 2) } : state),
     (state: LiveActivity.AgentsState) => ({ ...state, sessions: state.sessions.slice(0, 3) }),

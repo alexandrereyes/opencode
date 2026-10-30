@@ -82,6 +82,59 @@ export function tool(sessionID: string, at: number, call: string, name: string, 
   ] satisfies Event[]
 }
 
+type Item = { readonly content: string; readonly status: string }
+
+/** A completed `todowrite` call as the server publishes it: input started, called, success. */
+export function todowrite(sessionID: string, at: number, call: string, todos: readonly Item[]) {
+  return [
+    ...tool(sessionID, at, call, "todowrite", { todos }),
+    { type: "session.tool.success", created: at + 2, data: { sessionID, id: call } },
+  ] satisfies Event[]
+}
+
+/** The plan of the Progresso fixtures: three completed, one in progress, two pending and one cancelled. */
+export const plan: readonly Item[] = [
+  { content: "Ler o rastreador da Live Activity", status: "completed" },
+  { content: "Somar o progresso do plano no plugin", status: "completed" },
+  { content: "Adicionar a unidade todos ao contrato", status: "completed" },
+  { content: "Atualizar a Live Activity e o relógio", status: "in_progress" },
+  { content: "Rodar os testes do OpenCodeKit", status: "pending" },
+  { content: "Capturar as telas no iPhone 14", status: "pending" },
+  { content: "Migrar as fixtures antigas", status: "cancelled" },
+]
+
+/** An assistant message with one `todowrite` part, as stored in the transcript. */
+export function todoMessage(
+  id: string,
+  at: number,
+  todos: readonly Item[],
+  status: "completed" | "error" = "completed",
+) {
+  return Schema.decodeUnknownSync(SessionMessage.Assistant)({
+    id,
+    type: "assistant",
+    agent: "build",
+    model: { providerID: "llm-proxy", id: "gpt-6.1-sol-ultrafast" },
+    time: { created: at, completed: at },
+    content: [
+      {
+        type: "tool",
+        id: `call_${id}`,
+        name: "todowrite",
+        state:
+          status === "completed"
+            ? { status, input: { todos }, content: [{ type: "text", text: "Todos updated" }], metadata: { todos } }
+            : { status, input: { todos }, error: { type: "unknown", message: "falhou" } },
+        time: { created: at, ran: at, completed: at },
+      },
+    ],
+  })
+}
+
+export function userMessage(id: string, at: number) {
+  return Schema.decodeUnknownSync(SessionMessage.User)({ id, type: "user", text: "Continue", time: { created: at } })
+}
+
 export function session(sessionID: string, extra: Record<string, unknown> = {}) {
   const info = meta[sessionID] ?? { title: sessionID, directory: "/repo" }
   return Schema.decodeUnknownSync(Session.Info)({
@@ -124,7 +177,10 @@ export function world() {
   const watched = new Set<string>()
   const settings: { autoApprove: boolean; master?: string } = { autoApprove: false }
   const reads: string[] = []
+  /** Location directories with `experimental.todo` on. */
+  const todo = new Set<string>()
   const ctx: TrackerContext = {
+    todo: (directory) => Effect.sync(() => todo.has(directory)),
     session: {
       get: ({ sessionID }) => {
         reads.push(sessionID)
@@ -153,9 +209,11 @@ export function world() {
     marks: () =>
       Effect.sync(() => ({ notify: [...watched], autoApprove: settings.autoApprove, master: settings.master })),
     message: {
-      list: ({ sessionID, type }) =>
+      list: ({ sessionID, type, order }) =>
         Effect.sync(() => {
-          if (type !== "user") return { data: transcripts.get(sessionID) ?? [], cursor: {} }
+          // Transcripts are kept in server order; `desc` reads them newest first.
+          const stored = transcripts.get(sessionID) ?? []
+          if (type !== "user") return { data: order === "desc" ? stored.toReversed() : stored, cursor: {} }
           const at = prompts.get(sessionID)
           return {
             data:
@@ -181,10 +239,10 @@ export function world() {
     },
   }
   const add = (info: Session.Info) => infos.set(info.id, info)
-  return { ctx, infos, active, forms, permissions, prompts, reads, add, transcripts, watched, settings }
+  return { ctx, infos, active, forms, permissions, prompts, reads, add, transcripts, watched, settings, todo }
 }
 
-export type Scene = "working" | "one-question" | "two-questions" | "mixed" | "failed-only" | "calm"
+export type Scene = "working" | "one-question" | "two-questions" | "mixed" | "failed-only" | "calm" | "progress"
 
 /**
  * Builds the fixture situations from live events only. `pending` requests live in the world and reach the tracker
@@ -217,6 +275,16 @@ export function scene(name: Scene, server = world()) {
     tool(ids.live, T - minute, "call_edit", "edit", {
       path: "packages/ios-custom/OpenCode/LiveActivity/ConversationStore.swift",
     }).forEach(at)
+  }
+  // The same work with a Progresso: Live Activity no iOS and Deploy no Swarm keep their lists (rev. 2026-10-30).
+  if (name === "progress") {
+    server.todo.add(meta[ids.live].directory)
+    server.todo.add(meta[ids.deploy].directory)
+    todowrite(ids.live, T - 2 * minute, "call_plan", plan).forEach(at)
+    todowrite(ids.deploy, T - 3 * minute, "call_deploy", [
+      { content: "Gerar a imagem", status: "completed" },
+      { content: "Atualizar o serviço no Swarm", status: "in_progress" },
+    ]).forEach(at)
   }
   if (name === "failed-only") at(execution("succeeded", ids.live, T - 8 * minute))
   if (name === "failed-only" || name === "mixed") at(execution("failed", ids.deploy, T - 2 * minute))

@@ -7,6 +7,7 @@ import { marksFrom } from "../sessions/inventory.js"
 import { makeNotificationRegistry, makeNotifier, type Notifier } from "../notifications/index.js"
 import { Notifications } from "../notifications/rpc.js"
 import { Preferences } from "../preferences/rpc.js"
+import { tool } from "../progress/todos.js"
 import { LiveActivity } from "./rpc.js"
 import { eventTypes, makeTracker, type Event, type Tracker, type TrackerContext } from "./tracker.js"
 
@@ -19,8 +20,13 @@ export const emitMs = 1000
 
 /** One Location's plugin instance as the hub sees it. */
 export type Member = {
-  readonly ctx: TrackerContext & { readonly storage: Storage; readonly events: Stream.Stream<Event, unknown> }
+  readonly ctx: Omit<TrackerContext, "todo"> & {
+    readonly storage: Storage
+    readonly events: Stream.Stream<Event, unknown>
+  }
   readonly emit: (state: LiveActivity.AgentsState | null) => Effect.Effect<void, unknown>
+  /** Its Location directory and whether `todowrite` is in that Location's tools (`experimental.todo`). */
+  readonly todo?: { readonly directory: string; readonly enabled: Effect.Effect<boolean> }
 }
 
 export type HubOptions = {
@@ -54,7 +60,12 @@ export function makeHub(options: HubOptions) {
       scope,
       ready: yield* Deferred.make<{ readonly host: string; readonly push: LiveActivity.Push }>(),
       signal: yield* Queue.sliding<void>(1),
-      tracker: makeTracker(member.ctx),
+      // A session's Location answers for its own config; one with no loaded instance cannot be executing.
+      tracker: makeTracker({
+        ...member.ctx,
+        todo: (directory) =>
+          members.find((item) => item.todo?.directory === directory)?.todo?.enabled ?? Effect.succeed(false),
+      }),
       registry: makeRegistry(member.ctx.storage),
       notifications: makeNotificationRegistry(member.ctx.storage),
     }
@@ -230,7 +241,10 @@ export function makeHub(options: HubOptions) {
   /** Joins the hub for the lifetime of the calling scope. */
   const join = (member: Member) => Effect.acquireRelease(attach(member), () => detach(member))
 
-  return { join, handlers, notifications, view, members, runtime }
+  /** A session's Progresso while it shows (`docs/progress.md`); none before the hub has started. */
+  const progress = (sessionID: string) => runtime.current?.tracker.progress(sessionID)
+
+  return { join, handlers, notifications, view, members, runtime, progress }
 }
 
 export type Hub = ReturnType<typeof makeHub>
@@ -301,5 +315,9 @@ export const registerLiveActivity = Effect.fn("LiveActivity.register")(function*
       ),
     },
     emit: (state) => registration.events.emit("changed", { state }),
+    todo: {
+      directory: ctx.location.directory,
+      enabled: ctx.tool.list().pipe(Effect.map((tools) => tools.some((item) => item.id === tool))),
+    },
   })
 })

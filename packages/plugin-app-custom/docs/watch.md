@@ -40,7 +40,7 @@ Watch ══UDP (Opus, DTLS/ICE-lite)══▶ OpenAI GPT Live  (media never cro
 2. The backend creates a **watch device token** (random 32 bytes, base64url), stores only its SHA-256 with
    `{deviceID, name, createdAt, lastSeenAt}` in plugin storage, and returns:
    `{ deviceID, deviceToken, gatewayURL: "https://watch-mac.alexandrem.com.br", access: { clientId, clientSecret },
-   voice: { voiceID } }` (`voiceID` defaults to `rio`; the iPhone overrides it with its local voice preference).
+voice: { voiceID } }` (`voiceID` defaults to `rio`; the iPhone overrides it with its local voice preference).
 3. The iPhone sends that payload to the watch with WatchConnectivity (`transferUserInfo`, plus
    `updateApplicationContext` for re-sync). The watch stores it in its Keychain. The iPhone keeps nothing.
 4. Every gateway request carries `Authorization: Bearer <deviceToken>` in addition to the Access headers. Unknown,
@@ -50,7 +50,7 @@ Watch ══UDP (Opus, DTLS/ICE-lite)══▶ OpenAI GPT Live  (media never cro
 6. `custom.watch` → `stats()` (diagnostics, rev. 2026-10-29) returns in-memory counters since the server started:
    `{ at, devices: [{ deviceID, day: Usage, hours: [{ hour } & Usage] }] }`, `day` summing the last 24 hours and
    `hours` listing those with activity, newest first. `Usage = { state: { app, background, widget, unknown },
-   pushes: { urgent, coalesced, failed }, capped }`: `/state` reads by reader (each `widget` read is one complication
+pushes: { urgent, coalesced, failed }, capped }`: `/state` reads by reader (each `widget` read is one complication
    reload, which WidgetKit budgets), WidgetKit pushes sent by reason, failed pushes, and how often a push waited for
    the daily cap.
 
@@ -60,18 +60,18 @@ JSON bodies, camelCase, times in **epoch milliseconds**, optional fields omitted
 `{ "error": { "code": string, "message": string (pt-BR, short) } }` with a meaningful status. Rate limit per device:
 60 requests/minute outside an active call (voice heartbeats exempt) → `429`.
 
-| Method | Path | Body | Response |
-| --- | --- | --- | --- |
-| GET | `/watch/v1/ping` | — | `{ ok: true, server: string, version: string }` |
-| GET | `/watch/v1/state` | — (header `X-Watch-Client: app \| background \| widget`) | `{ state: AgentsState \| null, host: string }` — the same `AgentsState` as the Live Activity contract (`docs/live-activity.md`, schema and rollup rules), from the same hub, **plus `requestID` on every `attention` item** (the oldest pending request of that kind for that session; watch-only, never in APNs payloads) |
-| GET | `/watch/v1/requests/:requestID` | — | `WatchRequest` (below), `404` when no longer pending |
-| POST | `/watch/v1/requests/:requestID/reply` | `WatchReply` | `{ ok: true }`, `409` when already answered |
-| POST | `/watch/v1/widget-token` | `{ token: string (hex), environment: "sandbox" \| "production" }` | `{ ok: true }` |
-| POST | `/watch/v1/voice/calls` | `{ sdp: string, voiceID?: string }` | `{ callID, sdp, leaseSeconds }` |
-| POST | `/watch/v1/voice/calls/:callID/heartbeat` | `{ sent: number, received: number }` | `{ ok: true }` |
-| GET | `/watch/v1/voice/calls/:callID/events?after=<seq>` | — | long-poll ≤ 25 s: `{ events: VoiceEvent[], next: number, ended: boolean }` |
-| DELETE | `/watch/v1/voice/calls/:callID` | — | `{ ok: true }` |
-| POST | `/watch/v1/diagnostics` | `{ events: object[] ≤ 50 }` | `{ ok: true }` — logged with the device ID, secrets redacted |
+| Method | Path                                               | Body                                                              | Response                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------ | -------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/watch/v1/ping`                                   | —                                                                 | `{ ok: true, server: string, version: string }`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| GET    | `/watch/v1/state`                                  | — (header `X-Watch-Client: app \| background \| widget`)          | `{ state: AgentsState \| null, host: string }` — the same `AgentsState` as the Live Activity contract (`docs/live-activity.md`, schema and rollup rules), from the same hub, **plus `requestID` on every `attention` item**; a working row with a Progresso carries `progress.unit: "todos"` and `current` (rev. 2026-10-30, [progress.md](progress.md)), which the Painel shows as `Agora: …` (the oldest pending request of that kind for that session; watch-only, never in APNs payloads) |
+| GET    | `/watch/v1/requests/:requestID`                    | —                                                                 | `WatchRequest` (below), `404` when no longer pending                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| POST   | `/watch/v1/requests/:requestID/reply`              | `WatchReply`                                                      | `{ ok: true }`, `409` when already answered                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| POST   | `/watch/v1/widget-token`                           | `{ token: string (hex), environment: "sandbox" \| "production" }` | `{ ok: true }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| POST   | `/watch/v1/voice/calls`                            | `{ sdp: string, voiceID?: string }`                               | `{ callID, sdp, leaseSeconds }`                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| POST   | `/watch/v1/voice/calls/:callID/heartbeat`          | `{ sent: number, received: number }`                              | `{ ok: true }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| GET    | `/watch/v1/voice/calls/:callID/events?after=<seq>` | —                                                                 | long-poll ≤ 25 s: `{ events: VoiceEvent[], next: number, ended: boolean }`                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| DELETE | `/watch/v1/voice/calls/:callID`                    | —                                                                 | `{ ok: true }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| POST   | `/watch/v1/diagnostics`                            | `{ events: object[] ≤ 50 }`                                       | `{ ok: true }` — logged with the device ID, secrets redacted                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ```ts
 WatchRequest =
@@ -119,10 +119,10 @@ candidates; the answer must be ICE-lite with UDP candidates, otherwise `502 {cod
 - **Delegation (server-side):** the backend handles GPT Live delegation on the sideband with the same behaviour as
   the iPhone's `VoiceMaster` (`OpenCode/Voice/VoiceMaster.swift`): `delegation.created` → ensure the Sessão mestra
   (`custom.master`) and send the task to it (steer by default, queue when asked), stream its progress back with
-   `delegation.context.append` (`channel: speakable`, ≤ 500 UTF-8 bytes per part) and as `master` events. The
-   admission confirmation, tool activity and tool or step failures produce only visual `master` events (GPT Live
-   acknowledges the request itself, and spoke "já encaminhei" for every admission); the Mestra's text updates,
-   blockers and results supply voice context, without naming the Mestra. Turns are
+  `delegation.context.append` (`channel: speakable`, ≤ 500 UTF-8 bytes per part) and as `master` events. The
+  admission confirmation, tool activity and tool or step failures produce only visual `master` events (GPT Live
+  acknowledges the request itself, and spoke "já encaminhei" for every admission); the Mestra's text updates,
+  blockers and results supply voice context, without naming the Mestra. Turns are
   appended to voice memory (`custom.voice.append`) so the watch and the iPhone share one memory. First verify on the
   Mac, with one short call, which `session.delegation` setting makes `delegation.created` arrive on the sideband and
   whether appends sent there are accepted; record the result in "Backend implementation notes".
@@ -159,6 +159,8 @@ operation must keep the call. Ending the call from the system call UI ends it on
     `working`, `question`, `permission`, `failed` and `unread`, or `idle` from older backends): one folded push at
     most every **30 minutes** after the device's previous push, with the state current at that moment, so the
     final state is never lost. 30 minutes caps folded pushes at 2 an hour, about 28 over a 14-hour working day.
+    Progresso advances and activity text are not part of what the complication draws, so they never push it
+    (rev. 2026-10-30); the Painel reads them when it polls `/state`.
   - **Daily cap (rev. 2026-10-30):** at most **50 pushes per device in any 24 hours**; folded ones stop at **25**,
     keeping the other 25 for urgent changes (unread answers moved from folded to urgent, so the reserve grew; folded
     pushes now only carry decreases and the working count). A held change goes out when a slot frees (the oldest push leaves the 24 hours); until

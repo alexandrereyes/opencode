@@ -13,13 +13,13 @@ question), `progresso-duas-perguntas.png` (two), and the Dynamic Island of `opca
 
 ## Ownership
 
-| Concern | Owner |
-| --- | --- |
-| Which sessions count, their status, focus choice, activity text, progress, ordering, truncation | Backend |
-| Token storage, start/update/end decisions, throttling, alerts, APNs delivery | Backend |
-| Widget UI (Lock Screen, Dynamic Island), colors, copy layout, deep links | iOS |
-| Token collection and registration, local start/update while in foreground, duplicate cleanup | iOS |
-| Theme snapshot | iOS produces it, backend stores and echoes it, never interprets it |
+| Concern                                                                                         | Owner                                                              |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Which sessions count, their status, focus choice, activity text, progress, ordering, truncation | Backend                                                            |
+| Token storage, start/update/end decisions, throttling, alerts, APNs delivery                    | Backend                                                            |
+| Widget UI (Lock Screen, Dynamic Island), colors, copy layout, deep links                        | iOS                                                                |
+| Token collection and registration, local start/update while in foreground, duplicate cleanup    | iOS                                                                |
+| Theme snapshot                                                                                  | iOS produces it, backend stores and echoes it, never interprets it |
 
 The backend never sends UI copy other than session titles, project names, `activity`, `text` and push `alert`
 strings defined below. All user-visible strings are pt-BR.
@@ -80,7 +80,11 @@ Focus = SessionRef & {
   progress?: Progress
 }
 
-Progress { done: number, total: number, unit: "subagents" }   // total ≥ 1, 0 ≤ done ≤ total
+Progress {
+  done: number, total: number      // total ≥ 1, 0 ≤ done ≤ total
+  unit: "subagents" | "todos"      // "todos" rev. 2026-10-30: the session's Progresso (`progress.md`)
+  current?: string                 // "todos" only: the item in hand ("Agora: …"), ≤ 60 chars
+}
 
 Attention = SessionRef & {
   kind: "question" | "permission"
@@ -99,7 +103,8 @@ Need = SessionRef & {
 }
 ```
 
-`unit` is an enum so a future task list can add `"tasks"`; iOS renders unknown units as a bare `done/total`.
+`unit` is an enum so a new unit can be added; iOS renders unknown units as a bare `done/total` and ignores fields it
+does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agora: …` (rev. 2026-10-30).
 
 ### Backend rules
 
@@ -143,26 +148,32 @@ Need = SessionRef & {
   `Lendo <basename>`; shell → `Rodando <command, first 40 chars>`; grep/glob → `Buscando <pattern>`; webfetch or
   websearch → `Pesquisando na web`; subagent → `Delegando para <agent>`; reasoning → `Pensando`; text →
   `Escrevendo resposta`; otherwise omit.
-- **progress:** subagent children created by the focus session's most recent execution; `done` = children whose
-  execution finished (any outcome). Omit when there are none.
+- **progress:** the session's **Progresso** when it shows (rev. 2026-10-30, [progress.md](progress.md)):
+  `{ done, total, unit: "todos", current }`, with the upstream web's rules: `done` counts completed items, `total`
+  every item (cancelled ones included), `current` the item in progress, else the next pending one, else the last
+  completed one. It shows while `experimental.todo` is on for the session's Location, **the session itself** executes
+  and its list still has an open item. Otherwise, as before: subagent children created by the session's most recent
+  execution; `done` = children whose execution finished (any outcome). Omit when there are neither. Rows and focus use
+  the same rule.
 - **sessions order:** question, permission (oldest `since` first), failed (most recent first), working (focus first,
   then most recent activity), unread (most recent first); cut to 4. Rows with `status: "idle"` are emitted **only for
   unread sessions** (rev. 2026-10-28; read sessions no longer appear as rows). The status string stays `idle` so older
   builds keep decoding it; newer builds label it `Não lida`.
 - **Size:** the whole APNs body must stay ≤ 4096 bytes. Trim in this order until it fits: `attention[].text`, then
-  `needs` beyond 2, then `sessions` beyond 3, then `attention` beyond 2, then shorten titles.
+  `sessions[].progress.current` (rev. 2026-10-30; the focus keeps its own), then `needs` beyond 2, then `sessions`
+  beyond 3, then `attention` beyond 2, then shorten titles.
 
 ## RPC `custom.live-activity`
 
 Same plugin RPC mechanism as `custom.device` (iOS calls it with `rpc("custom.live-activity", "<method>", ...)`).
 
-| Method | Input | Output |
-| --- | --- | --- |
-| `register` | `{ deviceID, serverKey, environment: "sandbox" \| "production", theme, pushToStartToken? }` | `{ push: "configured" \| "unconfigured" }` |
-| `activity` | `{ deviceID, activityID, pushToken }` | `{}` |
-| `ended` | `{ deviceID, activityID, reason: "ended" \| "dismissed" }` | `{}` |
-| `unregister` | `{ deviceID }` | `{}` |
-| `snapshot` | `{}` | `{ state: AgentsState \| null }` (`null` = nothing working, waiting or failed) |
+| Method       | Input                                                                                       | Output                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `register`   | `{ deviceID, serverKey, environment: "sandbox" \| "production", theme, pushToStartToken? }` | `{ push: "configured" \| "unconfigured" }`                                     |
+| `activity`   | `{ deviceID, activityID, pushToken }`                                                       | `{}`                                                                           |
+| `ended`      | `{ deviceID, activityID, reason: "ended" \| "dismissed" }`                                  | `{}`                                                                           |
+| `unregister` | `{ deviceID }`                                                                              | `{}`                                                                           |
+| `snapshot`   | `{}`                                                                                        | `{ state: AgentsState \| null }` (`null` = nothing working, waiting or failed) |
 
 Event **`changed`**: `{ state: AgentsState | null }`, emitted when the state changes, coalesced to at most one per
 second. Wire type `rpc.custom.live-activity.changed`. Exactly one delivery per change to a connected app, even with
@@ -198,8 +209,10 @@ device showed an ended card lingering above a new one). Ended activities never s
   `alert` (rev. 2026-10-30). The buzz is the session alert of
   [session-notifications.md](session-notifications.md#live-activity-alerts), which goes through this activity as one
   more priority-10 update carrying `alert` (`<session title>` / `Pergunta: …`, `Permissão: …` or `Parou com erro ·
-  <project>`), as in `push-update.json`.
-- Otherwise coalesced, `apns-priority: 5`, at most one every 10 seconds per activity.
+<project>`), as in `push-update.json`.
+- Otherwise coalesced, `apns-priority: 5`, at most one every 10 seconds per activity. Progresso advances are such
+  routine changes (rev. 2026-10-30): never urgent, folded with the activity text into that slot, so a plan that moves
+  three times within 10 seconds costs one push carrying the last list; no new cadence and no new budget.
 - A heartbeat update every 10 minutes while active. Every push sets `stale-date` = now + 15 minutes.
 
 **End.** When `activeTotal` and `counts.failed` have been 0 for 10 minutes, the backend pushes `end` with the final
@@ -248,6 +261,10 @@ singles one out as "the" session; `focus` is no longer rendered here (it stays i
 - **Attention line** (bottom, only when `attention` is not empty), after a hairline: dot in the kind colour (`accent`
   question, `warning` permission) + bold first `attention` title + ` · há N min` (`textSecondary`, from `since`);
   when `attentionTotal > 1`, append ` +K` with the remaining count. One line, title truncates first.
+- **Progresso line** (rev. 2026-10-30): when there is no attention line and `focus.progress` is `todos`, the same
+  slot, after a hairline, reads `● <focus title> · done/total · Agora: <current>` (dot `success`; the title and the
+  item share the room, a short title staying whole; the count never truncates). It never displaces what needs
+  Alexandre.
 - **Failed only** (`activeTotal == 0`, `failed > 0`): ring with the red and gray arcs, centre `0` / `ativas`, counters
   `com erro` and `não lidas`, no attention line.
 - Fixed metrics; the card must fit the 160 pt Lock Screen limit in every state without vertical `ViewThatFits`.
@@ -281,6 +298,8 @@ half orange, half gray.
 - Expanded: header `N ativas · M precisa(m) de você` (second part `warning`), plus ` · K com erro` in `error` when
   failed > 0; then `sessions` rows (avatar, title, project, status at right: `Pergunta` `accent`, `Permissão`
   `warning`, `Erro` `error`, `Trabalhando` `success` with ` · done/total` when progress, `Não lida` `primary` for `idle` rows).
+  A row whose progress is `todos` with `current` shows `Agora: <current>` in place of the project and a bare
+  `done/total` (`success`) as its status, so the item keeps the room (rev. 2026-10-30).
   **Rows are single-line** (rev. 2026-10-27): small avatar, title (truncating) followed by the project in
   `textSecondary` on the same line, status at the right. At most 3 rows; the whole expanded presentation must fit
   without clipping on every iPhone with Dynamic Island, so the row count is fixed by measured row height, never by
@@ -298,11 +317,12 @@ half orange, half gray.
 - Left: the mascot inside the **state ring** (rev. 2026-10-30; it used to be a subagent progress ring, whose
   `done/total` remains in the working rows' status).
 - Badge overlapping the bottom of the ring, same priority as the minimal island: `!N` (`error`), `?N` (`accent`), hand
-  + N (`warning`); none when there is no attention or failure.
+  - N (`warning`); none when there is no attention or failure.
 - Right: the first 2 `sessions` rows, separated by a hairline. Each row: bold title (one line, truncating) and a status
   line: `Pergunta · há N min` (`accent`), `Permissão · há N min` (`warning`), `since` taken from the matching
   `attention` item; `Erro` (`error`); `Trabalhando` (`success`) with ` · done/total` when the row has progress;
-  `Não lida` (`primary`) for `idle` rows.
+  `Não lida` (`primary`) for `idle` rows. A `todos` row with `current` reads `done/total · <current>` instead
+  (rev. 2026-10-30).
 - Fixed metrics that fit the `.small` size on the smallest supported watch without clipping. Tap uses the same
   `widgetURL` as the Lock Screen card.
 
@@ -313,15 +333,16 @@ attention rows and expanded-island rows link to their own session. Deep links ar
 
 All in [`live-activity/`](live-activity/), generated for 2026-10-27 09:41 BRT (`updatedAt` 1793104860000).
 
-| File | Shows |
-| --- | --- |
-| `attributes.json` | `AgentsActivityAttributes` with the `openchamber-dark` theme |
-| `state-one-question.json` | Focus with progress + one pending question (approved mock A) |
-| `state-two-questions.json` | Focus + two pending questions (list layout) |
-| `state-mixed.json` | Question + permission + 2 failed (minimal shows `!2` in `error`) |
-| `state-working.json` | Only working sessions, no attention (minimal shows the ring) |
-| `state-failed-only.json` | No focus, one failed session (minimal `!1`) |
-| `push-start.json` / `push-update.json` / `push-end.json` | Complete APNs bodies |
+| File                                                     | Shows                                                                                               |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `attributes.json`                                        | `AgentsActivityAttributes` with the `openchamber-dark` theme                                        |
+| `state-one-question.json`                                | Focus with progress + one pending question (approved mock A)                                        |
+| `state-two-questions.json`                               | Focus + two pending questions (list layout)                                                         |
+| `state-mixed.json`                                       | Question + permission + 2 failed (minimal shows `!2` in `error`)                                    |
+| `state-working.json`                                     | Only working sessions, no attention (minimal shows the ring)                                        |
+| `state-failed-only.json`                                 | No focus, one failed session (minimal `!1`)                                                         |
+| `state-progress.json`                                    | Two working sessions with a Progresso (`unit: "todos"`, `current`) and one unread (rev. 2026-10-30) |
+| `push-start.json` / `push-update.json` / `push-end.json` | Complete APNs bodies                                                                                |
 
 ## Change control
 
@@ -353,6 +374,13 @@ session's latest own execution start (from `session.execution.started`), else th
 members. `activity` comes from the executing member with the latest tool, reasoning or text event. `progress` counts
 direct children created since the top-level session's latest execution started (or, without one, since the earliest
 executing member was created), finished or not. Working rows are ordered by the family's latest activity.
+
+**Progresso (rev. 2026-10-30).** The tracker also keeps each session's latest `todowrite` list, as described in
+[progress.md](progress.md): `session.tool.input.started` names the call, `session.tool.called` holds its input and
+`session.tool.success` makes it the list; a `todowrite` call does not change `activity`. A top-level session that
+starts executing without a known list (resumed, or after a restart) and every revert (`session.revert.*`) read the
+transcript instead. `experimental.todo` is asked of the session's own Location through the hub. When the list shows,
+it replaces the subagent count in `progress` for that row and the focus.
 
 **Background shells (rev. 2026-10-28).** Core's jobs are process-local and plugins have no API to list them, so the
 tracker follows the public events: `shell.created` (the shell tool tags `metadata.sessionID`; status `running`) adds

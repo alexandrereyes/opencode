@@ -1,9 +1,11 @@
 import type { Plugin } from "@opencode/plugin/effect"
 import type { Requests } from "../request-times.js"
 import { Session } from "@opencode/schema/session"
+import type { SessionMessage } from "@opencode/schema/session-message"
 import type { SessionScan } from "@opencode/schema/session-scan"
 import { DateTime, Effect } from "effect"
 import path from "node:path"
+import { latest, parse, summarize, tool, type Summary, type Todo } from "../progress/todos.js"
 import type { LiveActivity } from "./rpc.js"
 
 export const limits = {
@@ -21,6 +23,9 @@ export const limits = {
   needs: 3,
   /** Transcript messages a rebuild reads per session to find unfinished background shells. */
   shellMessages: 100,
+  /** Pages of `progressMessages` read to find a session's latest Progresso when it starts working again. */
+  progressPages: 5,
+  progressMessages: 100,
 }
 
 /** The live events the tracker folds; a structural subset of the server events a plugin receives. */
@@ -86,6 +91,18 @@ export type Event =
         readonly input: Readonly<Record<string, unknown>>
       }
     }
+  /** Only `todowrite` calls matter: the success makes their input the session's Progresso. */
+  | {
+      readonly type: "session.tool.success"
+      readonly created: number
+      readonly data: { readonly sessionID: string; readonly id: string }
+    }
+  /** A revert moves the boundary the Progresso is read before, so it is read again. */
+  | {
+      readonly type: "session.revert.staged" | "session.revert.cleared" | "session.revert.committed"
+      readonly created: number
+      readonly data: { readonly sessionID: string }
+    }
   | {
       readonly type: "permission.asked" | "form.created"
       /** Read from `ctx.request.pending()` instead, which also covers requests that end without an event. */
@@ -133,6 +150,10 @@ export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
   "session.execution.interrupted",
   "session.tool.input.started",
   "session.tool.called",
+  "session.tool.success",
+  "session.revert.staged",
+  "session.revert.cleared",
+  "session.revert.committed",
   "session.reasoning.started",
   "session.text.started",
   "session.synthetic",
@@ -159,7 +180,16 @@ export type TrackerContext = {
   }>
   message: Pick<Plugin.Context["message"], "list">
   request: Pick<Requests, "pending">
+  /**
+   * Whether `experimental.todo` is on for a Location directory: its tool list has `todowrite`, the server's own rule
+   * (the highest-priority config document that sets `experimental` decides). Off shows no Progresso, so the plans of
+   * migrated V1 sessions never come back.
+   */
+  todo: (directory: string) => Effect.Effect<boolean>
 }
+
+/** A session's Progresso as the apps, the Live Activity and Mestra show it. */
+export type SessionProgress = Summary & { readonly todos: readonly Todo[] }
 
 type Entry = {
   readonly id: string
@@ -190,6 +220,10 @@ type Entry = {
   activity?: string
   /** Tool call ID → tool name of the current execution, to describe `session.tool.called`. */
   readonly tools: Map<string, string>
+  /** The latest completed `todowrite` list before the revert boundary; `undefined` until read or seen. */
+  todos?: readonly Todo[]
+  /** `todowrite` calls waiting for their success, by call ID. */
+  readonly calls: Map<string, readonly Todo[]>
 }
 
 /** A shell a session started that has not finished: a background job keeps its family working. */
@@ -351,6 +385,7 @@ export function makeTracker(ctx: TrackerContext) {
       entry.running = true
       entry.ended = undefined
       entry.startedAt = yield* executionStart(entry)
+      if (!entry.parentID) yield* readTodos(entry)
     }
     // Background shells are process-local jobs with no list API for plugins: their launches and completion notices
     // are in the transcripts. After a server restart Core has already admitted a cancellation notice for each one.
@@ -421,6 +456,48 @@ export function makeTracker(ctx: TrackerContext) {
   const executionStart = (entry: Entry) =>
     latestPrompt(entry.id).pipe(Effect.map((prompt) => Math.max(prompt ?? 0, entry.idleAt ?? entry.created)))
 
+  /** `experimental.todo` per Location directory, read again whenever a session there starts or updates its list. */
+  const gates = new Map<string, boolean>()
+  const refreshGate = Effect.fn("LiveActivity.refreshGate")(function* (directory: string) {
+    gates.set(directory, yield* ctx.todo(directory).pipe(Effect.orElseSucceed(() => false)))
+  })
+
+  /**
+   * Reads a session's Progresso from its transcript, newest first, before its revert boundary: when it starts
+   * working without this process having seen its list (a resumed session, a restart) or after a revert.
+   */
+  const readTodos = Effect.fn("LiveActivity.readTodos")(function* (entry: Entry) {
+    const sessionID = Session.ID.make(entry.id)
+    const info = yield* ctx.session.get({ sessionID }).pipe(Effect.orElseSucceed(() => undefined))
+    const boundary = info?.revert?.messageID
+    const read = (
+      cursor: string | undefined,
+      pages: number,
+      gathered: readonly SessionMessage.Info[],
+    ): Effect.Effect<readonly Todo[]> =>
+      ctx.message
+        .list({ sessionID, limit: limits.progressMessages, order: "desc", ...(cursor ? { cursor } : {}) })
+        .pipe(
+          Effect.flatMap((page) => {
+            const messages = [...gathered, ...page.data]
+            const found = latest(messages, boundary)
+            if (found) return Effect.succeed(found)
+            const next = page.cursor.next
+            if (next && next !== cursor && page.data.length > 0 && pages + 1 < limits.progressPages)
+              return read(next, pages + 1, messages)
+            // Like the web, a boundary that is not among the messages hides none of them.
+            return Effect.succeed(
+              boundary !== undefined && !messages.some((message) => message.id === boundary)
+                ? (latest(messages) ?? [])
+                : [],
+            )
+          }),
+          Effect.orElseSucceed(() => [] as readonly Todo[]),
+        )
+    entry.todos = yield* read(undefined, 0, [])
+    yield* refreshGate(entry.directory)
+  })
+
   const rootOf = (id: string) => {
     const visit = (current: Entry | undefined, depth: number): Entry | undefined =>
       current?.parentID && depth < 32 ? visit(sessions.get(current.parentID), depth + 1) : current
@@ -482,6 +559,8 @@ export function makeTracker(ctx: TrackerContext) {
           running: false,
           activityAt: event.created,
           tools: new Map(),
+          // Unknown, not empty: an imported or forked session arrives with its history, list included.
+          calls: new Map(),
         })
         if (event.data.parentID) touch(sessions.get(event.data.parentID))
         return
@@ -515,6 +594,9 @@ export function makeTracker(ctx: TrackerContext) {
           target.ended = undefined
           target.activity = undefined
           target.tools.clear()
+          target.calls.clear()
+          // Only top-level sessions show a Progresso; a subagent's own list stays in its conversation.
+          if (!target.parentID) yield* target.todos === undefined ? readTodos(target) : refreshGate(target.directory)
         }
         worked(id, event.created)
         return yield* refreshPending(now)
@@ -549,9 +631,25 @@ export function makeTracker(ctx: TrackerContext) {
       case "session.tool.called": {
         const target = touch(entry)
         const name = target?.tools.get(event.data.id)
-        if (target) target.activity = name ? describe(name, event.data.input) : undefined
+        // Updating the list is no work of its own: the activity before it stays.
+        if (target && name === tool) target.calls.set(event.data.id, parse(event.data.input.todos))
+        else if (target) target.activity = name ? describe(name, event.data.input) : undefined
         return
       }
+      case "session.tool.success": {
+        const todos = entry?.calls.get(event.data.id)
+        if (!entry || !todos) return
+        entry.calls.delete(event.data.id)
+        entry.todos = todos
+        return yield* refreshGate(entry.directory)
+      }
+      case "session.revert.staged":
+      case "session.revert.cleared":
+      case "session.revert.committed":
+        if (!entry) return
+        if (entry.parentID) entry.todos = undefined
+        else yield* readTodos(entry)
+        return
       case "session.reasoning.started": {
         const target = touch(entry)
         if (target) target.activity = "Pensando"
@@ -586,6 +684,23 @@ export function makeTracker(ctx: TrackerContext) {
   }
   const unreadAt = (entry: Entry) =>
     (entry.completionAt ?? 0) > (entry.viewedAt ?? 0) ? (entry.completionAt ?? 0) : (entry.idleAt ?? 0)
+
+  /**
+   * The web's rule for showing the list: `experimental.todo` is on, the session itself executes (not only its
+   * subagents) and its list still has an open item.
+   */
+  const progressOf = (entry: Entry): SessionProgress | undefined => {
+    if (!entry.running || entry.archived || gates.get(entry.directory) !== true) return undefined
+    const todos = entry.todos ?? []
+    const summary = summarize(todos)
+    return summary ? { ...summary, todos } : undefined
+  }
+
+  /** The Progresso of a session this process tracks, for Sessões (`custom.navigation`) and Mestra's tools. */
+  const progress = (sessionID: string) => {
+    const entry = sessions.get(sessionID)
+    return entry ? progressOf(entry) : undefined
+  }
 
   /** Computes the contract state; also moves the focus, which must stay put while it keeps working. */
   const derive = (now: number, host: string): Derived => {
@@ -663,7 +778,11 @@ export function makeTracker(ctx: TrackerContext) {
       kept ??
       working.toSorted((a, b) => b.rollup.startedAt - a.rollup.startedAt || a.entry.id.localeCompare(b.entry.id))[0]
     state.focus = focused?.entry.id
+    // A session with a Progresso shows it instead of its subagent count (rev. 2026-10-30).
     const progress = (row: (typeof rows)[number]): LiveActivity.Progress | undefined => {
+      const todos = progressOf(row.entry)
+      if (todos)
+        return { done: todos.done, total: todos.total, unit: "todos", current: clip(todos.current, limits.activity) }
       const children = [...sessions.values()].filter(
         (child) => child.parentID === row.entry.id && child.created >= row.rollup.since,
       )
@@ -820,7 +939,7 @@ export function makeTracker(ctx: TrackerContext) {
     }
   }
 
-  return { rebuild, apply, refreshPending, derive, prune, sessions }
+  return { rebuild, apply, refreshPending, derive, prune, sessions, progress }
 }
 
 export type Tracker = ReturnType<typeof makeTracker>
@@ -926,5 +1045,6 @@ function fromInfo(info: Session.Info, running: boolean, completionAt?: number): 
         }
       : {}),
     tools: new Map(),
+    calls: new Map(),
   }
 }

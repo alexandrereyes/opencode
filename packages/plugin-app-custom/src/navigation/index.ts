@@ -4,6 +4,8 @@ import type { Requests } from "../request-times.js"
 import { DateTime, Effect, Schema } from "effect"
 import { Navigation } from "./rpc.js"
 import { Session } from "@opencode/schema/session"
+import { sharedHub } from "../live-activity/index.js"
+import type { SessionProgress } from "../live-activity/tracker.js"
 
 const encodeSession = Schema.encodeSync(Session.Info)
 
@@ -11,6 +13,8 @@ interface NavigationContext {
   readonly scan: Plugin.Context["session"]["scan"]
   readonly pending: Requests["pending"]
   readonly background: Plugin.Context["job"]["background"]
+  /** A session's Progresso while it shows; the Live Activity hub folds the same events for every Location. */
+  readonly progress?: (sessionID: string) => SessionProgress | undefined
 }
 
 export const registerNavigation = Effect.fn("Navigation.register")(function* (ctx: Context) {
@@ -19,7 +23,16 @@ export const registerNavigation = Effect.fn("Navigation.register")(function* (ct
   const jobs = ctx.job
   yield* ctx.rpc
     .register(Navigation.Definition, {
-      list: (input) => list({ scan: sessions.scan, pending: requests.pending, background: jobs.background }, input),
+      list: (input) =>
+        list(
+          {
+            scan: sessions.scan,
+            pending: requests.pending,
+            background: jobs.background,
+            progress: (sessionID) => sharedHub().progress(sessionID),
+          },
+          input,
+        ),
     })
     .pipe(Effect.orDie)
 })
@@ -62,6 +75,7 @@ export const list = Effect.fn("Navigation.list")(function* (
       const sessionQuestions = questions.get(row.session.id) ?? []
       const sessionBackground = background.get(row.session.id) ?? []
       const newest = sessionBackground[0]
+      const progress = ctx.progress?.(row.session.id)
       return {
         session: encodeSession(row.session),
         ...(row.messageAt === undefined ? {} : { messageAt: row.messageAt }),
@@ -84,6 +98,7 @@ export const list = Effect.fn("Navigation.list")(function* (
               ...(newest.title ? { backgroundTitle: newest.title } : {}),
             }
           : {}),
+        ...(progress ? { progress } : {}),
       }
     }),
   }

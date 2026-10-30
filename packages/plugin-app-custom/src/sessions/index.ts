@@ -13,10 +13,13 @@ import { Tool } from "@opencode/schema/tool"
 import { Clock, Effect, Option, Schema } from "effect"
 import { archive } from "../archive/index.js"
 import { Chats } from "../chats/rpc.js"
+import { sharedHub } from "../live-activity/index.js"
+import type { SessionProgress } from "../live-activity/tracker.js"
 import { Master } from "../master/rpc.js"
 import { Preferences } from "../preferences/rpc.js"
 import {
   type Inventory,
+  Progress,
   Summary,
   activity,
   attention,
@@ -180,6 +183,17 @@ const Request = Schema.Union([
 ])
 const Status = Schema.Struct({
   ...Listed.fields,
+  progress: Schema.optionalKey(
+    Schema.Struct({
+      ...Progress.fields,
+      items: Schema.Array(
+        Schema.Struct({
+          content: Schema.String,
+          status: Schema.Literals(["pending", "in_progress", "completed", "cancelled"]),
+        }),
+      ),
+    }),
+  ),
   cost: Schema.Number,
   tokens: TokenUsage.Info,
   branch: Schema.optionalKey(Schema.String),
@@ -239,6 +253,7 @@ export const registerSessions = Effect.fn("Sessions.register")(function* (ctx: P
         claim: (input) => chats.claim(input).pipe(Effect.asVoid),
         confirm: (input) => chats.confirm(input).pipe(Effect.asVoid),
       },
+      progress: (sessionID) => sharedHub().progress(sessionID),
     }),
   )
 })
@@ -339,6 +354,8 @@ export type SessionsContext = {
     claim: (input: Allocation & { sessionID: Session.ID }) => Effect.Effect<void, unknown>
     confirm: (input: Allocation & { sessionID: Session.ID }) => Effect.Effect<void, unknown>
   }
+  /** A session's Progresso while it shows; absent in tests without the Live Activity hub. */
+  progress?: (sessionID: string) => SessionProgress | undefined
 }
 
 export function registerTools(editor: ToolEditor, ctx: SessionsContext) {
@@ -357,6 +374,7 @@ export function registerTools(editor: ToolEditor, ctx: SessionsContext) {
           Effect.orElseSucceed(() => ({ pinned: [], notify: [] })),
         ),
       chats: ctx.chats.root,
+      ...(ctx.progress ? { progress: ctx.progress } : {}),
     }).pipe(Effect.map((value) => ({ ...value, rows: value.rows.filter((row) => row.session.id !== self) })))
   const add = <A, B>(
     name: string,
@@ -1123,9 +1141,14 @@ const status = Effect.fn("Sessions.status")(function* (
     .get({ location: { directory: session.location.directory } })
     .pipe(Effect.catch(() => Effect.succeed(undefined)))
   const members = yield* ctx.session.family({ sessionID }).pipe(Effect.orElseSucceed(() => undefined))
-  const listed = summary(value, row)
+  const { progress: _, ...listed } = summary(value, row)
+  const progress = value.progress(sessionID)
   return {
     ...listed,
+    // The whole list, so Mestra can answer what is done and what is left.
+    ...(progress
+      ? { progress: { done: progress.done, total: progress.total, current: progress.current, items: progress.todos } }
+      : {}),
     lastActivityAgo: ago(now, listed.lastActivity),
     cost: usd(session.cost + (members?.cost ?? 0)),
     tokens: session.tokens,

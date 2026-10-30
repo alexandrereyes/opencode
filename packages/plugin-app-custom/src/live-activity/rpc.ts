@@ -40,13 +40,16 @@ export const Attributes = Schema.Struct({
   theme: Theme,
 }).annotate({ identifier: "LiveActivity.Attributes" })
 
-export const Unit = Schema.Literals(["subagents"]).annotate({ identifier: "LiveActivity.Unit" })
+/** `subagents`: finished child sessions of the run; `todos` (rev. 2026-10-30): completed items of its Progresso. */
+export const Unit = Schema.Literals(["subagents", "todos"]).annotate({ identifier: "LiveActivity.Unit" })
 
 export interface Progress extends Schema.Schema.Type<typeof Progress> {}
 export const Progress = Schema.Struct({
   done: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   unit: Unit,
+  /** `todos` only: the item in hand ("Agora: …"), ≤ 60 chars. */
+  current: optional(Schema.String),
 }).annotate({ identifier: "LiveActivity.Progress" })
 
 const SessionRef = {
