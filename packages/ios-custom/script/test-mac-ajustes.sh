@@ -21,7 +21,7 @@ codesign --force --deep --sign - "$copy" 2>/dev/null
 trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$samples" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
 failed=0
 # Without arguments, every mode (zsh does not split `${@:-…}` into words).
-modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos)
+modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos servidores)
 (( $# )) && modes=("$@")
 for mode in $modes; do
   # Each mode starts from a fresh window: no restored window, reading place or Contexto width.
@@ -40,6 +40,9 @@ for mode in $modes; do
     ampliar) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
     # Wide and narrow Contexto, a subagent open over the root, its own subagent and the way back, in one launch.
     contexto) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
+    # Three fake servers in memory (never the app's defaults or the Keychain): the rail's avatar and menu, the
+    # voice confirmation, Ir ▸ Servidores and ⌃⌘2 (the copy comes forward for that part), then one server left.
+    servidores) extra=(-OpenCodeMacServers 3) ;;
     # The sheets' composers (Nova sessão, Pergunta paralela, a comment) record with the fake microphone too; the
     # fixtures' reviewer answers in 2.5 s, so "Ajustando texto…" can be seen and cancelled.
     dictation) extra=(-OpenCodeMacFakeDictation -OpenCodeDictationReview 2500) ;;

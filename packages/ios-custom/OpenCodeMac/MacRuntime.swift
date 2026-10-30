@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor @Observable final class MacRuntime {
   static let shared = MacRuntime()
   static let localURL = URL(string: "http://127.0.0.1:4096")!
-  let servers = ServerStore(launchOverride: .override(), builtinURL: MacRuntime.localURL)
+  let servers = MacRuntime.serverStore()
   let appearance = AppearanceSettings()
   let audio = MacVoiceSession()
   var store: SessionStore?
@@ -22,6 +22,8 @@ import SwiftUI
   weak var front: MacWindowRuntime?
   var initialSelection: MacSelection?
   var pendingNotification: (id: String, server: String?)?
+  /// Ajustes ▸ Servidores opens Adicionar servidor… (the rail's server menu).
+  var addingServer = false
   @ObservationIgnored var openMainWindow: (() -> Void)?
   @ObservationIgnored private var building: Task<Void, Never>?
   @ObservationIgnored private var events: Task<Void, Never>?
@@ -114,6 +116,13 @@ import SwiftUI
     } onChange: { [weak self] in
       Task { @MainActor [weak self] in self?.observeServices(store) }
     }
+  }
+
+  private static func serverStore() -> ServerStore {
+    #if DEBUG
+    if let fixture = MacServerChecks.servers() { return fixture }
+    #endif
+    return ServerStore(launchOverride: .override(), builtinURL: localURL)
   }
 
   func syncShown() {

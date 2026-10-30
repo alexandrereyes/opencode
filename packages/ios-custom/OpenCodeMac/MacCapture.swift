@@ -161,12 +161,12 @@ import SwiftUI
     let overlays = NSApp.windows.filter { other in
       other !== window && other.isVisible
         && (other.sheetParent === window || String(describing: type(of: other)).contains("Popover")
-          || (other.parent === window && ["mac-search-suggestions", "mac-model-palette", "mac-notification-panel"].contains(other.identifier?.rawValue ?? ""))
+          || (other.parent === window && ["mac-search-suggestions", "mac-model-palette", "mac-notification-panel", "mac-server-menu"].contains(other.identifier?.rawValue ?? ""))
           || (other.parent?.sheetParent === window && other.identifier?.rawValue == "mac-model-palette"))
     }.sorted { ($0.identifier?.rawValue == "mac-model-palette" ? 1 : 0) < ($1.identifier?.rawValue == "mac-model-palette" ? 1 : 0) }
     for other in overlays {
       guard let picture = draw(other) else { continue }
-      if ["mac-search-suggestions", "mac-model-palette", "mac-notification-panel"].contains(other.identifier?.rawValue ?? "") {
+      if ["mac-search-suggestions", "mac-model-palette", "mac-notification-panel", "mac-server-menu"].contains(other.identifier?.rawValue ?? "") {
         base = compose(base, window, picture, other) ?? base
         continue
       }

@@ -106,6 +106,12 @@ private struct MacServerSettings: View {
       }
     }
     .formStyle(.grouped)
+    // Adicionar servidor… in the rail's server menu.
+    .onChange(of: runtime.addingServer, initial: true) { _, adding in
+      guard adding else { return }
+      runtime.addingServer = false
+      editing = .init(server: nil)
+    }
     .sheet(item: $editing) { route in MacServerEditor(servers: servers, server: route.server) }
     .sheet(isPresented: $pairing) { MacPairingSheet(servers: servers) }
     .confirmationDialog("Remover \(removing?.title ?? "servidor")?", isPresented: Binding(

@@ -3039,6 +3039,45 @@ thread), `MacDiskCleaner.swift` and `MacDiskSheet.swift`.
   into the path, a change after a confirmation, a server that stops answering); then it deletes it. DEBUG
   `-OpenCodeMacDiskSurvey <folder>` reads this Mac's real folders with `clean` disabled.
 
+### Troca rápida de servidor — 30 October
+
+Approved option A of `.agent-artifacts/mac-troca-servidor/` (`prancha.png`), with the avatar at the rail's foot
+instead of its top. Stage 1 only: no new data or connection. The iPhone keeps switching in Você.
+
+- **Avatar** (`MacServerSwitcher.swift`, `MacServerButton`): the last item of the project rail, under Ajustes, in
+  the rail's tile. The current server's initials (`ServerSwitcher.initials`: the monogram, skipping joining words, so
+  "Mac de Alexandre" is MA) on a theme avatar color chosen from its ID like a project without one. Connecting: a
+  turning `primary` ring; disconnected: dimmed with a small unplugged badge (Ajustes' "Conectado / Conectando… /
+  Desconectado", `ServerSwitcher.Connection`). Hidden with one saved server (`ServerSwitcher.visible`), so the rail is
+  unchanged then. `othersNeedYou` draws the rail's request dot over it; nothing sets it until stage 2.
+- **Menu**: a click opens a borderless, nonactivating child panel beside the avatar that grows upward from its foot
+  (like the bell's list: it never takes the keyboard; Esc, a click outside or a choice closes it). SERVIDORES lists the
+  saved servers in Ajustes' order with their initials, address and ⌃⌘ shortcut; the current one has ✓ and its
+  connection. The others show no state (it needs their own connections). Then **Gerenciar servidores…** (Ajustes ▸
+  Servidores, ⌘,) and **Adicionar servidor…** (the same tab with its editor open, `MacRuntime.addingServer`).
+- **Switch**: Ajustes' "Usar" (`ServerStore.select`, then `MacRuntime.rebuild`): every window reloads on the session
+  it showed on that server, with its drafts. While a GPT Live call is on (`audio.voice.sessionID`), the window first
+  asks "Trocar para …? A conversa por voz será encerrada…" (`MacServerConfirmation`). Meanwhile the window reads
+  "Conectando a <servidor>…" and then the avatar turns until the event stream connects.
+- **Shortcuts**: Ir ▸ Servidores lists the servers (the current one checked) with ⌃⌘1…⌃⌘9 in Ajustes' order
+  (`ServerSwitcher.shortcuts`), only with two or more; Atalhos do teclado (⌘/) lists them. ⌃⌘1…⌃⌘9 were free: ⌘1…⌘9
+  are the list's sessions, ⌥1…⌥9 the rail's projects, ⌃⌘S, ⌃⌘← and ⌃⌘→ other commands, and macOS uses ⌃1…⌃9 for
+  Spaces.
+- **Stage 2 (not done)**: the other servers' state (the request dot, counts) needs a light monitor per saved server
+  (`/api/info` and the `custom.live-activity` snapshot, no new endpoint); a server per window needs one
+  `SessionStore` per server; a notification from another server still does nothing.
+
+Checks: `swift test --filter ServerSwitcher` (initials, color, order and shortcuts, when it hides, addresses,
+connection labels) and `script/test-mac-ajustes.sh servidores`: `-OpenCodeMacServers 3` swaps the saved servers for
+three fake ones held in memory (a `UserDefaults` subclass and a credential backend that never reach the app's domain
+or the Keychain; the check asserts the domain stays without `OpenCodeServers`). It checks the avatar, the menu's rows
+and place (upward, beside the rail, not key), Esc, the confirmation with a voice call (`MacServerChecks.overrides`)
+and Cancelar, Ir ▸ Servidores' items and ⌃⌘2 (the copy comes forward for this part only), the window back on its
+session with its draft after the rebuild, then one server left: no avatar and no Servidores in Ir. Pictures:
+`servidores-fechada`, `-menu`, `-confirmacao`, `-trocando`, `-conectando`, `-trocado`, `-desconectado` and
+`-um-servidor`. Every switch rebuilds the same in-memory fixture, so the check ends the run itself
+(`MacServerChecks.pending`).
+
 ### Chat (polish 1) — 27 October
 
 Briefing: `.agent-artifacts/mac-app/POLIMENTO-CHAT.md` of the `mac-polish-chat` worktree. The chat column is the
@@ -3392,7 +3431,7 @@ separate track.
   Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
   Marcar como lida, Arquivar ⌥⌘⌫, Excluir ⌘⌫, both confirmed and acting on the selection while there is one, Reiniciar Sessão mestra), Editar (Buscar
   na conversa ⌘F), Ir (Buscar projetos e sessões ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓,
-  Sessão mestra ⇧⌘M, Conversar por voz, the first nine sessions of the list, ⌘1…⌘9, and Todas then the project rail's chips in the order it shows them, ⌥1…⌥9) and Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
+  Sessão mestra ⇧⌘M, Conversar por voz, the first nine sessions of the list, ⌘1…⌘9, Todas then the project rail's chips in the order it shows them, ⌥1…⌥9, and with two or more saved servers Servidores, ⌃⌘1…⌃⌘9; see [Troca rápida de servidor](#troca-rápida-de-servidor--30-october)) and Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
   to ⌥⌘↑/⌥⌘↓, up and down Sessões. The title bar's `…` shows the same session actions and Buscar na conversa.
   Shortcuts avoid the text editing keys (⌘A, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓); ⌘⌫ typed
   in an editable field (`MacTextKeys`) still deletes to the start of the line there instead of excluding the session.

@@ -81,7 +81,7 @@ private struct MacRoot: View {
             Button("Tentar novamente") { Task { await runtime.prepare() } }
           }
         } else {
-          ProgressView("Conectando…").frame(maxWidth: .infinity, maxHeight: .infinity)
+          ProgressView("Conectando a \(runtime.servers.active.title)…").frame(maxWidth: .infinity, maxHeight: .infinity)
         }
       }
       // No minimum width here: the split view and the inspector derive the window's own, and a smaller one set
@@ -126,7 +126,7 @@ private struct MacWindowScene: View {
 
 /// The menu bar: Arquivo (Nova sessão, Nova janela, Atualizar), Visualizar (Contexto, Arquivos, the state filters),
 /// Sessão (the selected session's actions and the selection mode), Ir (search, back, previous/next, Sessão mestra,
-/// voice, ⌘1…⌘9) and the LLM proxy and Espaço em disco modals in Janela.
+/// voice, ⌘1…⌘9, ⌥1…⌥9 and the servers' ⌃⌘1…⌃⌘9) and the LLM proxy and Espaço em disco modals in Janela.
 private struct MacCommands: Commands {
   @Environment(\.openWindow) private var openWindow
   @FocusedValue(\.macWindow) private var runtime
@@ -254,6 +254,20 @@ private struct MacCommands: Commands {
                 Button(row.session.displayTitle) { runtime.selection = MacSelection(sessionID: row.id) }
                   .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .command)
               }
+            }
+          }
+        }
+        // ⌃⌘1…⌃⌘9: the saved servers in Ajustes' order, the current one checked; only with a choice to make.
+        let servers = runtime.app.servers
+        if ServerSwitcher.visible(servers.servers) {
+          Divider()
+          Section("Servidores") {
+            ForEach(ServerSwitcher.entries(servers.servers, activeID: servers.activeID)) { entry in
+              Toggle(entry.server.title, isOn: Binding(get: { entry.active },
+                set: { _ in runtime.app.requestServer(entry.id, from: runtime) }))
+                .keyboardShortcut(entry.shortcut.map {
+                  KeyboardShortcut(KeyEquivalent(Character(String($0))), modifiers: [.control, .command])
+                })
             }
           }
         }

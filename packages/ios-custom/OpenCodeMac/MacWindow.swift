@@ -99,6 +99,7 @@ struct MacWindow: View {
     } message: {
       Text("A sessão sairá de Recentes e ficará na lista de arquivadas. Não há opção de desarquivar nesta versão.")
     }
+    .modifier(MacServerConfirmation(runtime: runtime))
     // The call belongs to the app; this window owns its bar presentation and composer inset.
     .modifier(MacVoiceWindow(runtime: runtime))
     .focusedSceneValue(\.macWindow, runtime)

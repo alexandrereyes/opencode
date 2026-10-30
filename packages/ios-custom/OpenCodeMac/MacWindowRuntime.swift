@@ -61,6 +61,8 @@ import SwiftUI
   let modelPalette = MacModelPalette()
   var newSessionPalette: (() -> Void)?
   var archiveRequest: SessionRow?
+  /// A server switch waiting for "Trocar" because it would end the voice call (`MacServerConfirmation`).
+  var serverRequest: SavedServer?
   /// Pergunta paralela over the shown conversation, presented by this window only (`askSideQuestion`).
   var sideQuestion: SideQuestionLaunch?
   /// Arquivos widened for reading ("Ampliar"): the chat at its minimum, until "Reduzir" or closing Arquivos. Not

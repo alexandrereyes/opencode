@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos|servidores`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -33,7 +33,9 @@ import SwiftUI
 
   /// Once per launch: a second window (one SwiftUI restores and one the capture opens) would drive the same views.
   static func run(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String) async {
-    guard let mode, !started else { return }
+    guard let mode else { return }
+    // A window the server switch rebuilt (`servidores`) waits for that check, which ends the run itself.
+    if started { await MacServerChecks.pending?.value; return }
     started = true
     func shot(_ step: String) { MacCapture.shot(window, theme: theme, to: folder + "/\(MacCapture.name)-\(step).png") }
     if MacLaunch.background, foreground.contains(mode) {
@@ -63,6 +65,7 @@ import SwiftUI
       case "progresso": try await progresso(window: window, runtime: runtime, theme: theme, folder: folder, shot: shot)
       case "contexto": try await contexto(window: window, runtime: runtime, shot: shot)
       case "caminhos": try await caminhos(window: window, runtime: runtime, shot: shot)
+      case "servidores": await MacServerChecks.run(window: window, theme: theme, folder: folder)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")

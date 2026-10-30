@@ -8,6 +8,8 @@ struct MacProjectRail: View {
   @Environment(\.openSettings) private var openSettings
   let store: SessionStore
   let disk: MacDiskStore
+  /// The current server under Ajustes, only with two or more saved servers.
+  var server: MacServerButton? = nil
   let action: (String, PreferenceIntent) -> Void
   let add: () -> Void
   let shortcuts: () -> Void
@@ -48,7 +50,8 @@ struct MacProjectRail: View {
     .onChange(of: order, initial: true) { _, value in shownOrder(value) }
   }
 
-  /// Pinned to the rail's foot, outside the scrolling projects: the disk bar, Atalhos do teclado and Ajustes.
+  /// Pinned to the rail's foot, outside the scrolling projects: the disk bar, Atalhos do teclado, Ajustes and the
+  /// server.
   private var footer: some View {
     VStack(spacing: 9) {
       MacDiskIndicator(disk: disk, action: space)
@@ -57,6 +60,7 @@ struct MacProjectRail: View {
         .accessibilityIdentifier("rail-shortcuts")
       Button { openSettings() } label: { tile(name: "Ajustes", symbol: "gearshape", selected: false, count: 0) }
         .help("Ajustes (⌘,)").accessibilityLabel("Ajustes").accessibilityIdentifier("rail-settings")
+      if let server { server }
     }
     .padding(.top, 6).padding(.bottom, 10)
   }

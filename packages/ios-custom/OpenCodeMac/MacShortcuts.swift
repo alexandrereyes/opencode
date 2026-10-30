@@ -47,6 +47,8 @@ struct MacShortcut: Identifiable {
   // MacSearchPresentation: moveDown:/moveUp: in the ⌘K field.
   static let searchNext = MacShortcut(.general, "Busca: próximo resultado", caps: ["⌃", "N"])
   static let searchPrevious = MacShortcut(.general, "Busca: resultado anterior", caps: ["⌃", "P"])
+  // Ir ▸ Servidores binds one per saved server, in Ajustes' order, only with two or more.
+  static let servers = MacShortcut(.general, "Trocar de servidor (na ordem de Ajustes)", caps: ["⌃", "⌘", "1", "…", "⌃", "⌘", "9"])
 
   // Sessões (⌘1…⌘9 are bound per row in Ir ▸ Sessões da lista)
   static let numbered = MacShortcut(.sessions, "Abrir sessão 1–9", caps: ["⌘", "1", "…", "⌘", "9"])
@@ -102,7 +104,7 @@ struct MacShortcut: Identifiable {
   static let panImage = MacShortcut(.image, "Mover a imagem", caps: ["←", "↑", "↓", "→"])
 
   static let all: [MacShortcut] = [
-    search, newSession, newWindow, reload, compose, settings, shortcuts, searchNext, searchPrevious,
+    search, newSession, newWindow, reload, compose, settings, shortcuts, searchNext, searchPrevious, servers,
     numbered, railProjects, previous, next, back, master, fromThis, rename, pin, archive, delete, selectAll,
     find, model, sideQuestion, send, newline, dictationKey, dictationEditor, dictationRevision,
     createSession,
