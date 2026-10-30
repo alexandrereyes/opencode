@@ -10,5 +10,4 @@ export interface StorageDomain {
     key: string,
     update: (current: Schema.Json | undefined) => readonly [next: Schema.Json, result: A],
   ) => Promise<A>
-  readonly adoptLegacy: (key: string) => Promise<boolean>
 }

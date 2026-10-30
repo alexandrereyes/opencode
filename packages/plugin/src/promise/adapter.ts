@@ -500,7 +500,6 @@ export function fromPromise(plugin: Plugin) {
             remove: (key) => run(host.storage.remove(key)),
             scan: (options) => run(host.storage.scan(options)),
             update: (key, update) => run(host.storage.update(key, update)),
-            adoptLegacy: (key) => run(host.storage.adoptLegacy(key)),
           },
           tool: {
             reload: () => run(host.tool.reload()),

@@ -987,13 +987,6 @@ const count = await ctx.storage.update("counter", (current) => {
 })
 ```
 
-Adopt a legacy unnamespaced key once when moving existing data into plugin storage. The source must have the same key;
-an internal marker prevents a deleted destination from importing it again.
-
-```ts
-const imported = await ctx.storage.adoptLegacy("settings")
-```
-
 Scan keys by prefix with optional cursor pagination.
 
 ```ts
@@ -1010,7 +1003,6 @@ interface StorageContext {
   remove(key: string): Promise<void>
   scan(options: StorageScanOptions): Promise<StorageScanResult>
   update<A>(key: string, update: (current: Json | undefined) => readonly [next: Json, result: A]): Promise<A>
-  adoptLegacy(key: string): Promise<boolean>
 }
 
 interface StorageScanOptions {

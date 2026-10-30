@@ -1032,13 +1032,6 @@ effect: (ctx) =>
   }),
 ```
 
-Use `adoptLegacy` only when moving an existing unnamespaced key into plugin storage. Adoption uses the same key name,
-preserves an existing destination, and runs once even if that destination is later removed.
-
-```ts
-effect: (ctx) => ctx.storage.adoptLegacy("settings").pipe(Effect.asVoid),
-```
-
 Scan keys by prefix with cursor pagination.
 
 ```ts
@@ -1065,7 +1058,6 @@ interface StorageDomain {
     key: string,
     update: (current: Schema.Json | undefined) => readonly [next: Schema.Json, result: A],
   ) => Effect.Effect<A>
-  readonly adoptLegacy: (key: string) => Effect.Effect<boolean>
 }
 ```
 

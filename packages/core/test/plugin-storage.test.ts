@@ -32,32 +32,4 @@ describe("plugin storage", () => {
     }),
   )
 
-  it.effect("adopts an unnamespaced key once without replacing an existing target or restoring a deleted target", () =>
-    Effect.gen(function* () {
-      const kv = yield* KV.Service
-      const first = PluginHost.storage(kv, "first.plugin")
-      const second = PluginHost.storage(kv, "second.plugin")
-      const legacy = [{ id: "legacy", content: "kept" }]
-      yield* kv.set("catalog", legacy)
-
-      expect(
-        (yield* Effect.all([first.adoptLegacy("catalog"), first.adoptLegacy("catalog")], { concurrency: 2 })).sort(),
-      ).toEqual([false, true])
-      expect(yield* first.get("catalog")).toEqual(legacy)
-      expect(yield* second.get("catalog")).toBeUndefined()
-
-      yield* first.remove("catalog")
-      yield* kv.set("catalog", [{ id: "new-legacy", content: "must-not-return" }])
-      expect(yield* first.adoptLegacy("catalog")).toBe(false)
-      expect(yield* first.get("catalog")).toBeUndefined()
-
-      yield* second.set("catalog", [{ id: "current", content: "wins" }])
-      expect(yield* second.adoptLegacy("catalog")).toBe(false)
-      expect(yield* second.get("catalog")).toEqual([{ id: "current", content: "wins" }])
-
-      yield* kv.set("plugin:foreign:key", "private")
-      expect((yield* second.adoptLegacy("plugin:foreign:key").pipe(Effect.exit))._tag).toBe("Failure")
-      expect(yield* second.get("plugin:foreign:key")).toBeUndefined()
-    }),
-  )
 })

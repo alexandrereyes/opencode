@@ -8,7 +8,6 @@ const decode = Schema.decodeUnknownSync(Schema.Array(Snippets.Info))
 const encode = Schema.encodeSync(Schema.Array(Snippets.Info))
 
 export const registerSnippets = Effect.fn("Snippets.register")(function* (ctx: Plugin.Context) {
-  yield* ctx.storage.adoptLegacy(key)
   yield* ctx.storage.update(key, (current) => [encode(decode(current ?? [])), undefined])
   const registration: RpcRegistration<typeof Snippets.Definition> = yield* ctx.rpc
     .register(Snippets.Definition, {

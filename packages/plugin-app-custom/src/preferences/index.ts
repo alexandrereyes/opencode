@@ -136,7 +136,6 @@ export function importProfile(profile: Preferences.Profile, input: { hasLegacyDa
 }
 
 export const registerPreferences = Effect.fn("Preferences.register")(function* (ctx: Plugin.Context) {
-  yield* ctx.storage.adoptLegacy(key)
   yield* ctx.storage.update(key, (current) => [encode(decode(current ?? defaults)), undefined])
   const registration: RpcRegistration<typeof Preferences.Definition> = yield* ctx.rpc
     .register(Preferences.Definition, {

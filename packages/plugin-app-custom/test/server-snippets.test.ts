@@ -1,7 +1,6 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { Database } from "bun:sqlite"
 import { expect } from "bun:test"
 import { OpenCode } from "@opencode/client"
 import { Snippets } from "../src/snippets/rpc"
@@ -12,7 +11,7 @@ import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { ServerProcess } from "@opencode/server/process"
 
-it.live("migrates and serves one persistent snippet catalog across Locations", () =>
+it.live("serves one persistent snippet catalog across Locations", () =>
   Effect.gen(function* () {
     const tmp = yield* tmpdirScoped("opencode-plugin-snippets-")
     const db = path.join(tmp.path, "snippets.db")
@@ -47,42 +46,13 @@ it.live("migrates and serves one persistent snippet catalog across Locations", (
 
     yield* Effect.scoped(
       Effect.gen(function* () {
-        yield* ServerProcess.start<never, never>({
-          hostname: "127.0.0.1",
-          port: 0,
-          password: "secret",
-          app: { version: "initialize" },
-          database: { path: db },
-          config: { directory: path.join(tmp.path, "empty"), project: false },
-          models: { fetch: false },
-          fs: { filewatcher: false },
-        })
-      }),
-    )
-    const legacy = [
-      {
-        id: "legacy",
-        name: "legacy",
-        description: "Imported",
-        aliases: ["old"],
-        content: "Preserved legacy content",
-      },
-    ]
-    const sqlite = new Database(db)
-    sqlite
-      .query("insert into kv (key, value, time_created, time_updated) values (?, ?, ?, ?)")
-      .run("snippets:catalog", JSON.stringify(legacy), Date.now(), Date.now())
-    sqlite.close()
-
-    yield* Effect.scoped(
-      Effect.gen(function* () {
         const server = yield* start()
         const client = OpenCode.make({
           baseUrl: HttpServer.formatAddress(server.address),
           headers: { authorization: `Basic ${btoa("opencode:secret")}` },
         })
         const snippets = client.rpc(Snippets.Definition)
-        expect(yield* Effect.promise(() => snippets.list({}))).toEqual({ items: legacy })
+        expect(yield* Effect.promise(() => snippets.list({}))).toEqual({ items: [] })
         yield* Effect.promise(() => snippets.list({}, { location: { directory: first } }))
         yield* Effect.promise(() => snippets.list({}, { location: { directory: second } }))
         const plugins = yield* Effect.promise(() => client.plugin.list())
@@ -128,12 +98,13 @@ it.live("migrates and serves one persistent snippet catalog across Locations", (
             ),
           ),
         )
+        // Saves alternate between two Location plugin instances; none of the concurrent writes may be lost.
         expect((yield* Effect.promise(() => snippets.list({}, { location: { directory: first } }))).items).toHaveLength(
-          22,
+          21,
         )
         expect(
           (yield* Effect.promise(() => snippets.list({}, { location: { directory: second } }))).items,
-        ).toHaveLength(22)
+        ).toHaveLength(21)
         yield* Effect.promise(() =>
           snippets.save(
             {
@@ -163,7 +134,7 @@ it.live("migrates and serves one persistent snippet catalog across Locations", (
             [
               { method: "GET", path: "/api/snippet" },
               { method: "PUT", path: "/api/snippet" },
-              { method: "DELETE", path: "/api/snippet/legacy" },
+              { method: "DELETE", path: "/api/snippet/cross-location" },
             ].map((request) =>
               fetch(new URL(request.path, HttpServer.formatAddress(server.address)), {
                 method: request.method,
@@ -185,31 +156,11 @@ it.live("migrates and serves one persistent snippet catalog across Locations", (
           headers: { authorization: `Basic ${btoa("opencode:secret")}` },
         })
         const items = (yield* Effect.promise(() => client.rpc(Snippets.Definition).list({}))).items
-        expect(items.some((item) => item.id === "legacy" && item.content === "Preserved legacy content")).toBe(true)
+        expect(
+          items.some((item) => item.id === "cross-location" && item.content === "Refresh every server client"),
+        ).toBe(true)
         expect(items.some((item) => item.id === "snippet-0")).toBe(false)
-        expect(items).toHaveLength(22)
-      }),
-    )
-
-    const reopened = new Database(db)
-    const namespace = "custom.app-mentions"
-      .split("")
-      .map((value) => value.charCodeAt(0).toString(16).padStart(4, "0"))
-      .join("")
-    reopened.query("delete from kv where key = ?").run(`plugin:${namespace}:snippets:catalog`)
-    reopened
-      .query("update kv set value = ?, time_updated = ? where key = ?")
-      .run(JSON.stringify([{ ...legacy[0], id: "restored" }]), Date.now(), "snippets:catalog")
-    reopened.close()
-
-    yield* Effect.scoped(
-      Effect.gen(function* () {
-        const server = yield* start()
-        const client = OpenCode.make({
-          baseUrl: HttpServer.formatAddress(server.address),
-          headers: { authorization: `Basic ${btoa("opencode:secret")}` },
-        })
-        expect(yield* Effect.promise(() => client.rpc(Snippets.Definition).list({}))).toEqual({ items: [] })
+        expect(items).toHaveLength(21)
       }),
     )
   }).pipe(Effect.timeout("30 seconds")),
