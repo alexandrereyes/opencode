@@ -221,25 +221,46 @@ public struct VoiceNarration: Sendable {
 }
 
 public enum VoiceMasterProgress {
+  static let sessionTools: Set<String> = [
+    "list", "projects", "status", "search", "send", "create", "update", "interrupt", "mark_read", "archive", "requests",
+    "answer", "wait", "read",
+  ]
+  /// Names before the server's `sessions` namespace (`tools.mestra.*`, `tools.opencode.session_read`), which older servers still send.
+  static let formerSessionTools = [
+    "sessions_list": "list", "projects_list": "projects", "session_status": "status", "sessions_search": "search",
+    "session_send": "send", "session_create": "create", "session_update": "update", "session_interrupt": "interrupt",
+    "session_mark_read": "mark_read", "session_archive": "archive", "requests_list": "requests",
+    "request_answer": "answer", "session_wait": "wait", "session_read": "read",
+  ]
+  /// The session tool behind a tool call name: `sessions.read` in Code Mode, the tool ID `sessions_read`, or a former
+  /// name such as `mestra.sessions_list` or `opencode.session_read`. A bare `read` is the native file tool.
+  public static func sessionTool(_ name: String) -> String? {
+    for prefix in ["sessions.", "sessions_"] where name.hasPrefix(prefix) {
+      let tool = String(name.dropFirst(prefix.count))
+      return sessionTools.contains(tool) ? tool : nil
+    }
+    return formerSessionTools[String(name.split(separator: ".").last ?? Substring(name))]
+  }
+  /// The running tool call's full name, as the server sent it, and the session it targets.
   public static func call(_ event: ConversationEvent) -> (name: String, sessionID: String?)? {
     if event.type == "session.tool.called", let name = event.data.name {
-      return (String(name.split(separator: ".").last ?? Substring(name)), event.data.input?.object?["sessionID"]?.string)
+      return (name, event.data.input?.object?["sessionID"]?.string)
     }
     guard event.type == "session.tool.progress",
       let call = event.data.metadata?.object?["toolCalls"]?.array?.last(where: { $0.object?["status"]?.string == "running" })?.object,
       let name = call["tool"]?.string else { return nil }
-    return (String(name.split(separator: ".").last ?? Substring(name)), call["input"]?.object?["sessionID"]?.string)
+    return (name, call["input"]?.object?["sessionID"]?.string)
   }
   public static func describe(_ event: ConversationEvent) -> String? {
     if let call = call(event) {
-      switch call.name {
-      case "session_read", "session_status": return "A mestra está conferindo uma sessão."
-      case "sessions_list": return "A mestra está consultando suas sessões."
-      case "session_send": return "A mestra está encaminhando seu pedido."
-      case "session_create": return "A mestra está criando a sessão solicitada."
-      case "session_wait": return "A mestra está acompanhando o trabalho da sessão."
-      case "requests_list": return "A mestra está verificando os pedidos pendentes."
-      case "request_answer": return "A mestra está respondendo ao pedido autorizado."
+      switch sessionTool(call.name).map({ "sessions." + $0 }) ?? String(call.name.split(separator: ".").last ?? Substring(call.name)) {
+      case "sessions.read", "sessions.status": return "A mestra está conferindo uma sessão."
+      case "sessions.list": return "A mestra está consultando suas sessões."
+      case "sessions.send": return "A mestra está encaminhando seu pedido."
+      case "sessions.create": return "A mestra está criando a sessão solicitada."
+      case "sessions.wait": return "A mestra está acompanhando o trabalho da sessão."
+      case "sessions.requests": return "A mestra está verificando os pedidos pendentes."
+      case "sessions.answer": return "A mestra está respondendo ao pedido autorizado."
       case "read", "grep", "glob": return "A mestra está consultando os arquivos."
       case "execute": return "A mestra está consultando as ferramentas."
       case "iphone_query", "iphone_status": return "A mestra está consultando seu iPhone."

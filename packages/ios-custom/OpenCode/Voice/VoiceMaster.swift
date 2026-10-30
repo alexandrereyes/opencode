@@ -100,7 +100,7 @@ extension VoiceMasterServing {
   func receive(_ event: ConversationEvent) async {
     guard waiting, event.data.owner == masterID else { return }
     ConversationReducer.apply(event, to: &messages)
-    if let call = VoiceMasterProgress.call(event), ["session_read", "session_status", "session_wait"].contains(call.name),
+    if let call = VoiceMasterProgress.call(event), ["read", "status", "wait"].contains(VoiceMasterProgress.sessionTool(call.name)),
       let id = call.sessionID,
       let title = sessions.entries.first(where: { $0.session.id == id })?.session.displayTitle {
       update(.progress("A mestra está conferindo a sessão “" + String(title.prefix(120)) + "”.", narrate: false))

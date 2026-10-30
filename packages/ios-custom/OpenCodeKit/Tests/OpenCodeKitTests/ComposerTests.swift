@@ -347,7 +347,7 @@ private func detected(_ text: String) -> ComposerTrigger? {
   #expect(request.files == nil)
   #expect(request.metadata["sessions"]?.array?.count == 1)
   #expect(request.text.contains("Referenced OpenCode session:"))
-  #expect(request.text.contains("tools.opencode.session_read"))
+  #expect(request.text.contains("Use tools.sessions.read (tools.opencode.session_read on older servers)"))
 }
 
 @Test func attachmentInlineRulesAndConversionDecision() {

@@ -62,7 +62,7 @@ extension PromptRequest {
           if let data = try? encoder.encode(context), let json = String(data: data, encoding: .utf8)
           {
             suffix.append(
-              "Referenced OpenCode session: \(json). Use tools.opencode.session_read when you need to discuss its contents."
+              "Referenced OpenCode session: \(json). Use tools.sessions.read (tools.opencode.session_read on older servers) when you need to discuss its contents."
             )
           }
         }

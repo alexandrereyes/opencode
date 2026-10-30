@@ -97,7 +97,7 @@ private actor VoiceMasterHTTP {
     XCTAssertEqual(prompts.map(\.text), ["Primeiro pedido", "Segundo pedido"])
     XCTAssertEqual(updates.count, 2)
     let event = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
-      {"type":"session.tool.called","data":{"sessionID":"\(firstID!)","name":"session_read"}}
+      {"type":"session.tool.called","data":{"sessionID":"\(firstID!)","name":"sessions.read"}}
       """.utf8))
     await master.receive(event)
     guard case .progress(let message, let narrate) = updates.last else { return XCTFail("Missing progress") }

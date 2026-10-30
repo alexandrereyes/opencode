@@ -127,8 +127,33 @@ struct VoiceTests {
     #expect(VoiceMasterProgress.describe(reasoning) == nil)
   }
   @Test func codeModeProgressUsesStructuredNestedCalls() throws {
-    let event = try JSONDecoder().decode(ConversationEvent.self, from: Data(#"{"type":"session.tool.progress","data":{"metadata":{"toolCalls":[{"tool":"opencode.session_read","status":"running","input":{"sessionID":"private-id","secret":"never narrated"}}]}}}"#.utf8))
-    #expect(VoiceMasterProgress.call(event)?.sessionID == "private-id")
-    #expect(VoiceMasterProgress.describe(event) == "A mestra está conferindo uma sessão.")
+    for tool in ["sessions.read", "opencode.session_read"] {
+      let event = try JSONDecoder().decode(ConversationEvent.self, from: Data(#"{"type":"session.tool.progress","data":{"metadata":{"toolCalls":[{"tool":"\#(tool)","status":"running","input":{"sessionID":"private-id","secret":"never narrated"}}]}}}"#.utf8))
+      #expect(VoiceMasterProgress.call(event)?.sessionID == "private-id")
+      #expect(VoiceMasterProgress.describe(event) == "A mestra está conferindo uma sessão.")
+    }
+  }
+  @Test func sessionToolsKeepTheirNarrationUnderCurrentAndFormerNames() throws {
+    func describe(_ name: String) throws -> String? {
+      VoiceMasterProgress.describe(try JSONDecoder().decode(ConversationEvent.self, from: Data(#"{"type":"session.tool.called","data":{"name":"\#(name)"}}"#.utf8)))
+    }
+    for (current, former, text) in [
+      ("sessions.status", "mestra.session_status", "A mestra está conferindo uma sessão."),
+      ("sessions.list", "mestra.sessions_list", "A mestra está consultando suas sessões."),
+      ("sessions.send", "mestra.session_send", "A mestra está encaminhando seu pedido."),
+      ("sessions.create", "mestra.session_create", "A mestra está criando a sessão solicitada."),
+      ("sessions.wait", "mestra.session_wait", "A mestra está acompanhando o trabalho da sessão."),
+      ("sessions.requests", "mestra.requests_list", "A mestra está verificando os pedidos pendentes."),
+      ("sessions.answer", "mestra.request_answer", "A mestra está respondendo ao pedido autorizado."),
+    ] {
+      #expect(try describe(current) == text)
+      #expect(try describe(former) == text)
+    }
+    #expect(VoiceMasterProgress.sessionTool("sessions_mark_read") == "mark_read")
+    #expect(VoiceMasterProgress.sessionTool("sessions.unknown") == nil)
+    // Short session tool names never shadow the native tools that share them.
+    #expect(try describe("read") == "A mestra está consultando os arquivos.")
+    #expect(try describe("search") == "A mestra está usando uma ferramenta.")
+    #expect(VoiceMasterProgress.sessionTool("read") == nil)
   }
 }
