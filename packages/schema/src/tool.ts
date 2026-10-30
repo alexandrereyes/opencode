@@ -27,8 +27,6 @@ export interface Namespace {
 interface BaseOptions {
   readonly namespace?: string
   readonly permission?: string
-  /** If set, only these agents receive the tool in direct/Code Mode snapshots; no selected agent means hidden. */
-  readonly agents?: ReadonlyArray<Agent.ID>
 }
 
 export type Options = BaseOptions &

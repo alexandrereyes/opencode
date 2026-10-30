@@ -758,28 +758,6 @@ describe("Tool", () => {
     }),
   )
 
-  it.effect("filters agent-scoped direct tools and Code Mode before catalog creation and permission overrides", () =>
-    Effect.gen(function* () {
-      const service = yield* Tool.Service
-      const allowed = Agent.ID.make("specialist")
-      yield* transform(service, { shared: make() }, { namespace: "acme", codemode: true })
-      yield* transform(service, { scoped: make() }, { namespace: "acme", codemode: true, agents: [allowed] })
-      yield* transform(service, { scoped_direct: make() }, { codemode: false, agents: [allowed] })
-      yield* transform(service, { hidden: make() }, { agents: [] })
-      for (const agent of [allowed, identity.agent, undefined, allowed]) {
-        const snapshot = yield* service.snapshot([{ action: "*", resource: "*", effect: "allow" }], agent)
-        expect(snapshot.definitions.map((tool) => tool.name)).toEqual(
-          agent === allowed ? ["scoped_direct", "execute"] : ["execute"],
-        )
-        expect(codeModeListings(snapshot.codeModeCatalog!).map((tool) => tool.path)).toEqual(
-          agent === allowed ? ["acme.scoped", "acme.shared"] : ["acme.shared"],
-        )
-      }
-      const denied = yield* service.snapshot([{ action: "acme_scoped", resource: "*", effect: "deny" }], allowed)
-      expect(codeModeListings(denied.codeModeCatalog!).map((tool) => tool.path)).toEqual(["acme.shared"])
-    }),
-  )
-
   it.effect("keeps permission options isolated between registrations", () =>
     Effect.gen(function* () {
       const service = yield* Tool.Service
