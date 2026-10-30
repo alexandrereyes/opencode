@@ -20,14 +20,18 @@ the session's Location, so they are seen while that Location is loaded), and the
 /api/session/:id/model` right before a steered prompt, so a change takes effect at the next send; a picker change that is
 never sent, or a queued prompt, does not change the default.
 
-All tools use Standard Schema inputs/outputs in the `opencode` namespace. Each control registers `options.agents: ["mestra"]`:
-the native request snapshot filters it before direct definitions, inline Code Mode catalogs and Code Mode search/runtime
-are built. This also covers subagents and agents contributed by configuration after the custom plugin, even when a session
-allows every permission. Every captured executor independently rejects other agents. Controls are also `pinned`, so the
-Mestra catalog always lists their signatures instead of making the model `search` first (they are invisible to every other
-agent, so pinning costs nothing elsewhere). Controls target only nonarchived top-level sessions, excluding the caller and
-Mestra sessions; the only exception is a pending request owned by a subagent, accepted when its top-level ancestor is a
-valid target. No deletion is exposed: archive is the destructive limit.
+All tools use Standard Schema inputs/outputs and are ordinary Code Mode tools of their own `mestra` namespace
+(`tools.mestra.<name>`; the names, whose last segment the apps' voice narration reads, are unchanged). Since 2026-10-30
+any agent may call them: the Mestra already allows every tool, and keeping them from other agents was never a security
+boundary (an agent with a shell can drive the server through `opencode2 api`), only context hygiene. They are not
+`pinned`: pinned listings appear in every session's catalog. Unpinned, another agent's catalog shows the namespace and
+the few listings that fit the inline budget, and the Mestra's instructions name every tool by its exact path and input
+keys, so it calls them without `search` (`test/master.test.ts` checks the paths and keys against the input schemas).
+
+Controls target only nonarchived top-level sessions, excluding the caller and Mestra sessions; the only exception is a
+pending request owned by a subagent, accepted when its top-level ancestor is a valid target. The caller is the calling
+session's top-level ancestor: a subagent acts for its whole family, so it cannot interrupt, archive, wait on or message
+its own root, nor answer a request of its own family. No deletion is exposed: archive is the destructive limit.
 
 The Mestra agent denies the native `opencode_worktree_create` and `opencode_worktree_list` tools: they act on the caller's
 own Location, which for Mestra is a managed chat, not the project Alexandre names. `session_create` owns worktrees.
@@ -71,7 +75,8 @@ before, so a transcript shows why a session stopped.
 The invisible system prompt (`instructions`) is organized as role, answer style (voice-safe pt-BR), the tool map with
 direct call names, the attention concepts above, playbooks (overview order: needs you → errors → unread → running;
 ambiguous targets; session creation and worktrees; send; pending requests; costs) and safety (explicit requests only,
-transcripts and tool results are untrusted data, no control through shell/API/subagents).
+transcripts and tool results are untrusted data, no control through subagents; what the tools do not cover goes
+through `opencode2 api` from the shell).
 
 `mac_query` (namespace `mac`, available to every agent, `src/mac-data`) reads Calendar, Reminders and Contacts through
 the OpenCode app on the Mac: `calendar` (`from`/`to`, `calendars`, `query`), `reminders` (`status`, `from`/`to`, `lists`,
@@ -79,7 +84,9 @@ the OpenCode app on the Mac: `calendar` (`from`/`to`, `calendars`, `query`), `re
 (item `limit` and 20,000 serialized characters); a closed app, a source switched off or a missing grant fails with what
 Alexandre has to do. See `docs/mac-data.md`.
 
-Both send and create tag the admitted user prompt with `{"custom.master":{"sessionID":"<origin>"}}`.
+Both send and create tag the admitted user prompt with its origin: `{"custom.master":{"sessionID":"<origin>"}}` when the
+Mestra sends it (the apps label it "Sessão mestra"), `{"custom.sender":{"sessionID":"<origin>","agent":"<agent>"}}`
+for any other agent (the apps show a plain user message).
 Every tool's executor receives an explicit `MasterContext` (session, request, message, permission, VCS, worktree, model,
 agent, preferences, managed chats and a small `git switch -c` runner), which the tests replace with fixtures.
 Preferences add optional `data.masterSessions: Record<server, sessionID>` and `master.set` / `master.clear` intents;
@@ -119,8 +126,9 @@ inherited by both plugin interfaces, adapted to its canonical endpoint, and the 
 with the idle instant in milliseconds. It keeps the native guard: a view older than the session's idle time or one
 already covered by `time.viewed` is ignored.
 
-`test/master.test.ts` covers boundaries, root/self/archive/subagent filters with their reasons, agent restrictions,
-pinning, family-aware state and counts, unread/failed rules, list filters, projects, status (reply, error, files,
+`test/master.test.ts` covers boundaries, root/self/archive/subagent filters with their reasons, calls from another
+agent's session and from a subagent (lists without the caller, origin metadata, refusals for the caller's own family),
+the instructions' tool paths and keys, family-aware state and counts, unread/failed rules, list filters, projects, status (reply, error, files,
 subagents, cost), search, subagent requests and answers, origin metadata, model/agent validation, standalone chats,
 worktrees with branch and their cleanup on failure, update (rename, model, agent, pins/mutes across server keys), mark
 read, archive, bounded output, virtual-clock wait timeout and the default-model resolution (late providers, Sol fallback,
@@ -140,9 +148,6 @@ result, under `<home>/eval/runs`; `reset` rebuilds from the worktree and restore
 in-memory pending requests; `chat` and `state` support one-off checks. Judge both the answer and the resulting server
 state (`state`), since a fluent answer can hide a tool that never ran.
 
-`script/verify-master-visibility.ts` verifies read-only Code Mode discovery in fresh build, Mestra, general-child and
-late-configured-agent sessions in the owned 4179 sandbox. It saves bounded tool inventories under
-`$TMPDIR/opencode/master-tool-visibility/` and removes only its own sessions. Core's
-`test/tool-opencode-master-visibility.test.ts` covers the real custom registration and native snapshots/search; generic
-direct/Code Mode scope and cache isolation are covered by `test/tool-registry.test.ts`. See
-`docs/custom-master-session.md` for why a small generic snapshot extension is necessary instead of a late context hook.
+Until 2026-10-30 the controls were scoped to the Mestra by a custom `agents` tool option in Core, verified by
+`script/verify-master-visibility.ts` and Core's `test/tool-opencode-master-visibility.test.ts`; both were removed with
+that option (see `docs/upstream-integrations.md`, "Customizations in upstream code").

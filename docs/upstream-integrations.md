@@ -43,9 +43,9 @@ or guarantees; the plugin never calls the server's own HTTP API as a workaround.
 Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD`:
 
 - `packages/{core,server,protocol,schema,plugin,client,tui}/src`, `packages/cli/src` and `packages/cli/script`: **43 →
-  26 modified files, +698 → +448 lines, −30 → −22 lines**.
+  23 modified files, +698 → +442 lines, −30 → −19 lines**.
 - All shared paths outside `packages/plugin-app-custom`, `packages/ios-custom`, `docs`, `.agents` and `bun.lock`: **69 →
-  39 modified files, +1300 → +691 lines, −84 → −28 lines**.
+  35 modified files, +1300 → +663 lines, −84 → −25 lines**.
 
 ### Removed or moved by the offload
 
@@ -83,6 +83,13 @@ Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD`:
   no type matching `%permission%` (`event_sequence` has 1,386 rows, which carry no event types). Nothing else feeds
   durable events: `Bus.replay` has no caller outside tests, session import and export move `Session.Info` plus messages
   (`core/src/session/transfer.ts`), and no V1 migration or sync path names the type.
+- Agent-scoped tools (`agents` in `packages/schema/src/tool.ts`, the filter and `agent` parameter of `Tool.snapshot` in
+  `packages/core/src/tool.ts`, its call in `packages/core/src/session/context.ts`, the custom case of
+  `core/test/tool-registry.test.ts`, `core/test/tool-opencode-master-visibility.test.ts`): removed on 2026-10-30 by
+  Alexandre's decision; those files equal upstream again. Hiding the Mestra tools from other agents was context hygiene,
+  not a security boundary (an agent with a shell can drive the server through `opencode2 api`). They are now ordinary,
+  unpinned tools of a `mestra` namespace that any agent may call; the Mestra's instructions name their exact paths.
+  Measurements and the behavior for other callers: `docs/custom-master-session.md`, "Agent scoping removed".
 
 ### Remaining customizations
 
@@ -124,14 +131,6 @@ context has no equivalent for any of them; each is an upstream proposal candidat
 
 Other customizations:
 
-- Agent-scoped tools: `agents` in `packages/schema/src/tool.ts`, the filter in `Tool.snapshot(permissions, agent)`
-  (`packages/core/src/tool.ts`) and its call in `packages/core/src/session/context.ts`; tests in
-  `core/test/tool-registry.test.ts` and `core/test/tool-opencode-master-visibility.test.ts`. Consumer: the Mestra tools
-  (`master`), visible only to the `mestra` agent, both directly and in the Code Mode catalog. Deny rules added to the
-  other agents by an agent transform are not equivalent: the last matching rule wins and the session's own permissions
-  come after the agent's (`Permission.merge(agent, session)`), so a session allowing `*` would show the tools again;
-  agents added by plugins activated later would miss the rule; and the `context` hook sees only direct tools, after the
-  Code Mode catalog is built. Exit: upstream per-agent tool visibility.
 - Skill `slash` (`packages/schema/src/skill.ts`, frontmatter `slash` / `metadata.opencode/slash` in
   `packages/core/src/config/plugin/skill-file.ts`, `slash: true` on the built-in Report skill in
   `packages/core/src/plugin/skill.ts`, OpenAPI and Client types). Consumer: the iOS and Mac composer, which lists skills
@@ -143,7 +142,7 @@ Other customizations:
 - Compatibility skill watcher reconciliation in `packages/core/src/config/plugin/compatibility.ts` and
   `core/test/config/skill.test.ts` (see `docs/upstream-overrides.md`).
 - Tests only: custom tests that drive plugin code through Core's fixtures stay in Core, because they need Core's test
-  preload and HOME isolation: `core/test/tool-opencode-master-{ensure,ensure-bundle,model,visibility}.test.ts`,
+  preload and HOME isolation: `core/test/tool-opencode-master-{ensure,ensure-bundle,model}.test.ts`,
   `core/test/tool-opencode-session-read.test.ts`, `core/test/plugin/app-mentions.test.ts`; host tests
   `core/test/plugin/{pending,session-controls}.test.ts`; adapter test `plugin/test/session-controls.test.ts`. In
   `cli/test/debug-paths.test.ts` the spawned CLI drops `OPENCODE_CONFIG_DIR` and `OPENCODE_DB`, so a run from a shell

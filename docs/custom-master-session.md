@@ -7,8 +7,8 @@ UI and Session UI trees. This is a new custom capability, not an early upstream 
 ## Policy ownership
 
 `packages/plugin-app-custom/src/master` owns the hidden Mestra agent, its short invisible instructions, preferred
-Sol ultrafast/medium selection and server-default fallback, typed `opencode` control tools, root/self filtering,
-agent-only authorization, compact outputs and `custom.master` prompt-origin metadata. Existing native Session services
+Sol ultrafast/medium selection and server-default fallback, typed control tools, root/self filtering,
+compact outputs and `custom.master` prompt-origin metadata. Existing native Session services
 still own creation, durable prompt admission, queue/steer delivery, interruption, waiting, form validation and permissions.
 `custom.preferences` adds optional per-server master pointers plus set/clear intents without a profile-version change.
 
@@ -124,3 +124,32 @@ removed custom web app kept a session's current hidden agent (`packages/app-cust
 Live evaluation used fake repositories, seeded sessions in every state (unread, read, failed, muted, pinned, pending
 question, subagent permission, running) and fresh Mestra sessions driven through the HTTP API, checking both the answers
 and the resulting server state.
+
+## Agent scoping removed (2026-10-30)
+
+Decision (Alexandre): the thirteen Mestra controls are ordinary plugin tools. The Mestra already allows every tool, and
+keeping them from other agents was never a security boundary (any agent with a shell can drive the server through
+`opencode2 api`), only context hygiene. The `Tool.Options.agents` allowlist of the "Tool discovery isolation follow-up"
+above, its snapshot filter and its call in `session/context.ts` are removed, so those Core and Schema files equal
+upstream again; `core/test/tool-opencode-master-visibility.test.ts` and `script/verify-master-visibility.ts` are removed
+with them, as is the executors' Mestra-only guard.
+
+The controls move to their own unpinned `mestra` namespace (`tools.mestra.<name>`, names unchanged). Pinned, they would
+be listed in every session's Code Mode catalog. Measured in the owned 4177 sandbox (`build` and `mestra` sessions,
+rendered catalog, characters / estimated tokens at 4 characters per token):
+
+| Revision                                   | `build` catalog | `mestra` catalog | whole `mestra` context, characters |
+| ------------------------------------------ | --------------: | ---------------: | ---------------------------------: |
+| Before (Mestra-only, pinned in `opencode`) |   7,293 / 1,823 |   12,568 / 3,142 |                             37,444 |
+| Unpinned in `opencode`                     |   8,558 / 2,140 |    8,558 / 2,140 |        33,576 (previous tool list) |
+| Unpinned `mestra` namespace (chosen)       |   8,846 / 2,212 |    8,846 / 2,212 |                             34,584 |
+
+Unpinned listings compete for the 2,000-token inline budget, so another agent's catalog grows only to that budget. In
+`opencode` the shorter Mestra listings displaced two native listings of `build` (`session_read`, `read_mcp_resource`);
+their own namespace costs 72 more tokens and keeps the native `opencode` listings exactly as before. The Mestra's
+instructions name each tool by its exact path with its input keys, so it calls them without `search`.
+
+Calls from other sessions: the caller is the calling session's top-level ancestor (a subagent acts for its family), left
+out of the lists and refused as a target ("it is the calling session"); Mestra sessions stay excluded and refused; only
+the Mestra's messages carry `custom.master` (shown as "Sessão mestra" by the apps), others carry
+`custom.sender: {sessionID, agent}`.
