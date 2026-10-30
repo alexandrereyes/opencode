@@ -86,6 +86,7 @@ struct ComposerTextView: UIViewRepresentable {
                                      length: min(draft.selection.length, max(0, view.textStorage.length - draft.selection.location)))
         view.restyle()
         view.undoManager?.removeAllActions()
+        draft.restoreDictationUndo(view)
       } else if restyle {
         view.restyle()
       }

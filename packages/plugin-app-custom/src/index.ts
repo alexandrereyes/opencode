@@ -20,6 +20,7 @@ import { registerTranscript } from "./transcript/index.js"
 import { registerMaster } from "./master/index.js"
 import { registerVoice } from "./voice/index.js"
 import { registerSpeech } from "./speech/index.js"
+import { registerDictation } from "./dictation/index.js"
 import { registerMacData } from "./mac-data/index.js"
 import { registerDevice } from "./device/index.js"
 import { registerResources } from "./resources/index.js"
@@ -53,6 +54,7 @@ export default Plugin.define({
       yield* registerMaster(ctx)
       yield* registerVoice(ctx)
       yield* registerSpeech(ctx)
+      yield* registerDictation(ctx)
       yield* registerMacData(ctx)
       yield* registerDevice(ctx)
       yield* registerResources(ctx)

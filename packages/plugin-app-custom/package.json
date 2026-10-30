@@ -30,6 +30,7 @@
     "./master/rpc": "./src/master/rpc.ts",
     "./voice/rpc": "./src/voice/rpc.ts",
     "./speech/rpc": "./src/speech/rpc.ts",
+    "./dictation/rpc": "./src/dictation/rpc.ts",
     "./device/rpc": "./src/device/rpc.ts",
     "./mac-data/rpc": "./src/mac-data/rpc.ts",
     "./resources/rpc": "./src/resources/rpc.ts",

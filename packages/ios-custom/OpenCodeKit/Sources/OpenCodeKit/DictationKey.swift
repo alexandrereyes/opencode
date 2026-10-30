@@ -23,6 +23,8 @@ public struct DictationKeyGesture: Sendable, Equatable {
     case discard
     /// Esc during a dictation: stop and throw it away, with nothing transcribed.
     case cancel
+    /// ⌥⌘E during a dictation: turn its AI review on or off (during the review: use the original text).
+    case toggleRevision
   }
 
   private enum State: Sendable, Equatable {
@@ -47,6 +49,16 @@ public struct DictationKeyGesture: Sendable, Equatable {
     state = .pressed(recording: false, holding: true)
     return .begin
   }
+
+  /// Another modifier went down or up while the key is down. ⌘ during a hold waits for its key, since ⌥⌘E
+  /// (`toggleRevision`) keeps the hold; before the hold, and for any other modifier, the key is a modifier.
+  public mutating func modifier(command: Bool) -> Action {
+    if command, case .pressed(_, true) = state { return .none }
+    return interrupted()
+  }
+
+  /// ⌥⌘E: the dictation's review switch, with or without the key down; a hold goes on.
+  public func toggleRevision(dictating: Bool) -> Action { dictating ? .toggleRevision : .none }
 
   /// Another key, a click or another modifier while the key is down: it is a modifier, not dictation.
   public mutating func interrupted() -> Action {

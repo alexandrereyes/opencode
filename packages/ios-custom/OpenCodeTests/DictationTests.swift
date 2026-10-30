@@ -88,6 +88,128 @@ import os
     XCTAssertEqual(draft.document.text, "$sample Fora da tela Final No fim")
     XCTAssertEqual(draft.document.validTokens.map(\.token), [token])
   }
+  /// The AI review: on at every recording, its reply as a second undo step; off, failed, Usar original or the
+  /// sparkles during "Ajustando texto…" give the raw text; Descartar (Esc on the Mac) gives nothing.
+  func testReviewIsPerRecordingAndEveryWayOutOfItIsRawOrNothing() async throws {
+    let source = DictationTestSource()
+    source.install()
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: source.files.root)
+    }
+    let transcription = TranscriptionController(source: source, engine: DictationTestEngine(), monitorsNetwork: false)
+    let capture = DictationTestCapture()
+    capture.waits = false; capture.granted = true; capture.writesFixture = true
+    let recording = VoiceRecordingComposer(file: root.appending(path: "dictation.caf"), capture: capture, transcription: transcription)
+    defer { recording.discard() }
+    var received: [[String]] = []
+    recording.receive = { received.append($0) }
+    var reply: String? = "Texto revisado."
+    var asked: [String] = []
+    var answer: CheckedContinuation<Void, Never>?
+    recording.reviser = { text in
+      asked.append(text)
+      await withCheckedContinuation { answer = $0 }
+      return reply
+    }
+    func dictate(toggle: Bool = false) async throws {
+      recording.handle(.began); recording.handle(.ended)
+      try await wait { recording.state == .recording && recording.elapsed > 0 }
+      XCTAssertTrue(recording.revision.enabled, "Every recording starts with the review on")
+      if toggle { recording.toggleRevision(); XCTAssertFalse(recording.revision.enabled) }
+      recording.finish()
+    }
+    // On: "Ajustando texto…" until the reply, which comes after the raw text.
+    try await dictate()
+    try await wait { recording.revision.reviewing == "Texto transcrito" && answer != nil }
+    XCTAssertEqual(recording.state, .pending)
+    XCTAssertTrue(recording.cancellable)
+    answer?.resume(); answer = nil
+    try await wait { recording.state == .idle }
+    XCTAssertEqual(received.last, ["Texto transcrito", "Texto revisado."])
+    // Off for one recording: the raw text at once, and the next recording is on again.
+    try await dictate(toggle: true)
+    try await wait { recording.state == .idle && received.count == 2 }
+    XCTAssertEqual(received.last, ["Texto transcrito"])
+    XCTAssertEqual(asked.count, 1)
+    // A failed review (nil): the raw text.
+    reply = nil
+    try await dictate()
+    try await wait { answer != nil }
+    answer?.resume(); answer = nil
+    try await wait { recording.state == .idle && received.count == 3 }
+    XCTAssertEqual(received.last, ["Texto transcrito"])
+    // Usar original: the raw text now; the late reply changes nothing.
+    reply = "Tarde demais."
+    try await dictate()
+    try await wait { answer != nil }
+    recording.useOriginal()
+    try await wait { recording.state == .idle && received.count == 4 }
+    XCTAssertEqual(received.last, ["Texto transcrito"])
+    answer?.resume(); answer = nil
+    // The sparkles during the review are Usar original too.
+    try await dictate()
+    try await wait { answer != nil }
+    recording.toggleRevision()
+    try await wait { recording.state == .idle && received.count == 5 }
+    XCTAssertEqual(received.last, ["Texto transcrito"])
+    answer?.resume(); answer = nil
+    // Descartar or Esc: nothing at all, even when the reply comes later.
+    try await dictate()
+    try await wait { answer != nil }
+    recording.cancel()
+    XCTAssertEqual(recording.state, .idle)
+    answer?.resume(); answer = nil
+    try await Task.sleep(for: .milliseconds(200))
+    XCTAssertEqual(received.count, 5)
+    XCTAssertNil(recording.revision.reviewing)
+  }
+  func testRevisionReplacesTheRawTextAsASecondUndoStep() async throws {
+    let draft = ConversationDraft(server: "dictation-test", id: UUID().uuidString)
+    draft.text = NSAttributedString(string: "Antes")
+    let owner = UUID()
+    draft.editorOwner = owner
+    let window = UIWindow(windowScene: try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first))
+    window.rootViewController = UIHostingController(rootView: ComposerTextView(draft: draft, theme: .selected, expanded: true, owner: owner))
+    window.makeKeyAndVisible(); window.layoutIfNeeded()
+    defer { window.isHidden = true }
+    try await wait { draft.input != nil }
+    let input = try XCTUnwrap(draft.input)
+    draft.focused = true
+    await Task.yield()
+    draft.selection = NSRange(location: 5, length: 0)
+    await draft.insertTranscription(["texto cru", "Texto revisado."])
+    XCTAssertEqual(draft.document.text, "Antes Texto revisado.")
+    XCTAssertTrue(draft.dictationReview)
+    input.undoManager?.undo()
+    XCTAssertEqual(draft.document.text, "Antes texto cru")
+    input.undoManager?.undo()
+    XCTAssertEqual(draft.document.text, "Antes")
+    input.undoManager?.redo(); input.undoManager?.redo()
+    XCTAssertEqual(draft.document.text, "Antes Texto revisado.")
+    // The fullscreen composer replaces this editor right after a dictation: both steps come with it.
+    await draft.insertTranscription(["mais cru", "Mais revisado."])
+    XCTAssertEqual(draft.document.text, "Antes Texto revisado. Mais revisado.")
+    window.isHidden = true
+    let fullscreen = UUID()
+    draft.editorOwner = fullscreen
+    let other = UIWindow(windowScene: try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first))
+    other.rootViewController = UIHostingController(rootView: ComposerTextView(draft: draft, theme: .selected, expanded: true, owner: fullscreen))
+    other.makeKeyAndVisible(); other.layoutIfNeeded()
+    defer { other.isHidden = true }
+    try await wait { draft.input !== input && draft.input?.undoManager?.canUndo == true }
+    let replacement = try XCTUnwrap(draft.input)
+    // As the fullscreen composer does: it takes the keyboard once its cover is up.
+    draft.focused = true
+    _ = replacement.becomeFirstResponder()
+    try await Task.sleep(for: .milliseconds(500))
+    replacement.undoManager?.undo()
+    XCTAssertEqual(draft.document.text, "Antes Texto revisado. mais cru")
+    replacement.undoManager?.undo()
+    XCTAssertEqual(draft.document.text, "Antes Texto revisado.")
+    XCTAssertFalse(replacement.undoManager?.canUndo ?? true, "Only the last dictation's steps")
+  }
   func testPermissionReleaseCannotStartLateAndLockedInterruptionPauses() async throws {
     let capture = DictationTestCapture()
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -188,7 +310,7 @@ import os
     let recording = VoiceRecordingComposer(file: root.appending(path: "dictation.caf"), capture: capture, transcription: transcription)
     defer { recording.discard() }
     var received: String?
-    recording.receive = { received = $0 }
+    recording.receive = { received = $0.first }
     recording.handle(.began); recording.handle(.ended)
     try await wait { recording.state == .recording && recording.elapsed > 0 }
     recording.finish()

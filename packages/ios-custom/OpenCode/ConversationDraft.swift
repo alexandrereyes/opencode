@@ -104,24 +104,88 @@ extension ComposerTokenKind {
       self?.dictationPending = pending
       if pending { Task { await self?.persist() } }
     }
-    recording.receive = { [weak self] text in await self?.insertTranscription(text) }
+    recording.receive = { [weak self] edits in await self?.insertTranscription(edits) }
     return recording
   }()
-  func insertTranscription(_ text: String) async {
+  /// The quoted passage of a comment's editor, for the dictation review's context.
+  @ObservationIgnored private(set) var commentQuote: String?
+  /// Dictations here are reviewed through `store` with what this composer shows: a comment's passage, else the
+  /// conversation's latest messages (`turns` replaces them, as Pergunta paralela's thread), and the draft.
+  func useDictationReviewer(_ store: ConversationStore, turns: (@MainActor () -> [DictationReview.Turn])? = nil) {
+    recording.reviser = { [weak self, weak store] text in
+      guard let self, let store else { return nil }
+      let context = DictationReview.context(draft: document.text, quote: commentQuote,
+        turns: commentQuote == nil ? turns?() ?? DictationReview.turns(store.messages) : [])
+      return await store.reviewDictation(text, context: context)
+    }
+  }
+  func insertTranscription(_ text: String) async { await insertTranscription([text]) }
+  /// The raw transcription, then each revision of it (`DictationReview.edits`) in place of the previous one, each
+  /// its own undo step: undo brings back the raw text, then removes it.
+  func insertTranscription(_ edits: [String]) async {
     guard !deleted else { return }
     // At the caret while editing, otherwise (keyboard down, a download finishing later) at the end. Nothing typed
     // meanwhile or selected (a token included) is overwritten.
     let string = CFAttributedStringGetString(editorText) as NSString
     let location = focused ? min(selection.location, string.length) : string.length
-    let spaced = DictationInsertion.spaced(text,
-      before: location > 0 ? string.substring(with: string.rangeOfComposedCharacterSequence(at: location - 1)).first : nil,
-      after: location < string.length ? string.substring(with: string.rangeOfComposedCharacterSequence(at: location)).first : nil)
-    if !spaced.isEmpty {
-      replace(NSRange(location: location, length: 0), with: NSAttributedString(string: spaced, attributes: input?.plainAttributes))
+    let before = location > 0 ? string.substring(with: string.rangeOfComposedCharacterSequence(at: location - 1)).first : nil
+    let after = location < string.length ? string.substring(with: string.rangeOfComposedCharacterSequence(at: location)).first : nil
+    var range = NSRange(location: location, length: 0)
+    let steps = edits.map { DictationInsertion.spaced($0, before: before, after: after) }.filter { !$0.isEmpty }
+    for spaced in steps {
+      undoStep(editorUndoManager) { replace(range, with: NSAttributedString(string: spaced, attributes: input?.plainAttributes)) }
+      range.length = (spaced as NSString).length
     }
+    dictationUndo = steps.isEmpty ? nil : DictationUndo(location: location, steps: steps,
+      editor: input, text: CFAttributedStringGetString(editorText) as String)
     dictationPending = false
     dictationReview = true
     await persist()
+  }
+  /// The last dictation's steps, the editor that made them and the text they left.
+  private struct DictationUndo { let location: Int; let steps: [String]; weak var editor: ComposerInputView?; let text: String }
+  @ObservationIgnored private var dictationUndo: DictationUndo?
+  /// Another editor that takes over this draft starts with an empty undo stack (the iPhone's fullscreen composer opens
+  /// right after a dictation): it gets the last dictation's steps, while nothing else changed the text.
+  func restoreDictationUndo(_ view: ComposerInputView) {
+    guard let undo = dictationUndo, undo.editor !== view else { return }
+    guard let manager = view.undoManager else {
+      // Not in a window yet. Once it is, the stack the replaced editor left (aimed at that editor) goes too.
+      DispatchQueue.main.async { [weak self, weak view] in
+        guard let self, let view, let manager = view.undoManager else { return }
+        manager.removeAllActions()
+        restoreDictationUndo(view)
+      }
+      return
+    }
+    guard undo.text == CFAttributedStringGetString(editorText) as String else { dictationUndo = nil; return }
+    for (index, step) in undo.steps.enumerated() {
+      let previous = index == 0 ? "" : undo.steps[index - 1]
+      let length = (step as NSString).length
+      undoStep(manager) {
+        manager.registerUndo(withTarget: view) { view in
+          view.replaceCharacters(in: NSRange(location: undo.location, length: length),
+            with: NSAttributedString(string: previous, attributes: view.plainAttributes))
+        }
+      }
+    }
+  }
+  private var editorUndoManager: UndoManager? {
+    #if os(iOS)
+    input?.undoManager
+    #else
+    input?.textView.undoManager
+    #endif
+  }
+  /// Its own undo group even when several edits happen in one run-loop turn (where they would share one).
+  private func undoStep(_ manager: UndoManager?, _ edit: () -> Void) {
+    guard let manager, manager.groupingLevel == 0 else { return edit() }
+    let grouping = manager.groupsByEvent
+    manager.groupsByEvent = false
+    manager.beginUndoGrouping()
+    edit()
+    manager.endUndoGrouping()
+    manager.groupsByEvent = grouping
   }
   private(set) var sendRevision = 0
   func didSend() {
@@ -166,6 +230,7 @@ extension ComposerTokenKind {
       root: FileManager.default.temporaryDirectory.appending(path: "QuoteComments", directoryHint: .isDirectory))
     ephemeral = true
     self.recordingFactory = recordingFactory
+    commentQuote = quote.text
     text = quote.document.attributed
     selection = NSRange(location: editorText.length, length: 0)
   }

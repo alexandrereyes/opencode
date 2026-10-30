@@ -481,6 +481,13 @@ import UniformTypeIdentifiers
     #endif
     return try await client.sideQuestion(request, sessionID: id)
   }
+  /// `custom.dictation`: the revised dictation, or nil to insert the transcription as it is.
+  func reviewDictation(_ text: String, context: String?) async -> String? {
+    #if DEBUG
+    if let reviewer = DictationReviewFixture.reviewer { return await reviewer(text, context) }
+    #endif
+    return await client.reviewDictation(text, context: context)
+  }
   /// Where app mentions come from, without waiting for the Location's MCP list.
   var appScope: ComposerAppScope? {
     guard let directory = composerLocation ?? session?.location.directory else { return nil }

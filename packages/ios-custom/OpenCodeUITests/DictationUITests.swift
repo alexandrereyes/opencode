@@ -246,6 +246,92 @@ import XCTest
     app.buttons["Recolher"].tap()
     XCTAssertTrue(app.buttons["Recolher"].waitForNonExistence(timeout: 5))
   }
+  private let raw = "confira as sessões em andamento e prepare um resumo das alterações não envie esta mensagem antes da minha revisão"
+  private func waitValue(_ element: XCUIElement, _ value: String, timeout: TimeInterval = 15) {
+    let predicate = value.isEmpty ? NSPredicate(format: "value == nil OR value == ''") : NSPredicate(format: "value == %@", value)
+    let matched = expectation(for: predicate, evaluatedWith: element)
+    XCTAssertEqual(XCTWaiter.wait(for: [matched], timeout: timeout), .completed, String(describing: element.value))
+  }
+  /// The AI review with the fixtures' reviewer (`-OpenCodeDictationReview`, no model is called): the sparkles sit
+  /// between the waveform and pause, on in every new recording; "Ajustando texto…" offers Usar original; the
+  /// revision lands as a second undo step, so ⌘Z brings back the raw text, then removes it.
+  func testReviewSparklesAdjustingAndTwoStepUndo() throws {
+    open(extra: ["-OpenCodeDictationReview", "2500"])
+    try app.requireSandbox()
+    app.buttons["dictation-microphone"].tap()
+    let sparkles = app.buttons["dictation-revision"]
+    XCTAssertTrue(sparkles.waitForExistence(timeout: 5))
+    XCTAssertEqual(sparkles.label, "Revisar texto com IA")
+    XCTAssertEqual(sparkles.value as? String, "Ligado")
+    let pause = app.buttons["dictation-pause-resume"]
+    XCTAssertLessThanOrEqual(sparkles.frame.maxX, pause.frame.minX + 1)
+    XCTAssertGreaterThanOrEqual(sparkles.frame.width, 44)
+    Thread.sleep(forTimeInterval: 1.2)
+    capture("revisao-ligada")
+    sparkles.tap()
+    XCTAssertEqual(sparkles.value as? String, "Desligado")
+    capture("revisao-desligada")
+    sparkles.tap()
+    XCTAssertEqual(sparkles.value as? String, "Ligado")
+    app.buttons["dictation-stop"].tap()
+    XCTAssertTrue(app.staticTexts["dictation-reviewing"].waitForExistence(timeout: 10), app.debugDescription)
+    XCTAssertTrue(app.buttons["dictation-use-original"].exists)
+    capture("revisao-ajustando")
+    XCTAssertTrue(app.buttons["Recolher"].waitForExistence(timeout: 15), app.debugDescription)
+    let editor = app.textViews["conversation-composer"]
+    waitValue(editor, transcript)
+    capture("revisao-revisado")
+    // The simulator drops the first hardware key after the keyboard appears; an arrow at the end changes nothing.
+    editor.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
+    editor.typeKey("z", modifierFlags: .command)
+    waitValue(editor, raw, timeout: 5)
+    editor.typeKey("z", modifierFlags: .command)
+    waitValue(editor, "", timeout: 5)
+    app.buttons["Recolher"].tap()
+    XCTAssertTrue(app.buttons["Recolher"].waitForNonExistence(timeout: 5))
+  }
+  /// Off for one recording gives the raw text at once and the next starts on; Usar original gives the raw text
+  /// without waiting; Descartar during "Ajustando texto…" gives nothing.
+  func testReviewOffUsarOriginalAndDiscard() throws {
+    open(extra: ["-OpenCodeDictationReview", "30000"])
+    try app.requireSandbox()
+    let editor = app.textViews["conversation-composer"]
+    app.buttons["dictation-microphone"].tap()
+    XCTAssertTrue(app.buttons["dictation-revision"].waitForExistence(timeout: 5))
+    app.buttons["dictation-revision"].tap()
+    Thread.sleep(forTimeInterval: 1.2)
+    app.buttons["dictation-stop"].tap()
+    XCTAssertTrue(app.buttons["Recolher"].waitForExistence(timeout: 15), app.debugDescription)
+    XCTAssertFalse(app.staticTexts["dictation-reviewing"].exists)
+    waitValue(app.textViews["conversation-composer"], raw, timeout: 5)
+    app.buttons["Recolher"].tap()
+    XCTAssertTrue(app.buttons["Recolher"].waitForNonExistence(timeout: 5))
+    // The next recording starts on again; Usar original inserts the raw text without the 30 s reply.
+    XCTAssertTrue(app.buttons["composer-microphone"].waitForExistence(timeout: 5))
+    app.buttons["composer-microphone"].tap()
+    XCTAssertTrue(app.buttons["dictation-revision"].waitForExistence(timeout: 5))
+    XCTAssertEqual(app.buttons["dictation-revision"].value as? String, "Ligado")
+    Thread.sleep(forTimeInterval: 1.2)
+    app.buttons["dictation-stop"].tap()
+    let original = app.buttons["dictation-use-original"]
+    XCTAssertTrue(original.waitForExistence(timeout: 10))
+    original.tap()
+    XCTAssertTrue(app.buttons["Recolher"].waitForExistence(timeout: 5), app.debugDescription)
+    waitValue(app.textViews["conversation-composer"], raw + " " + raw, timeout: 5)
+    app.buttons["Recolher"].tap()
+    XCTAssertTrue(app.buttons["Recolher"].waitForNonExistence(timeout: 5))
+    // Descartar during the review: nothing lands.
+    let before = editor.value as? String
+    app.buttons["composer-microphone"].tap()
+    Thread.sleep(forTimeInterval: 1.2)
+    app.buttons["dictation-stop"].tap()
+    XCTAssertTrue(app.staticTexts["dictation-reviewing"].waitForExistence(timeout: 10))
+    app.buttons["dictation-discard-pending"].tap()
+    XCTAssertTrue(app.staticTexts["dictation-reviewing"].waitForNonExistence(timeout: 5))
+    Thread.sleep(forTimeInterval: 1)
+    XCTAssertEqual(editor.value as? String, before)
+    XCTAssertFalse(app.buttons["Recolher"].exists)
+  }
   func testModelSettingsShowLocalStatusAndDeletionCanBeCancelled() {
     open()
     app.buttons["Modelo"].tap()

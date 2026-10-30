@@ -224,6 +224,7 @@ struct ComposerEditor: View {
     .onAppear {
       draft.editorOwner = editorID
       draft.recording.willUseAudio = { voice?.sessionID == nil }
+      draft.useDictationReviewer(store)
     }
     .onChange(of: voice?.sessionID) { _, id in if id != nil { draft.recording.suspend() } }
     .alert("Baixar transcrição no aparelho?", isPresented: $draft.recording.asksDownload) {

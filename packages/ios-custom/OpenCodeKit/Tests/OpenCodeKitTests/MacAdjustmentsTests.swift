@@ -153,6 +153,25 @@ import Testing
     #expect(DictationKeyGesture.keyCode == 61)
   }
 
+  @Test func optionCommandETogglesTheReviewWithoutEndingAHold() {
+    var key = DictationKeyGesture()
+    // Held: ⌘ goes down, E toggles the review, ⌘ goes up and the release still transcribes.
+    key.press(recording: false, otherModifiers: false)
+    #expect(key.held() == .begin)
+    #expect(key.modifier(command: true) == .none)
+    #expect(key.toggleRevision(dictating: true) == .toggleRevision)
+    #expect(key.modifier(command: true) == .none)
+    #expect(key.release() == .release)
+    // Hands-free (the key up): ⌥⌘E toggles too; with no dictation it keeps its meaning.
+    #expect(key.toggleRevision(dictating: true) == .toggleRevision)
+    #expect(key.toggleRevision(dictating: false) == .none)
+    // ⌘ before the hold started, or another modifier during it: a shortcut, as before.
+    key.press(recording: false, otherModifiers: false)
+    #expect(key.modifier(command: true) == .none && key.held() == .none && key.release() == .none)
+    key.press(recording: false, otherModifiers: false)
+    #expect(key.held() == .begin && key.modifier(command: false) == .discard && key.release() == .none)
+  }
+
   @Test func escapeCancelsADictationWithoutTouchingAnythingElse() {
     var key = DictationKeyGesture()
     // A tap started hands-free recording; the key is up when Esc comes.

@@ -1501,6 +1501,40 @@ off-screen and unfocused end), `DictationUITests` (`testCompactMicrophoneBesideS
 `testCompactMicrophoneTapIsHandsFreeAndTheAgentMovedToTheFooter`, the comment case) and `SizingTests` (typed text on
 iPhone 18 Pro and SE) cover it in both themes. Captures are in `$TMPDIR/opencode/composer-mic-text/prints/`.
 
+#### AI review of the dictation — 30 October
+
+**Alexandre, 30/10.** After Parakeet transcribes, the server revises the text before it enters the draft:
+`custom.dictation/review` (`packages/plugin-app-custom/docs/dictation-review.md`) with **GPT-6.1 Terra Fast low**
+through `llm-proxy`, a language-neutral English prompt (revise in the language or languages spoken, never translate)
+and what the composer shows as context (`DictationReview.context`): in a conversation the draft and the end of the
+six latest user and assistant messages; in Nova sessão the draft; in a comment the quoted passage and the draft; in the
+Mac's Pergunta paralela its thread and the draft. No Session is created. It applies to every composer with dictation,
+iPhone and Mac (the iPhone's Pergunta paralela has no microphone).
+
+- **Switch:** the sparkles (`DictationRevisionButton`, `dictation-revision`) in the recording bar, between the
+  waveform and pause (also while holding), orange when on and gray when off; VoiceOver reads "Revisar texto com IA",
+  Ligado/Desligado. **Every recording starts on** (`DictationRevision.begin`); nothing is remembered. ⌥⌘E toggles it
+  on the Mac (below).
+- **Ajustando texto…:** the pending row shows a spinner, pulsing sparkles (still with Reduce Motion), **Usar
+  original** (inserts the raw text at once; the late reply is ignored) and Descartar. The sparkles or ⌥⌘E there mean
+  Usar original. Descartar, and Esc on the Mac, cancel everything: nothing is inserted.
+- **Timing:** the server consumes the model's stream and gives up after **5 s without a new piece** (first piece
+  included), returning the transcription; a reply that keeps streaming is never cut. Measured median 1.4 s. The app
+  waits at most 60 s (`DictationReview.ceiling`) for a server that never answers. Partial text is not shown in the
+  field: the draft changes once, so the undo steps stay simple and Usar original/Esc never fight a half-written reply.
+- **Failure, offline, an older server without the RPC, or an unchanged reply:** the raw text, with no message.
+- **Undo in two steps:** the raw text and the revision are inserted as two undo groups (`ConversationDraft.undoStep`),
+  so the first undo brings back the raw text and the second removes it. The iPhone's fullscreen composer, which opens
+  right after a dictation with an empty undo stack, gets both steps back (`restoreDictationUndo`) while nothing else
+  changed the text.
+
+`swift test` (`DictationReviewTests`, `MacAdjustmentsTests/optionCommandETogglesTheReviewWithoutEndingAHold`), hosted
+`DictationPipelineTests` (`testReviewIsPerRecordingAndEveryWayOutOfItIsRawOrNothing`,
+`testRevisionReplacesTheRawTextAsASecondUndoStep`) and `DictationUITests` (`testReviewSparklesAdjustingAndTwoStepUndo`,
+`testReviewOffUsarOriginalAndDiscard`) cover it. The fixtures replace the server with `DictationReviewFixture`:
+the fake engine transcribes `DictationFixtures.raw` (no punctuation) and the reviewer answers `DictationFixtures.text`
+after 800 ms (`-OpenCodeDictationReview <ms>|fail`); no model is called.
+
 #### Isolated dictation verification
 
 Use **OpenCode Gravacao** (`0C2C8A7F-CD76-43D5-88F5-A880D5A80B78`) and
@@ -3702,6 +3736,12 @@ project filter replacing the chips and the highlight of the open subagent.
   what it did before; a second Esc after cancelling closes the sheet. `script/test-mac-ajustes.sh dictation`
   (`-OpenCodeMacFakeDictation`) covers tap, hold and release, transcribing, Esc without a dictation, and the three
   sheets. The iPhone has no key-driven dictation and is unchanged.
+  **AI review (Alexandre, 30/10):** the sparkles sit before pause in the recording bar, and **⌥⌘E** toggles them
+  during a dictation (during "Ajustando texto…" it is Usar original), also with the right Option key held: ⌘ during a
+  hold waits for its key instead of ending the hold (`DictationKeyGesture.modifier(command:)`), and ⌥⌘E is consumed
+  without the interruption every other key causes. Without a dictation ⌥⌘E keeps its meaning. Esc during "Ajustando
+  texto…" cancels everything. See [AI review of the dictation](#ai-review-of-the-dictation--30-october);
+  `test-mac-ajustes.sh dictation` (`-OpenCodeDictationReview 2500`) checks it with the per-composer context.
 - **Quotes (A10).** A quote still in the draft opens as `Citação · N` already editing its comment, with the focus in
   it; Ir ao trecho citado and Remover citação stay. Return or ⌘Return concludes, Esc closes. Sent marks keep the
   details sheet.

@@ -67,11 +67,13 @@ struct MacShortcut: Identifiable {
   static let find = MacShortcut(.conversation, "Buscar na conversa", "f")
   static let model = MacShortcut(.conversation, "Trocar modelo e esforço", "m", [.option, .command])
   static let sideQuestion = MacShortcut(.conversation, "Pergunta paralela", "b", [.option, .command])
-  // MacComposerText: Return sends, Shift+Return breaks the line, ⌃⌥Space dictates; MacDictationKey: right Option.
+  // MacComposerText: Return sends, Shift+Return breaks the line, ⌃⌥Space dictates; MacDictationKey: right Option,
+  // and ⌥⌘E during a dictation.
   static let send = MacShortcut(.conversation, "Enviar", caps: ["↩"])
   static let newline = MacShortcut(.conversation, "Nova linha", caps: ["⇧", "↩"])
   static let dictationKey = MacShortcut(.conversation, "Ditado", caps: ["⌥", "direito"])
   static let dictationEditor = MacShortcut(.conversation, "Ditado no editor", caps: ["⌃", "⌥", "Espaço"])
+  static let dictationRevision = MacShortcut(.conversation, "Ditado: ligar ou desligar a revisão com IA", caps: ["⌥", "⌘", "E"])
   static let createSession = MacShortcut(.conversation, "Enviar em Nova sessão", .return)
 
   // Janela
@@ -102,7 +104,8 @@ struct MacShortcut: Identifiable {
   static let all: [MacShortcut] = [
     search, newSession, newWindow, reload, compose, settings, shortcuts, searchNext, searchPrevious,
     numbered, railProjects, previous, next, back, master, fromThis, rename, pin, archive, delete, selectAll,
-    find, model, sideQuestion, send, newline, dictationKey, dictationEditor, createSession,
+    find, model, sideQuestion, send, newline, dictationKey, dictationEditor, dictationRevision,
+    createSession,
     context, files, previousFile, nextFile, fileBack, fileForward, widenFiles, fileTree, sidebar, proxy, disk,
     copyImage, zoomIn, zoomOut, zoomFit, zoomActual, panImage,
   ]

@@ -6,7 +6,9 @@ import OpenCodeKit
 /// a tap starts and the next stops, holding records until release. Local event monitors only see events while the
 /// app is in front, so the key keeps its normal meaning in every other app; the left Option key is never looked at.
 /// Esc during a dictation (any composer's, however it started) cancels it and is consumed here, before AppKit's key
-/// equivalents and the editor: no sheet closes and the focus stays. Without one, Esc keeps its meaning.
+/// equivalents and the editor: no sheet closes and the focus stays. Without one, Esc keeps its meaning. ⌥⌘E during a
+/// dictation turns its AI review on or off (during "Ajustando texto…" it uses the original text), also while the
+/// right Option key is held: unlike other keys and modifiers, ⌘ and that E do not end the hold.
 @MainActor final class MacDictationKey {
   static let shared = MacDictationKey()
 
@@ -82,6 +84,13 @@ import OpenCodeKit
       escaped = escape()
       return escaped
     }
+    if event.type == .keyDown, event.charactersIgnoringModifiers?.lowercased() == "e",
+      event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command, .option] {
+      let dictating = self.dictating
+      guard gesture.toggleRevision(dictating: dictating != nil) == .toggleRevision, let dictating else { return false }
+      if !event.isARepeat { dictating.perform(.toggleRevision) }
+      return true
+    }
     guard event.type == .flagsChanged else {
       if gesture.down { perform(gesture.interrupted()) }
       return false
@@ -89,8 +98,9 @@ import OpenCodeKit
     // NX_DEVICERALTKEYMASK: the right Option key itself, independent of the left one.
     let rightDown = event.modifierFlags.rawValue & 0x40 != 0
     guard event.keyCode == DictationKeyGesture.keyCode else {
-      // Another modifier changed while the key is down: a shortcut such as ⌥⌘, not dictation.
-      if gesture.down { perform(gesture.interrupted()) }
+      // Another modifier changed while the key is down: a shortcut such as ⌥⌘, not dictation; during a hold ⌘
+      // (left 55, right 54) waits for its key, which may be ⌥⌘E.
+      if gesture.down { perform(gesture.modifier(command: event.keyCode == 55 || event.keyCode == 54)) }
       return false
     }
     if rightDown, !gesture.down {
@@ -113,17 +123,22 @@ import OpenCodeKit
     return false
   }
 
-  /// Esc cancels the dictation of the composer the key is held for, else of the one it would dictate into, else
-  /// of any composer dictating in the key window, its sheet or the front window. Returns whether it cancelled.
+  /// Esc cancels the dictation of `dictating`. Returns whether it cancelled.
   private func escape() -> Bool {
-    let held = gesture.down ? target.flatMap { $0.dictating() ? $0 : nil } : nil
-    let dictating = held ?? focused.flatMap { $0.dictating() ? $0 : nil } ?? targets.last { target in
-      target.dictating() && target.editor().map { editor in windows.contains { $0 === editor.window } } == true
-    }
+    let dictating = self.dictating
     hold?.cancel()
     guard gesture.escape(dictating: dictating != nil) == .cancel, let dictating else { return false }
     dictating.perform(.cancel)
     return true
+  }
+
+  /// The composer the key is held for, else the one it would dictate into, else any composer dictating in the key
+  /// window, its sheet or the front window, if it is dictating.
+  private var dictating: Target? {
+    let held = gesture.down ? target.flatMap { $0.dictating() ? $0 : nil } : nil
+    return held ?? focused.flatMap { $0.dictating() ? $0 : nil } ?? targets.last { target in
+      target.dictating() && target.editor().map { editor in windows.contains { $0 === editor.window } } == true
+    }
   }
 
   private func perform(_ action: DictationKeyGesture.Action) {

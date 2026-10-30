@@ -11,6 +11,31 @@ import SwiftUI
     return args[index + 1]
   }
   nonisolated static let text = "Confira as sessões em andamento e prepare um resumo das alterações. Não envie esta mensagem antes da minha revisão."
+  /// What the fake engine transcribes; the fixtures' reviewer turns it into `text`.
+  nonisolated static let raw = "confira as sessões em andamento e prepare um resumo das alterações não envie esta mensagem antes da minha revisão"
+}
+
+/// The dictation fixtures' reviewer, in place of the server's `custom.dictation`: after a delay (800 ms, or
+/// `-OpenCodeDictationReview <milliseconds>`) it returns `DictationFixtures.text` for the fake transcription;
+/// `-OpenCodeDictationReview fail` keeps the raw text, as a failed review does.
+@MainActor enum DictationReviewFixture {
+  /// The context of each review asked, for the checks.
+  static private(set) var contexts: [String?] = []
+  static var reviewer: ((String, String?) async -> String?)? {
+    #if os(macOS)
+    guard MacLaunch.fixture else { return nil }
+    #else
+    guard DictationFixtures.mode == "fake" else { return nil }
+    #endif
+    let args = ProcessInfo.processInfo.arguments
+    let value = args.firstIndex(of: "-OpenCodeDictationReview").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
+    return { text, context in
+      contexts.append(context)
+      try? await Task.sleep(for: .milliseconds(value.flatMap(Int.init) ?? 800))
+      guard value != "fail", text == DictationFixtures.raw else { return nil }
+      return DictationFixtures.text
+    }
+  }
 }
 
 /// `-OpenCodeDictationTimeline`: uptime marks of the recording milestones for `script/measure-dictation-device.py`.
@@ -58,6 +83,10 @@ struct DictationFixtureRoot: View {
     NavigationStack {
       VStack {
         Text("Ditado local · nenhum servidor é acessado").appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+        // `requireSandbox()`: the launch's server, which this fixture never calls.
+        Text(ServerConfiguration.launch().url.absoluteString)
+          .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1).clipped()
+          .allowsHitTesting(false).accessibilityIdentifier("debug-server-url")
         if let load = transcription.loadSeconds { Text(String(format: "Carga: %.2f s", load)).accessibilityIdentifier("dictation-load-time") }
         if let time = transcription.transcriptionSeconds { Text(String(format: "Transcrição: %.2f s", time)).accessibilityIdentifier("dictation-inference-time") }
         Spacer()
@@ -115,7 +144,7 @@ final class DictationFixtureSource: TranscriptionModelSource, @unchecked Sendabl
 }
 actor DictationFixtureEngine: TranscriptionEngine {
   func load(from directory: URL) async throws {}
-  func transcribe(_ samples: [Float]) async throws -> String { DictationFixtures.text }
+  func transcribe(_ samples: [Float]) async throws -> String { DictationFixtures.raw }
   func unload() async {}
 }
 

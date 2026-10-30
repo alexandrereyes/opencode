@@ -105,7 +105,8 @@ struct MacSideQuestionSheet: View {
       canSubmit: canSubmit, submit: submit, cancel: { dismiss() }, focusOnAppear: true,
       identifier: "side-question-composer",
       accessory: AnyView(Text(store.modelLabel(store.session?.model)).appFont(.caption)
-        .foregroundStyle(theme.color(.textSecondary)).lineLimit(1)))
+        .foregroundStyle(theme.color(.textSecondary)).lineLimit(1)),
+      dictationTurns: { [state] in DictationReview.turns(state.entries) })
       .accessibilityElement(children: .contain).accessibilityIdentifier("side-question-card")
   }
 

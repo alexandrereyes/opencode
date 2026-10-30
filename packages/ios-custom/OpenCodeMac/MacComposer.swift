@@ -35,6 +35,8 @@ struct MacComposer: View {
   var accessory: AnyView? = nil
   /// Sits on the card's top right corner (the chat's ↓ when the window leaves no margin for it).
   var corner: AnyView? = nil
+  /// What the dictation review sees besides the draft, in place of the conversation's latest messages.
+  var dictationTurns: (@MainActor () -> [DictationReview.Turn])? = nil
   @State private var owner = UUID()
   @State private var suggestionReturn = ComposerSuggestionReturn()
   @State private var highlight = ComposerSuggestionHighlight()
@@ -83,6 +85,7 @@ struct MacComposer: View {
     .onAppear {
       draft.editorOwner = owner
       draft.recording.willUseAudio = { [weak voice = voice] in voice?.state.visible != true }
+      draft.useDictationReviewer(store, turns: dictationTurns)
       reviewDictation()
       registerDictationKey()
     }
@@ -317,6 +320,7 @@ struct MacComposer: View {
         case .finish: recording.finish()
         case .discard: recording.discard()
         case .cancel: recording.cancel()
+        case .toggleRevision: recording.toggleRevision()
         case .none: break
         }
       }))
@@ -596,13 +600,15 @@ struct MacReplyComposer: View {
   var focusOnAppear = false
   var identifier = "question-reply"
   var accessory: AnyView? = nil
+  var dictationTurns: (@MainActor () -> [DictationReview.Turn])? = nil
   @State private var draft = Self.scratch()
 
   var body: some View {
     MacComposer(store: store, draft: draft,
       embedded: MacComposerEmbedding(canSubmit: canSubmit, submit: submit,
         cancel: cancel ?? { [weak draft] in draft?.input?.window?.makeFirstResponder(nil) }),
-      features: features, placeholder: placeholder, identifier: identifier, accessory: accessory)
+      features: features, placeholder: placeholder, identifier: identifier, accessory: accessory,
+      dictationTurns: dictationTurns)
       .onAppear {
         // Where its dictation records (a saved draft makes it on its first save).
         try? FileManager.default.createDirectory(at: draft.persistence.directory, withIntermediateDirectories: true)

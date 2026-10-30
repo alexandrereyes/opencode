@@ -293,6 +293,7 @@ struct DictationRecordingPanel: View {
                 .disabled(!recording.previewReady).accessibilityIdentifier("dictation-preview")
             }
             Spacer(minLength: 0)
+            DictationRevisionButton(recording: recording)
             DictationIconButton(title: recording.state == .paused ? "Continuar gravação" : "Pausar gravação", symbol: recording.state == .paused ? "mic.fill" : "pause.circle") {
               Haptics.play(.light)
               if recording.state == .paused { recording.resume() } else { recording.pause() }
@@ -316,6 +317,7 @@ struct DictationRecordingPanel: View {
           .foregroundStyle(theme.color(.textSecondary))
           .offset(x: recording.gesture.offset.width * 0.5)
           .opacity(recording.discarding ? 0 : max(0, 1 + recording.gesture.offset.width / VoiceRecordingGesture.cancelDistance))
+        if !recording.discarding { DictationRevisionButton(recording: recording) }
       } else {
         DictationIconButton(title: "Descartar gravação", symbol: "trash") { Haptics.play(.warning); recording.discard() }
           .accessibilityIdentifier("dictation-discard")
@@ -327,6 +329,7 @@ struct DictationRecordingPanel: View {
           timer
           waveform.frame(height: 44)
         }.frame(maxWidth: .infinity)
+        DictationRevisionButton(recording: recording)
         DictationIconButton(title: recording.state == .paused ? "Continuar gravação" : "Pausar gravação", symbol: recording.state == .paused ? "mic.fill" : "pause.circle") {
           Haptics.play(.light)
           if recording.state == .paused { recording.resume() } else { recording.pause() }
@@ -381,6 +384,28 @@ struct DictationRecordingPanel: View {
   }
 }
 
+/// The AI review of this recording, on at every new one: orange when on, gray when off (⌥⌘E on the Mac).
+private struct DictationRevisionButton: View {
+  @Environment(\.appTheme) private var theme
+  let recording: VoiceRecordingComposer
+  var body: some View {
+    let enabled = recording.revision.enabled
+    Button {
+      Haptics.play(.light)
+      recording.toggleRevision()
+    } label: {
+      Image(systemName: "sparkles").appSymbol(.action)
+        .foregroundStyle(theme.color(enabled ? .primary : .textSecondary))
+        .frame(width: 44, height: 44).contentShape(Rectangle())
+    }
+    .accessibilityLabel("Revisar texto com IA").accessibilityValue(enabled ? "Ligado" : "Desligado")
+    .accessibilityIdentifier("dictation-revision")
+    #if os(macOS)
+    .help(enabled ? "Revisão com IA ligada (⌥⌘E)" : "Revisão com IA desligada (⌥⌘E)")
+    #endif
+  }
+}
+
 private struct DictationIconButton: View {
   let title: String
   let symbol: String
@@ -394,11 +419,17 @@ private struct DictationIconButton: View {
 
 struct DictationPendingView: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   let recording: VoiceRecordingComposer
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack {
-        if let job = recording.job, case .failed(let reason) = job.state {
+        if recording.revision.reviewing != nil {
+          ProgressView().tint(theme.color(.primary))
+          Image(systemName: "sparkles").foregroundStyle(theme.color(.primary))
+            .symbolEffect(.pulse, isActive: !reduceMotion).accessibilityHidden(true)
+          Text("Ajustando texto…").accessibilityIdentifier("dictation-reviewing")
+        } else if let job = recording.job, case .failed(let reason) = job.state {
           Text(reason).foregroundStyle(theme.color(.error))
           Button("Tentar de novo") { recording.retry() }.accessibilityIdentifier("dictation-retry")
         } else if let error = recording.error {
@@ -409,6 +440,11 @@ struct DictationPendingView: View {
           Text(recording.job?.state == .transcribing ? "Transcrevendo neste \(TranscriptionController.device)…" : recording.transcription.label)
         }
         Spacer(minLength: 0)
+        if recording.revision.reviewing != nil {
+          Button("Usar original") { recording.useOriginal() }
+            .buttonStyle(.bordered).buttonBorderShape(.capsule).tint(theme.color(.textSecondary))
+            .accessibilityLabel("Usar texto original").accessibilityIdentifier("dictation-use-original")
+        }
         Button("Descartar", role: .destructive) { Haptics.play(.warning); recording.discard() }.accessibilityIdentifier("dictation-discard-pending")
       }
       if recording.transcription.status == .missing {
@@ -421,6 +457,7 @@ struct DictationPendingView: View {
       if case .failed = recording.transcription.status {
         Button("Tentar de novo") { recording.transcription.retry() }
       }
-    }.appFont(.caption).foregroundStyle(theme.color(.textSecondary)).accessibilityIdentifier("dictation-pending")
+    }.appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+      .accessibilityElement(children: .contain).accessibilityIdentifier("dictation-pending")
   }
 }

@@ -631,6 +631,136 @@ import SwiftUI
     }
     guard !draft.recording.capturing else { throw Failure(description: "continuou gravando após soltar") }
     try await escape(window: window, runtime: runtime, draft: draft, option: option, shot: shot)
+    try await revision(window: window, runtime: runtime, draft: draft, option: option, shot: shot)
+  }
+
+  /// The AI review (the fixtures' reviewer, 2.5 s): on at every recording, ⌥⌘E toggles it, also with the right
+  /// Option key held and without ending the hold; "Ajustando texto…"; the context is what each composer shows; undo
+  /// brings back the raw text, then removes it; Esc during the review inserts nothing.
+  private static func revision(window: NSWindow, runtime: MacWindowRuntime, draft: ConversationDraft,
+    option: (Bool, Bool) -> Void, shot: (String) -> Void) async throws
+  {
+    func toggle(_ target: NSWindow) {
+      NSApp.postEvent(key("e", code: 14, flags: [.command, .option], window: target), atStart: false)
+    }
+    /// ⌘ (left, 0x08) going down or up while the right Option key (0x40) is held.
+    func command(_ down: Bool) {
+      let flags = NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | 0x40
+        | (down ? NSEvent.ModifierFlags.command.rawValue | 0x08 : 0))
+      if let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
+        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+        characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 55) {
+        NSApp.postEvent(event, atStart: false)
+      }
+    }
+    func tap() { option(true, false); option(false, false) }
+    let editor = try require(draft.input?.textView, "editor")
+    let before = "Antes do ditado"
+    func reset() {
+      draft.text = NSAttributedString(string: before)
+      draft.selection = NSRange(location: (before as NSString).length, length: 0)
+      draft.focused = true
+    }
+    reset()
+    try await wait("foco para a revisão") { window.firstResponder === editor ? true : nil }
+    tap()
+    try await wait("gravou para a revisão") { draft.recording.capturing ? true : nil }
+    guard draft.recording.revision.enabled else { throw Failure(description: "a gravação começou com a revisão desligada") }
+    try await Task.sleep(for: .seconds(1.2))
+    shot("revisao-ligada")
+    toggle(window)
+    try await wait("⌥⌘E desligou") { draft.recording.revision.enabled ? nil : true }
+    shot("revisao-desligada")
+    toggle(window)
+    try await wait("⌥⌘E ligou") { draft.recording.revision.enabled ? true : nil }
+    tap()
+    try await wait("ajustando texto") { draft.recording.revision.reviewing != nil ? true : nil }
+    try await Task.sleep(for: .milliseconds(400))
+    shot("revisao-ajustando")
+    let revised = before + " " + DictationFixtures.text
+    try await wait("revisado", timeout: 15) { draft.text.string == revised ? true : nil }
+    let context = DictationReviewFixture.contexts.last.flatMap { $0 } ?? ""
+    print("MacAjustes dictation: contexto da conversa com \(context.count) caracteres")
+    guard context.hasSuffix("Draft:\n" + before), context.contains("User: ") || context.contains("Assistant: ") else {
+      throw Failure(description: "contexto da conversa: \(context.prefix(300).debugDescription)")
+    }
+    shot("revisao-revisado")
+    editor.undoManager?.undo()
+    try await wait("primeiro desfazer voltou ao texto cru") {
+      draft.text.string == before + " " + DictationFixtures.raw ? true : nil
+    }
+    editor.undoManager?.undo()
+    try await wait("segundo desfazer removeu o ditado") { draft.text.string == before ? true : nil }
+    // Held: ⌘ and E toggle the review without ending the hold; the release transcribes, unrevised.
+    reset()
+    option(true, false)
+    try await wait("segurar gravou para o ⌥⌘E") { draft.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.4))
+    command(true); toggle(window); command(false)
+    try await wait("⌥⌘E segurando desligou") { draft.recording.revision.enabled ? nil : true }
+    try await Task.sleep(for: .milliseconds(400))
+    guard draft.recording.capturing else { throw Failure(description: "⌥⌘E encerrou a gravação segurada") }
+    option(false, false)
+    try await wait("soltar inseriu o texto cru", timeout: 15) {
+      draft.text.string == before + " " + DictationFixtures.raw ? true : nil
+    }
+    // Esc during "Ajustando texto…": nothing lands, not even after the reply.
+    reset()
+    tap()
+    try await wait("gravou para o Esc na revisão") { draft.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.2))
+    tap()
+    try await wait("ajustando para o Esc") { draft.recording.revision.reviewing != nil ? true : nil }
+    NSApp.postEvent(key("\u{1b}", code: 53, window: window), atStart: false)
+    try await wait("Esc cancelou a revisão") { draft.recording.visible ? nil : true }
+    try await Task.sleep(for: .seconds(3))
+    guard draft.text.string == before, window.firstResponder === editor else {
+      throw Failure(description: "Esc na revisão: texto \(draft.text.string.debugDescription)")
+    }
+    draft.text = NSAttributedString()
+    // Each sheet's composer reviews with what it shows.
+    try await sheetReview("nova-sessao", window: window, option: option, shot: shot) {
+      runtime.newSession(from: MacFixture.rootID)
+    } context: { !$0.contains("User: ") && !$0.contains("Assistant: ") }
+    try await sheetReview("pergunta-paralela", window: window, option: option, shot: shot) {
+      runtime.askSideQuestion()
+    } context: { !$0.contains("User: ") && !$0.contains("Assistant: ") }
+    try await sheetReview("comentario", window: window, option: option, shot: shot) {
+      draft.commenting = ChatQuote(messageID: "msg_check", partID: "prt_check", text: "Trecho citado")
+    } context: { $0.hasPrefix("Quoted passage:\nTrecho citado") }
+    print("MacAjustes dictation: revisão ligada a cada gravação, ⌥⌘E (também segurando), desfazer em dois passos, Esc")
+  }
+
+  private static func sheetReview(_ name: String, window: NSWindow, option: (Bool, Bool) -> Void,
+    shot: (String) -> Void, open: () -> Void, context expected: (String) -> Bool) async throws
+  {
+    open()
+    let sheet = try await wait("folha \(name) (revisão)") { window.attachedSheet }
+    let field = try await wait("campo da folha \(name) (revisão)") {
+      MacSyntheticKey.composer(in: sheet.contentView).flatMap { sheet.firstResponder === $0 ? $0 : nil }
+    }
+    let draft = try require(field.input?.representedDraft, "rascunho da folha \(name)")
+    await draft.load()
+    field.insertText("Texto da folha", replacementRange: field.selectedRange())
+    try await Task.sleep(for: .milliseconds(400))
+    option(true, false); option(false, false)
+    try await wait("gravou na folha \(name) (revisão)") { draft.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.2))
+    option(true, false); option(false, false)
+    try await wait("revisado na folha \(name)", timeout: 15) {
+      field.string.contains(DictationFixtures.text) ? true : nil
+    }
+    let context = DictationReviewFixture.contexts.last.flatMap { $0 } ?? ""
+    guard context.hasSuffix("Draft:\nTexto da folha"), expected(context) else {
+      throw Failure(description: "contexto da folha \(name): \(context.prefix(300).debugDescription)")
+    }
+    shot("revisao-\(name)")
+    NSApp.postEvent(key("\u{1b}", code: 53, window: sheet), atStart: false)
+    try await wait("Esc fechou a folha \(name)") { window.attachedSheet == nil ? true : nil }
+    try await Task.sleep(for: .milliseconds(600))
+    guard FileManager.default.fileExists(atPath: draft.persistence.directory.path) else { return }
+    draft.text = NSAttributedString()
+    await draft.persist()
   }
 
   /// Esc cancels a dictation (tap, hold, transcription) and does nothing else; a second Esc keeps its meaning.
@@ -703,6 +833,8 @@ import SwiftUI
       MacSyntheticKey.composer(in: sheet.contentView).flatMap { sheet.firstResponder === $0 ? $0 : nil }
     }
     let draft = try require(field.input?.representedDraft, "rascunho da folha \(name)")
+    // A saved draft (Nova sessão's, from an earlier run) loads after the field may already have the focus.
+    await draft.load()
     field.insertText("Texto da folha", replacementRange: field.selectedRange())
     let before = field.string
     try await Task.sleep(for: .milliseconds(400))

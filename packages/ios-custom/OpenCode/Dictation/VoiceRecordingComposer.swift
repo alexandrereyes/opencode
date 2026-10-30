@@ -26,12 +26,17 @@ import AppKit
   private(set) var previewDuration: TimeInterval = 0
   private(set) var waveform = [Float](repeating: 0, count: 64)
   private(set) var job: DictationJob?
+  /// The AI review of this recording (the sparkles), on at every new recording, and the review under way.
+  private(set) var revision = DictationRevision()
   var asksDownload = false
   var permissionDenied = false
   var error: String?
   let transcription: TranscriptionController
   let file: URL
-  @ObservationIgnored var receive: @MainActor (String) async -> Void = { _ in }
+  /// The edits for one transcription: the raw text, then its revision, each its own undo step.
+  @ObservationIgnored var receive: @MainActor ([String]) async -> Void = { _ in }
+  /// The composer's reviewer (`custom.dictation` with what the composer shows); nil: the raw text goes in.
+  @ObservationIgnored var reviser: (@MainActor (String) async -> String?)?
   @ObservationIgnored var pendingChanged: (Bool) -> Void = { _ in }
   @ObservationIgnored var willUseAudio: () -> Bool = { true }
   @ObservationIgnored private let capture: any VoiceRecordingCapture
@@ -100,6 +105,7 @@ import AppKit
     Self.audioOwner = self
     state = .authorizing
     error = nil
+    revision.begin()
     // The panel appears at the touch: nothing from the previous recording.
     elapsed = 0; levels = Array(repeating: 0, count: 40)
     observeInterruptions()
@@ -242,24 +248,51 @@ import AppKit
   private func enqueue() {
     let job = DictationJob(file: file) { [weak self] text in
       guard let self else { return }
-      await receive(text)
       mark("text")
-      pendingChanged(false)
-      try? FileManager.default.removeItem(at: file)
-      state = .idle; gesture = VoiceRecordingGesture(); self.job = nil
-      announce("Texto transcrito. Revise a mensagem antes de enviar")
+      guard let reviser, revision.transcribed(text, reviewer: true) else { return await deliver([text]) }
+      // The transcription queue moves on; the review runs here, where Usar original, Esc and Descartar reach it.
+      self.job = nil
+      announce("Ajustando texto")
+      let ticket = generation
+      task = Task {
+        let revised = await reviser(text)
+        guard ticket == generation, let edits = revision.reviewed(text, revised: revised) else { return }
+        await deliver(edits)
+      }
     }
     self.job = job
     transcription.enqueue(job)
+  }
+  private func deliver(_ edits: [String]) async {
+    await receive(edits)
+    pendingChanged(false)
+    try? FileManager.default.removeItem(at: file)
+    state = .idle; gesture = VoiceRecordingGesture(); job = nil; task = nil
+    announce("Texto transcrito. Revise a mensagem antes de enviar")
+  }
+  /// The sparkles or ⌥⌘E: while recording it turns the review on or off; during "Ajustando texto…" it is Usar
+  /// original.
+  func toggleRevision() {
+    if revision.reviewing != nil { return useOriginal() }
+    guard capturing else { return }
+    _ = revision.toggle()
+    announce(revision.enabled ? "Revisão com IA ligada" : "Revisão com IA desligada")
+  }
+  /// Usar original: the transcription goes in now and the review's reply is ignored.
+  func useOriginal() {
+    guard let raw = revision.useOriginal() else { return }
+    generation = UUID()
+    task?.cancel(); task = nil
+    Task { await deliver([raw]) }
   }
   func retry() {
     error = nil
     if let job { transcription.retry(job) } else { enqueue() }
   }
-  /// What Esc cancels on the Mac: a recording (paused or still asking for the microphone too) or a transcription
-  /// under way. A dictation waiting for the model's download, or one that failed, keeps its audio for Tentar de novo.
+  /// What Esc cancels on the Mac: a recording (paused or still asking for the microphone too), a transcription
+  /// under way or its review. A dictation waiting for the model's download, or one that failed, keeps its audio for Tentar de novo.
   var cancellable: Bool {
-    if capturing { return true }
+    if capturing || revision.reviewing != nil { return true }
     guard state == .pending, error == nil else { return false }
     guard let job else { return true }
     switch job.state {
@@ -280,6 +313,7 @@ import AppKit
     clearPreview(); removeObservers(); capture.stop()
     if let job { transcription.cancel(job) }
     job = nil
+    revision.cancel()
     try? FileManager.default.removeItem(at: file)
     pendingChanged(false)
     state = .idle; elapsed = 0; gesture = VoiceRecordingGesture(); discarding = false; error = nil

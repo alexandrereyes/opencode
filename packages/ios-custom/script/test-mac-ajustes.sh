@@ -34,8 +34,9 @@ for mode in $modes; do
     divider) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
     arquivos) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     ampliar) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
-    # The sheets' composers (Nova sessão, Pergunta paralela, a comment) record with the fake microphone too.
-    dictation) extra=(-OpenCodeMacFakeDictation) ;;
+    # The sheets' composers (Nova sessão, Pergunta paralela, a comment) record with the fake microphone too; the
+    # fixtures' reviewer answers in 2.5 s, so "Ajustando texto…" can be seen and cancelled.
+    dictation) extra=(-OpenCodeMacFakeDictation -OpenCodeDictationReview 2500) ;;
   esac
   set +e
   timeout 150 "$copy/Contents/MacOS/OpenCodeMac" -OpenCodeMacFixture contexto \
