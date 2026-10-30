@@ -283,11 +283,30 @@ correct the reported problem and rerun activation.
 ### 4096 proxy and session resources hub
 
 The loopback proxy on 4096 (`com.alexandrem.opencode2-ui`, Homebrew Node, `<runtime>/bin/proxy.mjs`) is the
-entry point of the Cloudflare One route (`10.203.96.2:80` → nginx → 4096) and of local browsers. Its source is
-`packages/cli/script/custom-proxy.mjs`. It injects the server credentials for every route except `/resources/*`,
-which it forwards, without any `authorization` header, to the session resources hub on `127.0.0.1:4179`
-(WebSocket upgrades included); the hub authorizes each request with its own short tickets
-(`packages/plugin-app-custom/docs/resources.md`).
+entry point of the Cloudflare One route (`10.203.96.2:80` → nginx → 4096), of the Mac app and of local browsers.
+Its source is `packages/cli/script/custom-proxy.mjs`. Every user and process of the Mac can reach the loopback (the
+pf rule per user is not relied on), so the proxy **requires the server's own credentials** and never adds any:
+
+- It accepts exactly what the server accepts (`packages/server/src/middleware/authorization.ts`): `Basic` for
+  `opencode:<password>` or `opencode:<session token>` (pairing links), the same pair in `?auth_token=` (which wins
+  over the header), or the web sign-in cookie `opencode_session_<port>` from the same origin. Pairing redemption
+  (`/auth/connect/<code>`) and ticketed PTY/MCP connects (`?ticket=`) pass through; the server validates them.
+- Anything else gets the server's `401` (`WWW-Authenticate: Basic` for non-browser clients and navigations), for
+  HTTP and WebSocket upgrades alike, before any upstream is contacted. Accepted requests go to the server unchanged,
+  which checks them again. The password is read on every request from `<runtime>/config/opencode/service-custom.json`;
+  a missing or empty password answers `503` (fail closed).
+- Paths are normalized (dot segments, `%2e`) before these checks and forwarded normalized, so `/resources/../…` or a
+  ticketed prefix cannot route elsewhere.
+- `/resources/*` goes to the session resources hub on `127.0.0.1:4179` (WebSocket upgrades included) without
+  `authorization` or `cookie`; the hub authorizes each request with its own short tickets
+  (`packages/plugin-app-custom/docs/resources.md`), which the authenticated server issues.
+- The Host/Origin guards (`localhost|127.0.0.1|[::1]:4096`) still answer `403` first.
+
+Clients: the native apps already send `Basic` from the Keychain on every request (`OpenCodeClient.request`), so the
+built-in server "Mac de Alexandre" needs its password once in each app (Ajustes ▸ Servidores ▸ Editar… ▸ Senha;
+iPhone: Servidores ▸ lápis ▸ Senha), the value of `password` in `service-custom.json`. Browsers get the Basic prompt or use
+the web app's sign-in. The Apple Watch does not use 4096 (its gateway on 4192 has device tokens). A Unix socket
+was considered and rejected: URLSession has no Unix-socket transport and nginx in Docker needs TCP.
 
 After a successful activation (`custom:activate`, `custom:update`, rollback), activation installs that file as
 `<runtime>/bin/proxy.mjs` and restarts the proxy job with `launchctl kickstart -k`, but only when the installed job
@@ -448,7 +467,8 @@ OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/opencode-mac`). Diffe
   already applies to the stop that replaces an older unit.
 - The 4096 proxy stays on the Mac and reaches the server through OrbStack, which forwards the machine's
   `127.0.0.1:4178` to the Mac's loopback; its `/resources/*` go to the Mac's hub on `127.0.0.1:4179` (below), not to
-  Linux. After a successful activation, `installMacProxy` does what `installProxy` does on macOS through the mounted
+  Linux. It checks credentials against the **Mac's** `~/.local/share/opencode-custom-v2/config/opencode/service-custom.json`
+  (`hostname`, `port`, `password`), so that file's `password` must equal the Linux server's. After a successful activation, `installMacProxy` does what `installProxy` does on macOS through the mounted
   `/Users`: only when `~/Library/LaunchAgents/com.alexandrem.opencode2-ui.plist` exists and its `ProgramArguments`
   (read with `mac plutil`) run the Mac runtime's `~/.local/share/opencode-custom-v2/bin/proxy.mjs`, and only when the
   content changed, it replaces that file and restarts the job with

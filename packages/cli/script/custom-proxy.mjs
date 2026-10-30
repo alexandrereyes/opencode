@@ -1,34 +1,121 @@
 // Loopback proxy for the custom server, installed by custom:activate/update as <runtime>/bin/proxy.mjs and run by
-// launchd (com.alexandrem.opencode2-ui) with Homebrew Node. nginx (Cloudflare One route) and local browsers reach
-// 127.0.0.1:4096; the proxy injects the server credentials. /resources/* goes to the session resources hub
-// instead, which authorizes every request with its own short tickets (no server credentials are forwarded).
+// launchd (com.alexandrem.opencode2-ui) with Homebrew Node. nginx (Cloudflare One route), the Mac app and local
+// browsers reach 127.0.0.1:4096. Other users and processes of the Mac reach it too, so the proxy demands the
+// server's own credentials (packages/server/src/middleware/authorization.ts) before forwarding, and forwards them
+// unchanged: it never adds a credential. /resources/* goes to the session resources hub instead, which authorizes
+// every request with its own short tickets (no server credentials are forwarded).
 import http from "node:http"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { createHmac, timingSafeEqual } from "node:crypto"
 // The launchd job sets no environment; the overrides exist for tests.
 const home = process.env.OPENCODE_CUSTOM_HOME ?? path.join(os.homedir(), ".local/share/opencode-custom-v2")
 const port = Number(process.env.OPENCODE_PROXY_PORT ?? 4096)
 const hubPort = Number(process.env.OPENCODE_RESOURCES_HUB_PORT ?? 4179)
-function options(req) {
-  if (resources(req)) {
-    const { authorization, ...headers } = req.headers
-    return { hostname: "127.0.0.1", port: hubPort, path: req.url, method: req.method, headers }
+const username = "opencode"
+// Routes the server opens without credentials because it validates their single-use code or ticket itself.
+const pairing = /^\/auth\/connect\/[^/]+$/
+const ticketed = [
+  /^\/api\/pty\/[^/]+\/connect$/,
+  /^\/api\/experimental\/persistent-pty\/[^/]+\/connect$/,
+  /^\/api\/experimental\/client-mcp$/,
+]
+function config() {
+  const value = JSON.parse(fs.readFileSync(path.join(home, "config/opencode/service-custom.json"), "utf8"))
+  // Without a password the server would not ask for one either: refuse instead of forwarding.
+  if (typeof value.password !== "string" || value.password === "") throw new Error("no server password")
+  return value
+}
+// The path as the upstream will route it (dot segments resolved), so the checks below and the upstream agree.
+function target(req) {
+  const url = new URL(req.url ?? "/", "http://localhost")
+  return { url, path: url.pathname + url.search }
+}
+function resources(url) {
+  return url.pathname.startsWith("/resources/")
+}
+function same(a, b) {
+  const left = Buffer.from(a)
+  const right = Buffer.from(b)
+  return left.length === right.length && timingSafeEqual(left, right)
+}
+// Session tokens from pairing links and the web sign-in: `<expires>.<hmac>`, keyed by the password.
+function session(token, password) {
+  const parts = token.split(".")
+  if (parts.length !== 2) return false
+  const expires = Number(parts[0])
+  if (!Number.isSafeInteger(expires) || expires * 1000 <= Date.now()) return false
+  const key = createHmac("sha256", password).update("opencode-session-v1").digest()
+  return same(parts[1], createHmac("sha256", key).update(parts[0]).digest("base64url"))
+}
+function credential(encoded, password) {
+  const decoded = Buffer.from(encoded, "base64").toString("utf8")
+  const separator = decoded.indexOf(":")
+  if (separator === -1 || decoded.slice(0, separator) !== username) return false
+  const secret = decoded.slice(separator + 1)
+  return same(secret, password) || session(secret, password)
+}
+function sessionCookie(req, password) {
+  const host = req.headers.host ?? ""
+  const hostPort = URL.parse(`http://${host}`)?.port
+  const name = hostPort ? `opencode_session_${hostPort}` : "opencode_session"
+  const entry = (req.headers.cookie ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(name + "="))
+  const token = entry?.slice(name.length + 1)
+  if (!token) return false
+  // Same-site pages on other ports still send the cookie, so only same-origin requests may use it.
+  if (req.headers.origin !== undefined && URL.parse(req.headers.origin)?.host !== host) return false
+  return session(token, password)
+}
+function authorized(req, url, password) {
+  if (pairing.test(url.pathname)) return true
+  if (url.searchParams.get("ticket") && ticketed.some((route) => route.test(url.pathname))) return true
+  const token = url.searchParams.get("auth_token")
+  const header = /^Basic\s+(.+)$/i.exec(req.headers.authorization ?? "")?.[1]
+  const encoded = token || header
+  return (encoded !== undefined && credential(encoded, password)) || sessionCookie(req, password)
+}
+function challenge(req) {
+  const mode = req.headers["sec-fetch-mode"]
+  return mode === undefined || mode === "navigate"
+}
+// What to do with a request: forward it (`options`) or answer it with a status.
+function route(req) {
+  if (!allowed(req)) return { status: 403 }
+  const { url, path: forwarded } = target(req)
+  if (resources(url)) {
+    // The hub needs only its ticket: server credentials never reach it.
+    const { authorization: _authorization, cookie: _cookie, ...rest } = req.headers
+    return { options: { hostname: "127.0.0.1", port: hubPort, path: forwarded, method: req.method, headers: rest } }
   }
-  const config = JSON.parse(fs.readFileSync(path.join(home, "config/opencode/service-custom.json"), "utf8"))
+  let server
+  try {
+    server = config()
+  } catch {
+    return { status: 503 }
+  }
+  if (!authorized(req, url, server.password)) return { status: 401, challenge: challenge(req) }
   return {
-    hostname: config.hostname,
-    port: config.port,
-    path: req.url,
-    method: req.method,
-    headers: {
-      ...req.headers,
-      authorization: "Basic " + Buffer.from("opencode:" + config.password).toString("base64"),
+    options: {
+      hostname: server.hostname,
+      port: server.port,
+      path: forwarded,
+      method: req.method,
+      headers: req.headers,
     },
   }
 }
-function resources(req) {
-  return (req.url ?? "").startsWith("/resources/")
+const unauthorized = JSON.stringify({ _tag: "UnauthorizedError", message: "Authentication required" })
+function refusal(decision) {
+  if (decision.status !== 401) return {}
+  return {
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(unauthorized),
+    ...(decision.challenge ? { "www-authenticate": 'Basic realm="Secure Area"' } : {}),
+  }
 }
 function allowed(req) {
   return (
@@ -38,13 +125,14 @@ function allowed(req) {
   )
 }
 const server = http.createServer((req, res) => {
-  if (!allowed(req)) {
-    res.writeHead(403).end()
+  const decision = route(req)
+  if (!decision.options) {
+    res.writeHead(decision.status, refusal(decision)).end(decision.status === 401 ? unauthorized : undefined)
     return
   }
   let upstream
   try {
-    upstream = http.request(options(req), (response) => {
+    upstream = http.request(decision.options, (response) => {
       res.writeHead(response.statusCode, response.headers)
       response.pipe(res)
     })
@@ -60,13 +148,23 @@ const server = http.createServer((req, res) => {
   req.pipe(upstream)
 })
 server.on("upgrade", (req, socket, head) => {
-  if (!allowed(req)) {
-    socket.destroy()
+  const decision = route(req)
+  if (!decision.options) {
+    if (decision.status === 401)
+      socket.end(
+        "HTTP/1.1 401 Unauthorized\r\n" +
+          Object.entries({ ...refusal(decision), connection: "close" })
+            .map(([key, value]) => `${key}: ${value}`)
+            .join("\r\n") +
+          "\r\n\r\n" +
+          unauthorized,
+      )
+    else socket.destroy()
     return
   }
   let upstream
   try {
-    upstream = http.request(options(req))
+    upstream = http.request(decision.options)
   } catch {
     socket.destroy()
     return

@@ -1,6 +1,8 @@
 import { afterEach, expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
 import { chmod, mkdir, mkdtemp, readlink, realpath, rename, rm, stat } from "node:fs/promises"
+import { ServerAuth } from "@opencode/server/auth"
+import { Option } from "effect"
 import { migrate } from "../script/custom-migrate"
 import os from "node:os"
 import path from "node:path"
@@ -1146,46 +1148,50 @@ test("proxy installation only touches the job that runs this runtime's proxy", a
   expect(await installProxy(home, agents)).toBe("proxy unchanged")
 })
 
-test("the 4096 proxy injects credentials for the server and forwards /resources to the hub without them", async () => {
-  const node = Bun.which("node")
-  if (!node) return
+/** Runs `custom-proxy.mjs` on a free port against fake server and hub listeners that record what they receive. */
+async function proxyFixture(config: Record<string, unknown> = { password: "pw" }) {
   const home = await fixture()
-  const seen: { target: string; path: string; authorization: string | null }[] = []
-  const upstream = Bun.serve({
+  const seen: { target: string; path: string; authorization: string | null; cookie: string | null }[] = []
+  const record = (target: string, request: Request) =>
+    seen.push({
+      target,
+      path: new URL(request.url).pathname + new URL(request.url).search,
+      authorization: request.headers.get("authorization"),
+      cookie: request.headers.get("cookie"),
+    })
+  const echo = {
+    message: (socket: { send(value: string): unknown }, message: string | Buffer) =>
+      void socket.send(`echo:${message}`),
+  }
+  const upstream = Bun.serve<undefined>({
     hostname: "127.0.0.1",
     port: 0,
-    fetch(request) {
-      seen.push({
-        target: "server",
-        path: new URL(request.url).pathname,
-        authorization: request.headers.get("authorization"),
-      })
+    fetch(request, server) {
+      record("server", request)
+      if (server.upgrade(request, { data: undefined })) return undefined
       return new Response("server")
     },
+    websocket: echo,
   })
   const hub = Bun.serve<undefined>({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request, server) {
-      seen.push({
-        target: "hub",
-        path: new URL(request.url).pathname,
-        authorization: request.headers.get("authorization"),
-      })
+      record("hub", request)
       if (server.upgrade(request, { data: undefined })) return undefined
       return new Response("hub")
     },
-    websocket: { message: (socket, message) => void socket.send(`echo:${message}`) },
+    websocket: echo,
   })
   await mkdir(`${home}/config/opencode`, { recursive: true })
   await Bun.write(
     `${home}/config/opencode/service-custom.json`,
-    JSON.stringify({ hostname: "127.0.0.1", port: upstream.port, password: "pw" }),
+    JSON.stringify({ hostname: "127.0.0.1", port: upstream.port, ...config }),
   )
   const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
   const port = listener.port
   listener.stop(true)
-  const proxy = Bun.spawn([node, path.join(import.meta.dir, "../script/custom-proxy.mjs")], {
+  const proxy = Bun.spawn([Bun.which("node")!, path.join(import.meta.dir, "../script/custom-proxy.mjs")], {
     env: {
       ...process.env,
       OPENCODE_CUSTOM_HOME: home,
@@ -1195,43 +1201,208 @@ test("the 4096 proxy injects credentials for the server and forwards /resources 
     stdout: "ignore",
     stderr: "inherit",
   })
+  const base = `http://127.0.0.1:${port}`
+  const deadline = Date.now() + 10_000
+  while (
+    Date.now() < deadline &&
+    !(await fetch(`${base}/resources/x/snapshot`).then(
+      (response) => response.ok,
+      () => false,
+    ))
+  )
+    await Bun.sleep(50)
+  seen.length = 0
+  return {
+    port,
+    base,
+    seen,
+    /** The status line and headers the proxy answers to a WebSocket upgrade. */
+    async upgrade(target: string, headers: Record<string, string> = {}) {
+      const { promise, resolve } = Promise.withResolvers<string>()
+      let text = ""
+      const socket = await Bun.connect({
+        hostname: "127.0.0.1",
+        port,
+        socket: {
+          data(_socket, data) {
+            text += data.toString()
+            if (text.includes("\r\n\r\n")) resolve(text)
+          },
+          close: () => resolve(text),
+        },
+      })
+      socket.write(
+        [
+          `GET ${target} HTTP/1.1`,
+          `Host: 127.0.0.1:${port}`,
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "Sec-WebSocket-Version: 13",
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+          ...Object.entries(headers).map(([key, value]) => `${key}: ${value}`),
+          "",
+          "",
+        ].join("\r\n"),
+      )
+      const response = await promise
+      socket.end()
+      return response
+    },
+    async close() {
+      proxy.kill()
+      await proxy.exited
+      void upstream.stop(true)
+      void hub.stop(true)
+    },
+  }
+}
+
+const basic = (secret: string, user = "opencode") => `Basic ${Buffer.from(`${user}:${secret}`).toString("base64")}`
+/** A session token issued by the server itself (pairing links, web sign-in); `expired` dates it in the past. */
+function sessionToken(password: string, expired = false) {
+  const now = expired ? Date.now() - (ServerAuth.SESSION_TTL_SECONDS + 60) * 1000 : Date.now()
+  return ServerAuth.issueSession(ServerAuth.Config.of({ password: Option.some(password), username: "opencode" }), now)!
+}
+async function echoed(url: string, headers: Record<string, string> = {}) {
+  const socket = new WebSocket(url, { headers } as unknown as string[])
+  return new Promise<string>((resolve, reject) => {
+    socket.onopen = () => socket.send("ping")
+    socket.onmessage = (event) => {
+      resolve(String(event.data))
+      socket.close()
+    }
+    socket.onerror = () => reject(new Error("websocket failed"))
+  })
+}
+
+test("the 4096 proxy refuses requests without the server's credentials and never adds them", async () => {
+  if (!Bun.which("node")) return
+  const proxy = await proxyFixture()
   try {
-    const base = `http://127.0.0.1:${port}`
-    const deadline = Date.now() + 10_000
-    while (
-      Date.now() < deadline &&
-      !(await fetch(`${base}/api/info`).then(
-        (response) => response.ok,
-        () => false,
-      ))
-    )
-      await Bun.sleep(50)
-    expect(await (await fetch(`${base}/api/info`, { headers: { authorization: "Basic eA==" } })).text()).toBe("server")
+    const status = async (target: string, headers: Record<string, string> = {}) =>
+      (await fetch(proxy.base + target, { headers })).status
+    const missing = await fetch(`${proxy.base}/api/session`)
+    expect(missing.status).toBe(401)
+    expect(missing.headers.get("www-authenticate")).toBe('Basic realm="Secure Area"')
+    expect(await missing.json()).toEqual({ _tag: "UnauthorizedError", message: "Authentication required" })
+    // Like the server: browser fetches get no challenge, so no native prompt stalls the web app.
+    const fetched = await fetch(`${proxy.base}/api/session`, { headers: { "sec-fetch-mode": "cors" } })
+    expect([fetched.status, fetched.headers.get("www-authenticate")]).toEqual([401, null])
+    expect(await status("/api/session", { authorization: basic("wrong") })).toBe(401)
+    expect(await status("/api/session", { authorization: basic("pw", "admin") })).toBe(401)
+    expect(await status("/api/session", { authorization: basic(sessionToken("pw", true)) })).toBe(401)
+    expect(await status("/api/session", { authorization: basic(sessionToken("other")) })).toBe(401)
+    expect(await status(`/api/session?auth_token=${Buffer.from("opencode:wrong").toString("base64")}`)).toBe(401)
+    // A wrong auth_token wins over a right header, as on the server.
     expect(
-      await (await fetch(`${base}/resources/x/snapshot?ticket=t`, { headers: { authorization: "Basic eA==" } })).text(),
-    ).toBe("hub")
-    expect(seen.find((item) => item.target === "server")?.authorization).toBe(
-      `Basic ${Buffer.from("opencode:pw").toString("base64")}`,
+      await status(`/api/session?auth_token=${Buffer.from("opencode:wrong").toString("base64")}`, {
+        authorization: basic("pw"),
+      }),
+    ).toBe(401)
+    expect(await status("/api/pty/p1/connect")).toBe(401)
+    // Dot segments are resolved before the checks: no detour through /resources or a ticketed route.
+    expect(await status("/resources/../api/session")).toBe(401)
+    expect(await status("/resources/%2e%2e/api/session")).toBe(401)
+    expect(await status("/api/pty/p1/connect/../../../session?ticket=t")).toBe(401)
+    expect(
+      await status("/api/session", {
+        cookie: `${ServerAuth.sessionCookieName(`127.0.0.1:${proxy.port}`)}=${sessionToken("other")}`,
+      }),
+    ).toBe(401)
+    expect(proxy.seen).toEqual([])
+
+    expect(await (await fetch(`${proxy.base}/api/session`, { headers: { authorization: basic("pw") } })).text()).toBe(
+      "server",
     )
-    expect(seen.find((item) => item.target === "hub")).toEqual({
-      target: "hub",
-      path: "/resources/x/snapshot",
-      authorization: null,
-    })
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/resources/x/stream?ticket=t`)
-    const reply = await new Promise<string>((resolve, reject) => {
-      socket.onopen = () => socket.send("ping")
-      socket.onmessage = (event) => resolve(String(event.data))
-      socket.onerror = () => reject(new Error("websocket failed"))
-    })
-    socket.close()
-    expect(reply).toBe("echo:ping")
-    expect((await fetch(`${base}/api/info`, { headers: { origin: "https://evil.example" } })).status).toBe(403)
+    const token = Buffer.from("opencode:pw").toString("base64")
+    expect(await status(`/api/session?auth_token=${encodeURIComponent(token)}`)).toBe(200)
+    expect(await status("/api/session", { authorization: basic(sessionToken("pw")) })).toBe(200)
+    expect(await status("/api/session", { cookie: `a=b; opencode_session_${proxy.port}=${sessionToken("pw")}` })).toBe(
+      200,
+    )
+    // The server validates pairing codes and tickets itself.
+    expect(await status("/auth/connect/code1")).toBe(200)
+    expect(await status("/api/pty/p1/connect?ticket=t")).toBe(200)
+    expect(await status("/api/experimental/persistent-pty/p1/connect?ticket=t")).toBe(200)
+    expect(await status("/api/experimental/client-mcp?ticket=t")).toBe(200)
+    expect(proxy.seen.map((item) => [item.path, item.authorization])).toEqual([
+      ["/api/session", basic("pw")],
+      [`/api/session?auth_token=${encodeURIComponent(token)}`, null],
+      ["/api/session", basic(sessionToken("pw"))],
+      ["/api/session", null],
+      ["/auth/connect/code1", null],
+      ["/api/pty/p1/connect?ticket=t", null],
+      ["/api/experimental/persistent-pty/p1/connect?ticket=t", null],
+      ["/api/experimental/client-mcp?ticket=t", null],
+    ])
+    expect(proxy.seen.every((item) => item.target === "server")).toBe(true)
+    expect(await status("/api/session", { authorization: basic("pw"), origin: "https://evil.example" })).toBe(403)
+    expect(await status("/api/session", { authorization: basic("pw"), host: "evil.example" })).toBe(403)
   } finally {
-    proxy.kill()
-    await proxy.exited
-    void upstream.stop(true)
-    void hub.stop(true)
+    await proxy.close()
+  }
+})
+
+test("the 4096 proxy refuses WebSocket upgrades without credentials and relays authorized ones", async () => {
+  if (!Bun.which("node")) return
+  const proxy = await proxyFixture()
+  try {
+    const refused = await proxy.upgrade("/api/event")
+    expect(refused.split("\r\n")[0]).toBe("HTTP/1.1 401 Unauthorized")
+    expect(refused.toLowerCase()).toContain('www-authenticate: basic realm="secure area"')
+    expect((await proxy.upgrade("/api/event", { Authorization: basic("wrong") })).split("\r\n")[0]).toBe(
+      "HTTP/1.1 401 Unauthorized",
+    )
+    expect((await proxy.upgrade("/api/event", { Origin: "https://evil.example" })).split("\r\n")[0] ?? "").toBe("")
+    expect(proxy.seen).toEqual([])
+    expect((await proxy.upgrade("/api/event", { Authorization: basic("pw") })).split("\r\n")[0]).toBe(
+      "HTTP/1.1 101 Switching Protocols",
+    )
+    expect(await echoed(`ws://127.0.0.1:${proxy.port}/api/event`, { authorization: basic("pw") })).toBe("echo:ping")
+    expect(await echoed(`ws://127.0.0.1:${proxy.port}/api/pty/p1/connect?ticket=t`)).toBe("echo:ping")
+    expect(proxy.seen.every((item) => item.target === "server")).toBe(true)
+  } finally {
+    await proxy.close()
+  }
+})
+
+test("the 4096 proxy forwards /resources to the hub with its ticket only, never the server credentials", async () => {
+  if (!Bun.which("node")) return
+  const proxy = await proxyFixture()
+  try {
+    const response = await fetch(`${proxy.base}/resources/x/snapshot?ticket=t`, {
+      headers: {
+        authorization: basic("pw"),
+        cookie: `${ServerAuth.sessionCookieName(`127.0.0.1:${proxy.port}`)}=${sessionToken("pw")}`,
+      },
+    })
+    expect(await response.text()).toBe("hub")
+    expect(
+      await echoed(`ws://127.0.0.1:${proxy.port}/resources/x/stream?ticket=t`, { authorization: basic("pw") }),
+    ).toBe("echo:ping")
+    expect(proxy.seen).toEqual([
+      { target: "hub", path: "/resources/x/snapshot?ticket=t", authorization: null, cookie: null },
+      { target: "hub", path: "/resources/x/stream?ticket=t", authorization: null, cookie: null },
+    ])
+    expect(
+      (await fetch(`${proxy.base}/resources/x/snapshot?ticket=t`, { headers: { origin: "https://evil.example" } }))
+        .status,
+    ).toBe(403)
+  } finally {
+    await proxy.close()
+  }
+})
+
+test("the 4096 proxy fails closed when the server config has no password", async () => {
+  if (!Bun.which("node")) return
+  for (const config of [{}, { password: "" }]) {
+    const proxy = await proxyFixture(config)
+    try {
+      expect((await fetch(`${proxy.base}/api/session`, { headers: { authorization: basic("") } })).status).toBe(503)
+      expect(proxy.seen).toEqual([])
+    } finally {
+      await proxy.close()
+    }
   }
 })
 
