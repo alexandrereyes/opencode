@@ -15,7 +15,7 @@ struct OpenCodeWatchApp: App {
     let fixture = WatchFixture.launch
     let model = WatchModel(fixture: fixture)
     let voice = VoiceCall(fixture: fixture != nil)
-    if fixture?.screen == .voice { voice.showFixture() }
+    if fixture?.screen == .voice || (fixture != nil && WatchFixture.voiceLive) { voice.showFixture() }
     let link = WatchLink(model: model)
     if fixture == nil {
       link.activate()

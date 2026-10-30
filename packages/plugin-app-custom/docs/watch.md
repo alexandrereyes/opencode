@@ -188,8 +188,9 @@ All copy pt-BR, theme colors from `openchamber-dark` (no theme picker on the wat
 1. **Painel** (root, `app-1-painel.png`): the state ring (rev. 2026-10-30) with `N para você`; rows from
    `attention` first (lavender question, amber permission), then `sessions` (status colors as in the Live Activity);
    a Liquid Glass microphone button bottom-right starts voice. Pull to refresh; refresh every 10 s while visible.
-   Session rows have no navigation in v1 (no chevron); only attention rows open Responder. The microphone button
-   must never cover list content (use the watchOS bottom toolbar or an equivalent inset). Offline/unpaired states: "Abra o OpenCode no iPhone para parear" / "Mac indisponível" with the last update time.
+   Session rows have no navigation in v1 (no chevron); only attention rows open Responder. The list takes the
+   whole screen and the microphone floats over its bottom trailing corner (rev. 2026-10-30); the list's end leaves
+   room for it, so it never hides the last row. Offline/unpaired states: "Abra o OpenCode no iPhone para parear" / "Mac indisponível" with the last update time.
 2. **Responder** (`app-3-responder-pergunta.png`): opens from an attention row; question text, one large button per
    option (recommended first, orange), "Responder por voz" dictation for `allowText`; permissions show the summary
    and Negar / Permitir uma vez / Sempre permitir. Success returns to the dashboard with haptic feedback.

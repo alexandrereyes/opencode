@@ -53,6 +53,9 @@ struct WatchFixture {
     case working, workingUnread = "working-unread", questionWorkingUnread = "question-working-unread", nothing
     /// Two working sessions with a Progresso (rev. 2026-10-30), shown expanded.
     case progress
+    /// One session (an unread answer), and many: a question, a failure, two unread and three working, expanded, for
+    /// the full-screen list under the floating microphone (rev. 30/10).
+    case one, many
 
     func state(now: Int) -> String {
       let work = """
@@ -85,6 +88,20 @@ struct WatchFixture {
            question + "," + unread("s5", "Gravador de voz", 360_000),
            row("s1", "Escolher banco do cache", "question") + "," + work + "," + row("s5", "Gravador de voz", "idle"))
         case .nothing: ("", 0, "", "", "")
+        case .one:
+          (#""working":0,"question":0,"permission":0,"failed":0,"idle":1,"unread":1"#, 0, "",
+           unread("s5", "QA Autonomo!", 120_000), row("s5", "QA Autonomo!", "idle"))
+        case .many:
+          (#""working":3,"question":1,"permission":0,"failed":1,"idle":2,"unread":2"#, 4, question,
+           question + ","
+             + #"{"sessionID":"s7","title":"Migrar o banco de dados","project":"core","directory":"/r/core","kind":"failed","since":\#(now - 900_000)}"#
+             + "," + unread("s5", "QA Autonomo!", 120_000) + "," + unread("s6", "Anel do relógio", 600_000),
+           row("s1", "Escolher banco do cache", "question") + "," + row("s7", "Migrar o banco de dados", "failed") + ","
+             + #"{"sessionID":"s2","title":"Live Activity no iOS","project":"ios","directory":"/r/ios","status":"working","#
+             + #""progress":{"done":3,"total":7,"unit":"todos","current":"Atualizar a Live Activity e o relógio"}},"#
+             + #"{"sessionID":"s3","title":"Deploy no Swarm","project":"infra","directory":"/r/infra","status":"working"},"#
+             + row("s4", "Revisar contrato do relógio", "working") + "," + row("s5", "QA Autonomo!", "idle") + ","
+             + row("s6", "Anel do relógio", "idle"))
         case .progress:
           (#""working":2,"question":0,"permission":0,"failed":0,"idle":0,"unread":0"#, 2, "", "",
            #"{"sessionID":"s2","title":"Live Activity no iOS","project":"ios","directory":"/r/ios","status":"working","#
@@ -100,6 +117,16 @@ struct WatchFixture {
         """
     }
   }
+
+  /// DEBUG only: `-OpenCodeWatchVoiceLive YES` keeps a fixture call live behind the Painel, so captures show the
+  /// microphone during a call.
+  static let voiceLive: Bool = {
+    #if DEBUG
+      UserDefaults.standard.bool(forKey: "OpenCodeWatchVoiceLive")
+    #else
+      false
+    #endif
+  }()
 
   static let combo: Combo? = {
     #if DEBUG

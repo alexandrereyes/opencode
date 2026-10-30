@@ -37,13 +37,16 @@ public extension AgentsState {
   /// `N para você`, or nil when nothing needs Alexandre.
   var forYouLabel: String? { forYou > 0 ? "\(forYou) para você" : nil }
   var workingLabel: String { "\(counts.working) trabalhando" }
-  /// `1 pergunta · 2 não lidas · 6 trabalhando`: the non-zero counts behind `N para você`, then the work.
-  var forYouDetail: String {
+  /// The non-zero counts behind `N para você`, then the work: `["1 pergunta", "2 não lidas", "6 trabalhando"]`. The
+  /// Painel wraps between them, never inside one.
+  var forYouParts: [String] {
     let part = { (count: Int, one: String, many: String) in count > 0 ? ["\(count) \(count == 1 ? one : many)"] : [] }
-    return (part(counts.question, "pergunta", "perguntas") + part(counts.permission, "permissão", "permissões")
+    return part(counts.question, "pergunta", "perguntas") + part(counts.permission, "permissão", "permissões")
       + part(counts.failed, "com erro", "com erro") + part(counts.unread ?? 0, "não lida", "não lidas")
-      + part(counts.working, "trabalhando", "trabalhando")).joined(separator: " · ")
+      + part(counts.working, "trabalhando", "trabalhando")
   }
+  /// `1 pergunta · 2 não lidas · 6 trabalhando`.
+  var forYouDetail: String { forYouParts.joined(separator: " · ") }
   /// The rectangular complication's main line: `3 para você`, or `6 trabalhando · nada para você`.
   var complicationLine: String {
     forYouLabel ?? (counts.working > 0 ? "\(workingLabel) · nada para você" : "nada para você")

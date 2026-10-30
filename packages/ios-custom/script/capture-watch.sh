@@ -19,10 +19,11 @@ xcrun simctl bootstatus "$simulator" -b >/dev/null
 xcrun simctl install "$simulator" "$derived/Build/Products/Debug-watchsimulator/OpenCodeWatch.app"
 mkdir -p "$output"
 combo=${OPENCODE_WATCH_COMBO:-}
+voice=${OPENCODE_WATCH_VOICE:-}
 for fixture in "${fixtures[@]}"; do
-  name="real-$fixture${combo:+-$combo}.png"
+  name="real-$fixture${combo:+-$combo}${voice:+-voice}.png"
   xcrun simctl launch --terminate-running-process "$simulator" br.com.alexandrem.opencode.watchkitapp \
-    -OpenCodeWatchFixture "$fixture" ${combo:+-OpenCodeWatchCombo "$combo"} >/dev/null
+    -OpenCodeWatchFixture "$fixture" ${combo:+-OpenCodeWatchCombo "$combo"} ${voice:+-OpenCodeWatchVoiceLive YES} >/dev/null
   sleep 4
   xcrun simctl io "$simulator" screenshot "$output/$name" >/dev/null 2>&1
   printf 'captured %s\n' "$output/$name"

@@ -150,6 +150,7 @@ private let stateJSON = """
     #expect(need.kind.label == "respondeu" && need.date == Date(timeIntervalSince1970: 1_793_111_000))
     #expect(state.complicationLine == "4 para você")
     #expect(state.complicationDetail == "1 pergunta · 1 com erro · 2 não lidas · 2 trabalhando")
+    #expect(state.forYouParts == ["1 pergunta", "1 com erro", "2 não lidas", "2 trabalhando"])
   }
 
   @Test func labelsUseSingularAndPlural() throws {

@@ -4453,6 +4453,21 @@ watch's own Wi-Fi or cellular. The contract with the backend is
   two captions, mute and end), plus "Sem pareamento" and "Mac indisponível". Below the ring, `Atualizado agora` /
   `Atualizado há N min.` says how old the state is (rev. 29/10). Colors are `openchamber-dark` (`WatchPalette`, checked
   against the theme JSON by `WatchPaletteTests`).
+- **Painel in full screen (rev. 30/10):** the list runs to the bottom edge and the microphone floats over its bottom
+  trailing corner as an `overlay`, 14 points into the rounded corner as before; during a call it shows a moving
+  waveform and leads back to the call. An opaque `safeAreaInset` band used to reserve that strip, which cut the list
+  at the button's height and left the screen empty below it. The end clearance is now a transparent, non-hit-testable
+  `safeAreaInset` strip (the button's 30 points above the safe area plus 8): the list still draws and scrolls under
+  it, only its end moves up, so the last row scrolls clear of the button. `contentMargins(.bottom, …)` does not move
+  a watchOS `List`'s end, and an empty last row is held to the list's minimum row height or collapses with
+  `defaultMinListRowHeight` 0 (both measured in the simulator). The legend wraps between counts, never inside one
+  (`ItemFlow`, from `forYouParts`): `2 não lidas ·` / `3 trabalhando`, a count too wide for a line shrinking
+  (`minimumScaleFactor`) instead of breaking. From 42 mm it stays beside the ring; on 40 and 41 mm (screens under 180
+  points) the column beside the ring is about 75 points, where `3 trabalhando` does not fit even shrunk, so the
+  legend goes below the ring across the width (ring 54 points, title 17). `Trabalhando N` no longer breaks inside the
+  word either. Captures:
+  `script/capture-watch.sh` with `OPENCODE_WATCH_COMBO=nothing|one|working-unread|many` and `OPENCODE_WATCH_VOICE=live`,
+  fixtures `dashboard` and `dashboard-end` (scrolled to the true end).
 - **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
   mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
   state in the same Keychain group and reloads on WidgetKit push, when the app updates it, and otherwise every hour.
