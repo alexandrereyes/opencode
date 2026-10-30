@@ -182,33 +182,25 @@ import Testing
 
   @Test func failedOnlyCard() throws {
     let state = try Self.state("state-failed-only")
-    #expect(state.activeTotal == 0 && state.gaugeNumber == 3 && state.gaugeLabel == "para você")
+    let ring = state.statusRing
+    #expect(state.activeTotal == 0 && ring.number == 3 && ring.label == "para você")
     #expect(state.counters.map { "\($0.count) \($0.label)" } == ["1 com erro", "2 não lidas"])
-    let arcs = state.gauge(gap: 0)
-    #expect(arcs.map(\.role) == [.error, .primary] && arcs.map(\.dim) == [false, false])
+    #expect(ring.segments.map(\.role) == [.error, .primary] && ring.segments.map(\.dim) == [false, false])
     let line = try #require(state.attentionLine)
     #expect(line.title == "Deploy no Swarm" && line.kind == "erro" && line.role == .error && line.more == 2)
     #expect(line.since == Date(timeIntervalSince1970: 1_793_104_740))
   }
 
-  @Test func gaugeDrawsOnlyWhatNeedsAlexandre() throws {
-    let state = try Self.state("state-one-question")
-    #expect(state.gaugeNumber == 4 && state.gaugeLabel == "para você")
-    let arcs = state.gauge(gap: 0)
-    // 1 question and 3 unread out of 4; the 3 working sessions draw no arc.
-    #expect(arcs.map(\.role) == [.accent, .primary])
-    #expect(abs(arcs[0].to - 1.0 / 4) < 1e-9 && arcs.last?.to == 1)
-    let gapped = state.gauge(gap: 0.04)
-    #expect(abs(gapped[0].from - 0.02) < 1e-9 && abs(gapped[0].to - (1.0 / 4 - 0.02)) < 1e-9)
-    var single = try Self.state("state-working")
-    single.counts.unread = 0
-    #expect(single.gauge(gap: 0.04) == [AgentsGaugeArc(role: .success, dim: false, from: 0, to: 1)])
-    #expect(single.gaugeNumber == 2 && single.gaugeLabel == "ativas")
-    single.counts.working = 0
-    #expect(single.gauge(gap: 0.04).isEmpty)
-    // A tiny share never draws backwards.
-    single.counts = AgentsState.Counts(working: 200, question: 0, permission: 0, failed: 0, idle: 1)
-    #expect(single.gauge(gap: 0.05).count == 2 && single.gauge(gap: 0.05).allSatisfy { $0.to >= $0.from })
+  @Test func ringSegmentsEveryStateAroundForYou() throws {
+    let ring = try Self.state("state-one-question").statusRing
+    // 1 question, 3 unread and 3 working: the work draws too, muted, after what needs Alexandre.
+    #expect(ring.number == 4 && ring.label == "para você")
+    #expect(ring.segments.map(\.role) == [.accent, .primary, .textSecondary])
+    #expect(ring.segments.map(\.count) == [1, 3, 3] && ring.total == 7)
+    var calm = try Self.state("state-working")
+    calm.counts.unread = 0
+    #expect(calm.statusRing.segments.map(\.role) == [.success] && calm.statusRing.number == 2)
+    #expect(calm.statusRing.label == "ativas")
   }
 
   @Test func attentionLineShowsTheFirstNeedWithItsKind() throws {
@@ -401,18 +393,6 @@ import Testing
 
 /// The Apple Watch Smart Stack card (`.small`).
 @Suite struct AgentsWatchTests {
-  @Test func ringFollowsTheFocusProgress() throws {
-    var state = try AgentsActivityTests.state("state-working")
-    #expect(state.ring == .segments(done: 2, total: 3))
-    state.focus?.progress = AgentsState.Progress(done: 3, total: 12, unit: "subagents")
-    #expect(state.ring == .continuous(0.25))
-    state.focus?.progress = AgentsState.Progress(done: 8, total: 8, unit: "subagents")
-    #expect(state.ring == .segments(done: 8, total: 8))
-    state.focus?.progress = nil
-    #expect(state.ring == .full)
-    #expect(try AgentsActivityTests.state("state-failed-only").ring == .track)
-  }
-
   @Test func badgeAndRows() throws {
     let mixed = try AgentsActivityTests.state("state-mixed")
     #expect(mixed.watchBadge == .failed(2))
@@ -485,16 +465,15 @@ import Testing
   @Test func failedOnlyWithUnread() throws {
     let state = try withUnread("state-failed-only", 2)
     #expect(state.counters.map { "\($0.count) \($0.label)" } == ["1 com erro", "2 não lidas"])
-    let arcs = state.gauge(gap: 0)
-    #expect(arcs.map(\.role) == [.error, .primary] && arcs.map(\.dim) == [false, false])
+    #expect(state.statusRing.segments.map(\.role) == [.error, .primary])
   }
 
-  @Test func gaugeUsesTheOrangeArcForUnread() throws {
+  @Test func ringUsesTheOrangeSegmentForUnread() throws {
     let state = try withUnread("state-one-question", 3)
-    #expect(state.gauge(gap: 0).map(\.role) == [.accent, .primary])
-    // An older backend's recently finished sessions stay gray beside the work.
-    let old = try legacy("state-working").gauge(gap: 0)
-    #expect(old.map(\.role) == [.success, .textSecondary] && old.last?.dim == true)
+    #expect(state.statusRing.segments.map(\.role) == [.accent, .primary, .textSecondary])
+    // An older backend's recently finished sessions stay gray and dimmed beside the work.
+    let old = try legacy("state-working").statusRing.segments
+    #expect(old.map(\.role) == [.success, .textSecondary] && old.map(\.dim) == [false, true])
     let failed = try legacy("state-failed-only")
     #expect(failed.counters.map(\.label) == ["com erro", "concluídas há pouco"])
   }
@@ -506,19 +485,5 @@ import Testing
     let old = try legacy("state-failed-only")
     #expect(old.statusLabel(idle) == "Concluída" && old.statusRole(idle) == .textSecondary)
     #expect(state.statusLabel(state.sessions[0]) == "Erro")
-  }
-
-  @Test func watchRingUsesOrangeForUnreadAndGrayAsFallback() {
-    // Option A: only what needs Alexandre draws, and its count is the orange number.
-    let unread = WatchRing(counts: .init(working: 3, question: 1, permission: 0, failed: 0, idle: 4, unread: 1))
-    #expect(unread.arcs.map(\.role) == [.accent, .primary])
-    #expect(unread.arcs.map(\.start) == [0, 0.5])
-    #expect(unread.number == 2 && unread.numberRole == .primary)
-    let old = WatchRing(counts: .init(working: 3, question: 0, permission: 0, failed: 0, idle: 1))
-    #expect(old.arcs.map(\.role) == [.success, .border] && old.number == 3 && old.numberRole == .textStrong)
-    let onlyUnread = WatchRing(counts: .init(working: 0, question: 0, permission: 0, failed: 0, idle: 0, unread: 2))
-    #expect(onlyUnread.arcs == [.init(role: .primary, start: 0, end: 1)] && !onlyUnread.idle && onlyUnread.number == 2)
-    let none = WatchRing(counts: .init(working: 0, question: 0, permission: 0, failed: 0, idle: 3, unread: 0))
-    #expect(none.idle && none.number == 0)
   }
 }

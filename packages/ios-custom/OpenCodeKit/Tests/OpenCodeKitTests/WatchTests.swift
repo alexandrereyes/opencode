@@ -121,25 +121,6 @@ private let stateJSON = """
     get throws { try #require(JSONDecoder().decode(WatchStateSnapshot.self, from: Data(stateJSON.utf8)).state) }
   }
 
-  @Test func ringArcsAreProportional() {
-    let ring = WatchRing(counts: .init(working: 3, question: 0, permission: 0, failed: 0, idle: 2))
-    #expect(ring.arcs.map(\.role) == [.success, .border])
-    #expect(ring.arcs.map(\.start) == [0, 0.6])
-    #expect(ring.arcs.map { ($0.end * 100).rounded() / 100 } == [0.6, 1])
-    #expect(!ring.idle)
-  }
-
-  @Test func ringOrderCoversEveryKindThatNeedsAlexandre() {
-    let ring = WatchRing(counts: .init(working: 1, question: 1, permission: 1, failed: 1, idle: 0, unread: 1))
-    #expect(ring.arcs.map(\.role) == [.accent, .warning, .error, .primary])
-    #expect(ring.arcs.last?.end == 1 && ring.number == 4)
-  }
-
-  @Test func emptyRingIsGray() {
-    #expect(WatchRing(counts: .init(working: 0, question: 0, permission: 0, failed: 0, idle: 0)).idle)
-    #expect(WatchRing(counts: nil).arcs == [.init(role: .border, start: 0, end: 1)])
-  }
-
   @Test func needsComeFirstThenTheCollapsedWork() throws {
     let state = try self.state
     #expect(state.dashboardRows().map(\.id) == ["attention-question-s2", "attention-permission-s3", "working"])

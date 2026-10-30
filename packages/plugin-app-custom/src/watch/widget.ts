@@ -11,12 +11,17 @@ import type { Stats } from "./stats.js"
 export const limits = {
   /** Other changes wait this long after the device's previous push and go out folded into one. */
   coalesceMs: 30 * 60_000,
+  /**
+   * Urgent pushes are at most one a minute: sessions that finish together, or a question right after an answer,
+   * go out as one push with the state at the end of that minute.
+   */
+  urgentSpacingMs: 60_000,
   /** Window of the daily cap. */
   dayMs: 24 * 3_600_000,
-  /** Pushes per device in any 24 hours, urgent ones included. */
-  dailyCap: 40,
-  /** Folded pushes stop here, so the last 10 of the cap stay for urgent changes. */
-  coalescedCap: 30,
+  /** Pushes per device in any 24 hours, urgent ones included (rev. 2026-10-30: 50, with unread answers urgent). */
+  dailyCap: 50,
+  /** Folded pushes stop here, so the last 25 of the cap stay for urgent changes. */
+  coalescedCap: 25,
   expirationSeconds: 15 * 60,
 }
 
@@ -45,17 +50,26 @@ export function key(state: LiveActivity.AgentsState | null): Key {
   }
 }
 
-/** A new question, permission or failure, or the active total leaving or reaching zero. */
+/**
+ * A new question, permission or failure, a new unread answer (rev. 2026-10-30: what Alexandre most wants to see on
+ * the wrist; it used to wait for a folded push), or the active total leaving or reaching zero.
+ */
 export function urgent(known: Key, next: Key) {
-  return next.attention > known.attention || next.failed > known.failed || (known.active === 0) !== (next.active === 0)
+  return (
+    next.attention > known.attention ||
+    next.failed > known.failed ||
+    next.finished > known.finished ||
+    (known.active === 0) !== (next.active === 0)
+  )
 }
 
 const same = (a: Key, b: Key) => (Object.keys(a) as (keyof Key)[]).every((name) => a[name] === b[name])
 
 /**
- * WidgetKit pushes (`apns-push-type: widgets`) that ask the watch complication to reload. Urgent changes go at once;
- * the rest wait for one folded push per `coalesceMs`, and nothing is pushed for a state the watch already read
- * through `/state` (`seen`). The first state after start is only recorded.
+ * WidgetKit pushes (`apns-push-type: widgets`) that ask the watch complication to reload. Urgent changes go at once
+ * (at most one a minute, priority 10); the rest wait for one folded push per `coalesceMs` (priority 5), and nothing
+ * is pushed for a state the watch already read through `/state` (`seen`). The first state after start is only
+ * recorded.
  */
 export function makeWidgetPush(input: {
   readonly devices: Devices
@@ -96,8 +110,9 @@ export function makeWidgetPush(input: {
         }
         continue
       }
-      if (reason === "coalesced" && now - last.at < limits.coalesceMs) {
-        wakes.push(last.at + limits.coalesceMs)
+      const spacing = reason === "urgent" ? limits.urgentSpacingMs : limits.coalesceMs
+      if (now - last.at < spacing) {
+        wakes.push(last.at + spacing)
         continue
       }
       const previous = { known: last.known, at: last.at }
@@ -110,7 +125,9 @@ export function makeWidgetPush(input: {
       const push: Push = {
         token: widget.token,
         environment: widget.environment,
-        priority: 5,
+        // Priority 5 may be held and delivered in bursts by APNs; an urgent change goes at once (Apple's own widget
+        // push example leaves the header out, which means 10).
+        priority: reason === "urgent" ? 10 : 5,
         expiration: Math.floor(now / 1000) + limits.expirationSeconds,
         body: { aps: { "content-changed": true } },
         type: "widgets",

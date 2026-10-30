@@ -202,11 +202,12 @@ export function makeGateway(options: GatewayOptions) {
       // Every reader caches what it gets for the complication: no push is needed for this state any more.
       running.latest.state = view.state
       running.widget?.seen(device.deviceID, view.state)
-      yield* running.stats.state(
-        device.deviceID,
-        reader(request.headers.get("x-watch-client")),
-        yield* Clock.currentTimeMillis,
-      )
+      const from = reader(request.headers.get("x-watch-client"))
+      yield* running.stats.state(device.deviceID, from, yield* Clock.currentTimeMillis)
+      // Complication reloads and background refreshes are a few dozen a day: logged one by one, to line them up with
+      // the pushes. The app in front reads every 10 s and only counts.
+      if (from === "widget" || from === "background")
+        yield* Effect.logInfo("Watch state read", { deviceID: device.deviceID, reader: from })
       // The watch opens Responder from an attention row, so each item carries its oldest pending request.
       const state = view.state && {
         ...view.state,

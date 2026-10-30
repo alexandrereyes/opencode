@@ -8,9 +8,9 @@ import WidgetKit
 /// Heights are deterministic: every block has a fixed frame from `AgentsLayout`, never measured with `ViewThatFits`
 /// (the system clips instead of proposing its limit).
 
-/// Lock Screen card, "ring and counters" (Option A, 29/10: attention first): while something needs Alexandre, the
-/// ring of those counts with `N para você`, their lines before `trabalhando` and the first of them; otherwise the
-/// ring of the work with `activeTotal`. It summarizes all sessions and never singles one out.
+/// Lock Screen card, "ring and counters" (Option A, 29/10: attention first): the state ring (rev. 30/10: a segment
+/// per state, `N para você` in the centre while something needs Alexandre, otherwise `N ativas`), the counter lines
+/// in the ring's colors and the first session that needs him. It summarizes all sessions and never singles one out.
 struct AgentsLockScreenView: View {
   let attributes: AgentsActivityAttributes
   let state: AgentsState
@@ -54,28 +54,19 @@ struct AgentsLockScreenView: View {
   }
 }
 
-/// The closed ring of the Lock Screen card, with `N para você` or `N ativas` in the centre.
+/// The closed state ring of the Lock Screen card, with `N para você` or `N ativas` in the centre.
 struct AgentsGaugeView: View {
   let attributes: AgentsActivityAttributes
   let state: AgentsState
 
   var body: some View {
-    let width = AgentsLayout.lockRingWidth
-    // The round caps cover `width` along the circle, so the gap also makes room for them.
-    let circumference = Double.pi * Double(AgentsLayout.lockRing - width)
-    let arcs = state.gauge(gap: (Double(width) + 4) / circumference)
+    let ring = state.statusRing
     ZStack {
-      if arcs.isEmpty { Circle().stroke(attributes.color(.border), lineWidth: width).padding(width / 2) }
-      ForEach(Array(arcs.enumerated()), id: \.offset) { _, arc in
-        AgentsArc(from: arc.from, to: arc.to)
-          .stroke(attributes.color(arc.role).opacity(arc.dim ? 0.55 : 1),
-            style: StrokeStyle(lineWidth: width, lineCap: arcs.count > 1 ? .round : .butt))
-          .padding(width / 2)
-      }
+      AgentsStatusRingView(ring: ring, color: attributes.color, lineWidth: AgentsLayout.lockRingWidth, gap: 4)
       VStack(spacing: -2) {
-        Text(verbatim: "\(state.gaugeNumber)").font(.system(size: 26, weight: .bold)).monospacedDigit()
+        Text(verbatim: "\(ring.number)").font(.system(size: 26, weight: .bold)).monospacedDigit()
           .foregroundStyle(attributes.color(.textStrong))
-        Text(state.gaugeLabel).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary))
+        Text(ring.label).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary))
       }
     }
   }
@@ -181,8 +172,9 @@ struct AgentsMinimalView: View {
         Text(verbatim: "\(count)").font(.system(size: 13, weight: .bold)).monospacedDigit()
       }.foregroundStyle(attributes.color(minimal.role))
     } else {
+      // Nothing to answer or fix: the mascot inside the state ring (unread answers, work).
       ZStack {
-        Circle().strokeBorder(attributes.color(.success), lineWidth: 2)
+        AgentsStatusRingView(ring: state.statusRing, color: attributes.color, lineWidth: 2, gap: 1.5)
         AgentsMascot(attributes: attributes).padding(5)
       }
     }
@@ -250,8 +242,9 @@ struct AgentsActivityContent: View {
   }
 }
 
-/// Smart Stack card (approved mock `smartstack-b3-anel-segmentado.png`): the mascot inside the subagent ring with the
-/// attention badge, and the first two sessions. Fixed metrics fit the smallest watch's 152 × 69.5 points.
+/// Smart Stack card: the mascot inside the state ring (rev. 30/10: a segment per state, like every summary; it used
+/// to count subagents) with the attention badge, and the first two sessions. Fixed metrics fit the smallest watch's
+/// 152 × 69.5 points.
 struct AgentsWatchView: View {
   static let height: CGFloat = 64
   static let ring: CGFloat = 44
@@ -262,7 +255,7 @@ struct AgentsWatchView: View {
   var body: some View {
     HStack(spacing: 6) {
       ZStack(alignment: .bottom) {
-        AgentsRingView(attributes: attributes, ring: state.ring)
+        AgentsStatusRingView(ring: state.statusRing, color: attributes.color, lineWidth: 4, gap: 2)
           .overlay { AgentsMascot(attributes: attributes).padding(9) }
           .frame(width: Self.ring, height: Self.ring)
         if let badge = state.watchBadge { badgeView(badge).offset(y: 3) }
@@ -308,48 +301,6 @@ struct AgentsWatchView: View {
       }
       .font(.system(size: 11, weight: .medium)).foregroundStyle(attributes.color(state.statusRole(row))).lineLimit(1)
       .minimumScaleFactor(0.85)
-    }
-  }
-}
-
-/// Segments with small gaps for up to eight subagents, one continuous arc above that, a full ring while working
-/// without subagents, and only the track when nothing works.
-struct AgentsRingView: View {
-  let attributes: AgentsActivityAttributes
-  let ring: AgentsRing
-  private let style = StrokeStyle(lineWidth: 4, lineCap: .round)
-
-  var body: some View {
-    ZStack {
-      switch ring {
-      case .segments(let done, let total):
-        let gap = total > 1 ? 0.07 : 0
-        ForEach(0..<total, id: \.self) { index in
-          let start = Double(index) / Double(total)
-          AgentsArc(from: start + gap / 2, to: start + 1 / Double(total) - gap / 2)
-            .stroke(attributes.color(index < done ? .success : .border), style: style)
-        }
-      case .continuous(let fraction):
-        Circle().stroke(attributes.color(.border), style: style)
-        AgentsArc(from: 0, to: fraction).stroke(attributes.color(.success), style: style)
-      case .full:
-        Circle().stroke(attributes.color(.success), style: style)
-      case .track:
-        Circle().stroke(attributes.color(.border), style: style)
-      }
-    }
-    .padding(style.lineWidth / 2)
-  }
-}
-
-/// An arc from 12 o'clock, clockwise, between two fractions of the circle.
-struct AgentsArc: Shape {
-  let from: Double
-  let to: Double
-  func path(in rect: CGRect) -> Path {
-    Path { path in
-      path.addArc(center: CGPoint(x: rect.midX, y: rect.midY), radius: min(rect.width, rect.height) / 2,
-        startAngle: .degrees(from * 360 - 90), endAngle: .degrees(to * 360 - 90), clockwise: false)
     }
   }
 }

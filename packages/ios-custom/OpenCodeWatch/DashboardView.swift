@@ -111,6 +111,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 1) {
           Text(model.state?.forYouLabel ?? model.state?.workingLabel ?? "0 trabalhando")
             .font(.system(size: 19, weight: .semibold)).foregroundStyle(Color.watch(.textStrong))
+            .lineLimit(1).minimumScaleFactor(0.7)
           Text(model.state?.complicationDetail ?? "nada para você")
             .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.watch(.textSecondary))
             .lineLimit(2).minimumScaleFactor(0.8).fixedSize(horizontal: false, vertical: true)

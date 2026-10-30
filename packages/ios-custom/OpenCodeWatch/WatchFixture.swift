@@ -2,7 +2,8 @@ import Foundation
 import OpenCodeKit
 
 /// DEBUG-only screens for captures: `-OpenCodeWatchFixture dashboard|question|permission|voice|unpaired|offline|
-/// complications`. Fixtures never touch the network, the Keychain or the shared cache.
+/// complications`, optionally with `-OpenCodeWatchCombo working|working-unread|question-working-unread|nothing` for
+/// the state ring's combinations. Fixtures never touch the network, the Keychain or the shared cache.
 struct WatchFixture {
   enum Screen: String {
     case dashboard, question, permission, voice, unpaired, offline, complications
@@ -47,11 +48,64 @@ struct WatchFixture {
     }
   }
 
+  /// The state ring's combinations (rev. 30/10), each with sessions that match its counts.
+  enum Combo: String {
+    case working, workingUnread = "working-unread", questionWorkingUnread = "question-working-unread", nothing
+
+    func state(now: Int) -> String {
+      let work = """
+        {"sessionID":"s2","title":"Live Activity no iOS","project":"ios","directory":"/r/ios","status":"working"},
+        {"sessionID":"s3","title":"Deploy no Swarm","project":"infra","directory":"/r/infra","status":"working"}
+        """
+      let question = """
+        {"sessionID":"s1","title":"Escolher banco do cache","project":"core","directory":"/r/core","kind":"question",
+         "since":\(now - 180_000),"text":"Qual banco usar no cache das sessões?","requestID":"fixture-question"}
+        """
+      let unread = { (id: String, title: String, ago: Int) in
+        """
+        {"sessionID":"\(id)","title":"\(title)","project":"ios","directory":"/r/ios","kind":"unread","since":\(now - ago)}
+        """
+      }
+      let row = { (id: String, title: String, status: String) in
+        #"{"sessionID":"\#(id)","title":"\#(title)","project":"ios","directory":"/r/ios","status":"\#(status)"}"#
+      }
+      let (counts, active, attention, needs, sessions): (String, Int, String, String, String) =
+        switch self {
+        case .working:
+          (#""working":3,"question":0,"permission":0,"failed":0,"idle":0,"unread":0"#, 3, "", "",
+           work + "," + row("s4", "Revisar contrato do relógio", "working"))
+        case .workingUnread:
+          (#""working":2,"question":0,"permission":0,"failed":0,"idle":2,"unread":2"#, 2, "",
+           unread("s5", "Gravador de voz", 360_000) + "," + unread("s6", "Anel do relógio", 600_000),
+           work + "," + row("s5", "Gravador de voz", "idle") + "," + row("s6", "Anel do relógio", "idle"))
+        case .questionWorkingUnread:
+          (#""working":2,"question":1,"permission":0,"failed":0,"idle":1,"unread":1"#, 3, question,
+           question + "," + unread("s5", "Gravador de voz", 360_000),
+           row("s1", "Escolher banco do cache", "question") + "," + work + "," + row("s5", "Gravador de voz", "idle"))
+        case .nothing: ("", 0, "", "", "")
+        }
+      guard self != .nothing else { return #"{"state":null,"host":"MacBook Pro"}"# }
+      return """
+        {"state":{"v":1,"updatedAt":\(now),"host":"MacBook Pro","counts":{\(counts)},"activeTotal":\(active),
+         "attention":[\(attention)],"attentionTotal":\(attention.isEmpty ? 0 : 1),"needs":[\(needs)],
+         "sessions":[\(sessions)]},"host":"MacBook Pro"}
+        """
+    }
+  }
+
+  static let combo: Combo? = {
+    #if DEBUG
+      UserDefaults.standard.string(forKey: "OpenCodeWatchCombo").flatMap(Combo.init(rawValue:))
+    #else
+      nil
+    #endif
+  }()
+
   var entry: WatchStateCache.Entry? {
     guard screen != .unpaired else { return nil }
     let now = Date()
     let ms = { (date: Date) in Int((date.timeIntervalSince1970 * 1000).rounded()) }
-    let json = """
+    let json = Self.combo?.state(now: ms(now)) ?? """
       {"state":{"v":1,"updatedAt":\(ms(now)),"host":"MacBook Pro",
        "counts":{"working":3,"question":1,"permission":0,"failed":0,"idle":1,"unread":1},"activeTotal":4,
        "attention":[{"sessionID":"s1","title":"Escolher banco do cache","project":"core","directory":"/r/core",

@@ -127,8 +127,10 @@ private struct ComplicationsPreview: View {
   var body: some View {
     ScrollView {
       VStack(spacing: 10) {
+        // The corner's circle (its curved label only draws on a watch face) and the empty ring for comparison.
         HStack(spacing: 14) {
           ComplicationCircular(state: entry?.snapshot.state).frame(width: 58, height: 58)
+          ComplicationCorner(state: entry?.snapshot.state).frame(width: 40, height: 40)
           ComplicationCircular(state: nil).frame(width: 58, height: 58)
         }
         TimelineView(.periodic(from: entry?.fetched ?? .now, by: WatchAge.fresh)) { context in

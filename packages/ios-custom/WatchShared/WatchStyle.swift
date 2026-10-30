@@ -34,28 +34,27 @@ struct WatchMascot: View {
   }
 }
 
-/// The approved ring (`opcao-1-anel-estados.png`): proportional arcs with a gap at the bottom where the mascot
-/// sits. Option A (29/10): while something needs Alexandre, its count in orange and only its arcs; otherwise the
-/// active count over the green work. With nothing active, the mascot alone over a gray ring.
+/// The approved ring (`opcao-1-anel-estados.png`) with the gap at the bottom where the mascot sits, drawn by the
+/// shared state ring (rev. 30/10: a segment per state). The number is `N para você` in orange while something needs
+/// Alexandre, otherwise the sessions working; with nothing active, the mascot alone over the gray track.
 struct WatchRingView: View {
+  /// Degrees open at the bottom for the mascot.
+  static let opening: Double = 80
   let state: AgentsState?
   var lineWidth: CGFloat = 5
   var numberSize: CGFloat = 20
 
   var body: some View {
-    let ring = WatchRing(counts: state?.counts)
+    let ring = AgentsStatusRing(counts: state?.counts)
     GeometryReader { proxy in
       let side = min(proxy.size.width, proxy.size.height)
       ZStack {
-        ForEach(Array(ring.arcs.enumerated()), id: \.offset) { index, arc in
-          WatchArcShape(start: arc.start, end: arc.end, separated: ring.arcs.count > 1)
-            .stroke(Color.watch(arc.role), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-            .widgetAccentable(arc.role != .border)
-        }
+        AgentsStatusRingView(ring: ring, color: Color.watch, lineWidth: lineWidth, opening: Self.opening,
+          gap: lineWidth * 0.6, accentable: true)
         if ring.number > 0 {
           Text(verbatim: "\(ring.number)")
             .font(.system(size: numberSize, weight: .bold, design: .rounded)).monospacedDigit()
-            .foregroundStyle(Color.watch(ring.numberRole))
+            .foregroundStyle(Color.watch(ring.forYou ? .primary : .textStrong))
             .minimumScaleFactor(0.5)
             .offset(y: -side * 0.06)
           WatchMascot().frame(width: side * 0.42).offset(y: side * 0.36)
@@ -71,28 +70,6 @@ struct WatchRingView: View {
   }
 }
 
-/// One arc of the ring. The sweep runs clockwise from the left end of the bottom gap to its right end.
-struct WatchArcShape: Shape {
-  let start: Double
-  let end: Double
-  var separated = true
-
-  func path(in rect: CGRect) -> Path {
-    let sweep = 360 - WatchRing.gap
-    // Bottom is 90° in SwiftUI's clockwise-down coordinates; the gap is centred there.
-    let origin = 90 + WatchRing.gap / 2
-    let pad = separated ? 7.0 : 0
-    let from = origin + start * sweep + (start > 0 ? pad / 2 : 0)
-    let to = origin + end * sweep - (end < 1 ? pad / 2 : 0)
-    var path = Path()
-    guard to > from else { return path }
-    let inset = rect.insetBy(dx: 3, dy: 3)
-    path.addArc(center: CGPoint(x: inset.midX, y: inset.midY), radius: min(inset.width, inset.height) / 2,
-      startAngle: .degrees(from), endAngle: .degrees(to), clockwise: false)
-    return path
-  }
-}
-
 // MARK: Complications
 
 struct ComplicationCircular: View {
@@ -102,16 +79,18 @@ struct ComplicationCircular: View {
   }
 }
 
+/// The corner's circle: the closed state ring around the number, or around the mascot when nothing is active.
 struct ComplicationCorner: View {
   let state: AgentsState?
   var body: some View {
-    let ring = WatchRing(counts: state?.counts)
+    let ring = AgentsStatusRing(counts: state?.counts)
     ZStack {
+      AgentsStatusRingView(ring: ring, color: Color.watch, lineWidth: 3, gap: 2, accentable: true)
       if ring.number > 0 {
-        Text(verbatim: "\(ring.number)").font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
-          .foregroundStyle(Color.watch(ring.numberRole))
+        Text(verbatim: "\(ring.number)").font(.system(size: 17, weight: .bold, design: .rounded)).monospacedDigit()
+          .foregroundStyle(Color.watch(ring.forYou ? .primary : .textStrong)).minimumScaleFactor(0.6).padding(4)
       } else {
-        WatchMascot().padding(6)
+        WatchMascot().padding(8)
       }
     }
     .widgetLabel {

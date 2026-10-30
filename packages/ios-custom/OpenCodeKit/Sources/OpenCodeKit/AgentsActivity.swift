@@ -209,15 +209,6 @@ public struct AgentsCounter: Equatable, Sendable {
   public let emphasized: Bool
 }
 
-/// One arc of the Lock Screen ring, as fractions of the circle clockwise from 12 o'clock.
-public struct AgentsGaugeArc: Equatable, Sendable {
-  public let role: ThemeRole
-  /// Recently finished sessions draw at reduced opacity.
-  public let dim: Bool
-  public let from: Double
-  public let to: Double
-}
-
 /// The Lock Screen card's bottom line: the first session that needs Alexandre and how many others do.
 public struct AgentsAttentionLine: Equatable, Sendable {
   public let role: ThemeRole
@@ -313,34 +304,8 @@ public extension AgentsState {
     return parts
   }
 
-  /// The ring's arcs, proportional to the counts, with `gap` (a fraction of the circle) between them. While
-  /// something needs Alexandre only those counts draw (question, permission, failed, unread); otherwise the contract
-  /// order (working, then the `idle` fallback of older backends). A single non-zero count closes the circle; none
-  /// draws no arc (the view shows only the track).
-  func gauge(gap: Double) -> [AgentsGaugeArc] {
-    let attention: [(Int, ThemeRole, Bool)] = [
-      (counts.question, .accent, false), (counts.permission, .warning, false), (counts.failed, .error, false),
-      (counts.unread ?? 0, .primary, false),
-    ]
-    let parts = (forYou > 0 ? attention : [
-      (counts.working, .success, false), (counts.question, .accent, false), (counts.permission, .warning, false),
-      (counts.failed, .error, false), (counts.finished.count, counts.finished.role, !counts.finished.unread),
-    ]).filter { $0.0 > 0 }
-    let total = Double(parts.reduce(0) { $0 + $1.0 })
-    guard total > 0 else { return [] }
-    if parts.count == 1 { return [AgentsGaugeArc(role: parts[0].1, dim: parts[0].2, from: 0, to: 1)] }
-    var start = 0.0
-    return parts.map { count, role, dim in
-      let end = start + Double(count) / total
-      defer { start = end }
-      let from = start + gap / 2
-      return AgentsGaugeArc(role: role, dim: dim, from: from, to: max(from, end - gap / 2))
-    }
-  }
-
-  /// The ring's centre: `N para você` while something needs Alexandre, otherwise `N ativas`.
-  var gaugeNumber: Int { forYou > 0 ? forYou : activeTotal }
-  var gaugeLabel: String { forYou > 0 ? "para você" : activeTotal == 1 ? "ativa" : "ativas" }
+  /// The state ring of every summary (`AgentsStatusRing`): segments per state and `N para você` in the centre.
+  var statusRing: AgentsStatusRing { AgentsStatusRing(counts: counts) }
 
   /// One line per non-zero count, at most `AgentsLayout.lockMaxCounters`. While something needs Alexandre those
   /// lines come first and `trabalhando` follows in gray, dropped first when they do not fit; otherwise the contract
@@ -443,30 +408,7 @@ public extension AgentsState.Row {
   }
 }
 
-/// The Apple Watch card's progress ring around the mascot.
-public enum AgentsRing: Equatable, Sendable {
-  /// One arc per subagent, the first `done` in `success` (at most `segmentLimit`).
-  case segments(done: Int, total: Int)
-  /// Above the segment limit: one continuous arc filled `done/total`.
-  case continuous(Double)
-  /// Working without subagent progress.
-  case full
-  /// Nothing working.
-  case track
-
-  public static let segmentLimit = 8
-}
-
 public extension AgentsState {
-  var ring: AgentsRing {
-    if let progress = focus?.progress, progress.total > 0 {
-      return progress.total <= AgentsRing.segmentLimit
-        ? .segments(done: min(max(progress.done, 0), progress.total), total: progress.total)
-        : .continuous(progress.fraction)
-    }
-    return counts.working > 0 ? .full : .track
-  }
-
   /// Badge below the ring: the minimal island's priority, none without attention or failure.
   var watchBadge: AgentsMinimal? { minimal == .mascot ? nil : minimal }
 
