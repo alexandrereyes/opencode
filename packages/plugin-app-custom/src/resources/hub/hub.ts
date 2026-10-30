@@ -5,7 +5,7 @@ import { optional } from "@opencode/schema/schema"
 import { Option, Schema } from "effect"
 import { namespaceOf, sameNamespace } from "../adapters/chrome.js"
 import { jpeg, size } from "../adapters/process.js"
-import type { Adapter, Entry, Image, StreamSink } from "../adapters/types.js"
+import type { Adapter, Entry, Image, StoredActivity, StreamSink } from "../adapters/types.js"
 import { ResourceProtocol } from "../protocol.js"
 import { Resources } from "../rpc.js"
 import { makeInputQueue } from "./input-queue.js"
@@ -33,6 +33,11 @@ export const Upsert = Schema.Struct({
   owner: optional(Resources.Owner),
   /** Marks an agent use now (state `agent`). */
   used: optional(Schema.Boolean),
+  /**
+   * The shell command that named it (`call` is its tool call). `running` keeps the resource `agent` until the same call
+   * comes back with `running: false` or `POST /admin/calls/<call>/end` closes it.
+   */
+  activity: optional(Schema.Struct({ call: Schema.String, command: Schema.String, running: Schema.Boolean })),
 })
 export type Upsert = typeof Upsert.Type
 
@@ -70,6 +75,18 @@ const StoredEntry = Schema.Struct({
   discoveredAt: Schema.Number,
   lastUsedAt: Schema.Number,
   updatedAt: Schema.Number,
+  activity: optional(
+    Schema.Array(
+      Schema.Struct({
+        call: Schema.String,
+        command: Schema.String,
+        at: Schema.Number,
+        sessionID: optional(Schema.String),
+        agent: optional(Schema.String),
+        endedAt: optional(Schema.Number),
+      }),
+    ),
+  ),
 })
 const decodeStored = Schema.decodeUnknownOption(Schema.Array(StoredEntry))
 const decodeUpsert = Schema.decodeUnknownOption(Upsert)
@@ -192,11 +209,12 @@ export function createHub(options: HubOptions) {
     const lock = locks.get(entry.id)
     const at = now()
     const adapter = options.adapters[entry.kind]
+    const open = (item: StoredActivity) => item.endedAt === undefined && at - item.at < Resources.limits.activityOpenMs
     const state: Resources.State = lock
       ? "user"
       : entry.status !== "running"
         ? entry.status
-        : at - entry.lastUsedAt < Resources.limits.agentRecentMs
+        : at - entry.lastUsedAt < Resources.limits.agentRecentMs || entry.activity?.some(open)
           ? "agent"
           : at - entry.lastUsedAt < Resources.limits.liveRecentMs
             ? "live"
@@ -214,6 +232,17 @@ export function createHub(options: HubOptions) {
       lastUsedAt: entry.lastUsedAt,
       updatedAt: entry.updatedAt,
       live: { stream: adapter.stream !== undefined, input: adapter.input !== undefined },
+      ...(entry.activity?.length
+        ? {
+            activity: entry.activity.toReversed().map((item) => ({
+              at: item.at,
+              command: item.command,
+              ...(item.sessionID ? { sessionID: item.sessionID } : {}),
+              ...(item.agent ? { agent: item.agent } : {}),
+              ...(open(item) ? { running: true } : {}),
+            })),
+          }
+        : {}),
     }
   }
 
@@ -234,11 +263,30 @@ export function createHub(options: HubOptions) {
       discoveredAt: existing?.discoveredAt ?? at,
       lastUsedAt: input.used || !existing ? at : existing.lastUsedAt,
       updatedAt: at,
+      ...(input.activity || existing?.activity
+        ? { activity: record(existing?.activity ?? [], input.activity, input.owner, at) }
+        : {}),
     }
     entries.set(id, entry)
     changed(id)
     void probe([entry.kind])
     return view(entry)
+  }
+
+  /** Closes a shell command on every resource it named: the resource stops counting as in use for it. */
+  const end = (call: string) => {
+    const at = now()
+    const ended = [...entries.values()].filter((entry) =>
+      entry.activity?.some((item) => item.call === call && item.endedAt === undefined),
+    )
+    ended.forEach((entry) =>
+      entries.set(entry.id, {
+        ...entry,
+        lastUsedAt: at,
+        activity: entry.activity?.map((item) => (item.call === call ? { ...item, endedAt: item.endedAt ?? at } : item)),
+      }),
+    )
+    if (ended.length > 0) changed(...ended.map((entry) => entry.id))
   }
 
   const remove = (id: string) => {
@@ -707,6 +755,10 @@ export function createHub(options: HubOptions) {
           ]
         }),
       })
+    if (resource === "calls" && id && action === "end" && request.method === "POST") {
+      end(decodeURIComponent(id))
+      return Response.json({})
+    }
     if (resource === "tickets" && request.method === "POST") {
       const input = decodeTicket(await request.json().catch(() => undefined))
       if (Option.isNone(input)) return status(400)
@@ -923,7 +975,7 @@ export function createHub(options: HubOptions) {
     waiters.forEach((wake) => wake())
   }
 
-  return { fetch, websocket, start, close, upsert, control, ticket, probe, expire, claim, view, entries, locks }
+  return { fetch, websocket, start, close, upsert, end, control, ticket, probe, expire, claim, view, entries, locks }
 }
 
 export function idFor(meta: Resources.Meta) {
@@ -936,6 +988,43 @@ export function idFor(meta: Resources.Meta) {
 }
 
 /** Whether two metadata records name the same resource (shared UDID, adb serial, AVD, session or CDP endpoint). */
+/**
+ * The entry's history after `input`: the call's command added at its start (a call seen only once it ended, a
+ * resource found in its output, starts and ends then), or ended when it comes back with `running: false`. The oldest
+ * fall off past `limits.activityKept`.
+ */
+export function record(
+  current: readonly StoredActivity[],
+  input: Upsert["activity"],
+  owner: Resources.Owner | undefined,
+  at: number,
+): StoredActivity[] {
+  if (!input) return [...current]
+  if (current.some((item) => item.call === input.call))
+    return current.map((item) =>
+      item.call === input.call && !input.running ? { ...item, endedAt: item.endedAt ?? at } : item,
+    )
+  const next: StoredActivity = {
+    call: input.call,
+    command: shown(input.command),
+    at,
+    ...(owner ? { sessionID: owner.sessionID } : {}),
+    ...(owner?.agent ? { agent: owner.agent } : {}),
+    ...(input.running ? {} : { endedAt: at }),
+  }
+  return [...current, next].slice(-Resources.limits.activityKept)
+}
+
+/** The command as the history shows it: leading `NAME=value` assignments (often tokens) dropped, one short line. */
+export function shown(command: string) {
+  const line = command
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/, "")
+  const limit = Resources.limits.activityCommandLength
+  return line.length > limit ? `${line.slice(0, limit - 1)}…` : line
+}
+
 export function sameResource(a: Resources.Meta, b: Resources.Meta) {
   if (a.kind === "ios-simulator" && b.kind === "ios-simulator") return a.udid === b.udid
   if (a.kind === "android-emulator" && b.kind === "android-emulator")

@@ -14,6 +14,18 @@ export interface Entry {
   readonly discoveredAt: number
   readonly lastUsedAt: number
   readonly updatedAt: number
+  /** The agents' latest shell commands that named it, oldest first (`Resources.limits.activityKept`). */
+  readonly activity?: readonly StoredActivity[]
+}
+
+/** One agent shell command that named a resource; `call` is its tool call, open until the command ends. */
+export interface StoredActivity {
+  readonly call: string
+  readonly command: string
+  readonly at: number
+  readonly sessionID?: string
+  readonly agent?: string
+  readonly endedAt?: number
 }
 
 export interface Probe {

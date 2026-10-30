@@ -5,7 +5,7 @@ import { optional } from "@opencode/schema/schema"
 import { Effect, Option, Schedule, Schema } from "effect"
 import path from "node:path"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
-import { parseSimulators, references, resolveSimulators } from "./discovery.js"
+import { known, parseSimulators, references, resolveSimulators } from "./discovery.js"
 import { blocking, refusal, returned } from "./lock.js"
 import { Resources } from "./rpc.js"
 import { HubError, makeHubClient, stateDirectory, type HubClient } from "./supervisor.js"
@@ -81,16 +81,6 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     })
     .pipe(Effect.orDie)
 
-  yield* ctx.tool.hook("execute.before", (event) =>
-    Effect.gen(function* () {
-      const command = shellCommand(event.tool, event.input)
-      if (!command) return
-      const locks = yield* Effect.promise(() => hub.locks())
-      const lock = blocking(command, locks, shellWorkdir(event.input))
-      if (lock) return yield* new Tool.Error({ message: refusal(lock) })
-    }),
-  )
-
   // Discovery: every shell command that names a simulator, emulator or Playwright browser registers it for the
   // session family, and its result gains an `opencode-resource:` link (once per session) and `metadata.resources`.
   const roots = new Map<string, { root: string; directory: string }>()
@@ -106,10 +96,46 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       return found
     }).pipe(Effect.catchCause(() => Effect.succeed({ root: sessionID, directory: "" })))
 
+  yield* ctx.tool.hook("execute.before", (event) =>
+    Effect.gen(function* () {
+      const command = shellCommand(event.tool, event.input)
+      if (!command) return
+      const locks = yield* Effect.promise(() => hub.locks())
+      const lock = blocking(command, locks, shellWorkdir(event.input))
+      if (lock) return yield* new Tool.Error({ message: refusal(lock) })
+      // In use from the start: a long command (a test run, a recording) keeps its resources `agent` until it ends, and
+      // the history shows it while it runs. Only resources the hub already knows; the result registers new ones.
+      if (references(command).length === 0) return
+      const owner = yield* family(event.sessionID)
+      const found = references(command, "", shellWorkdir(event.input) ?? (owner.directory || undefined))
+      const registered = yield* call(() => hub.list(false)).pipe(
+        Effect.map((result) => known(found, result.resources)),
+        Effect.orElseSucceed(() => []),
+      )
+      yield* Effect.forEach(
+        registered,
+        (resource) =>
+          call(() =>
+            hub.upsert({
+              kind: resource.kind,
+              meta: resource.meta,
+              owner: { sessionID: event.sessionID, rootSessionID: owner.root, agent: event.agent },
+              used: true,
+              activity: { call: event.id, command, running: true },
+            }),
+          ).pipe(Effect.ignore),
+        { discard: true },
+      )
+    }),
+  )
+
   yield* ctx.tool.hook("execute.after", (event) =>
     Effect.gen(function* () {
       const command = shellCommand(event.tool, event.input)
-      if (!command || event.status !== "completed") return
+      if (!command) return
+      // Whatever the outcome, the command no longer holds the resources it named.
+      if (references(command).length > 0) yield* Effect.promise(() => hub.end(event.id))
+      if (event.status !== "completed") return
       const content =
         typeof event.result.content === "string"
           ? [{ type: "text" as const, text: event.result.content }]
@@ -129,6 +155,7 @@ export const registerResources = Effect.fn("Resources.register")(function* (
             meta,
             owner: { sessionID: event.sessionID, rootSessionID: owner.root, agent: event.agent },
             used: true,
+            activity: { call: event.id, command, running: false },
           }),
         ).pipe(Effect.option),
       ).pipe(Effect.map((results) => results.flatMap((result) => (Option.isSome(result) ? [result.value] : []))))

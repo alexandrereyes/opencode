@@ -36,11 +36,12 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | `label`                                   | Display name derived from `meta` (`iPhone 17 · OpenCode Salto Turno`, `Pixel 9 · abacato v2`, `localhost:5173/login`) unless registration named it                                        |
 | `purpose`                                 | Optional, from explicit registration                                                                                                                                                      |
 | `owner`                                   | `{ sessionID, rootSessionID, agent? }`: the session whose tool call used it (a subagent's own session) and the family's root; lists group by root and show "via <subagente>"              |
-| `state`                                   | `user` (Alexandre controls it) › `agent` (used in the last 90 s) › `live` (running, used in the last 10 min) › `idle` ("Livre") › `stopped` › `gone`                                      |
+| `state`                                   | `user` (Alexandre controls it) › `agent` (a command naming it is running, or ended in the last 90 s) › `live` (running, used in the last 10 min) › `idle` ("Livre") › `stopped` › `gone`  |
 | `control`                                 | `{ holder: "user", since, expiresAt }` while Alexandre holds control                                                                                                                      |
 | `meta`                                    | Per kind, tagged by `kind`: iOS `{ udid, name?, device?, runtime? }`; Android `{ serial?, avd?, consolePort?, grpcPort?, device? }`; Chrome `{ session?, cdp?, targetID?, url?, title? }` |
 | `live`                                    | `{ stream, input }`: whether the adapter implements them (without `stream` the hub streams snapshots)                                                                                     |
 | `discoveredAt`, `lastUsedAt`, `updatedAt` | Epoch ms                                                                                                                                                                                  |
+| `activity`                                | Optional (rev. 2026-10-30): the agents' latest shell commands that named it, newest first, at most 5: `{ at, command, sessionID?, agent?, running? }`; see [Activity](#activity)          |
 
 Two registrations name the same resource when they share a UDID, an adb serial or AVD, or a Playwright session or
 CDP endpoint; the hub merges them into one entry (metadata merged, latest owner wins).
@@ -77,7 +78,8 @@ Public (ticket in the `ticket` query parameter; the 4096 proxy forwards only `/r
 | `POST /resources/<id>/input`              | `{ events: Input[] }` with a control ticket                 |
 
 Admin (`authorization: Bearer <secret>` from `hub.json`; loopback only, never proxied): `GET /admin/health`,
-`GET|PUT /admin/resources` (PUT = upsert `{ kind, meta, name?, purpose?, owner?, used? }`),
+`GET|PUT /admin/resources` (PUT = upsert `{ kind, meta, name?, purpose?, owner?, used?, activity? }`, with
+`activity` = `{ call, command, running }`), `POST /admin/calls/<call>/end` (ends that tool call on every resource),
 `GET|DELETE /admin/resources/<id>`, `POST /admin/resources/<id>/control`, `GET /admin/resources/<id>/snapshot`,
 `POST /admin/tickets`, `GET /admin/locks`, `POST /admin/events?wait=<ms>` (long poll; each event goes to exactly one
 caller), `POST /admin/shutdown`.
@@ -376,6 +378,29 @@ lists show them under the subagent ("via <agente>"). Reconciliation is the hub's
 become `stopped` or `gone` (ended entries are dropped after 24 h, stopped ones after 7 days). The optional
 `resource_label` tool only names a resource already used (`ref` = UDID, simulator name, serial, AVD or Playwright
 session) or records its purpose.
+
+## Activity
+
+What an agent did with a resource, and whether it is doing it now, comes from the commands that name it (rev.
+2026-10-30). The plugin is the only place that sees every agent command and already matches it to resources, so the
+hub keeps the history next to the registry and the list carries it; apps read nothing else (no transcript reads per
+resource, and a resource shared by several sessions shows them all).
+
+- **Start.** `execute.before`, once the lock lets the command through, matches it against the hub's registry alone
+  (`known` in `discovery.ts`: UDID, a name only one live simulator has, adb serial or AVD, Playwright session and
+  namespace, CDP port; no `simctl`, so the command is not delayed) and upserts each match with `used` and
+  `activity { call, command, running: true }`. Without a running hub nothing is read or started.
+- **End.** `execute.after`, whatever the outcome, posts `/admin/calls/<call>/end`; a completed command then registers
+  as before, with `activity { …, running: false }`, so a resource found only in its result (the UDID printed by
+  `simctl create`) gets the line too.
+- **State.** A resource is `agent` while one of its commands is open (a test run or a recording of several minutes
+  stays "Agente usando") and for 90 s after it ends. A command whose end never arrives (a crash, a lost hook) stops
+  counting after 30 minutes (`limits.activityOpenMs`).
+- **Stored.** Per entry, oldest first, at most 5 (`limits.activityKept`): `{ call, command, at, sessionID?, agent?,
+endedAt? }` in `resources.json` (0600). The list shows them newest first without `call` and with `running`.
+  `command` drops leading `NAME=value` assignments (where tokens usually go), collapses whitespace and is cut at 160
+  characters. Registries written before the field load unchanged; older hubs ignore `activity` and answer 404 to the
+  end route, which the plugin ignores; older apps ignore the field.
 
 ## Hub process
 

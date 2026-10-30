@@ -90,6 +90,19 @@ export const Control = Schema.Struct({
   expiresAt: Schema.Number,
 }).annotate({ identifier: "Resources.Control" })
 
+export interface Activity extends Schema.Schema.Type<typeof Activity> {}
+export const Activity = Schema.Struct({
+  /** Epoch ms when the command started (or, for one first seen in its result, when it ended). */
+  at: Schema.Number,
+  /** The shell command, without leading `NAME=value` assignments, whitespace collapsed, at most 160 characters. */
+  command: Schema.String,
+  /** Session whose tool call ran it, and its agent. */
+  sessionID: optional(Schema.String),
+  agent: optional(Schema.String),
+  /** Still running: the resource stays `agent` until the command ends. */
+  running: optional(Schema.Boolean),
+}).annotate({ identifier: "Resources.Activity" })
+
 export interface Resource extends Schema.Schema.Type<typeof Resource> {}
 export const Resource = Schema.Struct({
   id: ID,
@@ -107,6 +120,8 @@ export const Resource = Schema.Struct({
   updatedAt: Schema.Number,
   /** Whether the hub can stream it live and accept input (an adapter implements them). */
   live: Schema.Struct({ stream: Schema.Boolean, input: Schema.Boolean }),
+  /** The agents' latest shell commands that named it, newest first; absent until one does (and on older hubs). */
+  activity: optional(Schema.Array(Activity)),
 }).annotate({ identifier: "Resources.Resource" })
 
 export const Capability = Schema.Literals(["view", "control"]).annotate({ identifier: "Resources.Capability" })
@@ -145,6 +160,11 @@ export const limits = {
   agentRecentMs: 90_000,
   liveRecentMs: 600_000,
   snapshotMaxWidth: 1_600,
+  /** Commands kept per resource for its history. */
+  activityKept: 5,
+  /** A command still open after this long (its end never arrived: a crash, a lost hook) no longer counts as use. */
+  activityOpenMs: 30 * 60_000,
+  activityCommandLength: 160,
 }
 
 const error = { unavailable: Schema.toStandardSchemaV1(Unavailable) }

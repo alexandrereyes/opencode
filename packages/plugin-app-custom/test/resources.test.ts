@@ -5,8 +5,8 @@ import path from "node:path"
 import type { Adapter, Entry } from "../src/resources/adapters/types"
 import { parseRunning } from "../src/resources/adapters/android-emulator"
 import { parse } from "../src/resources/adapters/ios-simulator"
-import { parseSimulators, references, resolveSimulators } from "../src/resources/discovery"
-import { createHub, idFor, label, sameResource, type Lock } from "../src/resources/hub/hub"
+import { known, parseSimulators, references, resolveSimulators } from "../src/resources/discovery"
+import { createHub, idFor, label, sameResource, shown, type Lock } from "../src/resources/hub/hub"
 import { links } from "../src/resources/index"
 import { sign, verify } from "../src/resources/hub/ticket"
 import { blocking, refusal, returned } from "../src/resources/lock"
@@ -355,6 +355,224 @@ describe("hub", () => {
     } finally {
       await fs.rm(directory, { recursive: true, force: true })
     }
+  })
+})
+
+describe("activity", () => {
+  const meta = { kind: "ios-simulator" as const, udid }
+  const owner = { sessionID: "ses_child", rootSessionID: "ses_root", agent: "explore" }
+
+  test("a command keeps its resource in use from its start until it ends", () => {
+    const clock = { value: 1_000_000 }
+    const hub = createHub({
+      adapters: {
+        "ios-simulator": fakeAdapter().adapter,
+        "android-emulator": fakeAdapter().adapter,
+        chrome: fakeAdapter().adapter,
+      },
+      secret: "s",
+      now: () => clock.value,
+    })
+    const command = `AGENT_DEVICE_TOKEN=secret   agent-device   --udid ${udid} test flows/gravar.yaml`
+    const started = hub.upsert({
+      kind: "ios-simulator",
+      meta,
+      owner,
+      used: true,
+      activity: { call: "call_1", command, running: true },
+    })
+    expect(started.state).toBe("agent")
+    expect(started.activity).toEqual([
+      {
+        at: 1_000_000,
+        command: `agent-device --udid ${udid} test flows/gravar.yaml`,
+        sessionID: "ses_child",
+        agent: "explore",
+        running: true,
+      },
+    ])
+    // A long run stays `agent` past the 90 s that a finished command gets.
+    clock.value += Resources.limits.agentRecentMs * 3
+    expect(hub.view(hub.entries.get(started.id)!).state).toBe("agent")
+    // Its result ends it (also when a call is ended by ID, whatever its outcome); the 90 s count from the end.
+    clock.value += 1_000
+    hub.upsert({
+      kind: "ios-simulator",
+      meta,
+      owner,
+      used: true,
+      activity: { call: "call_1", command, running: false },
+    })
+    const ended = hub.view(hub.entries.get(started.id)!)
+    expect(ended.activity).toEqual([expect.objectContaining({ at: 1_000_000, command: expect.any(String) })])
+    expect(ended.activity?.[0]?.running).toBeUndefined()
+    clock.value += Resources.limits.agentRecentMs
+    expect(hub.view(hub.entries.get(started.id)!).state).toBe("live")
+  })
+
+  test("ending a call by ID closes it on every resource it named and stale calls stop counting", () => {
+    const clock = { value: 1_000_000 }
+    const fake = fakeAdapter()
+    const hub = createHub({
+      adapters: { "ios-simulator": fake.adapter, "android-emulator": fake.adapter, chrome: fake.adapter },
+      secret: "s",
+      now: () => clock.value,
+    })
+    const phone = hub.upsert({
+      kind: "ios-simulator",
+      meta,
+      owner,
+      used: true,
+      activity: { call: "call_2", command: "maestro test", running: true },
+    })
+    const emulator = hub.upsert({
+      kind: "android-emulator",
+      meta: { kind: "android-emulator", serial: "emulator-5554" },
+      owner,
+      used: true,
+      activity: { call: "call_2", command: "maestro test", running: true },
+    })
+    clock.value += Resources.limits.agentRecentMs * 2
+    hub.end("call_2")
+    for (const id of [phone.id, emulator.id]) {
+      expect(hub.view(hub.entries.get(id)!).activity?.[0]?.running).toBeUndefined()
+      expect(hub.view(hub.entries.get(id)!).state).toBe("agent")
+    }
+    // A call whose end never arrives stops counting after `activityOpenMs`.
+    hub.upsert({
+      kind: "ios-simulator",
+      meta,
+      owner,
+      used: true,
+      activity: { call: "call_3", command: "xcrun simctl spawn x sleep 9999", running: true },
+    })
+    clock.value += Resources.limits.activityOpenMs
+    const stale = hub.view(hub.entries.get(phone.id)!)
+    expect(stale.state).toBe("idle")
+    expect(stale.activity?.[0]).toMatchObject({ command: "xcrun simctl spawn x sleep 9999" })
+    expect(stale.activity?.[0]?.running).toBeUndefined()
+  })
+
+  test("keeps the latest commands, newest first, one per call, and persists them", async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-resources-activity-"))
+    try {
+      const fake = fakeAdapter()
+      const clock = { value: 1_000_000 }
+      const options = {
+        adapters: { "ios-simulator": fake.adapter, "android-emulator": fake.adapter, chrome: fake.adapter },
+        secret: "s",
+        file: path.join(directory, "resources.json"),
+        now: () => clock.value,
+      }
+      const first = createHub(options)
+      for (const index of [1, 2, 3, 4, 5, 6, 7]) {
+        clock.value += 1_000
+        first.upsert({
+          kind: "ios-simulator",
+          meta,
+          owner,
+          used: true,
+          activity: { call: `call_${index}`, command: `step ${index}`, running: index === 7 },
+        })
+      }
+      // The same call again (its result) updates its line instead of adding one.
+      first.upsert({
+        kind: "ios-simulator",
+        meta,
+        owner,
+        used: true,
+        activity: { call: "call_6", command: "step 6", running: false },
+      })
+      const listed = first.view(first.entries.get(`ios-simulator:${udid}`)!).activity
+      expect(listed?.map((item) => item.command)).toEqual(["step 7", "step 6", "step 5", "step 4", "step 3"])
+      expect(listed?.map((item) => item.running ?? false)).toEqual([true, false, false, false, false])
+      const deadline = Date.now() + 5_000
+      while (!(await Bun.file(options.file).exists()) && Date.now() < deadline) await Bun.sleep(20)
+      await Bun.sleep(400)
+      const second = createHub(options)
+      await second.start()
+      second.close()
+      expect(second.view(second.entries.get(`ios-simulator:${udid}`)!).activity?.map((item) => item.command)).toEqual([
+        "step 7",
+        "step 6",
+        "step 5",
+        "step 4",
+        "step 3",
+      ])
+      // A registry written before the history existed still loads.
+      await Bun.write(
+        options.file,
+        JSON.stringify([
+          {
+            id: `ios-simulator:${udid}`,
+            kind: "ios-simulator",
+            meta,
+            status: "running",
+            discoveredAt: 1,
+            lastUsedAt: 1,
+            updatedAt: 1,
+          },
+        ]),
+      )
+      const third = createHub(options)
+      await third.start()
+      third.close()
+      expect(third.view(third.entries.get(`ios-simulator:${udid}`)!).activity).toBeUndefined()
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  test("the admin route ends a call and the shown command drops assignments and long tails", async () => {
+    const clock = { value: 1_000_000 }
+    const { admin, hub } = serve(clock)
+    const created = await (
+      await admin("/admin/resources", {
+        method: "PUT",
+        body: JSON.stringify({
+          kind: "ios-simulator",
+          meta,
+          owner,
+          used: true,
+          activity: { call: "call/9", command: "agent-device tap", running: true },
+        }),
+      })
+    ).json()
+    expect(created.activity[0].running).toBe(true)
+    expect((await admin(`/admin/calls/${encodeURIComponent("call/9")}/end`, { method: "POST" })).status).toBe(200)
+    expect(hub.view(hub.entries.get(created.id)!).activity?.[0]?.running).toBeUndefined()
+    expect(shown(`A=1 B="dois três" C='x' ${"z".repeat(300)}`)).toHaveLength(Resources.limits.activityCommandLength)
+    expect(shown(`A=1 B="dois três" C='x' agent-device\n  tap\t"Gravar"`)).toBe(`agent-device tap "Gravar"`)
+  })
+
+  test("a command is matched to registered resources without simctl", () => {
+    const resource = (meta: Resources.Meta, state: Resources.State = "idle"): Resources.Resource => ({
+      id: idFor(meta),
+      kind: meta.kind,
+      label: "x",
+      state,
+      meta,
+      discoveredAt: 0,
+      lastUsedAt: 0,
+      updatedAt: 0,
+      live: { stream: true, input: true },
+    })
+    const phone = resource({ kind: "ios-simulator", udid, name: "OpenCode Teste" })
+    const old = resource(
+      { kind: "ios-simulator", udid: "4D3C2B1A-0000-4000-8000-000000000002", name: "OpenCode Teste" },
+      "stopped",
+    )
+    const pixel = resource({ kind: "android-emulator", serial: "emulator-5554", avd: "Pixel_9" })
+    const browser = resource({ kind: "chrome", session: "login", workspace: "/tmp/projeto" })
+    const all = [phone, old, pixel, browser]
+    expect(known(references(`xcrun simctl io ${udid.toLowerCase()} screenshot a.png`), all)).toEqual([phone])
+    // A name counts when one live simulator has it (the stopped twin is ignored).
+    expect(known(references(`xcrun simctl launch "OpenCode Teste" com.app`), all)).toEqual([phone])
+    expect(known(references("adb -s emulator-5554 shell input tap 1 1"), all)).toEqual([pixel])
+    expect(known(references("emulator -avd Pixel_9 -no-window"), all)).toEqual([pixel])
+    expect(known(references("playwright-cli -s=login click e3", "", "/tmp/projeto"), all)).toEqual([browser])
+    expect(known(references("playwright-cli -s=other click e3", "", "/tmp/projeto"), all)).toEqual([])
+    expect(known(references(`xcrun simctl launch "Outro" com.app`), all)).toEqual([])
   })
 })
 

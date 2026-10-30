@@ -137,7 +137,8 @@ export function makeHubClient(options: { readonly state: string; readonly comman
 
   return {
     port: async () => (await ensure(true))?.port,
-    list: () => json<{ resources: Resources.Resource[] }>("/admin/resources"),
+    /** `spawn: false` reads only a hub already running (no hub, no resources). */
+    list: (spawn = true) => json<{ resources: Resources.Resource[] }>("/admin/resources", { spawn }),
     get: (id: string) => json<Resources.Resource>(resource(id)),
     upsert: (input: Upsert) =>
       json<Resources.Resource>("/admin/resources", { method: "PUT", body: JSON.stringify(input) }),
@@ -166,6 +167,12 @@ export function makeHubClient(options: { readonly state: string; readonly comman
         ...(width > 0 ? { width, height } : {}),
       }
     },
+    /** Ends a shell command on the resources it named. Never starts the hub: only a running one marked it. */
+    end: (call: string) =>
+      json<{}>(`/admin/calls/${encodeURIComponent(call)}/end`, { method: "POST", spawn: false }).then(
+        () => undefined,
+        () => undefined,
+      ),
     /** Never starts the hub: no hub means no locks. */
     locks: () =>
       json<{ locks: Lock[] }>("/admin/locks", { spawn: false }).then(

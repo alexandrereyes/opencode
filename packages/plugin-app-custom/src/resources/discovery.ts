@@ -1,3 +1,4 @@
+import { sameResource } from "./hub/hub.js"
 import type { Resources } from "./rpc.js"
 
 /**
@@ -107,6 +108,41 @@ function dedupe(list: Reference[]) {
     seen.add(key)
     return true
   })
+}
+
+/**
+ * The registered resources a command names, matched against the hub's registry alone (no `simctl`), so a command is
+ * marked in use before it runs without delaying it. A simulator name counts only when exactly one live registered
+ * simulator has it; unknown resources wait for the command's result to register them.
+ */
+export function known(list: readonly Reference[], resources: readonly Resources.Resource[]) {
+  const live = resources.filter((resource) => resource.state !== "gone")
+  return live.filter((resource) =>
+    list.some((reference) => {
+      const meta = resource.meta
+      if (reference.kind === "ios-simulator" && meta.kind === "ios-simulator") {
+        if (reference.udid) return reference.udid.toUpperCase() === meta.udid.toUpperCase()
+        const named = live.filter(
+          (other) =>
+            other.meta.kind === "ios-simulator" && other.meta.name === reference.name && other.state !== "stopped",
+        )
+        return named.length === 1 && named[0] === resource
+      }
+      if (reference.kind === "android-emulator" && meta.kind === "android-emulator")
+        return (
+          (reference.serial !== undefined && reference.serial === meta.serial) ||
+          (reference.avd !== undefined && reference.avd === meta.avd)
+        )
+      if (reference.kind === "chrome" && meta.kind === "chrome")
+        return sameResource(meta, {
+          kind: "chrome",
+          session: reference.session,
+          ...(reference.workspace ? { workspace: reference.workspace } : {}),
+          ...(reference.cdp ? { cdp: reference.cdp } : {}),
+        })
+      return false
+    }),
+  )
 }
 
 export type Simulator = { readonly udid: string; readonly name: string; readonly booted: boolean }
