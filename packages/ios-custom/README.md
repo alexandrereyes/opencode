@@ -3203,6 +3203,11 @@ separate track.
 - **Arquivos**: Markdown files open rendered with the chat's renderer (soft line breaks joined,
   `MarkdownSoftBreaks`, lazily in pieces) and HTML with Quick Look; `</>` shows their source. ‹ › (⌥⌘← ⌥⌘→) page
   through the folder's files, like the iPhone viewer's siblings. Images, PDF, audio and video stay in Quick Look.
+  `MacMarkdownText` draws the plain parse from its first frame and swaps in the highlighted one when it lands: until
+  30/10 it started empty, and a lazy stack never builds a row of zero height, so its `.task` never ran and every
+  Markdown file showed a blank pane. Keep it non-empty from the start in any lazy list. `-OpenCodeMacAjustes markdown`
+  opens a short file and a long report with wide tables and links (`script/fixtures/mac-markdown`) as a chat link
+  does and requires their text and the table on screen.
 - **Alerts and notifications**: the in-app banner (`SessionAlertCenter`) stays silent for the session on screen
   while the app is in front. While the app is not in front, each banner (answered or finished, failed, permission,
   question; mutes and deduplication included) also becomes a macOS notification (`MacNotifications`), and clicking
@@ -3726,7 +3731,7 @@ project filter replacing the chips and the highlight of the open subagent.
 
 **Checks.** `MacAdjustmentsTests` (cost format, ⌘1–⌘9 order, archived search, remembered width and its range,
 absolute breadcrumb, run label, model rows, the right Option key's rules). `script/test-mac-ajustes.sh` runs
-`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider|edge`)
+`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider|edge|markdown`)
 in the fixture through real AppKit events (`edge` scrolls the columns and requires each one cut at the title bar's
 bottom edge, like the chat; Contexto and Sessões are `.clipped()` because macOS 26 extends their scroll views under
 the bar): line heights, wrapping width and scroll position with one line, three,

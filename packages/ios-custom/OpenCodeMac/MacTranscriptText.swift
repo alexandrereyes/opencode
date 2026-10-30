@@ -502,9 +502,18 @@ struct MacSelectableBlock: NSViewRepresentable {
 struct MacMarkdownText: View {
   @Environment(\.appTheme) private var theme
   let text: String
-  @State private var sections: [MarkdownSection] = []
+  /// The shared parse of `text` (highlight.js colors, measured formulas) once it lands.
+  @State private var parsed: Parsed?
+  private struct Parsed {
+    let text: String
+    let sections: [MarkdownSection]
+  }
 
   var body: some View {
+    // Drawn from the first frame with the plain parse, never empty: a lazy stack (Arquivos) does not build a row of
+    // zero height, so a row waiting for its own `.task` to fill it stayed blank for good.
+    let sections = parsed?.text == text ? parsed?.sections ?? []
+      : MarkdownBlocks.sections(ResponseMarkdownCache.shared.cached(text) ?? MarkdownBlocks.parse(text))
     VStack(alignment: .leading, spacing: 14) {
       ForEach(sections) { section in
         switch section {
@@ -521,8 +530,7 @@ struct MacMarkdownText: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .task(id: text) {
-      sections = MarkdownBlocks.sections(MarkdownBlocks.parse(text))
-      sections = MarkdownBlocks.sections(await ResponseMarkdownCache.shared.parse(text))
+      parsed = Parsed(text: text, sections: MarkdownBlocks.sections(await ResponseMarkdownCache.shared.parse(text)))
     }
   }
 }

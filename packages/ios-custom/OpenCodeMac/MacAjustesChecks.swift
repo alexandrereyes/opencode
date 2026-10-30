@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -44,6 +44,7 @@ import SwiftUI
       case "master": try await master(window: window, runtime: runtime, shot: shot)
       case "divider": try await divider(window: window, runtime: runtime)
       case "edge": try await edge(window: window, shot: shot)
+      case "markdown": try await markdown(window: window, runtime: runtime, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -753,6 +754,50 @@ import SwiftUI
     try await Task.sleep(for: .seconds(1.5))
     print("MacAjustes master: lixeira acessível \(accessible("master-trash", in: window) != nil)")
     shot("lixeira")
+  }
+
+  // MARK: Markdown files in Arquivos
+
+  /// Arquivos drew nothing for every Markdown file (30/10): its lazy stack never built a piece still empty until its
+  /// own task parsed it. A short file and a long report with wide tables and links (`script/fixtures/mac-markdown`),
+  /// each opened the way a file link in the chat opens it, must show their text, tables included, with height.
+  private static func markdown(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
+    let folder = try require(MacFixture.current?.root, "fixture") + "/packages/ios-custom/script/fixtures/mac-markdown"
+    runtime.showFiles(at: folder, file: folder + "/simples.md")
+    try await rendered("Título simples", visible: true, in: window)
+    try await rendered("Um parágrafo curto com negrito", visible: true, in: window)
+    shot("simples")
+    runtime.showFiles(at: folder, file: folder + "/Relatório com tabela larga.md")
+    try await rendered("A configuração existe, mas nenhuma oferta confirma o prazo", visible: true, in: window)
+    try await rendered("Não vale pagar uma pré-venda", visible: false, in: window)
+    // The wide table sits between two prose pieces: bring the one after it into view, the table above it.
+    let after = try require(views(window).first { ($0 as? MacResponseTextView)?.string.contains("O prazo da Loja A") == true },
+      "texto depois da tabela")
+    after.scrollToVisible(NSRect(x: 0, y: 0, width: 1, height: 1))
+    // SwiftUI builds no accessibility tree without a client; the table is its horizontal scroll view, wider than
+    // the pane and as tall as its six rows.
+    func table() -> Bool {
+      views(window).contains { view in
+        guard let scroll = view as? NSScrollView, let document = scroll.documentView, !scroll.visibleRect.isEmpty
+        else { return false }
+        return scroll.frame.height > 150 && document.frame.width > scroll.frame.width + 100
+      }
+    }
+    try await wait("tabela larga") { table() ? true : nil }
+    // Still in place once the highlighted parse has replaced the first one.
+    try await Task.sleep(for: .seconds(1))
+    guard table() else { throw Failure(description: "a tabela saiu da vista depois da segunda leitura") }
+    shot("relatorio")
+  }
+
+  /// A Markdown text view of the window whose text contains `text`, laid out with height (and on screen).
+  private static func rendered(_ text: String, visible: Bool, in window: NSWindow) async throws {
+    try await wait("texto \"\(text)\" no painel") {
+      views(window).contains { view in
+        guard let view = view as? MacResponseTextView, view.string.contains(text), view.frame.height > 0 else { return false }
+        return !visible || !view.visibleRect.isEmpty
+      } ? true : nil
+    }
   }
 
   /// A SwiftUI control by its accessibility identifier, anywhere in the window (title bar included).
