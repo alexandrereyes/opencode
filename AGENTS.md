@@ -33,6 +33,7 @@ Follow this order while preserving existing behavior, data, and runtime guarante
 - Preserve upstream implementation bodies. Do not copy whole upstream modules or move their bodies merely to hide the diff.
 - Document remaining integration points, measure overlap against a fixed upstream base, and verify behavioral parity with meaningful tests.
 - Keep unrelated upstream fixes outside the customization scope.
+- List every changed or added upstream-owned file (anything outside `packages/plugin-app-custom`, `packages/ios-custom`, `docs/`, `.agents/` and `packages/cli/{script,test}/custom-*`) in "Customizations in upstream code" of `docs/upstream-integrations.md`, with its reason and exit condition. Run `bun run custom:upstream-check` before integrating into `custom`; it fails on any changed upstream-owned file missing from that section's path list.
 
 ## Web UI
 

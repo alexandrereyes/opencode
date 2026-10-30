@@ -45,7 +45,9 @@ Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD`:
 - `packages/{core,server,protocol,schema,plugin,client,tui}/src`, `packages/cli/src` and `packages/cli/script`: **43 →
   23 modified files, +698 → +442 lines, −30 → −19 lines**.
 - All shared paths outside `packages/plugin-app-custom`, `packages/ios-custom`, `docs`, `.agents` and `bun.lock`: **69 →
-  35 modified files, +1300 → +663 lines, −84 → −25 lines**.
+  35 modified files, +1300 → +663 lines, −84 → −25 lines**. The `custom:upstream-check` guardrail adds one line each to
+  `AGENTS.md` and `package.json` (+665); the move of the session tools to `sessions/` changes no upstream-owned file
+  besides the custom Core test `core/test/tool-opencode-session-read.test.ts`, still an added file.
 
 ### Removed or moved by the offload
 
@@ -141,17 +143,109 @@ Other customizations:
   it. The field must be in the public schema to be encoded. Exit: upstream skill slash flag.
 - `Plugin.awaitActivation` in `packages/server/src/handlers/mcp.ts` (#54191, see `docs/upstream-overrides.md`) and in
   `shell.create` of `packages/server/src/handlers/shell.ts` (plugin `shell` hooks on a cold Location, see
-  `packages/plugin-app-custom/docs/resources.md`); tests `server/test/{mcp,shell}.test.ts`.
+  `packages/plugin-app-custom/docs/resources.md`); tests `server/test/{mcp,shell}.test.ts`. Exit: upstream merges
+  #54191 and awaits activation in `shell.create`.
 - Compatibility skill watcher reconciliation in `packages/core/src/config/plugin/compatibility.ts` and
-  `core/test/config/skill.test.ts` (see `docs/upstream-overrides.md`).
+  `core/test/config/skill.test.ts`. Exit: its entry in `docs/upstream-overrides.md`.
 - Tests only: custom tests that drive plugin code through Core's fixtures stay in Core, because they need Core's test
   preload and HOME isolation: `core/test/tool-opencode-master-{ensure,ensure-bundle,model}.test.ts`,
   `core/test/tool-opencode-session-read.test.ts`, `core/test/plugin/app-mentions.test.ts`; host tests
   `core/test/plugin/{pending,session-controls}.test.ts`; adapter test `plugin/test/session-controls.test.ts`. In
   `cli/test/debug-paths.test.ts` the spawned CLI drops `OPENCODE_CONFIG_DIR` and `OPENCODE_DB`, so a run from a shell
-  with the live server's environment cannot reach production paths.
-- Repository level, not upstream code: root `AGENTS.md`, `package.json` (`custom:*` scripts, `@expo/serve-sim` patch),
-  `.gitignore`, `packages/cli/script/custom-*.ts` and `packages/cli/test/custom-*.test.ts`.
+  with the live server's environment cannot reach production paths. Exit: the plugin package gets a test preload with
+  Core's HOME isolation (the Core tests), or upstream isolates the spawned CLI itself (`debug-paths`).
+- Repository level: root `AGENTS.md` (fork policy), `package.json` (`custom:*` scripts, the `@expo/serve-sim` patch the
+  custom plugin depends on, in `patches/@expo%2Fserve-sim@0.10.3.patch`), `bun.lock` (the custom packages' workspace
+  entries and dependencies) and `.gitignore` (`.playwright-cli/`, the Playwright CLI's local state). They stay while the
+  fork exists. `packages/cli/script/custom-*.ts` and `packages/cli/test/custom-*.test.ts` do not exist upstream.
+
+### Changed upstream files
+
+Every upstream-owned file that differs from the integrated baseline, one exact path per line, without globs.
+`bun run custom:upstream-check` (`packages/cli/script/custom-upstream-check.ts`) compares this list with the files that
+`HEAD`, the uncommitted changes and the untracked files change against `git merge-base HEAD upstream/dev` (or
+`--base <sha>`). It fails on a changed file missing here and on an entry that no longer differs. Upstream-owned means
+everything outside the custom areas, none of which exists upstream: `packages/plugin-app-custom/`,
+`packages/ios-custom/`, `docs/`, `.agents/`, and the `packages/cli/script/custom-` and `packages/cli/test/custom-`
+prefixes. A new entry also needs its reason and exit condition above; the `#` lines name the group.
+
+```text
+# Plugin context extensions (Remaining customizations)
+packages/core/src/plugin/host.ts
+packages/plugin/src/job.ts
+packages/plugin/src/mcp.ts
+packages/plugin/src/message.ts
+packages/plugin/src/request.ts
+packages/plugin/src/effect/index.ts
+packages/plugin/src/effect/job.ts
+packages/plugin/src/effect/mcp.ts
+packages/plugin/src/effect/message.ts
+packages/plugin/src/effect/plugin.ts
+packages/plugin/src/effect/request.ts
+packages/plugin/src/effect/session.ts
+packages/plugin/src/promise/adapter.ts
+packages/plugin/src/promise/index.ts
+packages/plugin/src/promise/job.ts
+packages/plugin/src/promise/mcp.ts
+packages/plugin/src/promise/message.ts
+packages/plugin/src/promise/plugin.ts
+packages/plugin/src/promise/request.ts
+packages/plugin/src/promise/session.ts
+packages/client/src/promise/api.ts
+packages/core/test/plugin/host.ts
+packages/core/test/plugin/fixture.ts
+packages/core/test/fixture/policy.ts
+packages/plugin/src/README.md
+packages/plugin/src/effect/README.md
+services/www/src/docs/content/build/plugins/effect.mdx
+services/www/src/docs/content/build/plugins/server.mdx
+# message.list cursor
+packages/schema/src/session-message-page.ts
+packages/schema/test/session-message-page.test.ts
+# job.background
+packages/core/src/job.ts
+packages/core/test/job.test.ts
+# session.family
+packages/core/src/session/family.ts
+packages/schema/src/session-family.ts
+packages/core/test/session-family.test.ts
+# session.scan
+packages/core/src/session.ts
+packages/core/src/session/store.ts
+packages/schema/src/session-scan.ts
+packages/core/test/session-scan.test.ts
+packages/schema/test/session-scan.test.ts
+# Skill slash
+packages/schema/src/skill.ts
+packages/core/src/config/plugin/skill-file.ts
+packages/core/src/plugin/skill.ts
+packages/protocol/openapi.json
+packages/client/src/promise/generated/types.ts
+# Plugin.awaitActivation
+packages/server/src/handlers/mcp.ts
+packages/server/src/handlers/shell.ts
+packages/server/test/mcp.test.ts
+packages/server/test/shell.test.ts
+# Compatibility skill watcher
+packages/core/src/config/plugin/compatibility.ts
+packages/core/test/config/skill.test.ts
+# Tests only
+packages/core/test/tool-opencode-master-ensure.test.ts
+packages/core/test/tool-opencode-master-ensure-bundle.test.ts
+packages/core/test/tool-opencode-master-model.test.ts
+packages/core/test/tool-opencode-session-read.test.ts
+packages/core/test/plugin/app-mentions.test.ts
+packages/core/test/plugin/pending.test.ts
+packages/core/test/plugin/session-controls.test.ts
+packages/plugin/test/session-controls.test.ts
+packages/cli/test/debug-paths.test.ts
+# Repository level
+AGENTS.md
+package.json
+bun.lock
+.gitignore
+patches/@expo%2Fserve-sim@0.10.3.patch
+```
 
 ### Validation
 

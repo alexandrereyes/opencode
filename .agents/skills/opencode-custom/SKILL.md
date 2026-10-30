@@ -59,6 +59,7 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 - Mudou Protocol ou Server HttpApi público? Execute `bun run generate` em `packages/client`; nunca edite arquivos gerados manualmente.
 - Faça mudanças focadas, sem refatorações extensas não necessárias à feature.
 - Mudanças no fluxo de release (`packages/cli/script/custom-*.ts`, launchers, config gerada) ficam no fork e são documentadas em `docs/custom-macos.md`.
+- Toda alteração ou adição em arquivo do upstream (qualquer caminho fora de `packages/plugin-app-custom`, `packages/ios-custom`, `docs/`, `.agents/` e `packages/cli/{script,test}/custom-*`) entra em "Customizations in upstream code" de `docs/upstream-integrations.md`, com o motivo e a condição de saída, e o caminho exato vai para a lista de "Changed upstream files". `bun run custom:upstream-check` compara essa lista com o diff contra a baseline upstream integrada e falha em qualquer arquivo não documentado.
 - Credenciais, tokens, banco, logs, backups e releases ficam fora do Git. Não exiba segredos ao consultar configuração. Use arquivos locais privados ou referências a variáveis.
 - Ao aplicar um PR/commit upstream antecipadamente ou adaptá-lo, registre a entrada em `docs/upstream-overrides.md` na mesma mudança, seguindo o template do arquivo: link, SHA da revisão upstream revisada, mudança local e diferenças, testes, status, condição para reconciliar/remover e instalação (`none` salvo ação operacional explícita). Mudança de UI upstream não entra antecipada em `packages/app`, `ui` ou `session-ui`: ela chega com a próxima integração upstream. Apenas acompanhar um PR aberto, sem incorporá-lo, não gera entrada. O registro começou sem auditoria retroativa: ao identificar um caso antigo, registre-o também.
 
@@ -101,6 +102,7 @@ git push -u origin <feature-curta>
 ```
 
 - Faça stage apenas do trabalho desta feature.
+- Antes de integrar em `custom`, rode `bun run custom:upstream-check` na branch; ele precisa passar.
 - A integração é em **`custom` do fork**, nunca na branch oficial nem em `main` por hábito.
 - Depois da aprovação da feature, prepare a integração em checkout limpo baseado no **`origin/custom` atualizado**, incorporando a feature e validando a combinação. Prefira squash para uma feature nova de vários commits; preserve histórico existente quando um merge for mais adequado.
 - Imediatamente antes de publicar a integração, confirme que `origin/custom` não avançou. Se avançou, refaça a integração sobre a base nova e valide novamente.
@@ -114,6 +116,7 @@ Integre de `upstream/dev`, branch padrão do upstream e fonte do canal oficial `
 - O clone busca só as branches de `remote.upstream.fetch`. Confirme que `+refs/heads/dev:refs/remotes/upstream/dev` está entre elas (`git config --get-all remote.upstream.fetch`) antes de usar `upstream/dev`.
 - No fork, `origin/dev` é uma cópia parada em 2026-02-16 e `origin/v2` não existe; para upstream, use sempre `upstream/dev`.
 - A troca para `dev` chega com o próprio merge nos arquivos do upstream (`AGENTS.md`, `script/lint-changed.ts`, `script/publish.ts`, `.opencode/command/rmslop.md`, `services/update`). No conflito de `AGENTS.md`, mantenha a orientação de `custom` e troque `v2`/`origin/v2` por `dev`/`upstream/dev`.
+- Depois do merge, a baseline do `custom:upstream-check` passa a ser a nova revisão: atualize "Customizations in upstream code" (remova o que voltou a ser igual ao upstream, documente o que mudou) até o check passar.
 
 Antes de integrar uma revisão upstream, reconcilie cada entrada aberta (`active` ou `reconcile`) de `docs/upstream-overrides.md` com essa revisão e atualize o registro na própria integração:
 
