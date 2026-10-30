@@ -304,6 +304,7 @@ struct MacComposer: View {
       conversation: embedded == nil ? windowRuntime?.id : nil,
       editor: { [weak draft, owner] in draft?.editorOwner == owner ? draft?.input?.textView : nil },
       recording: { recording.capturing },
+      dictating: { recording.cancellable },
       available: { [weak voice, weak draft] in
         voice?.state.visible != true && draft?.sending == false && draft?.importing == false
       },
@@ -315,6 +316,7 @@ struct MacComposer: View {
         case .start: recording.handle(.began); recording.handle(.ended)
         case .finish: recording.finish()
         case .discard: recording.discard()
+        case .cancel: recording.cancel()
         case .none: break
         }
       }))

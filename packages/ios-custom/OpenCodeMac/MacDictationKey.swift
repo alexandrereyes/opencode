@@ -5,6 +5,8 @@ import OpenCodeKit
 /// sessão, a comment, Pergunta paralela), or else into that window's conversation composer (`DictationKeyGesture`):
 /// a tap starts and the next stops, holding records until release. Local event monitors only see events while the
 /// app is in front, so the key keeps its normal meaning in every other app; the left Option key is never looked at.
+/// Esc during a dictation (any composer's, however it started) cancels it and is consumed here, before AppKit's key
+/// equivalents and the editor: no sheet closes and the focus stays. Without one, Esc keeps its meaning.
 @MainActor final class MacDictationKey {
   static let shared = MacDictationKey()
 
@@ -17,6 +19,8 @@ import OpenCodeKit
     /// Its text view, while it is the draft's editor.
     let editor: () -> NSTextView?
     let recording: () -> Bool
+    /// A recording or a transcription under way, which Esc cancels (`VoiceRecordingComposer.cancellable`).
+    let dictating: () -> Bool
     let available: () -> Bool
     let perform: (DictationKeyGesture.Action) -> Void
   }
@@ -27,6 +31,8 @@ import OpenCodeKit
   private var target: Target?
   private var hold: Task<Void, Never>?
   private var monitor: Any?
+  /// The last Esc down cancelled a dictation.
+  private var escaped = false
 
   func register(_ target: Target) {
     targets.removeAll { $0.owner == target.owner }
@@ -38,19 +44,23 @@ import OpenCodeKit
     targets.removeAll { $0.owner == owner }
   }
 
-  /// The focused composer of the key window or of the front window's sheet; else the front window's conversation
-  /// composer, unless a sheet covers it.
-  private var focused: Target? {
+  /// The key window, the front window's innermost sheet and the front window.
+  private var windows: [NSWindow] {
     let front = MacRuntime.shared.front?.window
     var sheet = front?.attachedSheet
     while let next = sheet?.attachedSheet { sheet = next }
-    let windows = [NSApp.keyWindow, sheet, front].compactMap { $0 }
+    return [NSApp.keyWindow, sheet, front].compactMap { $0 }
+  }
+
+  /// The focused composer of the key window or of the front window's sheet; else the front window's conversation
+  /// composer, unless a sheet covers it.
+  private var focused: Target? {
     for window in windows {
       if let target = targets.last(where: { target in
         target.editor().map { $0.window === window && window.firstResponder === $0 } ?? false
       }) { return target }
     }
-    guard let runtime = MacRuntime.shared.front, front?.attachedSheet == nil else { return nil }
+    guard let runtime = MacRuntime.shared.front, runtime.window?.attachedSheet == nil else { return nil }
     return targets.last { $0.conversation == runtime.id }
   }
 
@@ -59,25 +69,32 @@ import OpenCodeKit
     monitor = NSEvent.addLocalMonitorForEvents(
       matching: [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
     ) { [weak self] event in
-      self?.handle(event)
-      return event
+      // An Esc that cancelled a dictation is used up: it reaches no sheet, button or editor.
+      self?.handle(event) == true ? nil : event
     }
   }
 
-  private func handle(_ event: NSEvent) {
+  /// Whether the event was used and must go no further.
+  private func handle(_ event: NSEvent) -> Bool {
+    if event.type == .keyDown, event.keyCode == 53 {
+      // Holding Esc repeats it: the repeats of an Esc that cancelled do not close the sheet afterwards.
+      if event.isARepeat, escaped { return true }
+      escaped = escape()
+      return escaped
+    }
     guard event.type == .flagsChanged else {
       if gesture.down { perform(gesture.interrupted()) }
-      return
+      return false
     }
     // NX_DEVICERALTKEYMASK: the right Option key itself, independent of the left one.
     let rightDown = event.modifierFlags.rawValue & 0x40 != 0
     guard event.keyCode == DictationKeyGesture.keyCode else {
       // Another modifier changed while the key is down: a shortcut such as ⌥⌘, not dictation.
       if gesture.down { perform(gesture.interrupted()) }
-      return
+      return false
     }
     if rightDown, !gesture.down {
-      guard let target = focused, target.available() else { return }
+      guard let target = focused, target.available() else { return false }
       self.target = target
       let others = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         .subtracting([.option, .capsLock, .numericPad, .function])
@@ -93,6 +110,20 @@ import OpenCodeKit
       perform(gesture.release())
       target = nil
     }
+    return false
+  }
+
+  /// Esc cancels the dictation of the composer the key is held for, else of the one it would dictate into, else
+  /// of any composer dictating in the key window, its sheet or the front window. Returns whether it cancelled.
+  private func escape() -> Bool {
+    let held = gesture.down ? target.flatMap { $0.dictating() ? $0 : nil } : nil
+    let dictating = held ?? focused.flatMap { $0.dictating() ? $0 : nil } ?? targets.last { target in
+      target.dictating() && target.editor().map { editor in windows.contains { $0 === editor.window } } == true
+    }
+    hold?.cancel()
+    guard gesture.escape(dictating: dictating != nil) == .cancel, let dictating else { return false }
+    dictating.perform(.cancel)
+    return true
   }
 
   private func perform(_ action: DictationKeyGesture.Action) {

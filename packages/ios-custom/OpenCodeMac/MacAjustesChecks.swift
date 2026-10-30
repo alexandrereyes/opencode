@@ -627,6 +627,101 @@ import SwiftUI
       draft.text.string.contains("Confira as sessões") ? true : nil
     }
     guard !draft.recording.capturing else { throw Failure(description: "continuou gravando após soltar") }
+    try await escape(window: window, runtime: runtime, draft: draft, option: option, shot: shot)
+  }
+
+  /// Esc cancels a dictation (tap, hold, transcription) and does nothing else; a second Esc keeps its meaning.
+  private static func escape(window: NSWindow, runtime: MacWindowRuntime, draft: ConversationDraft,
+    option: (Bool, Bool) -> Void, shot: (String) -> Void) async throws
+  {
+    // Through the app's queue, where `MacDictationKey` watches keys, to the window it would go to.
+    func esc(_ target: NSWindow) { NSApp.postEvent(key("\u{1b}", code: 53, window: target), atStart: false) }
+    func tap() { option(true, false); option(false, false) }
+    let editor = try require(draft.input?.textView, "editor")
+    let before = "Rascunho antes do ditado"
+    draft.text = NSAttributedString(string: before)
+    draft.selection = NSRange(location: (before as NSString).length, length: 0)
+    draft.focused = true
+    try await wait("foco no editor") { window.firstResponder === editor ? true : nil }
+    /// Esc ended the dictation, nothing landed afterwards and the editor kept the text and the focus.
+    func untouched(_ what: String) async throws {
+      try await wait("Esc cancelou (\(what))") { draft.recording.visible ? nil : true }
+      try await Task.sleep(for: .seconds(2.5))
+      guard draft.text.string == before, !draft.recording.visible, window.firstResponder === editor else {
+        throw Failure(description: "Esc (\(what)): texto \(draft.text.string.debugDescription), painel "
+          + "\(draft.recording.visible), foco \(window.firstResponder === editor)")
+      }
+    }
+    // Tap-started recording: Esc stops it with nothing transcribed.
+    tap()
+    try await wait("toque gravou para o Esc") { draft.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.2))
+    shot("esc-gravando")
+    esc(window)
+    try await untouched("toque")
+    shot("esc-cancelou")
+    // Held: Esc cancels while the key is down, and its release afterwards transcribes nothing.
+    option(true, false)
+    try await wait("segurar gravou para o Esc") { draft.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.4))
+    esc(window)
+    try await wait("Esc cancelou o segurar") { draft.recording.visible ? nil : true }
+    option(false, false)
+    try await untouched("segurar e soltar")
+    // Stopped and transcribing: Esc throws the transcription away.
+    tap()
+    try await wait("gravou para transcrever") { draft.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.2))
+    tap()
+    esc(window)
+    try await untouched("transcrevendo")
+    // No dictation: Esc keeps its meaning (here it closes the open suggestions).
+    draft.text = NSAttributedString(string: "@")
+    draft.selection = NSRange(location: 1, length: 0)
+    try await wait("sugestões abertas") { draft.trigger != nil ? true : nil }
+    esc(window)
+    try await wait("Esc sem ditado fechou as sugestões") { draft.trigger == nil ? true : nil }
+    draft.text = NSAttributedString()
+    // In a sheet, the first Esc only cancels the dictation; the second closes the sheet as before.
+    try await sheet("nova-sessao", window: window, option: option, shot: shot) { runtime.newSession(from: MacFixture.rootID) }
+    try await sheet("pergunta-paralela", window: window, option: option, shot: shot) { runtime.askSideQuestion() }
+    try await sheet("comentario", window: window, option: option, shot: shot) {
+      draft.commenting = ChatQuote(messageID: "msg_check", partID: "prt_check", text: "Trecho citado")
+    }
+    print("MacAjustes dictation: Esc cancelou toque, segurar e transcrição; folhas ficaram abertas no primeiro Esc")
+  }
+
+  private static func sheet(_ name: String, window: NSWindow, option: (Bool, Bool) -> Void, shot: (String) -> Void,
+    open: () -> Void) async throws
+  {
+    open()
+    let sheet = try await wait("folha \(name)") { window.attachedSheet }
+    let field = try await wait("campo da folha \(name)") {
+      MacSyntheticKey.composer(in: sheet.contentView).flatMap { sheet.firstResponder === $0 ? $0 : nil }
+    }
+    let draft = try require(field.input?.representedDraft, "rascunho da folha \(name)")
+    field.insertText("Texto da folha", replacementRange: field.selectedRange())
+    let before = field.string
+    try await Task.sleep(for: .milliseconds(400))
+    option(true, false); option(false, false)
+    try await wait("gravou na folha \(name)") { draft.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.2))
+    NSApp.postEvent(key("\u{1b}", code: 53, window: sheet), atStart: false)
+    try await wait("Esc cancelou na folha \(name)") { draft.recording.visible ? nil : true }
+    try await Task.sleep(for: .seconds(1.5))
+    guard window.attachedSheet === sheet, field.string == before, sheet.firstResponder === field,
+      !draft.recording.visible else {
+      throw Failure(description: "folha \(name): aberta \(window.attachedSheet === sheet), texto \(field.string.debugDescription), "
+        + "foco \(sheet.firstResponder === field)")
+    }
+    shot("esc-\(name)")
+    NSApp.postEvent(key("\u{1b}", code: 53, window: sheet), atStart: false)
+    try await wait("segundo Esc fechou a folha \(name)") { window.attachedSheet == nil ? true : nil }
+    try await Task.sleep(for: .milliseconds(600))
+    // A draft that outlives its sheet (Nova sessão's) is left as the fixture had it.
+    guard FileManager.default.fileExists(atPath: draft.persistence.directory.path) else { return }
+    draft.text = NSAttributedString()
+    await draft.persist()
   }
 
   // MARK: A13 — ↓ beside the text

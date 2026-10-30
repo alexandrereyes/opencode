@@ -3660,6 +3660,16 @@ project filter replacing the chips and the highlight of the open subagent.
   microphone button). Pressed with ⌘, ⌃, ⇧ or the left Option, or followed by another key or a click while down, it
   is a modifier and does nothing (a recording its hold had started is discarded). Not while a sheet covers the
   window or a GPT Live call holds the microphone. ⌃⌥Espaço in the editor still works.
+  **Esc cancels a dictation (Alexandre, 30/10):** while a composer records (tap, hold, paused, asking for the
+  microphone) or transcribes, Esc throws the audio and any transcript away (`VoiceRecordingComposer.cancel`); the
+  draft, the focus and an open sheet (Nova sessão, a comment, Pergunta paralela) stay as they were, and the panel
+  leaving is the feedback (VoiceOver hears "Ditado cancelado"). `MacDictationKey`'s local monitor consumes that Esc
+  before AppKit's key equivalents (`.cancelAction`) and the editor's own Esc, so it closes nothing; its key repeats
+  are consumed too. A held key released after Esc records nothing. A dictation waiting for the model's download or
+  one that failed keeps its audio for Tentar de novo, and Esc keeps its meaning then. With no dictation, Esc does
+  what it did before; a second Esc after cancelling closes the sheet. `script/test-mac-ajustes.sh dictation`
+  (`-OpenCodeMacFakeDictation`) covers tap, hold and release, transcribing, Esc without a dictation, and the three
+  sheets. The iPhone has no key-driven dictation and is unchanged.
 - **Quotes (A10).** A quote still in the draft opens as `Citação · N` already editing its comment, with the focus in
   it; Ir ao trecho citado and Remover citação stay. Return or ⌘Return concludes, Esc closes. Sent marks keep the
   details sheet.

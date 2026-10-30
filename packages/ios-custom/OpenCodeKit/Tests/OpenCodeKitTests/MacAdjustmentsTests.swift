@@ -153,6 +153,32 @@ import Testing
     #expect(DictationKeyGesture.keyCode == 61)
   }
 
+  @Test func escapeCancelsADictationWithoutTouchingAnythingElse() {
+    var key = DictationKeyGesture()
+    // A tap started hands-free recording; the key is up when Esc comes.
+    key.press(recording: false, otherModifiers: false)
+    #expect(key.release() == .start)
+    #expect(key.escape(dictating: true) == .cancel && !key.down)
+    // Held: Esc cancels at once, and the release afterwards transcribes nothing.
+    key.press(recording: false, otherModifiers: false)
+    #expect(key.held() == .begin)
+    #expect(key.escape(dictating: true) == .cancel)
+    #expect(key.down && key.release() == .none && !key.down)
+    // Stopped and transcribing (key up): the transcription is cancelled too.
+    #expect(key.escape(dictating: true) == .cancel)
+    // No dictation: Esc keeps its meaning, and the next tap still starts recording.
+    #expect(key.escape(dictating: false) == .none)
+    key.press(recording: false, otherModifiers: false)
+    #expect(key.release() == .start)
+    // ⌥ down, nothing recorded yet, then Esc: the key became a modifier (⌥Esc), so its release records nothing.
+    key.press(recording: false, otherModifiers: false)
+    #expect(key.escape(dictating: false) == .none)
+    #expect(key.held() == .none && key.release() == .none)
+    // A tap-started recording, ⌥ down again, then Esc: cancelled, and the release does not stop or start anything.
+    key.press(recording: true, otherModifiers: false)
+    #expect(key.escape(dictating: true) == .cancel && key.release() == .none)
+  }
+
   @Test func modelChoicesResolveProvidersOnceAndKeepTheCatalogOrder() throws {
     let models = try JSONDecoder().decode([ModelInfo].self, from: Data("""
       [{"id":"terra","providerID":"vercel","name":"GPT-6.1 Terra","variants":[{"id":"low"},{"id":"max"}],"limit":{"context":1}},

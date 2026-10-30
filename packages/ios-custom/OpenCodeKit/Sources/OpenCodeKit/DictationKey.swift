@@ -21,6 +21,8 @@ public struct DictationKeyGesture: Sendable, Equatable {
     case finish
     /// The key turned out to be a modifier after the hold had started a recording.
     case discard
+    /// Esc during a dictation: stop and throw it away, with nothing transcribed.
+    case cancel
   }
 
   private enum State: Sendable, Equatable {
@@ -51,6 +53,14 @@ public struct DictationKeyGesture: Sendable, Equatable {
     guard case .pressed(_, let holding) = state else { return .none }
     state = .modifier
     return holding ? .discard : .none
+  }
+
+  /// Esc. With a dictation under way (`dictating`: recording, by a tap or a hold, or transcribing) it cancels it and
+  /// Esc does nothing else; the key, if still down, then gives nothing on release. Otherwise Esc keeps its meaning
+  /// and, with the key down, makes it a modifier like any other key.
+  public mutating func escape(dictating: Bool) -> Action {
+    if down { state = .modifier }
+    return dictating ? .cancel : .none
   }
 
   public mutating func release() -> Action {

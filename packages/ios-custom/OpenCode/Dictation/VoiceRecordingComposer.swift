@@ -212,6 +212,8 @@ import AppKit
     task?.cancel(); task = nil
     clearPreview(); removeObservers(); capture.stop()
     state = .pending
+    // discard() while the file is read (Esc, Descartar) deletes it: the failed read must not bring the panel back.
+    let ticket = generation
     task = Task {
       do {
         let file = file
@@ -219,14 +221,17 @@ import AppKit
           let source = try AVAudioFile(forReading: file)
           return Double(source.length) / source.processingFormat.sampleRate
         }.value
-        guard state == .pending else { return }
+        guard ticket == generation, state == .pending else { return }
         guard duration >= VoiceRecordingGesture.minimumDuration else {
           discard(); announce("Gravação curta descartada"); return
         }
         pendingChanged(true)
         enqueue()
         asksDownload = transcription.status == .missing
-      } catch { state = .pending; self.error = "Não foi possível ler a gravação. Seu áudio foi preservado."; pendingChanged(true) }
+      } catch {
+        guard ticket == generation else { return }
+        state = .pending; self.error = "Não foi possível ler a gravação. Seu áudio foi preservado."; pendingChanged(true)
+      }
     }
   }
   func restorePending() {
@@ -250,6 +255,24 @@ import AppKit
   func retry() {
     error = nil
     if let job { transcription.retry(job) } else { enqueue() }
+  }
+  /// What Esc cancels on the Mac: a recording (paused or still asking for the microphone too) or a transcription
+  /// under way. A dictation waiting for the model's download, or one that failed, keeps its audio for Tentar de novo.
+  var cancellable: Bool {
+    if capturing { return true }
+    guard state == .pending, error == nil else { return false }
+    guard let job else { return true }
+    switch job.state {
+    case .transcribing: return true
+    case .waiting: return transcription.status == .ready || transcription.status == .preparing
+    case .failed, .done: return false
+    }
+  }
+  /// Esc: the dictation ends with nothing transcribed. The panel leaving is the visible answer; VoiceOver hears it.
+  func cancel() {
+    guard cancellable else { return }
+    discard()
+    announce("Ditado cancelado")
   }
   func discard() {
     generation = UUID()
