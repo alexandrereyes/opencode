@@ -330,7 +330,19 @@ import SwiftUI
       guard viewer.performKeyEquivalent(with: key(character, code: code, flags: .command, window: viewer)) else {
         throw Failure(description: "⌘\(character) não tratado pela janela")
       }
-      try await Task.sleep(for: .milliseconds(500))
+      try await settled()
+    }
+    /// The zoom and scroll animations last longer on a busy Mac, and an off-screen window of an app macOS left in
+    /// the background (activation is only a request) draws them slowly: waits until they stop, not a fixed time.
+    func settled() async throws {
+      try await Task.sleep(for: .milliseconds(250))
+      var last = (scroll.magnification, clip.bounds.origin)
+      for _ in 0..<30 {
+        try await Task.sleep(for: .milliseconds(100))
+        let now = (scroll.magnification, clip.bounds.origin)
+        if now.0 == last.0 && now.1 == last.1 { return }
+        last = now
+      }
     }
     try await command("1", code: 18)
     try expect(abs(scroll.magnification - 1) < 0.001, "⌘1 não mostrou o tamanho real")
@@ -343,13 +355,13 @@ import SwiftUI
     let arrow = clip.bounds.origin
     viewer.sendEvent(key("\u{F703}", code: 124, window: viewer))
     viewer.sendEvent(key("\u{F701}", code: 125, window: viewer))
-    try await Task.sleep(for: .milliseconds(400))
+    try await settled()
     try expect(abs(clip.bounds.minX - arrow.x - 60) < 0.5 && abs(clip.bounds.minY - arrow.y - 60) < 0.5,
       "as setas moveram para \(clip.bounds.origin) a partir de \(arrow)")
     // A manual zoom keeps the middle through a resize.
     let middle = NSPoint(x: clip.bounds.midX, y: clip.bounds.midY)
     viewer.setFrame(NSRect(x: -5200, y: 80, width: 1500, height: 900), display: true)
-    try await Task.sleep(for: .milliseconds(200))
+    try await settled()
     try expect(hypot(clip.bounds.midX - middle.x, clip.bounds.midY - middle.y) < 1 && abs(scroll.magnification - 1) < 0.001,
       "redimensionar com zoom tirou o meio \(middle) do lugar")
     try await command("0", code: 29)
@@ -357,7 +369,7 @@ import SwiftUI
     try expect(abs(scroll.magnification - refit) < 0.002, "⌘0 não ajustou à janela (\(refit))")
     // Fitting follows the window.
     viewer.setFrame(NSRect(x: -5200, y: 80, width: 900, height: 700), display: true)
-    try await Task.sleep(for: .milliseconds(200))
+    try await settled()
     let small = min(1, scroll.bounds.width / document.frame.width, scroll.bounds.height / document.frame.height)
     try expect(abs(scroll.magnification - small) < 0.002, "o ajuste não acompanhou a janela (\(small))")
     try expect(abs(clip.bounds.midX - document.frame.midX) < 1 && abs(clip.bounds.midY - document.frame.midY) < 1,
@@ -372,13 +384,14 @@ import SwiftUI
     viewer.sendEvent(mouse(.leftMouseDown, at: spot, in: viewer, clicks: 2))
     viewer.sendEvent(mouse(.leftMouseUp, at: spot, in: viewer, clicks: 2))
     // The zoom animates; how long depends on the load, not on a fixed pause.
-    _ = try? await wait("100% no duplo clique", timeout: 3) { abs(scroll.magnification - 1) < 0.001 ? true : nil }
+    _ = try? await wait("100% no duplo clique", timeout: 8) { abs(scroll.magnification - 1) < 0.001 ? true : nil }
+    try await settled()
     let after = clip.convert(spot, from: nil)
     try expect(abs(scroll.magnification - 1) < 0.001 && hypot(after.x - target.x, after.y - target.y) < 1,
       "o duplo clique não foi a 100% no ponto \(target) → \(after)")
     viewer.sendEvent(mouse(.leftMouseDown, at: spot, in: viewer, clicks: 2))
     viewer.sendEvent(mouse(.leftMouseUp, at: spot, in: viewer, clicks: 2))
-    _ = try? await wait("ajuste no segundo duplo clique", timeout: 3) { abs(scroll.magnification - small) < 0.002 ? true : nil }
+    _ = try? await wait("ajuste no segundo duplo clique", timeout: 8) { abs(scroll.magnification - small) < 0.002 ? true : nil }
     try expect(abs(scroll.magnification - small) < 0.002,
       "o segundo duplo clique não voltou ao ajuste (\(Int(scroll.magnification * 100))%)")
 
