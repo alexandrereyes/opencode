@@ -23,12 +23,23 @@ import SwiftUI
   }
 
   private static var started = false
+  /// Modes that need the app in front: the Ir menu that SwiftUI fills only for the active app (`numbers`), the
+  /// image viewer's context menu, which an inactive app may not open (`viewer`), and the dictation sheets'
+  /// composers taking the recorded text (`dictation`). A background copy (`MacLaunch.background`) comes forward
+  /// only for these, once its pictures are taken, and quits right after; its window stays off-screen.
+  static let foreground: Set<String> = ["numbers", "viewer", "dictation"]
 
   /// Once per launch: a second window (one SwiftUI restores and one the capture opens) would drive the same views.
   static func run(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String) async {
     guard let mode, !started else { return }
     started = true
     func shot(_ step: String) { MacCapture.shot(window, theme: theme, to: folder + "/\(MacCapture.name)-\(step).png") }
+    if MacLaunch.background, foreground.contains(mode) {
+      NSApp.setActivationPolicy(.regular)
+      NSApp.activate(ignoringOtherApps: true)
+      window.makeKeyAndOrderFront(nil)
+      try? await Task.sleep(for: .milliseconds(600))
+    }
     do {
       switch mode {
       case "composer": try await composer(window: window, runtime: runtime, shot: shot)
@@ -320,14 +331,16 @@ import SwiftUI
     viewer.sendEvent(mouse(.leftMouseUp, at: spot, in: viewer))
     viewer.sendEvent(mouse(.leftMouseDown, at: spot, in: viewer, clicks: 2))
     viewer.sendEvent(mouse(.leftMouseUp, at: spot, in: viewer, clicks: 2))
-    try await Task.sleep(for: .milliseconds(500))
+    // The zoom animates; how long depends on the load, not on a fixed pause.
+    _ = try? await wait("100% no duplo clique", timeout: 3) { abs(scroll.magnification - 1) < 0.001 ? true : nil }
     let after = clip.convert(spot, from: nil)
     try expect(abs(scroll.magnification - 1) < 0.001 && hypot(after.x - target.x, after.y - target.y) < 1,
       "o duplo clique não foi a 100% no ponto \(target) → \(after)")
     viewer.sendEvent(mouse(.leftMouseDown, at: spot, in: viewer, clicks: 2))
     viewer.sendEvent(mouse(.leftMouseUp, at: spot, in: viewer, clicks: 2))
-    try await Task.sleep(for: .milliseconds(500))
-    try expect(abs(scroll.magnification - small) < 0.002, "o segundo duplo clique não voltou ao ajuste")
+    _ = try? await wait("ajuste no segundo duplo clique", timeout: 3) { abs(scroll.magnification - small) < 0.002 ? true : nil }
+    try expect(abs(scroll.magnification - small) < 0.002,
+      "o segundo duplo clique não voltou ao ajuste (\(Int(scroll.magnification * 100))%)")
 
     // The menu has the zoom too, and the window stays open while it is up.
     let menu = contextMenu(viewer, at: start, to: folder + "/\(MacCapture.name)-menu.png")

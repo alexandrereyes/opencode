@@ -3266,9 +3266,12 @@ separate track.
   expands and marks its file, ‹ › and ⌃⌘← ⌃⌘→, Recentes, the filter, Alterados) and `ampliar` checks Ampliar and
   Reduzir (⇧⌘E, the chosen width untouched, closing ends it) and the narrow rail. The script runs its copy with
   `-OpenCodeMacBackground` (fixture only): an accessory app with no Dock icon or menu bar that never activates, its
-  windows off-screen, so a run does not take the focus from whoever is using the Mac. `question`, `numbers` and
-  `dictation` need the app in front (text input in the key window, the Ir menu SwiftUI fills only for the active
-  app) and fail while another app has the focus, with or without the flag.
+  windows off-screen, so a run does not take the focus from whoever is using the Mac. Only `numbers`,
+  `viewer` and `dictation` (`MacAjustesChecks.foreground`: the Ir menu that SwiftUI fills only for the active app,
+  the image viewer's context menu, the dictation sheets' composers) bring the copy forward, as a regular app and
+  only once their pictures are taken; it quits when the check ends. `viewer` also waits for the animated zoom
+  instead of a fixed pause.
+  `question` fails on its Return step with or without the app in front (since before the background mode).
 - **Alerts and notifications**: the in-app banner (`SessionAlertCenter`) stays silent for the session on screen
   while the app is in front. While the app is not in front, each banner (answered or finished, failed, permission,
   question; mutes and deduplication included) also becomes a macOS notification (`MacNotifications`), and clicking
