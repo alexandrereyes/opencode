@@ -225,6 +225,11 @@ import SwiftUI
     selection.childID = parent == nil || parent == selection.sessionID ? nil : parent
   }
 
+  /// Contexto's path: one of the open subagent's ancestors, the root closing the subagent.
+  func open(ancestor id: String) {
+    selection.childID = id == selection.sessionID ? nil : id
+  }
+
   func selectNeighbor(_ offset: Int) {
     guard let store else { return }
     let ids = SessionSections.group(store.filtered, now: .now, held: store.attentionHold).flatMap(\.rows).map(\.id)

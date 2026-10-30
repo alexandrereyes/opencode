@@ -53,6 +53,17 @@ struct MacSubagentBanner: View {
   }
 }
 
+extension SessionStore {
+  /// The open subagent's ancestry below `root`, oldest first and ending at `child`, from the sessions already
+  /// loaded (the list, the root's family, the child's own conversation): no request.
+  func subagentPath(root: String, child: String) -> [Session] {
+    var sessions = Dictionary(entries.map { ($0.session.id, $0.session) }, uniquingKeysWith: { a, _ in a })
+    for session in liveConversation(root)?.children ?? [] { sessions[session.id] = session }
+    if let current = liveConversation(child)?.session { sessions[child] = current }
+    return SubagentNavigation.path(root: root, child: child, sessions: Array(sessions.values))
+  }
+}
+
 /// Only the currently opened ancestry is expanded; returning to its root removes the branch.
 struct MacSubagentTree: View {
   @Environment(\.appTheme) private var theme
@@ -61,10 +72,7 @@ struct MacSubagentTree: View {
   let rootID: String
   private var path: [Session] {
     guard runtime.selection.sessionID == rootID, let child = runtime.selection.childID else { return [] }
-    var sessions = Dictionary(store.entries.map { ($0.session.id, $0.session) }, uniquingKeysWith: { a, _ in a })
-    for session in store.liveConversation(rootID)?.children ?? [] { sessions[session.id] = session }
-    if let current = store.liveConversation(child)?.session { sessions[child] = current }
-    return SubagentNavigation.path(root: rootID, child: child, sessions: Array(sessions.values))
+    return store.subagentPath(root: rootID, child: child)
   }
   var body: some View {
     #if DEBUG

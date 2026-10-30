@@ -11,6 +11,9 @@ struct MacWindow: View {
   @Bindable var store: SessionStore
   @Bindable var runtime: MacWindowRuntime
   @State private var context: ContextColumnStore?
+  /// The columns of the sessions shown last (the root under an open subagent, its ancestors), most recent first:
+  /// going back shows the root's column at once while it reloads.
+  @State private var contexts: [ContextColumnStore] = []
   @State private var detailWidth: CGFloat = 860
   @State private var windowWidth: CGFloat = 1500
   @State private var windowHeight: CGFloat = 940
@@ -108,12 +111,15 @@ struct MacWindow: View {
       if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacLiveTrace") { macTrace("scenePhase \(phase)") }
     }
     #endif
-    .task(id: runtime.selection.sessionID) {
-      guard let id = runtime.selection.sessionID else {
+    // Contexto follows the session open in the middle column: the subagent over the root while one is open. Only
+    // the shown column listens to the event stream.
+    .task(id: runtime.selection.childID ?? runtime.selection.sessionID) {
+      guard let id = runtime.selection.childID ?? runtime.selection.sessionID else {
         context = nil
         return
       }
-      let next = ContextColumnStore(id: id, sessions: store)
+      let next = contexts.first { $0.id == id } ?? ContextColumnStore(id: id, sessions: store)
+      contexts = [next] + contexts.filter { $0 !== next }.prefix(3)
       context = next
       await next.run()
     }

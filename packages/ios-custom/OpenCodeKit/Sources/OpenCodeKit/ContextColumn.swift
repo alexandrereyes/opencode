@@ -54,7 +54,7 @@ public enum ContextColumn {
     return nil
   }
 
-  /// "99,5%": the column shows one decimal for cache hits and subagent context.
+  /// "99,5%": the column shows one decimal for cache hits (context has none, `ContextUsage.percent`).
   public static func percent(_ fraction: Double) -> String {
     (fraction * 100).formatted(.number.locale(Locale(identifier: "pt_BR")).grouping(.never)
       .precision(.fractionLength(1))) + "%"
@@ -62,6 +62,50 @@ public enum ContextColumn {
 
   /// Cache hit below this reads as a warning (amber).
   public static let cacheWarning = 0.8
+
+  // MARK: Metrics line
+
+  /// A subagent's Progresso (its `todowrite` list): `2/4`.
+  public struct Progress: Sendable, Equatable {
+    public let done: Int
+    public let total: Int
+    public init(done: Int, total: Int) {
+      self.done = done
+      self.total = total
+    }
+    public var label: String { "\(done)/\(total)" }
+  }
+
+  public struct Metric: Sendable, Equatable {
+    public enum Kind: Sendable, Hashable { case context, tokens, cache, cost, elapsed, progress }
+    public let kind: Kind
+    public let text: String
+    /// Context above 80% or cache below `cacheWarning`.
+    public var warning = false
+  }
+
+  /// Below this width of the column's content the subagent lines drop their tokens (their tooltip keeps them).
+  public static let narrowWidth = 444.0
+
+  /// `◔ 71% · 711,3k / 1M · ⚡ 99,0% · US$ 26,95 · 20m · ☑ 2/4`: context, cache, cost, time, then Progresso. The
+  /// context has no decimal and the cache one. Narrow drops the tokens when a percentage stands for the context; a
+  /// model outside the catalog (no limit) keeps only its tokens, narrow too.
+  public static func metrics(
+    usage: ContextUsage?, cacheHit: Double?, cost: Double?, elapsed: String? = nil, progress: Progress? = nil,
+    narrow: Bool = false
+  ) -> [Metric] {
+    let context: [Metric] = usage.map { usage in
+      guard let fraction = usage.fraction else { return [Metric(kind: .tokens, text: usage.tokenLabel)] }
+      return [Metric(kind: .context, text: ContextUsage.percent(fraction), warning: usage.warning)]
+        + (narrow ? [] : [Metric(kind: .tokens, text: usage.tokenLabel)])
+    } ?? []
+    return context + [
+      cacheHit.map { Metric(kind: .cache, text: percent($0), warning: $0 < cacheWarning) },
+      cost.map { Metric(kind: .cost, text: narrow ? ContextUsage.compactMoney($0) : ContextUsage.money($0)) },
+      elapsed.map { Metric(kind: .elapsed, text: $0) },
+      progress.flatMap { $0.total > 0 ? Metric(kind: .progress, text: $0.label) : nil },
+    ].compactMap { $0 }
+  }
 
   // MARK: Subagents
 
@@ -95,6 +139,8 @@ public enum ContextColumn {
     public let permission: PermissionRequest?
     /// Resources the subagent (or one of its own subagents) is using right now.
     public let resources: [SessionResource]
+    /// Its Progresso while it works, when the column has one for the child.
+    public let progress: Progress?
     public var id: String { work.id }
   }
 
@@ -110,9 +156,11 @@ public enum ContextColumn {
   public static let minimumShown = 5
 
   /// Keeps `ConversationProjection.work`'s order (running first by latest start, then finished by last run).
+  /// `progress` is keyed by child session ID; like Sessões, a row shows it only while the child is live.
   public static func subagents(
     work: [SessionWork], rootID: String, members: [Session], models: [ModelInfo],
-    permissions: [PermissionRequest], forms: [PendingForm], resources: [SessionResource]
+    permissions: [PermissionRequest], forms: [PendingForm], resources: [SessionResource],
+    progress: [String: Progress] = [:]
   ) -> Subagents {
     let sessions = Dictionary(members.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let parents = parents(members)
@@ -137,7 +185,8 @@ public enum ContextColumn {
         permission: permission,
         resources: resources.filter { resource in
           inUse(resource) && resource.owner.map { owns($0.sessionID) } == true
-        })
+        },
+        progress: status.live ? child.flatMap { progress[$0] } : nil)
     }
     let live = rows.filter(\.status.live)
     let finished = rows.filter { !$0.status.live }

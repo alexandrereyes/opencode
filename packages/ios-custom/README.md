@@ -3146,8 +3146,9 @@ child and traces once a second what it shows (`-OpenCodeMacLiveTrace`). Capture 
 
 ### Coluna 3 — Contexto ("Máximo")
 
-`ContextColumnStore` reads, for the selected root, the same sources as the iPhone's conversation and "Agentes e
-tarefas": `GET /api/session/:id`, `custom.session-family/snapshot` and `/page`, the root's transcript page (links
+`ContextColumnStore` reads, for the session open in the middle column (the root, or the subagent open over it; see
+[Subagentes sem colunas e a sessão aberta](#subagentes-sem-colunas-e-a-sessão-aberta--30-october)), the same sources
+as the iPhone's conversation and "Agentes e tarefas": `GET /api/session/:id`, `custom.session-family/snapshot` and `/page`, the root's transcript page (links
 `subagent` calls), `/api/shell`, `/api/model`, `/api/agent`, `/api/vcs/diff`, `custom.worktrees/locate` and
 `custom.resources/list`, and reloads on the shared event stream. `ContextColumn` (OpenCodeKit) does the math.
 
@@ -3156,17 +3157,17 @@ hit below 80% amber, and the amber `?` of a subagent asking for permission. Top 
 
 1. `mac-app · +128 −14 · Arquivos ›`: the branch (its right-click menu copies it or the path, or shows it in the
    Finder; the path is its tooltip), the working diff and a plain link to Arquivos.
-2. Three figures (22 pt semibold over an 11-pt gray caption, hairlines between them): the context ring and `28%`
-   "contexto · 278,6k / 1M" (latest measured step, transcript fallback), `99,5%` "cache hit" of the session, then
-   `US$ 78,25` "custo total".
+2. One metrics line in the subagents' format at 18 pt: the context ring, `28%` and `278,6k / 1M` (latest measured
+   step, transcript fallback), `⚡ 99,5% cache` of the session, then `US$ 78,25 total`; it breaks after the context
+   when the column cannot hold one line.
 3. `Sessão US$ … · Subagentes US$ …` (the family snapshot's descendant cost, else the sum of loaded descendants).
-4. `SUBAGENTES active/total` with the `contexto · cache · custo` headings. Rows keep `ConversationProjection.work`'s
-   order (live first, then the newest finished up to five, the rest behind `+N concluídos ›`): a 13-pt medium title,
-   the three metrics in fixed right-aligned 11-pt columns with tabular digits (cost brighter, whole or
-   `US$ 2,7 mil`), then `agente · Modelo · esforço` with the elapsed time, then
-   `agora: <tool> · <resource it drives>`. The state is a glyph in a small gutter: a gray
-   spinning ring while running, an amber `?` while asking (with `Permitir · Negar` links), nothing once ended
-   (finished rows dimmed). Clicking opens the child in the middle column (`‹` returns); right-click has Parar.
+4. `SUBAGENTES active/total`. Rows keep `ConversationProjection.work`'s order (live first, then the newest finished
+   up to five, the rest behind `+N concluídos ›`), aligned at the column's margin with no glyph before them: a 13-pt
+   medium title (shimmering while it runs), `agente · Modelo · esforço`, the metrics line
+   `◔ 71% · 711,3k / 1M · ⚡ 99,0% · US$ 26,95 · 20m` and `agora: <tool> · <resource it drives>`. A subagent waiting
+   for Alexandre has an amber `?` after its title and says what it asks in amber beside `Permitir · Negar` (or
+   `Responder ›`); finished rows are dimmed to 45%. Clicking opens the child in the middle column (`‹` returns);
+   right-click has Parar.
 5. `TAREFAS N`: background shells, 12-pt lines with a monochrome icon (a hammer for builds and tests, play
    otherwise), the command without its port option plus `· :port`, the elapsed time; right-click Parar and Copiar
    comando.
@@ -3205,10 +3206,53 @@ mock "opção A", 30/10):
   the Mac has no working-copy diff renderer to reuse (the timeline's patches come from tool parts), so
   `Arquivo | Diff` inside the panel is left for later.
 
-**Not provided by the server (shown as `—`, no backend change):** a subagent's context before its first measured
-step; per-subagent cache when the child has no `tokens`; the resource ↔ subagent link is inferred from
+**Not provided by the server (left out of the line, no backend change):** a subagent's context before its first
+measured step; per-subagent cache when the child has no `tokens`; a subagent's Progresso written before the app opened (`☑ 2/4`, see below); the resource ↔ subagent link is inferred from
 `resource.owner.sessionID` walked up to the direct subagent, so a resource registered without an owner shows
 `Agente usando · —`; file dates and sizes for checkouts that are not on this Mac (`/api/fs/list` returns names only).
+
+### Subagentes sem colunas e a sessão aberta — 30 October
+
+Approved mocks: option B (`opcao-b.png`) and, without the gutter, B1 with the `?` of B3 (`sem-recuo/b1-brilho-titulo.png`,
+`sem-recuo/b3-marca-apos-titulo.png`) in `.agent-artifacts/subagentes-metricas/` of the main checkout.
+
+- **Metrics line** (`ContextColumn.metrics`, OpenCodeKit): context, cache, cost, time, then Progresso, with the
+  context ring before the percentage, `⚡` before the cache and `☑` before the Progresso. Context has no decimal and
+  cache one, in the session's line and the subagents'. A model outside the catalog (no limit) shows only
+  `711,3k tokens`. Below 444 pt of content (Contexto under 480 pt), or when the line does not fit, the tokens drop
+  and stay in the tooltip; a cost of a thousand or more becomes `US$ 2,8 mil` there. The right-hand columns and
+  their headings are gone.
+- **Shimmer** (`MacShimmerText`): the web's `TextShimmer` on a running subagent's title. The text in `textSecondary`
+  with a bright copy in `textStrong` behind a `CAGradientLayer` mask: a band of ±5.2 `ch` with soft edges whose
+  center runs from one gutter before the text to one after it, linear, in 1.2 s, without pause. Core Animation
+  moves the mask in the render server, so neither SwiftUI nor AppKit redraws while it runs (a SwiftUI
+  `repeatForever` re-renders the window every frame, see `MacSpinningArc`); each pass starts on a multiple of the
+  period of the media clock, so every title moves on the same phase. Both copies are drawn by AppKit
+  (`cacheDisplay` still shows the title); Reduzir Movimento and `ImageRenderer` (`macStillCapture`) show plain text.
+- **Progresso** (`☑ 2/4`): a live subagent's open list from `SessionStore.progress`, which follows the
+  `todowrite` calls on the shared event stream for every session, subagents included ([Progresso](#progresso--30-october)). A list written
+  before the app opened shows from the subagent's next call, since navigation entries carry only the roots'; without
+  one the line keeps no room.
+- **The open session**: Contexto follows the conversation in the middle column. Opening a subagent gives the column
+  a `ContextColumnStore` of that session: its context against its model's limit, its cache, its cost and
+  `Sessão · Subagentes` (its family snapshot), its own subagents (the root's grandchildren, with the same line and
+  shimmer), its background tasks (the shells its transcript started), the resources its branch uses, its MCPs and
+  Detalhes (model, agent, skills). Branch, diff and Arquivos are those of its folder: the server's working-copy
+  diff (`/api/vcs/diff`) belongs to the checkout, not to a session (`/api/session/:id/diff` is per turn), so a
+  subagent in its parent's checkout shows the same diff. A path at the top, `App Mac › Backend da Live Activity`,
+  says it is a subagent; each ancestor goes back to itself (the root also with ⌘[ or the banner's Voltar). The last
+  four columns stay loaded, so going back shows the root at once while it reloads; only the shown one listens to
+  the event stream, reloading on its own and its descendants' events.
+- **Checks**: `ContextColumnTests` (order, formats, narrow, outside the catalog, missing data and Progresso, a
+  subagent's own family) and `script/test-mac-ajustes.sh contexto`, one launch. The background copy has no
+  accessibility tree to read (`jump` already printed `?` for its element), so it checks the AppKit views, the
+  column's data and its narrow decision (`MacContextProbe`), and the pictures show the rest: the root's states, three
+  shimmering titles on one phase starting at the column's margin, the waiting row's request, three held moments of
+  the band (`-brilho-1…3`), the shimmer's CPU against Contexto hidden, narrow at 400 pt, then a subagent opened (its
+  context, costs and grandchildren, a reload on its grandchild's event and none on another session's), its own
+  subagent with the path through the middle one, and the way back through the path's action and `backToParent`
+  (⌘[ and the banner). The fixture's Backend da Live Activity has two subagents (one running) and Mapear apps Mac
+  de agentes runs a model outside the catalog.
 
 ### LLM proxy window (stage 2)
 

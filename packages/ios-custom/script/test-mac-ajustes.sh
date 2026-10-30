@@ -19,7 +19,7 @@ codesign --force --deep --sign - "$copy" 2>/dev/null
 trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
 failed=0
 # Without arguments, every mode (zsh does not split `${@:-…}` into words).
-modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso)
+modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto)
 (( $# )) && modes=("$@")
 for mode in $modes; do
   # Each mode starts from a fresh window: no restored window, reading place or Contexto width.
@@ -36,6 +36,8 @@ for mode in $modes; do
     divider) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
     arquivos) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     ampliar) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
+    # Wide and narrow Contexto, a subagent open over the root, its own subagent and the way back, in one launch.
+    contexto) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     # The sheets' composers (Nova sessão, Pergunta paralela, a comment) record with the fake microphone too; the
     # fixtures' reviewer answers in 2.5 s, so "Ajustando texto…" can be seen and cancelled.
     dictation) extra=(-OpenCodeMacFakeDictation -OpenCodeDictationReview 2500) ;;

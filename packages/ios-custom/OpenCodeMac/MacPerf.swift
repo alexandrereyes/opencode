@@ -16,7 +16,9 @@ import OpenCodeKit
   nonisolated static let shownStreams = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacPerfShown")
   /// `-OpenCodeMacPerfVerify`: incremental results are checked against full ones; `MacPerf divergência` reports one.
   static let verify = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacPerfVerify")
-  private static var counts: [String: Int] = [:]
+  private(set) static var counts: [String: Int] = [:]
+  /// `MacAjustesChecks` counts the views' bodies during its own phases, without the streaming run.
+  static var counting = false
 
   static func mismatch(_ name: String) {
     print("MacPerf divergência \(name)")
@@ -26,9 +28,11 @@ import OpenCodeKit
   private static let mainThread = mach_thread_self()
 
   static func count(_ name: String) {
-    guard enabled else { return }
+    guard enabled || counting else { return }
     counts[name, default: 0] += 1
   }
+
+  static func resetCounts() { counts = [:] }
 
   static func run(runtime: MacWindowRuntime) async {
     guard enabled, !started else { return }
@@ -176,7 +180,7 @@ import OpenCodeKit
   }
 
   /// The main thread's user and system CPU time, in seconds.
-  private static func mainCPU() -> Double {
+  static func mainCPU() -> Double {
     var info = thread_basic_info()
     var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
     let result = withUnsafeMutablePointer(to: &info) {

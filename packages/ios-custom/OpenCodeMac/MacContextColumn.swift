@@ -31,12 +31,14 @@ struct MacContextColumn: View {
   }
 }
 
-/// Contexto top to bottom: the summary line, the three large figures, the cost line, then Subagentes, MCPs,
-/// Tarefas and Recursos.
+/// Contexto top to bottom, for the session open in the middle column (the root or a subagent over it): the path
+/// back to the root when it is a subagent, the summary line, the session's metrics line, the cost line, then
+/// Subagentes, MCPs, Tarefas and Recursos.
 struct ContextColumnSections: View {
   @Environment(\.appTheme) private var theme
   let store: ContextColumnStore
   let runtime: MacWindowRuntime
+  @State private var narrow = false
 
   var body: some View {
     #if DEBUG
@@ -47,16 +49,18 @@ struct ContextColumnSections: View {
         Label(error, systemImage: "exclamationmark.triangle").appFont(.caption)
           .foregroundStyle(theme.color(.textSecondary)).padding(.bottom, 10)
       }
+      if let root = runtime.selection.sessionID, root != store.id {
+        ContextSessionPath(store: store, runtime: runtime, rootID: root).padding(.bottom, 10)
+      }
       ContextSummaryLine(store: store, runtime: runtime)
-      ContextFigures(store: store).padding(.top, 14).padding(.bottom, 12)
+      ContextFigures(store: store).padding(.top, 12).padding(.bottom, 12)
       ContextHairline()
       Text("Sessão \(ContextUsage.money(store.costs.session)) · Subagentes \(ContextUsage.money(store.costs.subagents))")
         .appFont(.caption).monospacedDigit().foregroundStyle(theme.color(.text))
         .lineLimit(1).padding(.vertical, 10)
       ContextHairline()
-      ContextSubagents(store: store, runtime: runtime).padding(.top, 14)
-      if let mcps = store.sessions.liveConversation(runtime.selection.childID ?? store.id)?.mcps,
-        mcps.summary.visible {
+      ContextSubagents(store: store, runtime: runtime, narrow: narrow).padding(.top, 14)
+      if let mcps = store.sessions.liveConversation(store.id)?.mcps, mcps.summary.visible {
         ContextHairline()
         ContextMCPs(store: mcps).padding(.top, 14)
       }
@@ -72,6 +76,56 @@ struct ContextColumnSections: View {
       ContextDetails(store: store, runtime: runtime).padding(.top, 14)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    // Only crossing the width changes the state, so dragging the divider re-renders nothing else.
+    .onGeometryChange(for: Bool.self) { $0.size.width < ContextColumn.narrowWidth } action: {
+      narrow = $0
+      #if DEBUG
+      MacContextProbe.narrow = $0
+      #endif
+    }
+  }
+}
+
+#if DEBUG
+/// What the column decided, for `MacAjustesChecks`: its background test copy has no accessibility tree to read.
+@MainActor enum MacContextProbe {
+  static var narrow = false
+}
+#endif
+
+/// `App Mac › Backend da Live Activity`: the column follows the subagent open in the middle column. Each ancestor
+/// goes back to itself; the root clears the subagent, like ⌘[ from its direct child.
+private struct ContextSessionPath: View {
+  @Environment(\.appTheme) private var theme
+  let store: ContextColumnStore
+  let runtime: MacWindowRuntime
+  let rootID: String
+
+  var body: some View {
+    let path = store.sessions.subagentPath(root: rootID, child: store.id)
+    let rootTitle = store.sessions.liveConversation(rootID)?.session?.displayTitle
+      ?? store.sessions.entries.first { $0.session.id == rootID }?.session.displayTitle ?? "Sessão principal"
+    let ancestors = [(id: rootID, title: rootTitle)] + path.dropLast().map { (id: $0.id, title: $0.displayTitle) }
+    HStack(spacing: 5) {
+      ForEach(Array(ancestors.enumerated()), id: \.offset) { index, ancestor in
+        Button {
+          runtime.open(ancestor: ancestor.id)
+        } label: {
+          Text(ancestor.title).lineLimit(1).truncationMode(.middle).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).foregroundStyle(theme.color(.textSecondary))
+        .help("Voltar para \(ancestor.title)" + (index == ancestors.count - 1 ? " (⌘[)" : ""))
+        .accessibilityIdentifier("context-path-" + ancestor.id)
+        Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+          .foregroundStyle(theme.color(.textWeak)).accessibilityHidden(true)
+      }
+      Text(store.session?.displayTitle ?? path.last?.displayTitle ?? "Subagente")
+        .foregroundStyle(theme.color(.text)).lineLimit(1).layoutPriority(1)
+      Spacer(minLength: 0)
+    }
+    .appFont(.caption)
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("context-path")
   }
 }
 
@@ -163,72 +217,85 @@ private struct ContextSummaryLine: View {
   }
 }
 
-/// `◔ 28% | 99,5% | US$ 78,25`: context (its ring before the number, like the title's), cache hit, then cost,
-/// each over a small gray caption, with hairlines between them.
+/// `◔ 38% 383,2k / 1M · ⚡ 97,8% cache · US$ 42,77 total`: the session's context (its latest measured step), cache hit
+/// and total cost, in the subagent lines' order and format at a larger size. It breaks after the context when the
+/// column is too narrow for one line.
 private struct ContextFigures: View {
   @Environment(\.appTheme) private var theme
-  @Environment(\.displayScale) private var displayScale
   let store: ContextColumnStore
 
   var body: some View {
     let usage = store.usage
-    let cache = store.cacheHit
-    HStack(alignment: .top, spacing: 0) {
-      figure(usage?.fraction.map(ContextUsage.percent) ?? "—",
-        caption: "contexto" + (usage.map { " · " + $0.tokenLabel } ?? "")) {
-        if let usage { ContextUsageRing(usage: usage, size: 20) }
+    let metrics = ContextColumn.metrics(usage: usage, cacheHit: store.cacheHit, cost: store.costs.total)
+    let context = metrics.filter { $0.kind == .context || $0.kind == .tokens }
+    let rest = metrics.filter { $0.kind != .context && $0.kind != .tokens }
+    ViewThatFits(in: .horizontal) {
+      HStack(alignment: .center, spacing: 9) {
+        group(context, usage: usage)
+        if !context.isEmpty && !rest.isEmpty { separator }
+        others(rest)
       }
-      divider
-      figure(cache.map(ContextColumn.percent) ?? "—", caption: "cache hit",
-        tone: (cache ?? 1) < ContextColumn.cacheWarning ? .warning : .textStrong)
-        .padding(.leading, 14)
-      divider
-      figure(ContextUsage.money(store.costs.total), caption: "custo total")
-        .padding(.leading, 14)
+      VStack(alignment: .leading, spacing: 6) {
+        group(context, usage: usage)
+        HStack(alignment: .center, spacing: 9) { others(rest) }
+      }
     }
-    .fixedSize(horizontal: false, vertical: true)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel((usage?.accessibilityLabel ?? "contexto sem medição")
       + ", custo total \(ContextUsage.money(store.costs.total))")
   }
 
-  private var divider: some View {
-    Rectangle().fill(theme.color(.border)).frame(width: 1 / displayScale).padding(.vertical, 2)
-  }
+  private var separator: some View { Text("·").font(.system(size: 15)).foregroundStyle(theme.color(.textWeak)) }
 
-  private func figure(_ value: String, caption: String, tone: ThemeRole = .textStrong,
-    @ViewBuilder leading: () -> some View = { EmptyView() }) -> some View
-  {
-    // The ring before the figure, centered on the number and its caption together.
-    HStack(alignment: .center, spacing: 7) {
-      leading()
-      VStack(alignment: .leading, spacing: 3) {
-        Text(value).font(.system(size: 22, weight: .semibold)).monospacedDigit()
-          .foregroundStyle(theme.color(tone)).lineLimit(1).minimumScaleFactor(0.7)
-        Text(caption).appFont(.footnote).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
-          .lineLimit(1).minimumScaleFactor(0.75)
+  /// `◔ 38% 383,2k / 1M`, or `383,2k tokens` for a model outside the catalog.
+  @ViewBuilder private func group(_ metrics: [ContextColumn.Metric], usage: ContextUsage?) -> some View {
+    if !metrics.isEmpty {
+      HStack(alignment: .center, spacing: 7) {
+        if let usage, metrics.contains(where: { $0.kind == .context }) { ContextUsageRing(usage: usage, size: 17) }
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          ForEach(metrics, id: \.kind) { metric in
+            if metric.kind == .context || metrics.count == 1 {
+              value(metric.text)
+            } else {
+              caption(metric.text)
+            }
+          }
+        }
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  /// `⚡ 97,8% cache · US$ 42,77 total`.
+  @ViewBuilder private func others(_ metrics: [ContextColumn.Metric]) -> some View {
+    ForEach(Array(metrics.enumerated()), id: \.offset) { index, metric in
+      if index > 0 { separator }
+      HStack(alignment: .firstTextBaseline, spacing: 5) {
+        if metric.kind == .cache {
+          Image(systemName: "bolt.fill").font(.system(size: 12)).foregroundStyle(theme.color(.textSecondary))
+        }
+        value(metric.text, tone: metric.warning ? .warning : .textStrong)
+        caption(metric.kind == .cache ? "cache" : "total")
+      }
+    }
+  }
+
+  private func value(_ text: String, tone: ThemeRole = .textStrong) -> some View {
+    Text(text).font(.system(size: 18, weight: .semibold)).monospacedDigit().foregroundStyle(theme.color(tone))
+      .lineLimit(1)
+  }
+
+  private func caption(_ text: String) -> some View {
+    Text(text).appFont(.caption).monospacedDigit().foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
   }
 }
 
 // MARK: - Subagents
 
-/// The fixed metric columns, right-aligned: contexto · cache · custo.
-private enum SubagentColumns {
-  static let context: CGFloat = 50
-  static let cache: CGFloat = 46
-  /// Fits `US$ 999,99` and the compact `US$ 260,4 mil` at 11 pt.
-  static let cost: CGFloat = 80
-  static let spacing: CGFloat = 12
-  static let gutter: CGFloat = 13
-}
-
 private struct ContextSubagents: View {
   @Environment(\.appTheme) private var theme
   let store: ContextColumnStore
   let runtime: MacWindowRuntime
+  let narrow: Bool
   @State private var expanded = false
 
   var body: some View {
@@ -237,14 +304,8 @@ private struct ContextSubagents: View {
     #endif
     let subagents = store.subagents
     VStack(alignment: .leading, spacing: 0) {
-      ContextSectionLabel(title: "Subagentes", count: "\(subagents.active)/\(subagents.total)") {
-        HStack(spacing: SubagentColumns.spacing) {
-          header("contexto", width: SubagentColumns.context)
-          header("cache", width: SubagentColumns.cache)
-          header("custo", width: SubagentColumns.cost)
-        }
-      }
-      .padding(.bottom, 4)
+      ContextSectionLabel(title: "Subagentes", count: "\(subagents.active)/\(subagents.total)")
+        .padding(.bottom, 4)
       if subagents.total == 0 {
         Text(store.loaded ? "Nenhum subagente nesta sessão." : "Carregando…").appFont(.caption)
           .foregroundStyle(theme.color(.textSecondary)).padding(.vertical, 10)
@@ -252,7 +313,7 @@ private struct ContextSubagents: View {
       let rows = subagents.shown + (expanded ? subagents.hidden : [])
       ForEach(Array(rows.enumerated()), id: \.element.id) { index, subagent in
         if index > 0 { ContextHairline() }
-        SubagentLine(store: store, subagent: subagent) {
+        SubagentLine(store: store, subagent: subagent, narrow: narrow) {
           if let child = subagent.work.sessionID { runtime.selection.childID = child }
         }
       }
@@ -275,74 +336,45 @@ private struct ContextSubagents: View {
       }
     }
   }
-
-  private func header(_ title: String, width: CGFloat) -> some View {
-    Text(title).appFont(.footnote).foregroundStyle(theme.color(.textSecondary))
-      .frame(width: width, alignment: .trailing)
-  }
 }
 
-/// One subagent: title and its metrics, `agora: …` with the resource it drives and the elapsed time, and the
-/// permission's Permitir · Negar. Its state is a small glyph: a gray spinning ring while it runs, an amber `?`
-/// while it asks, nothing once it ended.
+/// One subagent, aligned at the column's margin with no glyph before it: the title, `agente · Modelo · esforço`, the
+/// metrics line and `agora: …` with the resource it drives. A running title shimmers like the web's; one waiting for
+/// Alexandre carries an amber `?` after it and says what it asks, in amber, beside Permitir · Negar or Responder;
+/// a finished row is dimmed to 45%, below a running title's dimmer base between passes.
 private struct SubagentLine: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.sessionRowDate) private var now
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.macStillCapture) private var still
   let store: ContextColumnStore
   let subagent: ContextColumn.Subagent
+  let narrow: Bool
   let open: () -> Void
+
+  private var waiting: Bool { subagent.status == .permission || subagent.status == .question }
 
   var body: some View {
     #if DEBUG
     let _ = MacPerf.count("SubagentLine")
     #endif
-    HStack(alignment: .firstTextBaseline, spacing: 5) {
-      glyph.frame(width: SubagentColumns.gutter, alignment: .leading)
-      VStack(alignment: .leading, spacing: 3) {
-        HStack(alignment: .firstTextBaseline, spacing: SubagentColumns.spacing) {
-          Text(subagent.work.title).appFont(.secondary, weight: .medium).foregroundStyle(theme.color(.textStrong))
-            .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-          metric(subagent.usage?.totalLabel ?? "—", width: SubagentColumns.context)
-            .help(subagent.usage.map { $0.tokenLabel } ?? "Sem medição de contexto")
-          metric(subagent.cacheHit.map(ContextColumn.percent) ?? "—", width: SubagentColumns.cache,
-            tone: (subagent.cacheHit ?? 1) < ContextColumn.cacheWarning ? .warning : .text)
-          cost
-        }
-        // `astraxhighultra · Astra 6 - ultrafast · xhigh`: who runs it and with which model now.
-        HStack(alignment: .firstTextBaseline, spacing: SubagentColumns.spacing) {
-          Text(ContextColumn.runLabel(subagent.work, agents: store.agents, models: store.models) ?? "—")
-            .appFont(.footnote).foregroundStyle(theme.color(.textSecondary))
-            .lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier("subagent-model-" + subagent.id)
-          Text(elapsed).appFont(.caption).monospacedDigit().foregroundStyle(theme.color(.textSecondary))
-            .frame(width: SubagentColumns.cost, alignment: .trailing)
-        }
-        Text(activity).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
+    VStack(alignment: .leading, spacing: 3) {
+      title
+      // `astraxhighultra · Astra 6 - ultrafast · xhigh`: who runs it and with which model now.
+      Text(ContextColumn.runLabel(subagent.work, agents: store.agents, models: store.models) ?? "—")
+        .appFont(.footnote).foregroundStyle(theme.color(.textSecondary))
+        .lineLimit(1).truncationMode(.middle)
+        .accessibilityIdentifier("subagent-model-" + subagent.id)
+      metrics
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text(activity).appFont(.caption).foregroundStyle(theme.color(waiting ? .warning : .textSecondary))
           .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-        if let permission = subagent.permission {
-          HStack(spacing: 6) {
-            Spacer(minLength: 0)
-            Button("Permitir") { Task { await store.reply(permission, allow: true) } }
-              .foregroundStyle(theme.color(.textStrong))
-            Text("·").foregroundStyle(theme.color(.textWeak))
-            Button("Negar") { Task { await store.reply(permission, allow: false) } }
-              .foregroundStyle(theme.color(.text))
-          }
-          .appFont(.caption)
-          .buttonStyle(.plain)
-          .padding(.top, 3)
-          .disabled(store.acting.contains(permission.id))
-        } else if subagent.status == .question, subagent.work.sessionID != nil {
-          HStack(spacing: 6) {
-            Spacer(minLength: 0)
-            Button("Responder ›", action: open).foregroundStyle(theme.color(.textStrong))
-          }
-          .appFont(.caption).buttonStyle(.plain).padding(.top, 3)
-        }
+        actions
       }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.vertical, 9)
-    .opacity(subagent.status.live ? 1 : 0.6)
+    .opacity(subagent.status.live ? 1 : 0.45)
     .contentShape(Rectangle())
     .onTapGesture(perform: open)
     .contextMenu {
@@ -354,66 +386,126 @@ private struct SubagentLine: View {
     .help(subagent.work.sessionID == nil ? "" : "Abrir \(subagent.work.title)")
     .accessibilityElement(children: .contain)
     .accessibilityLabel("\(subagent.work.title), \(subagent.status.label)")
+    .accessibilityIdentifier("subagent-" + subagent.id)
   }
 
-  @ViewBuilder private var glyph: some View {
-    switch subagent.status {
-    case .permission, .question:
-      Image(systemName: "questionmark.circle").font(.system(size: 12, weight: .medium))
-        .foregroundStyle(theme.color(.warning))
-        .accessibilityLabel(subagent.status.label)
-    case .running, .starting:
-      ContextSpinner().accessibilityLabel(subagent.status.label)
-    default:
-      Color.clear.frame(width: 11, height: 11)
+  @ViewBuilder private var title: some View {
+    let text = subagent.work.title
+    if waiting {
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        plainTitle(text)
+        Image(systemName: "questionmark.circle").font(.system(size: 12, weight: .medium))
+          .foregroundStyle(theme.color(.warning)).fixedSize()
+          .accessibilityLabel(subagent.status.label)
+      }
+    } else if (subagent.status == .running || subagent.status == .starting) && !reduceMotion && !still {
+      MacShimmerText(text: text, font: .systemFont(ofSize: AppTextStyle.secondary.size, weight: .medium),
+        base: theme.nsColor(.textSecondary), peak: theme.nsColor(.textStrong))
+        .accessibilityLabel(text)
+        .accessibilityIdentifier("subagent-shimmer-" + subagent.id)
+    } else {
+      plainTitle(text)
     }
   }
 
-  /// The whole cost when it fits the column, else `US$ 2,7 mil`; never cut with an ellipsis.
-  private var cost: some View {
-    ViewThatFits(in: .horizontal) {
-      Text(ContextUsage.money(subagent.cost))
-      Text(ContextUsage.compactMoney(subagent.cost)).fixedSize()
+  private func plainTitle(_ text: String) -> some View {
+    Text(text).appFont(.secondary, weight: .medium).foregroundStyle(theme.color(.textStrong)).lineLimit(1)
+  }
+
+  /// The tokens drop first when the line does not fit (narrow, or a long cost); they stay in the tooltip.
+  private var metrics: some View {
+    let line = { (narrow: Bool) in
+      ContextMetricsLine(
+        metrics: ContextColumn.metrics(usage: subagent.usage, cacheHit: subagent.cacheHit, cost: subagent.cost,
+          elapsed: elapsed, progress: subagent.progress, narrow: narrow),
+        usage: subagent.usage)
     }
-    .appFont(.footnote).monospacedDigit().foregroundStyle(theme.color(.textStrong)).lineLimit(1)
-    .frame(width: SubagentColumns.cost, alignment: .trailing)
-    .help(ContextUsage.money(subagent.cost))
+    return ViewThatFits(in: .horizontal) {
+      line(narrow)
+      line(true)
+    }
+    .help(subagent.usage.map { "Contexto \($0.tokenLabel)" } ?? "Sem medição de contexto")
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("subagent-metrics-" + subagent.id)
   }
 
-  private func metric(_ value: String, width: CGFloat, tone: ThemeRole = .text) -> some View {
-    Text(value).appFont(.footnote).monospacedDigit().foregroundStyle(theme.color(tone)).lineLimit(1)
-      .frame(width: width, alignment: .trailing)
+  @ViewBuilder private var actions: some View {
+    if let permission = subagent.permission {
+      HStack(spacing: 6) {
+        Button("Permitir") { Task { await store.reply(permission, allow: true) } }
+          .foregroundStyle(theme.color(.textStrong))
+        Text("·").foregroundStyle(theme.color(.textWeak))
+        Button("Negar") { Task { await store.reply(permission, allow: false) } }
+          .foregroundStyle(theme.color(.text))
+      }
+      .appFont(.caption).buttonStyle(.plain).fixedSize()
+      .disabled(store.acting.contains(permission.id))
+    } else if subagent.status == .question, subagent.work.sessionID != nil {
+      Button("Responder ›", action: open).foregroundStyle(theme.color(.textStrong))
+        .appFont(.caption).buttonStyle(.plain).fixedSize()
+    }
   }
 
-  /// `agora: usando webfetch · Chrome · localhost:4177`: the current tool, then any resource it drives.
+  /// `agora: usando webfetch · Chrome · localhost:4177`: the current tool, then any resource it drives. A request
+  /// says what it asks for instead (`Quer rodar: gh api …`, `Pergunta: …`).
   private var activity: String {
     let current: String
     if let permission = subagent.permission {
       current = permission.preview
     } else if subagent.status == .question {
-      current = store.question(subagent.work.sessionID).map { "pergunta · " + $0.preview } ?? "aguardando sua resposta"
+      current = store.question(subagent.work.sessionID).map { "Pergunta: " + $0.preview } ?? "Aguardando sua resposta"
     } else if subagent.status.live {
-      current = subagent.work.sessionID.flatMap { store.activities[$0] } ?? "pensando"
+      current = "agora: " + (subagent.work.sessionID.flatMap { store.activities[$0] } ?? "pensando")
     } else {
       current = subagent.status.label.lowercased()
     }
-    let resources = subagent.resources.map(ContextColumn.chip)
-    return ([(subagent.status.live ? "agora: " : "") + current] + resources).joined(separator: " · ")
+    return ([current] + subagent.resources.map(ContextColumn.chip)).joined(separator: " · ")
   }
 
-  private var elapsed: String {
+  private var elapsed: String? {
     let millis = now.timeIntervalSince1970 * 1000
     if subagent.status.live { return SessionList.relativeTime(subagent.work.started, now: now).label }
-    return subagent.work.duration.map { SessionList.relativeTime(millis - $0, now: now).label } ?? "—"
+    return subagent.work.duration.map { SessionList.relativeTime(millis - $0, now: now).label }
   }
 }
 
-/// A small gray ring turning while a subagent runs.
-private struct ContextSpinner: View {
+/// `◔ 71% · 711,3k / 1M · ⚡ 99,0% · US$ 26,95 · 20m · ☑ 2/4`, in the order `ContextColumn.metrics` gives.
+private struct ContextMetricsLine: View {
   @Environment(\.appTheme) private var theme
+  let metrics: [ContextColumn.Metric]
+  let usage: ContextUsage?
+
   var body: some View {
-    MacSpinningArc(from: 0, to: 0.72, color: theme.nsColor(.textSecondary), lineWidth: 1.5, period: 1.1)
-      .frame(width: 10, height: 10)
+    HStack(alignment: .center, spacing: 5) {
+      ForEach(Array(metrics.enumerated()), id: \.offset) { index, metric in
+        if index > 0 { Text("·").foregroundStyle(theme.color(.textWeak)) }
+        item(metric)
+      }
+    }
+    .appFont(.footnote).monospacedDigit().lineLimit(1)
+  }
+
+  @ViewBuilder private func item(_ metric: ContextColumn.Metric) -> some View {
+    switch metric.kind {
+    case .context:
+      HStack(spacing: 4) {
+        if let usage { ContextUsageRing(usage: usage, size: 10) }
+        Text(metric.text).foregroundStyle(theme.color(.text))
+      }
+    case .cache:
+      HStack(spacing: 2) {
+        Image(systemName: "bolt.fill").font(.system(size: 8)).foregroundStyle(theme.color(.textSecondary))
+        Text(metric.text).foregroundStyle(theme.color(metric.warning ? .warning : .text))
+      }
+    case .progress:
+      HStack(spacing: 3) {
+        Image(systemName: "checklist").font(.system(size: 9)).foregroundStyle(theme.color(.textSecondary))
+        Text(metric.text).foregroundStyle(theme.color(.text))
+      }
+      .accessibilityLabel("Progresso \(metric.text)")
+    case .cost: Text(metric.text).foregroundStyle(theme.color(.textStrong))
+    case .tokens, .elapsed: Text(metric.text).foregroundStyle(theme.color(.textSecondary))
+    }
   }
 }
 

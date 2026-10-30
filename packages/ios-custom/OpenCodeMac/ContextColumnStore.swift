@@ -2,8 +2,9 @@ import Observation
 import OpenCodeKit
 import SwiftUI
 
-/// The live data of the Contexto column for one root session: the same reads the iPhone's conversation
-/// and "Agentes e tarefas" use, refreshed by the shared event stream.
+/// The live data of the Contexto column for one session, the root or a subagent open over it (its own family,
+/// subagents, cost and context): the same reads the iPhone's conversation and "Agentes e tarefas" use, refreshed
+/// by the shared event stream.
 @MainActor @Observable final class ContextColumnStore {
   let id: String
   let sessions: SessionStore
@@ -33,6 +34,12 @@ import SwiftUI
   }
   @ObservationIgnored private var scheduled: Task<Void, Never>?
   @ObservationIgnored private var resourcesTask: Task<Void, Never>?
+  #if DEBUG
+  /// The column listening to the events (the one on screen) and how many times it read the server, for
+  /// `MacAjustesChecks`.
+  @ObservationIgnored static weak var shown: ContextColumnStore?
+  @ObservationIgnored private(set) var loads = 0
+  #endif
 
   init(id: String, sessions: SessionStore) {
     self.id = id
@@ -52,7 +59,14 @@ import SwiftUI
   var subagents: ContextColumn.Subagents {
     ContextColumn.subagents(
       work: work, rootID: id, members: members, models: models, permissions: family?.permissions ?? [],
-      forms: family?.forms ?? [], resources: resources)
+      forms: family?.forms ?? [], resources: resources, progress: progress)
+  }
+  /// Each subagent's open Progresso (`2/4`), from the `todowrite` calls the shared event stream saw
+  /// (`SessionStore.progress`); a list from before the app opened shows from its next call.
+  private var progress: [String: ContextColumn.Progress] {
+    Dictionary(uniqueKeysWithValues: members.compactMap { member in
+      sessions.progress(member.id).flatMap { $0.open ? (member.id, ContextColumn.Progress(done: $0.done, total: $0.total)) : nil }
+    })
   }
   var tasks: [SessionWork] { work.filter { $0.kind == .script } }
   var costs: ContextColumn.Costs { ContextColumn.costs(session: session, family: family, members: members) }
@@ -77,6 +91,9 @@ import SwiftUI
   }
 
   func run() async {
+    #if DEBUG
+    Self.shown = self
+    #endif
     await load()
     for await frame in sessions.hub.events() {
       if Task.isCancelled { break }
@@ -95,6 +112,9 @@ import SwiftUI
   }
 
   func load() async {
+    #if DEBUG
+    loads += 1
+    #endif
     do {
       let session = try await client.session(id)
       let directory = session.location.directory

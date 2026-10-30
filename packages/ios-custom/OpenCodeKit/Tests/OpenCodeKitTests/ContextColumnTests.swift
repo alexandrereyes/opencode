@@ -161,6 +161,81 @@ private let family = """
   #expect(ContextColumn.percent(1) == "100,0%")
 }
 
+/// 711,3k tokens, 99% of the reads from cache.
+private func usage(limit: Double?) throws -> ContextUsage? {
+  let tokens = try decode(TokenUsage.self, #"{"input":7100,"output":1000,"reasoning":0,"cache":{"read":703200,"write":0}}"#)
+  return ContextUsage(tokens: tokens, limit: limit)
+}
+
+@Test func contextColumnMetricsLineKeepsContextCacheCostTimeAndProgressInOrder() throws {
+  let metrics = ContextColumn.metrics(
+    usage: try usage(limit: 1_000_000), cacheHit: 0.99, cost: 26.95, elapsed: "20m",
+    progress: .init(done: 2, total: 4))
+  #expect(metrics.map(\.kind) == [.context, .tokens, .cache, .cost, .elapsed, .progress])
+  // Context without a decimal, cache with one.
+  #expect(metrics.map(\.text) == ["71%", "711,3k / 1M", "99,0%", ContextUsage.money(26.95), "20m", "2/4"])
+  #expect(metrics.allSatisfy { !$0.warning })
+}
+
+@Test func contextColumnMetricsLineDropsTheTokensWhenNarrow() throws {
+  let metrics = ContextColumn.metrics(usage: try usage(limit: 1_000_000), cacheHit: 0.99, cost: 2_759.4, narrow: true)
+  #expect(metrics.map(\.text) == ["71%", "99,0%", "US$ 2,8 mil"])
+  #expect(ContextColumn.metrics(usage: try usage(limit: 1_000_000), cacheHit: nil, cost: 2_759.4).map(\.text)
+    == ["71%", "711,3k / 1M", ContextUsage.money(2_759.4)])
+}
+
+@Test func contextColumnMetricsLineShowsOnlyTokensForAModelOutsideTheCatalog() throws {
+  for narrow in [false, true] {
+    let metrics = ContextColumn.metrics(usage: try usage(limit: nil), cacheHit: 0.606, cost: nil, narrow: narrow)
+    #expect(metrics.map(\.kind) == [.tokens, .cache])
+    #expect(metrics.map(\.text) == ["711,3k tokens", "60,6%"])
+    // A cache hit below 80% is a warning.
+    #expect(metrics.map(\.warning) == [false, true])
+  }
+  #expect(ContextColumn.metrics(usage: try usage(limit: 800_000), cacheHit: nil, cost: nil).first?.warning == true)
+}
+
+@Test func contextColumnMetricsLineLeavesOutWhatIsMissing() throws {
+  // Before the first measured step, without a cost or a Progresso: nothing to show.
+  #expect(ContextColumn.metrics(usage: nil, cacheHit: nil, cost: nil).isEmpty)
+  #expect(ContextColumn.metrics(usage: nil, cacheHit: nil, cost: 1, elapsed: "2m", progress: nil).map(\.text)
+    == [ContextUsage.money(1), "2m"])
+  // An empty list is no Progresso.
+  #expect(ContextColumn.metrics(usage: nil, cacheHit: nil, cost: nil, progress: .init(done: 0, total: 0)).isEmpty)
+}
+
+@Test func contextColumnPassesAChildsProgressToItsRow() throws {
+  let members = try decode([Session].self, family)
+  let work = ConversationProjection.work(
+    ownerID: "root", viewedID: "root", messages: [], children: members, active: ["a", "b"], shells: [])
+  let subagents = ContextColumn.subagents(
+    work: work, rootID: "root", members: members, models: [], permissions: [], forms: [], resources: [],
+    progress: ["a": .init(done: 2, total: 4), "c": .init(done: 1, total: 3)])
+  #expect(subagents.shown.first { $0.id == "a" }?.progress?.label == "2/4")
+  // Without data the row has none, and the line keeps no room for it.
+  #expect(subagents.shown.first { $0.id == "b" }?.progress == nil)
+  // Like Sessões, only while the child works.
+  #expect(subagents.shown.first { $0.id == "c" }?.status == .completed)
+  #expect(subagents.shown.first { $0.id == "c" }?.progress == nil)
+}
+
+/// A subagent opened in the middle column has its own family: the column then lists its subagents (the root's
+/// grandchildren) and splits its own cost from theirs.
+@Test func contextColumnFollowsAnOpenedSubagent() throws {
+  let members = try decode([Session].self, family)
+  let child = try #require(members.first { $0.id == "a" })
+  let grandchildren = members.filter { $0.parentID == "a" }
+  let work = ConversationProjection.work(
+    ownerID: "a", viewedID: "a", messages: [], children: grandchildren, active: ["a1"], shells: [])
+  let subagents = ContextColumn.subagents(
+    work: work, rootID: "a", members: grandchildren, models: [], permissions: [], forms: [], resources: [])
+  #expect(subagents.shown.map(\.id) == ["a1"])
+  #expect(subagents.active == 1)
+  let costs = ContextColumn.costs(session: child, family: nil, members: grandchildren)
+  #expect(costs.session == 5)
+  #expect(costs.subagents == 2.27)
+}
+
 @Test func contextColumnFiltersOnlyChangedFilesAndTheirFolders() throws {
   let changes = try decode([WorkingChange].self, #"""
     [{"file":"packages/ios-custom/OpenCode/SessionColumn/SessionRowView.swift","additions":81,"deletions":0,"status":"modified"},

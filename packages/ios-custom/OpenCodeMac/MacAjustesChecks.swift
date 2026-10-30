@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -61,6 +61,7 @@ import SwiftUI
       case "arquivos": try await arquivos(window: window, runtime: runtime, shot: shot)
       case "ampliar": try await ampliar(window: window, runtime: runtime, shot: shot)
       case "progresso": try await progresso(window: window, runtime: runtime, theme: theme, folder: folder, shot: shot)
+      case "contexto": try await contexto(window: window, runtime: runtime, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -1066,6 +1067,222 @@ import SwiftUI
     try await rendered("A configuração existe, mas nenhuma oferta confirma o prazo", visible: true, in: window)
     try await Task.sleep(for: .milliseconds(500))
     shot("estreito")
+  }
+
+  // MARK: Contexto — the metrics line, the shimmer and the open subagent
+
+  /// The subagents' lines wide and narrow, their titles at the margin (the running ones shimmering on one phase), the
+  /// waiting one's request, the shimmer's CPU, then the column following a subagent, its own subagent and the way
+  /// back. The copy runs in the background without an accessibility tree: geometry comes from the AppKit views, the
+  /// rest from the column's data and decisions, and the pictures show the result.
+  private static func contexto(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
+    let rootID = MacFixture.rootID
+    let child = MacFixtureServer.parentOfGrandchildren
+    func column(_ id: String, subagents: Int) async throws -> ContextColumnStore {
+      try await wait("Contexto de \(id)", timeout: 12) {
+        ContextColumnStore.shown.flatMap { $0.id == id && $0.loaded && $0.subagents.total == subagents ? $0 : nil }
+      }
+    }
+    func shimmers(_ count: Int) async throws -> [MacShimmerText.ShimmerView] {
+      try await wait("\(count) títulos com brilho") {
+        let views = views(window).compactMap { $0 as? MacShimmerText.ShimmerView }.filter { $0.window != nil }
+        return views.count == count && views.allSatisfy { $0.phase != nil && $0.bounds.width > 40 } ? views : nil
+      }
+    }
+    /// Every running title starts at the column's margin, 18 pt inside Contexto's scroll view (else inside the
+    /// column, which ends at the window's edge): nothing is drawn before it.
+    func margins(_ views: [MacShimmerText.ShimmerView]) throws {
+      let scroll = views.first.flatMap { view in
+        sequence(first: view as NSView, next: { $0.superview }).lazy.compactMap { $0 as? NSScrollView }.first
+      }
+      let margin = (scroll.map { $0.convert($0.bounds, to: nil).minX }
+        ?? (window.contentView?.bounds.width ?? 0) - runtime.measuredContextWidth) + 18
+      let starts = views.map { $0.convert($0.bounds, to: nil).minX }
+      guard starts.allSatisfy({ abs($0 - margin) < 1 }) else {
+        throw Failure(description: "títulos recuados: margem \(margin), começos \(starts)")
+      }
+    }
+    runtime.contextWidth = 1_000
+    let root = try await column(rootID, subagents: MacFixtureServer.children.count)
+    do {
+      try await wait("Contexto largo") { runtime.measuredContextWidth > 990 ? true : nil }
+    } catch {
+      throw Failure(description: "Contexto \(runtime.measuredContextWidth) de \(runtime.contextWidth) pedidos · chat "
+        + "\(runtime.measuredChatWidth) · janela \(window.frame.width)")
+    }
+    let states = Dictionary(root.subagents.shown.map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a })
+    guard ["ses_mac_c1", "ses_mac_c2", "ses_mac_c3"].allSatisfy({ states[$0] == .running }),
+      states["ses_mac_c4"] == .permission, states["ses_mac_c5"] == .completed else {
+      throw Failure(description: "estados da raiz: \(states)")
+    }
+    let running = try await shimmers(3)
+    // One phase: every pass starts on a multiple of the period.
+    guard running.allSatisfy({ min($0.phase ?? 1, MacShimmerText.period - ($0.phase ?? 1)) < 0.001 }) else {
+      throw Failure(description: "fases do brilho: \(running.map { $0.phase ?? -1 })")
+    }
+    try margins(running)
+    guard !MacContextProbe.narrow else { throw Failure(description: "1000 pt tratado como estreito") }
+    guard root.subagents.shown.first(where: { $0.id == "ses_mac_c4" })?.permission?.preview
+      == "Quer rodar: gh api repos/jean/referencias" else { throw Failure(description: "pedido do subagente esperando") }
+    // A running subagent's `todowrite`, through the shared stream like a real one: its line gains `☑ 1/3`.
+    for event in progressEvents("ses_mac_c2") { runtime.store?.hub.inject(event) }
+    try await wait("Progresso do subagente") {
+      root.subagents.shown.first { $0.id == "ses_mac_c2" }?.progress?.label == "1/3" ? true : nil
+    }
+    try await Task.sleep(for: .seconds(1.2))
+    shot("largo")
+    // Three moments of the pass, held still: the bright band over the start, the middle and the end.
+    for (index, fraction) in [0.3, 0.5, 0.7].enumerated() {
+      running.forEach { $0.hold(at: fraction) }
+      try await Task.sleep(for: .milliseconds(500))
+      shot("brilho-\(index + 1)")
+    }
+    running.forEach { $0.hold(at: nil) }
+    try await shimmerCPU(runtime: runtime)
+
+    runtime.contextWidth = 400
+    try await wait("painel estreito") { MacContextProbe.narrow ? true : nil }
+    print("MacAjustes contexto larguras: janela \(Int(window.frame.width)) · Contexto \(Int(runtime.measuredContextWidth))")
+    try margins(try await shimmers(3))
+    try await Task.sleep(for: .milliseconds(800))
+    shot("estreito")
+
+    // Opening a subagent: the column shows its context, costs and its own subagents, with the path back.
+    runtime.contextWidth = 1_000
+    runtime.selection.childID = child
+    let opened = try await column(child, subagents: MacFixtureServer.grandchildren.count)
+    guard opened.session?.id == child, abs((opened.usage?.fraction ?? 0) - 0.2851) < 0.001,
+      opened.costs.session == 2_759.40, abs((opened.costs.subagents ?? 0) - 1.26) < 0.001,
+      opened.subagents.shown.map(\.id) == ["ses_mac_g1", "ses_mac_g2"],
+      opened.subagents.shown.map(\.status) == [.running, .completed]
+    else {
+      throw Failure(description: "coluna do subagente: \(opened.usage?.fraction ?? -1) · \(opened.costs) · "
+        + "\(opened.subagents.shown.map { "\($0.id) \($0.status)" })")
+    }
+    try margins(try await shimmers(1))
+    guard opened.sessions.subagentPath(root: rootID, child: child).map(\.id) == [child] else {
+      throw Failure(description: "caminho do subagente")
+    }
+    try await Task.sleep(for: .milliseconds(800))
+    shot("subagente-largo")
+    // Live: a step of its running subagent reloads it; another session's does not.
+    let loads = opened.loads
+    runtime.store?.hub.inject(event("session.updated", "ses_mac_g1"))
+    try await wait("recarregou com o evento do neto") { opened.loads > loads ? true : nil }
+    try await Task.sleep(for: .seconds(1))
+    let settled = opened.loads
+    runtime.store?.hub.inject(event("session.updated", "ses_mac_live"))
+    try await Task.sleep(for: .seconds(1.5))
+    guard opened.loads == settled else { throw Failure(description: "recarregou com o evento de outra sessão") }
+    runtime.contextWidth = 400
+    try await wait("subagente estreito") { MacContextProbe.narrow ? true : nil }
+    try await Task.sleep(for: .seconds(1))
+    shot("subagente-estreito")
+
+    // Its subagent: the path names both ancestors; the middle one goes back to it, then the root.
+    runtime.contextWidth = 1_000
+    runtime.selection.childID = "ses_mac_g1"
+    let grandchild = try await column("ses_mac_g1", subagents: 0)
+    try await wait("caminho pelo subagente do meio") {
+      grandchild.sessions.subagentPath(root: rootID, child: "ses_mac_g1").map(\.id) == [child, "ses_mac_g1"] ? true : nil
+    }
+    try await Task.sleep(for: .milliseconds(800))
+    shot("neto")
+    runtime.open(ancestor: child)
+    _ = try await column(child, subagents: MacFixtureServer.grandchildren.count)
+    guard runtime.selection.childID == child else { throw Failure(description: "o caminho não voltou ao subagente") }
+    runtime.open(ancestor: rootID)
+    try await wait("Contexto voltou à raiz") {
+      runtime.selection.childID == nil && ContextColumnStore.shown === root ? true : nil
+    }
+    // The root's column was kept: it shows at once while it reloads.
+    guard root.loaded, root.subagents.total == MacFixtureServer.children.count else {
+      throw Failure(description: "a coluna da raiz voltou vazia")
+    }
+    // ⌘[ and the banner's Voltar.
+    runtime.selection.childID = child
+    _ = try await column(child, subagents: MacFixtureServer.grandchildren.count)
+    runtime.backToParent()
+    try await wait("⌘[ voltou à raiz") {
+      runtime.selection.childID == nil && ContextColumnStore.shown?.id == rootID ? true : nil
+    }
+    try await Task.sleep(for: .milliseconds(800))
+    shot("voltou")
+  }
+
+  /// The shimmer's cost, with the three running titles on screen against Contexto hidden: the main thread, the
+  /// whole process, the window server and how many times the subagent rows' bodies ran.
+  private static func shimmerCPU(runtime: MacWindowRuntime) async throws {
+    func measure(_ name: String) async -> (main: Double, process: Double, server: Double?, bodies: Int) {
+      try? await Task.sleep(for: .seconds(1.5))
+      MacPerf.resetCounts()
+      MacPerf.counting = true
+      let wall = CACurrentMediaTime()
+      let main = MacPerf.mainCPU()
+      let process = processCPU()
+      let server = windowServerCPU()
+      try? await Task.sleep(for: .seconds(8))
+      let seconds = CACurrentMediaTime() - wall
+      MacPerf.counting = false
+      let result = (main: (MacPerf.mainCPU() - main) / seconds, process: (processCPU() - process) / seconds,
+        server: server.flatMap { start in windowServerCPU().map { ($0 - start) / seconds } },
+        bodies: (MacPerf.counts["SubagentLine"] ?? 0) + (MacPerf.counts["ContextSubagents"] ?? 0))
+      print(String(format: "MacAjustes contexto cpu %@: principal %.2f%% · processo %.2f%% · WindowServer %@ · corpos %d",
+        name, result.main * 100, result.process * 100,
+        result.server.map { String(format: "%.2f%%", $0 * 100) } ?? "—", result.bodies))
+      fflush(stdout)
+      return result
+    }
+    let shimmering = await measure("três títulos com brilho")
+    runtime.contextVisible = false
+    let hidden = await measure("Contexto oculto")
+    runtime.contextVisible = true
+    // SwiftUI redraws nothing while the band runs: the rows' bodies run at most on the minute's tick (an animation
+    // in SwiftUI would run them on every frame), and the main thread stays as idle as without the column.
+    guard shimmering.bodies <= 12, shimmering.main < hidden.main + 0.02 else {
+      throw Failure(description: "o brilho custa: \(shimmering) contra \(hidden)")
+    }
+  }
+
+  private static func processCPU() -> Double {
+    var usage = rusage()
+    getrusage(RUSAGE_SELF, &usage)
+    return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec)
+      + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
+  }
+
+  /// The window server's CPU time in seconds (`ps`), where Core Animation runs the band.
+  private static func windowServerCPU() -> Double? {
+    func run(_ path: String, _ arguments: [String]) -> String? {
+      let process = Process()
+      let pipe = Pipe()
+      process.executableURL = URL(fileURLWithPath: path)
+      process.arguments = arguments
+      process.standardOutput = pipe
+      guard (try? process.run()) != nil else { return nil }
+      process.waitUntilExit()
+      return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    guard let pid = run("/usr/bin/pgrep", ["-x", "WindowServer"])?.split(separator: "\n").first,
+      let time = run("/bin/ps", ["-o", "cputime=", "-p", String(pid)]) else { return nil }
+    // `[[hh:]mm:]ss.cc`
+    return time.split(separator: ":").reduce(0.0) { $0 * 60 + (Double($1) ?? 0) }
+  }
+
+  /// A `todowrite` call that succeeds: one item done, one in hand, one pending.
+  private static func progressEvents(_ id: String) -> [ServerEvent] {
+    let todos = #"[{"content":"Ler o tracker","status":"completed"},{"content":"Editar a Live Activity","status":"in_progress"},{"content":"Rodar os testes","status":"pending"}]"#
+    return [
+      #"{"type":"session.tool.input.started","created":0,"data":{"sessionID":"\#(id)","id":"call_todo_\#(id)","name":"todowrite"}}"#,
+      #"{"type":"session.tool.called","created":0,"data":{"sessionID":"\#(id)","id":"call_todo_\#(id)","name":"todowrite","input":{"todos":\#(todos)}}}"#,
+      #"{"type":"session.tool.success","created":0,"data":{"sessionID":"\#(id)","id":"call_todo_\#(id)"}}"#,
+    ].map { .update(try! JSONDecoder().decode(ConversationEvent.self, from: Data($0.utf8))) }
+  }
+
+  private static func event(_ type: String, _ id: String) -> ServerEvent {
+    let json = #"{"type":"\#(type)","created":\#(Date.now.timeIntervalSince1970 * 1000),"data":{"sessionID":"\#(id)"}}"#
+    return .update(try! JSONDecoder().decode(ConversationEvent.self, from: Data(json.utf8)))
   }
 
   /// A Markdown text view of the window whose text contains `text`, laid out with height (and on screen).

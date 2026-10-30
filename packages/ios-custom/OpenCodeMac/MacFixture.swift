@@ -53,7 +53,7 @@ import OpenCodeKit
   }
 }
 
-private struct MacFixtureServer: Sendable {
+struct MacFixtureServer: Sendable {
   let root: String
   let now: Double
   let pictures: [String: String]
@@ -80,7 +80,8 @@ private struct MacFixtureServer: Sendable {
     case "/api/session/active":
       let ended = progress && MacAjustesChecks.progressEnded
       return #"{"data":{"#
-        + ((ended ? [] : ["ses_mac_root"]) + ["ses_mac_live"] + Self.live.map(\.id)).map { #""\#($0)":{"type":"running"}"# }
+        + ((ended ? [] : ["ses_mac_root"]) + ["ses_mac_live"] + Self.live.map(\.id) + Self.liveGrandchildren.map(\.id))
+          .map { #""\#($0)":{"type":"running"}"# }
           .joined(separator: ",") + "}}"
     case "/api/session": return #"{"data":[\#(searchFixture ? archivedSession : "")],"cursor":{}}"#
     case "/api/model" where MacFixture.value("-OpenCodeMacLargeCatalog") != nil: return largeCatalog
@@ -178,14 +179,22 @@ private struct MacFixtureServer: Sendable {
         let branch = directory == root ? "mac-app" : "main"
         return #"{"directory":"\#(directory)","worktree":"\#(directory)","canonical":"\#(directory)","branch":"\#(branch)"}"#
       }.joined(separator: ",") + "]"
+    // Every descendant of the root, its grandchildren included; Backend da Live Activity has subagents of its own.
     case "custom.session-family/snapshot":
-      input?["sessionID"]?.string == MacFixture.rootID
-        ? #"{"count":\#(Self.children.count),"cost":63.89,"active":[\#(Self.live.map { session($0) }.joined(separator: ","))],"forms":[\#(rootQuestion)],"permissions":[\#(childPermission)]}"#
-        : #"{"count":0,"active":[],"forms":[],"permissions":[]}"#
+      switch input?["sessionID"]?.string {
+      case MacFixture.rootID:
+        #"{"count":\#(Self.children.count + Self.grandchildren.count),"cost":63.89,"active":[\#((Self.live + Self.liveGrandchildren).map { session($0) }.joined(separator: ","))],"forms":[\#(rootQuestion)],"permissions":[\#(childPermission)]}"#
+      case Self.parentOfGrandchildren:
+        #"{"count":\#(Self.grandchildren.count),"cost":\#(Self.grandchildren.map(\.cost).reduce(0, +)),"active":[\#(Self.liveGrandchildren.map { session($0) }.joined(separator: ","))],"forms":[],"permissions":[]}"#
+      default: #"{"count":0,"active":[],"forms":[],"permissions":[]}"#
+      }
     case "custom.session-family/page":
-      input?["sessionID"]?.string == MacFixture.rootID
-        ? #"{"data":[\#(Self.children.map { session($0) }.joined(separator: ","))],"next":null}"#
-        : #"{"data":[],"next":null}"#
+      switch input?["sessionID"]?.string {
+      case MacFixture.rootID:
+        #"{"data":[\#((Self.children + Self.grandchildren).map { session($0) }.joined(separator: ","))],"next":null}"#
+      case Self.parentOfGrandchildren: #"{"data":[\#(Self.grandchildren.map { session($0) }.joined(separator: ","))],"next":null}"#
+      default: #"{"data":[],"next":null}"#
+      }
     case "custom.transcript/list":
       transcript(input?["sessionID"]?.string ?? "", limit: input?["limit"]?.number.map(Int.init),
         cursor: input?["cursor"]?.string)
@@ -221,6 +230,9 @@ private struct MacFixtureServer: Sendable {
     let started: Double
     var finished: Double? = nil
     var activity: String? = nil
+    var parent = MacFixture.rootID
+    /// Its model and the one its context was measured with; `terra-7` is outside the catalog (no limit).
+    var model = "opus-5.5"
   }
 
   static let live: [Child] = [
@@ -229,7 +241,8 @@ private struct MacFixtureServer: Sendable {
     Child(id: "ses_mac_c2", title: "iOS da Live Activity", agent: "opushigh", context: 223_500, cache: 0.991,
       cost: 4.60, started: 18, activity: #"{"name":"edit","state":{"status":"running","input":{"filePath":"packages/ios-custom/OpenCode/SessionsView.swift"}}}"#),
     Child(id: "ses_mac_c3", title: "Mapear apps Mac de agentes", agent: "explore", context: 116_400, cache: 0.826,
-      cost: 2.09, started: 4, activity: #"{"name":"webfetch","state":{"status":"running","input":{"url":"https://agentastic.dev"}}}"#),
+      cost: 2.09, started: 4, activity: #"{"name":"webfetch","state":{"status":"running","input":{"url":"https://agentastic.dev"}}}"#,
+      model: "terra-7"),
     Child(id: "ses_mac_c4", title: "Referências: Jean", agent: "terraxhigh", context: 91_400, cache: 0.606,
       cost: 1.12, started: 7),
   ]
@@ -238,6 +251,16 @@ private struct MacFixtureServer: Sendable {
     return Child(id: String(format: "ses_mac_d%02d", index), title: "Subagente concluído \(index)", agent: "explore",
       context: 20_000 + Double(index) * 900, cache: 0.97, cost: 1.15, started: 60 + step, finished: 50 + step)
   }
+  /// The subagents of Backend da Live Activity: one running, one finished.
+  static let parentOfGrandchildren = "ses_mac_c1"
+  static let grandchildren: [Child] = [
+    Child(id: "ses_mac_g1", title: "Ler os testes do backend", agent: "explore", context: 61_200, cache: 0.97,
+      cost: 0.84, started: 9, activity: #"{"name":"read","state":{"status":"running","input":{"path":"packages/plugin-app-custom/test/live-activity.test.ts"}}}"#,
+      parent: parentOfGrandchildren),
+    Child(id: "ses_mac_g2", title: "Mapear eventos do tracker", agent: "explore", context: 38_900, cache: 0.95,
+      cost: 0.42, started: 16, finished: 12, parent: parentOfGrandchildren),
+  ]
+  static var liveGrandchildren: [Child] { grandchildren.filter { $0.finished == nil } }
   static let children: [Child] = live + [
     Child(id: "ses_mac_c5", title: "Capturar tela do web custom", agent: "terrahigh", context: 70_600, cache: 0.994,
       cost: 260.85, started: 40, finished: 25),
@@ -250,7 +273,7 @@ private struct MacFixtureServer: Sendable {
     let tokens = #"{"input":\#(Int(input)),"output":1000,"reasoning":0,"cache":{"read":\#(Int(read)),"write":0}}"#
     let finished = child.finished.map { #","idle":\#(now - $0 * minute)"# } ?? ""
     let outcome = child.finished == nil ? "" : #","outcome":"succeeded""#
-    return #"{"id":"\#(child.id)","parentID":"ses_mac_root","projectID":"prj_opencode2","title":"\#(child.title)","agent":"\#(child.agent)","model":{"id":"opus-5.5","providerID":"llm-proxy","variant":"high"},"cost":\#(child.cost),"tokens":\#(tokens),"context":{"id":"msg_\#(child.id)","tokens":\#(tokens),"model":{"id":"opus-5.5","providerID":"llm-proxy"}},"location":{"directory":"\#(root)"},"time":{"created":\#(now - child.started * minute),"updated":\#(now - (child.finished ?? 0) * minute)\#(finished)}\#(outcome)}"#
+    return #"{"id":"\#(child.id)","parentID":"\#(child.parent)","projectID":"prj_opencode2","title":"\#(child.title)","agent":"\#(child.agent)","model":{"id":"\#(child.model)","providerID":"llm-proxy","variant":"high"},"cost":\#(child.cost),"tokens":\#(tokens),"context":{"id":"msg_\#(child.id)","tokens":\#(tokens),"model":{"id":"\#(child.model)","providerID":"llm-proxy"}},"location":{"directory":"\#(root)"},"time":{"created":\#(now - child.started * minute),"updated":\#(now - (child.finished ?? 0) * minute)\#(finished)}\#(outcome)}"#
   }
 
   private struct Root {
@@ -339,7 +362,8 @@ private struct MacFixtureServer: Sendable {
   }
 
   private var sessions: [String: String] {
-    Dictionary(uniqueKeysWithValues: roots.map { ($0.id, rootSession($0)) } + Self.children.map { ($0.id, session($0)) }
+    Dictionary(uniqueKeysWithValues: roots.map { ($0.id, rootSession($0)) }
+      + (Self.children + Self.grandchildren).map { ($0.id, session($0)) }
       + (searchFixture ? [("ses_mac_archived", archivedSession)] : []))
   }
 
@@ -369,9 +393,9 @@ private struct MacFixtureServer: Sendable {
   // MARK: Transcripts
 
   private func transcript(_ id: String, limit: Int? = nil, cursor: String? = nil) -> String {
-    if let child = Self.live.first(where: { $0.id == id }) {
+    if let child = (Self.live + Self.liveGrandchildren).first(where: { $0.id == id }) {
       let tool = child.activity.map { #",{"type":"tool","id":"call_\#(id)",\#($0.dropFirst())"# } ?? ""
-      return #"{"data":[{"id":"msg_\#(id)_a","type":"assistant","time":{"created":\#(now - minute)},"content":[{"type":"text","text":"Trabalhando em \#(child.title)\#(perfTick)."}\#(tool)]}]}"#
+      return #"{"data":[{"id":"msg_\#(id)_a","type":"assistant","time":{"created":\#(now - minute)},"content":[{"type":"text","text":"Trabalhando em \#(child.title)\#(perfTick)."}\#(subagentCalls(of: id))\#(tool)]}]}"#
     }
     guard id == MacFixture.rootID else {
       return #"{"data":[{"id":"msg_\#(id)","type":"assistant","time":{"created":\#(now - 30 * minute)},"content":[{"type":"text","text":"Resumo sintético da sessão\#(MacPerf.streaming.contains(id) ? perfTick : "")."}]}]}"#
@@ -385,6 +409,16 @@ private struct MacFixtureServer: Sendable {
     let end = min(messages.count, start + limit)
     let next = end < messages.count ? #""o\#(end)""# : "null"
     return #"{"data":[\#(messages[min(start, end)..<end].joined(separator: ","))],"cursor":{"next":\#(next),"previous":null}}"#
+  }
+
+  /// The `subagent` calls that started a session's own subagents, so their elapsed time counts from the call.
+  private func subagentCalls(of id: String) -> String {
+    Self.grandchildren.filter { $0.parent == id }.map { child in
+      let start = now - child.started * minute
+      let state = child.finished.map { #""status":"completed","output":"Pronto.","time":{"completed":\#(now - $0 * minute)}"# }
+        ?? #""status":"running""#
+      return #",{"type":"tool","id":"call_\#(child.id)","name":"subagent","state":{\#(state),"input":{"agent":"\#(child.agent)","description":"\#(child.title)"},"metadata":{"sessionID":"\#(child.id)"}},"time":{"created":\#(start),"ran":\#(start)}}"#
+    }.joined()
   }
 
   /// `-OpenCodeMacPerfLong <n>`: `n` earlier turns before the root's two, each a prompt and an answer with Markdown

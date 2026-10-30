@@ -310,6 +310,7 @@ import SwiftUI
       .environment(\.appTheme, theme)
       .environment(\.locale, Locale(identifier: "pt_BR"))
       .environment(\.colorScheme, theme.dark ? .dark : .light)
+      .environment(\.macStillCapture, true)
     let renderer = ImageRenderer(content: content)
     renderer.scale = 2
     guard let image = renderer.cgImage,
