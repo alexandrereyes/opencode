@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -62,6 +62,7 @@ import SwiftUI
       case "ampliar": try await ampliar(window: window, runtime: runtime, shot: shot)
       case "progresso": try await progresso(window: window, runtime: runtime, theme: theme, folder: folder, shot: shot)
       case "contexto": try await contexto(window: window, runtime: runtime, shot: shot)
+      case "caminhos": try await caminhos(window: window, runtime: runtime, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -1283,6 +1284,99 @@ import SwiftUI
   private static func event(_ type: String, _ id: String) -> ServerEvent {
     let json = #"{"type":"\#(type)","created":\#(Date.now.timeIntervalSince1970 * 1000),"data":{"sessionID":"\#(id)"}}"#
     return .update(try! JSONDecoder().decode(ConversationEvent.self, from: Data(json.utf8)))
+  }
+
+  // MARK: Paths in an answer
+
+  /// `-OpenCodeMacAjustes caminhos`: an audio file outside the project, made by the script (`-OpenCodeMacPathSample`).
+  nonisolated static let pathSample = mode == "caminhos" ? MacFixture.value("-OpenCodeMacPathSample") : nil
+  private nonisolated static let markdownFolder = "packages/ios-custom/script/fixtures/mac-markdown"
+
+  /// The list the fixture's first answer gains: the sample and a missing file beside it in inline code, a relative
+  /// path with `:linha`, an explicit link with `%20` and an explicit link to a folder.
+  nonisolated static func pathsAnswer(_ sample: String) -> String {
+    "\n\nAs amostras:\n\n- `\(sample)`\n- `\(sample).ausente.m4a`\n- `\(markdownFolder)/simples.md:3`\n"
+      + "- [o relatório](\(markdownFolder)/Relat%C3%B3rio%20com%20tabela%20larga.md)\n"
+      + "- [a pasta das fixtures](packages/ios-custom/script/fixtures/)"
+  }
+
+  /// The Mac linked inline code only for http URLs (30/10): a path the iPhone opens, `/private/var/…/amostra.m4a`,
+  /// was plain text. Inline code naming a file the server lists becomes a link, a missing one stays text; each link
+  /// is clicked with real mouse events and opens Arquivos at the file (the folder for a folder link); a file gone
+  /// since then shows the warning.
+  private static func caminhos(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
+    let sample = try require(pathSample, "-OpenCodeMacPathSample")
+    let root = try require(MacFixture.current?.root, "fixture")
+    let store = try require(runtime.store, "sessões")
+    let transcript = try await wait("transcrição") {
+      runtime.memory(MacFixture.rootID).active.flatMap { $0.revealed ? $0 : nil }
+    }
+    transcript.reveal(messageID: "msg_root_2")
+    let text = try await wait("lista de caminhos") {
+      views(window).compactMap { $0 as? MacResponseTextView }.first { $0.string.contains(sample) && !$0.visibleRect.isEmpty }
+    }
+    func link(_ shown: String) -> (URL, NSRange)? {
+      let range = (text.string as NSString).range(of: shown)
+      guard range.location != NSNotFound, let storage = text.textStorage else { return nil }
+      return (storage.attribute(.link, at: range.location + 1, effectiveRange: nil) as? URL).map { ($0, range) }
+    }
+    let file = try await wait("caminho fora do projeto virou link") {
+      link(sample).flatMap { FileReference.path($0.0) == sample && !FileReference.isFolder($0.0) ? $0.1 : nil }
+    }
+    let line = try await wait("caminho com :linha virou link") {
+      link(markdownFolder + "/simples.md:3").flatMap { FileReference.path($0.0) == markdownFolder + "/simples.md" ? $0.1 : nil }
+    }
+    let folder = try await wait("link de pasta") {
+      link("a pasta das fixtures").flatMap { FileReference.isFolder($0.0) ? $0.1 : nil }
+    }
+    let report = try require(link("o relatório"), "link com %20")
+    guard FileReference.path(report.0) == markdownFolder + "/Relatório com tabela larga.md" else {
+      throw Failure(description: "link com %20: \(report.0)")
+    }
+    // The missing file was looked up with the others and stays plain text.
+    try await Task.sleep(for: .milliseconds(600))
+    if link(sample + ".ausente.m4a") != nil { throw Failure(description: "caminho inexistente virou link") }
+    shot("links")
+
+    try clickLink(text, file, in: window)
+    let files = try await wait("Arquivos com a amostra") { MacFilesStore.shown.flatMap { $0.selected == sample ? $0 : nil } }
+    let loaded = try await wait("amostra carregada") { files.file }
+    guard loaded.error == nil, loaded.text == nil else { throw Failure(description: "amostra: \(loaded.error ?? "lida como texto")") }
+    try await Task.sleep(for: .milliseconds(800))
+    shot("amostra")
+    try clickLink(text, line, in: window)
+    try await wait("arquivo do :linha") { files.selected == root + "/" + markdownFolder + "/simples.md" ? true : nil }
+    try clickLink(text, report.1, in: window)
+    try await wait("arquivo com %20") { files.selected == root + "/" + markdownFolder + "/Relatório com tabela larga.md" ? true : nil }
+    try clickLink(text, folder, in: window)
+    try await wait("pasta do link") {
+      MacFilesStore.shown.flatMap { $0.folder == root + "/packages/ios-custom/script/fixtures" ? true : nil }
+    }
+
+    try FileManager.default.removeItem(atPath: sample)
+    try clickLink(text, file, in: window)
+    // The window shows the Sessions store's toasts; a conversation's own toast is never drawn on the Mac.
+    let warning = try await wait("aviso de arquivo inexistente") {
+      store.toast.message.flatMap { $0.kind == .error && $0.text.contains(sample) ? $0.text : nil }
+    }
+    guard warning.hasPrefix("Arquivo não encontrado") else { throw Failure(description: "aviso: \(warning)") }
+    try await Task.sleep(for: .milliseconds(400))
+    shot("ausente")
+  }
+
+  /// A real click (down, then the release already queued) at the middle of `range`'s first line.
+  private static func clickLink(_ view: MacResponseTextView, _ range: NSRange, in window: NSWindow) throws {
+    let rect = view.firstRect(forCharacterRange: NSRange(location: range.location, length: min(range.length, 6)), actualRange: nil)
+    let point = window.convertPoint(fromScreen: CGPoint(x: rect.midX, y: rect.midY))
+    guard let hit = window.contentView?.superview?.hitTest(point) ?? window.contentView?.hitTest(point), hit === view else {
+      throw Failure(description: "o link não está sob o clique em \(point)")
+    }
+    func mouse(_ type: NSEvent.EventType) -> NSEvent? {
+      NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+    }
+    if let up = mouse(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
+    if let down = mouse(.leftMouseDown) { window.sendEvent(down) }
   }
 
   /// A Markdown text view of the window whose text contains `text`, laid out with height (and on screen).

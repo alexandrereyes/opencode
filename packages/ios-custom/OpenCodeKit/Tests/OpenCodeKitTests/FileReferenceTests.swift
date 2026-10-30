@@ -21,6 +21,14 @@ import Testing
   #expect(FileReference.path(FileReference.link("/Users/mac/ação #one.png")) == "/Users/mac/ação #one.png")
 }
 
+@Test func responseRunsNameInlineCodePathsAndExplicitLocalLinksOnBothApps() {
+  let sample = "/private/var/folders/pm/x/T/opencode/amostra-bossa.m4a"
+  let blocks = MarkdownBlocks.parse("- `\(sample)`\n- `docs/a.swift:12`\n- [relatório](docs/Relat%C3%B3rio%20final.md)\n- [web](https://example.com/a.md)\n- `value` e prosa /tmp/b.png")
+  #expect(blocks.flatMap(\.runs).compactMap { FileReference.named($0) }.map { "\($0.0)|\($0.explicit)" } == [
+    "\(sample)|false", "docs/a.swift|false", "docs/Relatório final.md|true",
+  ])
+}
+
 @Test func fileViewerRoutesTypesAndRequiresConsentBeforeLargeDownloads() {
   for ext in ["png", "JPEG", "heic", "webp"] { #expect(FileViewerKind(path: "a.\(ext)") == .image) }
   for ext in ["mp4", "mov", "m4v", "mp3", "m4a", "wav", "aac", "flac"] { #expect(FileViewerKind(path: "a.\(ext)") == .audiovisual) }

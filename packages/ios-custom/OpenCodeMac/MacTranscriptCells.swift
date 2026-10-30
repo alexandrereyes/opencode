@@ -93,7 +93,8 @@ final class MacProseCell: MacTranscriptCell {
     text.context = context
     text.part = part
     inset = context.inset
-    let value = MacResponseTextStyle.text(prose, theme: context.theme, rasters: context.rasters(part))
+    let value = MacResponseTextStyle.text(prose, theme: context.theme, rasters: context.rasters(part),
+      files: context.fileTargets(prose.segments, stable: part.stable))
     highlight(value, prose: prose, part: part, context: context)
     text.show(value, prose: prose, theme: context.theme)
     setAccessibilityIdentifier(item?.id)

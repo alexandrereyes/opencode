@@ -3349,7 +3349,18 @@ separate track.
   through the folder's files, like the iPhone viewer's siblings. Images, PDF, audio and video stay in Quick Look.
   `MacMarkdownText` draws the plain parse from its first frame and swaps in the highlighted one when it lands: until
   30/10 it started empty, and a lazy stack never builds a row of zero height, so its `.task` never ran and every
-  Markdown file showed a blank pane. Keep it non-empty from the start in any lazy list. `-OpenCodeMacAjustes markdown`
+  Markdown file showed a blank pane. Keep it non-empty from the start in any lazy list.
+- **Paths in answers** (30/10): until then the Mac linked inline code only for `http(s)` URLs, so a path the iPhone
+  opens (`/private/var/folders/…/amostra.m4a`) was plain text. Both apps now take a run's path from
+  `FileReference.named` (inline code or an explicit local link, `:linha`/`#L` stripped, `%20` decoded); the Mac asks
+  `fileLinkTarget` once the answer finished (`MacTranscriptContext.fileTargets`, 60 s cache, `fileRevision`
+  configures the cells again) and links inline code naming a file or folder the server lists, wherever it is
+  (Session directory, `~`, temporary folders). A file opens Arquivos at it, read from this Mac or downloaded from the
+  server; a folder opens Arquivos listing it; a file gone since shows "Arquivo não encontrado no servidor" in the
+  window's toast (a conversation's own toast is not drawn on the Mac). A link takes the first click of a background
+  window (`acceptsFirstMouse`). `-OpenCodeMacAjustes caminhos` (the script makes a real `.m4a` under the resolved
+  temporary folder) clicks each kind with real mouse events and checks the warning after deleting the sample.
+- `-OpenCodeMacAjustes markdown`
   opens a short file and a long report with wide tables and links (`script/fixtures/mac-markdown`) as a chat link
   does and requires their text and the table on screen. `-OpenCodeMacAjustes arquivos` checks the tree (a link
   expands and marks its file, ‹ › and ⌃⌘← ⌃⌘→, Recentes, the filter, Alterados) and `ampliar` checks Ampliar and

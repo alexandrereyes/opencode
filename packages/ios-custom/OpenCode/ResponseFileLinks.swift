@@ -58,14 +58,7 @@ extension ResponseTextView {
 
 enum ResponseFileLinks {
   /// The local path a run may name: unlinked inline code, or an explicit local Markdown link.
-  static func path(_ run: MarkdownRun) -> (String, explicit: Bool)? {
-    if let link = run.link {
-      guard let path = FileReference.local(link) else { return nil }
-      return (path.removingPercentEncoding ?? path, true)
-    }
-    guard run.code, let path = FileReference.inline(run.text) else { return nil }
-    return (path, false)
-  }
+  static func path(_ run: MarkdownRun) -> (String, explicit: Bool)? { FileReference.named(run) }
 }
 
 extension SelectableResponseText.Coordinator {

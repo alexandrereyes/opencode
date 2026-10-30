@@ -191,7 +191,7 @@ import SwiftUI
   /// Native text cells read the context when configured; reconfigure them when what they draw changes.
   private func observeContext() {
     withObservationTracking {
-      _ = (context.theme.id, context.search, context.quotes, context.rasterRevision)
+      _ = (context.theme.id, context.search, context.quotes, context.rasterRevision, context.fileRevision)
     } onChange: { [weak self] in
       Task { @MainActor in
         guard let self else { return }

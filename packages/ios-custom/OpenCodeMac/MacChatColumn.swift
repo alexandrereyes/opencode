@@ -294,6 +294,7 @@ struct MacConversationView: View {
       if context.avatar != avatar { context.avatar = avatar }
       context.openChild = { id in open(child: id) }
       context.openPath = { path in openFile(path) }
+      context.openFolder = { folder in runtime.showFiles(at: folder) }
       context.revert = { message in revertCandidate = message }
       context.comment = { quote in commenting = quote }
       context.sideQuestion = { text in runtime.askSideQuestion(quote: text) }
@@ -417,16 +418,18 @@ struct MacConversationView: View {
     runtime.selection.childID = id
   }
 
-  /// A file named in an answer opens Arquivos at its folder, with the file selected.
+  /// A file named in an answer opens Arquivos at its folder, with the file selected; an explicit link to a folder
+  /// opens Arquivos listing it. The server answers, so paths outside the project (`~`, temporary folders) open too.
   private func openFile(_ source: String) {
     guard let directory = conversation.session?.location.directory else { return }
     Task {
-      let path = try? await sessions.client.fileLinkMatches(source, directory: directory).first
-      guard let path else {
-        conversation.toast.show("Arquivo não encontrado: \(source)", kind: .error)
-        return
+      if let path = try? await sessions.client.fileLinkMatches(source, directory: directory).first {
+        return runtime.showFiles(at: URL(fileURLWithPath: path).deletingLastPathComponent().path, file: path)
       }
-      runtime.showFiles(at: URL(fileURLWithPath: path).deletingLastPathComponent().path, file: path)
+      if case .directory(let folder)? = try? await sessions.client.fileLinkTarget(source, directory: directory) {
+        return runtime.showFiles(at: folder)
+      }
+      sessions.toast.show("Arquivo não encontrado no servidor: \(source)", kind: .error)
     }
   }
 }

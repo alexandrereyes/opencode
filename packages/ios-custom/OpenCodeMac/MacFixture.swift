@@ -120,7 +120,9 @@ struct MacFixtureServer: Sendable {
     case "/api/session/\(MacFixture.rootID)/inbox":
       return #"{"data":[{"id":"inb_mac_1","sessionID":"\#(MacFixture.rootID)","type":"user","delivery":"queue","payload":{"text":"Depois roda os testes do Mac e do iPhone"},"time":{"created":\#(now - minute)}}]}"#
     case "/api/fs/list":
-      return list(query.first { $0.name == "path" }?.value ?? query.first { $0.name == "location[directory]" }?.value ?? root)
+      if let path = query.first(where: { $0.name == "path" })?.value { return list(path) }
+      // Without `path` the server lists the Location itself, paths relative to it (`fileLinkMatches`).
+      return list(query.first { $0.name == "location[directory]" }?.value ?? root, relative: true)
     case "/api/fs/find": return find(query.first { $0.name == "query" }?.value ?? "")
     case "/api/form":
       return attention
@@ -454,6 +456,7 @@ struct MacFixtureServer: Sendable {
     if MacDetailsFixture.mode != nil { return MacDetailsFixture.messages(now: now) }
     let first = now - 48 * minute
     let answer = "## Próxima etapa\n\nClaro! Vou criar o app de Mac com a coluna de contexto ao vivo, reaproveitando a coluna de Sessões do iPhone.\n\n- A janela tem três colunas: Sessões, o chat e o Contexto.\n- O Contexto mostra subagentes, tarefas e recursos em uso.\n\nO componente principal da lista de sessões está em `SessionColumnSections.swift`, e o cabeçalho em `packages/ios-custom/OpenCode/SessionColumn/SessionColumnHeader.swift`."
+      + (MacAjustesChecks.pathSample.map(MacAjustesChecks.pathsAnswer) ?? "")
     let encoded = String(decoding: try! JSONEncoder().encode(answer), as: UTF8.self)
     var offset = 20.0
     func call(_ id: String, _ name: String, _ input: String, seconds: Double, metadata: String = "{}") -> String {
@@ -521,7 +524,7 @@ struct MacFixtureServer: Sendable {
   }
 
   /// Lists this Mac's folder, folders first, like `/api/fs/list`. Paths are absolute (Location `/`).
-  private func list(_ path: String) -> String? {
+  private func list(_ path: String, relative: Bool = false) -> String? {
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: path) else { return nil }
     let entries = names.compactMap { name -> (String, Bool)? in
       var directory: ObjCBool = false
@@ -529,9 +532,9 @@ struct MacFixtureServer: Sendable {
       return (name, directory.boolValue)
     }.sorted { $0.1 != $1.1 ? $0.1 : $0.0.localizedStandardCompare($1.0) == .orderedAscending }
     let data = entries.map { name, directory in
-      #"{"path":"\#(String((path + "/" + name).dropFirst()))","type":"\#(directory ? "directory" : "file")"}"#
+      #"{"path":"\#(relative ? name : String((path + "/" + name).dropFirst()))","type":"\#(directory ? "directory" : "file")"}"#
     }
-    return #"{"location":{"directory":"/"},"data":[\#(data.joined(separator: ","))]}"#
+    return #"{"location":{"directory":"\#(relative ? path : "/")"},"data":[\#(data.joined(separator: ","))]}"#
   }
 
   private func find(_ query: String) -> String {

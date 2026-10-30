@@ -102,7 +102,7 @@ import SwiftUI
   }
 
   static func text(_ block: MarkdownBlock, theme: AppTheme, rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:],
-    tableHeader: Bool = false) -> NSMutableAttributedString
+    tableHeader: Bool = false, files: [String: FileLinkTarget] = [:]) -> NSMutableAttributedString
   {
     let result = NSMutableAttributedString()
     let heading: Int? = { if case .heading(let level) = block.kind { level } else { nil } }()
@@ -154,11 +154,19 @@ import SwiftUI
         attributes[.link] = url
         attributes[.foregroundColor] = theme.nsColor(.markdownLink)
       }
-      if let link = run.link, let path = FileReference.local(link) {
-        attributes[.link] = FileReference.link(path.removingPercentEncoding ?? path)
+      // A local path, as on the iPhone: an explicit link always, inline code once the server confirmed it (`files`);
+      // a confirmed folder opens Arquivos at it.
+      let named = code ? nil : FileReference.named(run)
+      let target = named.flatMap { files[$0.0] }
+      let local: URL? = named.flatMap { named in
+        if case .directory(let folder)? = target { return FileReference.folderLink(folder) }
+        return named.explicit || target != nil ? FileReference.link(named.0) : nil
+      }
+      if let local, run.link != nil {
+        attributes[.link] = local
         attributes[.foregroundColor] = theme.nsColor(.markdownLink)
       }
-      if run.code, !code, run.link == nil, let url = FileReference.inlineURL(run.text) {
+      if run.code, !code, run.link == nil, let url = FileReference.inlineURL(run.text) ?? local {
         attributes[.link] = url
         attributes[.foregroundColor] = theme.nsColor(.inlineCode)
         attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
@@ -188,11 +196,11 @@ import SwiftUI
 
   /// Prose segments joined as paragraphs of one text, unit for unit with `prose.block`.
   static func text(_ prose: MarkdownProse, theme: AppTheme,
-    rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:]) -> NSMutableAttributedString
+    rasters: [ResponseFormulaKey: ResponseFormulaRaster] = [:], files: [String: FileLinkTarget] = [:]) -> NSMutableAttributedString
   {
     let result = NSMutableAttributedString()
     for (index, segment) in prose.segments.enumerated() {
-      let part = segment.kind == .rule ? rule() : text(segment, theme: theme, rasters: rasters)
+      let part = segment.kind == .rule ? rule() : text(segment, theme: theme, rasters: rasters, files: files)
       let extra = CGFloat(segment.indent) + CGFloat(segment.quoteDepth) * quoteLevel
       let first = (part.string as NSString).range(of: "\n").location
       let lead = NSRange(location: 0, length: first == NSNotFound ? part.length : first + 1)
@@ -385,6 +393,14 @@ final class MacResponseTextView: NSTextView {
     highlights.first { $0.mark.quote.id == id }?.ranges.first.flatMap { rect(for: quoteMap.display($0))?.minY }
   }
 
+  /// A link opens on the first click even while the window is behind another app's, as the composer takes its
+  /// first click; elsewhere that click only brings the window forward.
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    guard let event, let storage = textStorage else { return false }
+    let index = characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
+    return index < storage.length && storage.attribute(.link, at: index, effectiveRange: nil) != nil
+  }
+
   override func mouseDown(with event: NSEvent) {
     let point = convert(event.locationInWindow, from: nil)
     let wasSelected = selectedRange().length > 0
@@ -487,7 +503,8 @@ struct MacSelectableBlock: NSViewRepresentable {
     view.part = part
     // Reading this observable value updates this cell only when its marks change.
     _ = transcript.quotes
-    view.show(MacResponseTextStyle.text(block, theme: transcript.theme, tableHeader: tableHeader),
+    view.show(MacResponseTextStyle.text(block, theme: transcript.theme, tableHeader: tableHeader,
+      files: transcript.fileTargets([block], stable: part.stable)),
       prose: MarkdownProse([block]), theme: transcript.theme)
   }
   func sizeThatFits(_ proposal: ProposedViewSize, nsView: MacResponseTextView, context: Context) -> CGSize? {

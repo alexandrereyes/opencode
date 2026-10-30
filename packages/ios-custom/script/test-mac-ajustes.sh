@@ -12,14 +12,16 @@ prints=${OPENCODE_MAC_CAPTURES:-${TMPDIR%/}/opencode/mac-ajustes-prints/checks}
 mkdir -p "$prints"
 copy="$prints/OpenCodeMacAjustesChecks.app"
 domain=br.com.alexandrem.opencode.mac.ajustes.tests
+# `caminhos`: an audio file outside the project, under the resolved temporary folder (`/private/var/folders/…`).
+samples=${${TMPDIR%/}:A}/opencode/mac-caminhos-$$
 ditto "$derived/Build/Products/Debug/OpenCodeMac.app" "$copy"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $domain" "$copy/Contents/Info.plist"
 codesign --force --deep --sign - "$copy" 2>/dev/null
 # cfprefsd may still write the last app's preferences right after it exits.
-trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
+trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$samples" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
 failed=0
 # Without arguments, every mode (zsh does not split `${@:-…}` into words).
-modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto)
+modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos)
 (( $# )) && modes=("$@")
 for mode in $modes; do
   # Each mode starts from a fresh window: no restored window, reading place or Contexto width.
@@ -41,6 +43,10 @@ for mode in $modes; do
     # The sheets' composers (Nova sessão, Pergunta paralela, a comment) record with the fake microphone too; the
     # fixtures' reviewer answers in 2.5 s, so "Ajustando texto…" can be seen and cancelled.
     dictation) extra=(-OpenCodeMacFakeDictation -OpenCodeDictationReview 2500) ;;
+    caminhos)
+      mkdir -p "$samples"
+      afconvert -f m4af -d aac /System/Library/Sounds/Ping.aiff "$samples/amostra.m4a"
+      extra=(-OpenCodeMacPathSample "$samples/amostra.m4a") ;;
   esac
   set +e
   timeout 150 "$copy/Contents/MacOS/OpenCodeMac" -OpenCodeMacFixture contexto \

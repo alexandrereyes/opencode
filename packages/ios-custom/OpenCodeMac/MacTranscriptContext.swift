@@ -54,10 +54,15 @@ struct MacTranscriptAvatar: Equatable {
   /// The transcript's viewport; prompts cap their text at 40% of its height, like the iPhone.
   var viewport: CGFloat = 800
   var rasterRevision = 0
+  /// Bumped when a path named in an answer resolves differently on the server (`fileTargets`).
+  var fileRevision = 0
+  @ObservationIgnored private var files: [String: (target: FileLinkTarget?, checked: Date)] = [:]
+  @ObservationIgnored private var lookups: Set<String> = []
   /// Prompts whose bubble is pinned at the top right now.
   var pinned: String?
   @ObservationIgnored var openChild: (String) -> Void = { _ in }
   @ObservationIgnored var openPath: (String) -> Void = { _ in }
+  @ObservationIgnored var openFolder: (String) -> Void = { _ in }
   @ObservationIgnored var loadOlder: () -> Void = {}
   @ObservationIgnored var revealTurn: (String) -> Bool = { _ in false }
   @ObservationIgnored var revert: (ConversationMessage) -> Void = { _ in }
@@ -106,13 +111,46 @@ struct MacTranscriptAvatar: Equatable {
     return rasterLookup(part.partID)
   }
 
-  /// A link in an answer: a file opens Arquivos at its folder; anything else opens in its app.
+  /// A link in an answer: a file opens Arquivos at its folder, a folder opens Arquivos listing it; anything else
+  /// opens in its app.
   func open(_ url: URL) {
     if let path = FileReference.path(url) {
+      if FileReference.isFolder(url) { return openFolder(path) }
       openPath(path)
       return
     }
     NSWorkspace.shared.open(url)
+  }
+
+  /// What the local paths these blocks name are on the server, as far as already confirmed, like the iPhone's
+  /// `ResponseFileExistence`: inline code becomes a link only for a file or folder that exists there, wherever it
+  /// is (the Session directory, `~`, a temporary folder). Unknown paths of a finished answer are looked up through
+  /// `fileLinkTarget` and kept 60 s; a different answer bumps `fileRevision`, which configures the cells again.
+  func fileTargets(_ blocks: [MarkdownBlock], stable: Bool) -> [String: FileLinkTarget] {
+    _ = fileRevision
+    guard let directory = store.session?.location.directory else { return [:] }
+    let paths = Set(blocks.flatMap { block -> [String] in
+      if case .code = block.kind { return [] }
+      return block.runs.compactMap { FileReference.named($0)?.0 }
+    })
+    var targets: [String: FileLinkTarget] = [:]
+    for path in paths {
+      let key = directory + "\u{0}" + path
+      let known = files[key]
+      if let target = known?.target { targets[path] = target }
+      guard stable, !lookups.contains(key), known.map({ Date.now.timeIntervalSince($0.checked) >= 60 }) ?? true
+      else { continue }
+      lookups.insert(key)
+      Task { [weak self, client] in
+        let target = (try? await client.fileLinkTarget(path, directory: directory)) ?? nil
+        guard let self else { return }
+        self.lookups.remove(key)
+        let changed = self.files[key]?.target != target
+        self.files[key] = (target, .now)
+        if changed { self.fileRevision += 1 }
+      }
+    }
+    return targets
   }
 
   /// Quote marks inside one text part, anchored to its source against the whole part's blocks.

@@ -38,6 +38,17 @@ public enum FileReference {
     return path.isEmpty ? nil : path
   }
 
+  /// The local path a response's run may name, on the iPhone and the Mac alike: unlinked inline code, or an explicit
+  /// local Markdown link (decoded). Inline code becomes a link only once `fileLinkTarget` confirms it.
+  public static func named(_ run: MarkdownRun) -> (String, explicit: Bool)? {
+    if let link = run.link {
+      guard let path = local(link) else { return nil }
+      return (path.removingPercentEncoding ?? path, true)
+    }
+    guard run.code, let path = inline(run.text) else { return nil }
+    return (path, false)
+  }
+
   /// A server folder confirmed by `fileLinkTarget`; it opens in the file explorer.
   public static func folderLink(_ path: String) -> URL { link(path, host: "folder") }
 
