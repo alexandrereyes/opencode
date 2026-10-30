@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Case-insensitive composer suggestions against an isolated sandbox. Creates a fake repository, two disposable
-Sessions and one snippet, runs ComposerCaseUITests (or the given test IDs) and removes what it created."""
+"""Case-insensitive composer suggestions against an isolated sandbox. Creates a fake repository, five disposable
+Sessions (one archived, two sharing a title) and one snippet, runs ComposerCaseUITests (or the given test IDs) and
+removes what it created."""
 import base64
 import json
 import os
@@ -47,15 +48,19 @@ model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
 created = []
 
 
-def session(title, messages):
+twin = home / "repos" / "composer-twin"
+twin.mkdir(parents=True, exist_ok=True)
+
+
+def session(title, messages, where=directory):
     now = int(time.time() * 1000)
     id = "ses_" + uuid.uuid4().hex
     api("/api/experimental/session/import", {
-        "info": {"id": id, "title": title, "projectID": "global", "location": {"directory": str(directory)},
+        "info": {"id": id, "title": title, "projectID": "global", "location": {"directory": str(where)},
                  "agent": "build", "model": model, "outcome": "succeeded", "cost": 0,
                  "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
                  "time": {"created": now, "updated": now, "idle": now, "viewed": now}},
-        "location": {"directory": str(directory)}, "messages": messages}, "POST")
+        "location": {"directory": str(where)}, "messages": messages}, "POST")
     created.append(id)
     return id
 
@@ -67,6 +72,11 @@ try:
     conversation = session("Caixa das sugestões", [
         {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Teste de caixa.", "time": {"created": now - 1000}}])
     target = session("Sessão Revisão Especial", [])
+    # Mentions skip archived sessions and tell repeated titles apart.
+    archived = session("Arquivada Escondida", [])
+    api("/api/rpc/custom.archive/archive", {"input": {"sessionID": archived}}, "POST")
+    twin_a = session("Gemea Repetida", [])
+    twin_b = session("Gemea Repetida", [], where=twin)
     api("/api/rpc/custom.snippets/save?" + query, {"input": {
         "id": "snip-commit", "name": "commit-push-pr", "description": "Commit, push e PR", "aliases": ["cpp"],
         "content": "Faça commit, push e abra o PR."}}, "POST")
@@ -74,6 +84,7 @@ try:
     command = next(c["name"] for c in api("/api/command?" + query)["data"] if c["name"].isascii() and c["name"].isalpha())
     agent = next(a["id"] for a in api("/api/agent?" + query)["data"]
                  if a.get("mode") != "primary" and not a.get("hidden") and a["id"].isascii() and a["id"].isalpha())
+    report.update({"archived": archived, "twins": [twin_a, twin_b]})
     report.update({"conversation": conversation, "target": target, "skill": skill, "command": command, "agent": agent})
     run = plistlib.loads(next(derived.glob("Build/Products/OpenCode_*.xctestrun")).read_bytes())
     targets = ([t for c in run["TestConfigurations"] for t in c["TestTargets"]]
@@ -82,7 +93,8 @@ try:
         test_target.setdefault("EnvironmentVariables", {}).update({
             "OPENCODE_TEST_PASSWORD": password, "OPENCODE_SERVER_PASSWORD": password, "OPENCODE_TEST_THEME": theme,
             "OPENCODE_TEST_SERVER_URL": url, "OPENCODE_CASE_SESSION": conversation, "OPENCODE_CASE_TARGET": target,
-            "OPENCODE_CASE_SKILL": skill, "OPENCODE_CASE_COMMAND": command, "OPENCODE_CASE_AGENT": agent})
+            "OPENCODE_CASE_SKILL": skill, "OPENCODE_CASE_COMMAND": command, "OPENCODE_CASE_AGENT": agent,
+            "OPENCODE_CASE_ARCHIVED": archived, "OPENCODE_CASE_TWIN_A": twin_a, "OPENCODE_CASE_TWIN_B": twin_b})
         test_target["CommandLineArguments"] = ["-OpenCodeServerURL", url]
     configured.write_bytes(plistlib.dumps(run))
     configured.chmod(0o600)

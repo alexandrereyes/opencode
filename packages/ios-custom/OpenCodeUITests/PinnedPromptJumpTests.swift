@@ -1,8 +1,9 @@
 import XCTest
 
-/// The offline fixture opens at msg_scroll_0148's turn: tool steps, then a long final answer below its divider.
-/// A turn starts right below its prompt when its first step's content sits the message's 10-point top padding
-/// below the prompt: the padding belongs to the message, whether it is drawn inside its cell or above it.
+/// The offline fixture opens at msg_scroll_0148's turn: a long prompt folded to two lines with **Mostrar mensagem
+/// completa**, then tool steps and a long final answer below its divider. A turn starts right below its prompt when
+/// its first step's cell sits the message's 10-point top padding below the prompt. The cell, not the activity
+/// card's button, is measured: the button's touch area reaches above the card it draws.
 @MainActor final class PinnedPromptJumpTests: XCTestCase {
   private let padding: CGFloat = 10
 
@@ -25,7 +26,7 @@ import XCTest
       settle()
       let header = transcript.cells.containing(.any, identifier: "user-content-" + id).firstMatch
       // The turn's first row holds its tool steps; the final answer and its divider come after it.
-      let start = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'tool-group-context:msg_scroll_0149'")).firstMatch
+      let start = transcript.cells.containing(NSPredicate(format: "identifier BEGINSWITH 'tool-group-context:msg_scroll_0149'")).firstMatch
       // The final answer's first paragraphs: one item of the answer (its text views share the part's identifier).
       let answer = transcript.cells["text:msg_scroll_0151:text:0:0"]
       let text = app.descendants(matching: .any)["user-prompt-" + id]
@@ -36,6 +37,18 @@ import XCTest
         // The bubble's padding, beside the prompt text: the bubble's own tap rather than the text's.
         let content = app.descendants(matching: .any)["user-content-" + id].frame
         return app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: content.minX - 7, dy: content.midY))
+      }
+      // The rest of the folded bubble outside its text: the gap above the expansion control, the control's row
+      // beside it, and the padding below it.
+      func outside() -> [(String, XCUICoordinate)] {
+        let content = app.descendants(matching: .any)["user-content-" + id].frame
+        let control = toggle.frame
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        return [
+          ("the gap above Mostrar mensagem completa", CGVector(dx: content.midX, dy: (content.maxY + control.minY) / 2)),
+          ("the row beside Mostrar mensagem completa", CGVector(dx: content.minX + 12, dy: control.midY)),
+          ("the padding below Mostrar mensagem completa", CGVector(dx: control.midX, dy: control.maxY + 6)),
+        ].map { ($0.0, origin.withOffset($0.1)) }
       }
       func unmoved(_ y: CGFloat, _ message: String) {
         settle()
@@ -80,6 +93,17 @@ import XCTest
       XCTAssertTrue(pinned)
       XCTAssertEqual(toggle.value as? String, "Recolhido", "A pinned prompt's text scrolls instead of expanding")
       shot(app, "pinned-jumped-" + theme)
+
+      for (area, point) in outside() {
+        for _ in 0..<3 { drag(app, transcript, by: 120) }
+        settle()
+        XCTAssertTrue(pinned)
+        XCTAssertFalse(atStart, area)
+        point.tap()
+        XCTAssertTrue(wait { atStart }, "Tapping " + area + " returns to the turn's first row")
+        XCTAssertTrue(pinned)
+        XCTAssertEqual(toggle.value as? String, "Recolhido", area)
+      }
 
       // Far enough that the turn's first row is no longer laid out.
       for _ in 0..<12 where answer.frame.minY > transcript.frame.minY - 1600 { drag(app, transcript, by: 300) }

@@ -79,5 +79,31 @@
       "directory": "/Users/alexandremartins/Dev/core-infra",
       "status": "working"
     }
+  ],
+  "needs": [
+    {
+      "sessionID": "ses_01JZCACHEDATABASE000000002",
+      "title": "Escolher banco do cache",
+      "project": "core",
+      "directory": "/Users/alexandremartins/Dev/opencode2",
+      "kind": "question",
+      "since": 1793104680000
+    },
+    {
+      "sessionID": "ses_01JZOAUTHLOGIN000000000003",
+      "title": "Corrigir login OAuth",
+      "project": "app-custom",
+      "directory": "/Users/alexandremartins/Worktrees/opencode2-oauth-login",
+      "kind": "question",
+      "since": 1793104800000
+    },
+    {
+      "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+      "title": "Revisar navegação",
+      "project": "app",
+      "directory": "/Users/alexandremartins/Dev/opencode2",
+      "kind": "unread",
+      "since": 1793104560000
+    }
   ]
 }

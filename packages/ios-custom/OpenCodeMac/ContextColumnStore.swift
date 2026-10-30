@@ -10,7 +10,9 @@ import SwiftUI
   private(set) var session: Session?
   private(set) var family: FamilySnapshot?
   /// Every descendant of the session (`custom.session-family/page`), with their context, tokens and cost.
-  private(set) var members: [Session] = []
+  private(set) var members: [Session] = [] { didSet { familyIDs = Set([id] + members.map(\.id)) } }
+  /// The session and its descendants, for matching each streamed event without rebuilding the set.
+  @ObservationIgnored private var familyIDs: Set<String>
   /// The root's latest transcript page, oldest first: it links `subagent` calls and background shells.
   private(set) var messages: [ConversationMessage] = []
   private(set) var shells: [ShellInfo] = []
@@ -35,6 +37,7 @@ import SwiftUI
   init(id: String, sessions: SessionStore) {
     self.id = id
     self.sessions = sessions
+    familyIDs = [id]
   }
 
   var client: OpenCodeClient { sessions.client }
@@ -82,8 +85,7 @@ import SwiftUI
       case .disconnected: break
       case .update(let event) where event.type == OpenCodeClient.resourcesChangedEvent: scheduleResources()
       case .update(let event):
-        let family = Set([id] + members.map(\.id))
-        guard event.data.owner.map(family.contains) == true || event.type.hasPrefix("rpc.") else { continue }
+        guard event.data.owner.map(familyIDs.contains) == true || event.type.hasPrefix("rpc.") else { continue }
         // Streaming deltas only move the subagents' "agora" line; structural events reload everything.
         schedule(delay: event.type.hasSuffix(".delta") || event.type.hasSuffix(".progress") ? 2_000 : 700)
       }

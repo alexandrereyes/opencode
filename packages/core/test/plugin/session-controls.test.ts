@@ -3,6 +3,7 @@ import { Context, Deferred, Effect, Fiber, Layer } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { Bus } from "@opencode/core/bus"
 import { Form } from "@opencode/core/form"
+import { Job } from "@opencode/core/job"
 import { KV } from "@opencode/core/kv"
 import { Location } from "@opencode/core/location"
 import { LocationServiceMap } from "@opencode/core/location-service-map"
@@ -87,6 +88,7 @@ testEffect(Layer.empty).live(
         LayerNode.group([
           LocationServiceMap.node,
           Bus.node,
+          Job.node,
           KV.node,
           Session.node,
           SessionFamily.node,

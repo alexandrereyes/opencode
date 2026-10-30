@@ -4,6 +4,7 @@ import { TestClock } from "effect/testing"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
 import { makeHub, type Member } from "../src/live-activity/index"
+import { makeRegistry } from "../src/live-activity/lifecycle"
 import { makeTracker, type Event } from "../src/live-activity/tracker"
 import { devicesKey, limits, makeNotificationRegistry, makeNotifier } from "../src/notifications/index"
 import type { Notifications } from "../src/notifications/rpc"
@@ -52,9 +53,11 @@ function setup(answer: (push: Push) => Result = () => ({ status: "sent" })) {
   const tracker = makeTracker(server.ctx)
   const shared = storage()
   const registry = makeNotificationRegistry(shared)
+  const activities = makeRegistry(shared)
   const pushes: Push[] = []
   const notifier = makeNotifier({
     registry,
+    activities,
     send: (push) =>
       Effect.sync(() => {
         pushes.push(push)
@@ -64,7 +67,8 @@ function setup(answer: (push: Push) => Result = () => ({ status: "sent" })) {
   const step = (at: number, ...events: Event[]) =>
     Effect.gen(function* () {
       for (const event of events) yield* tracker.apply(event, at)
-      const plan = yield* notifier.evaluate(tracker.derive(at, host), at)
+      const derived = tracker.derive(at, host)
+      const plan = yield* notifier.evaluate(derived, at, derived.state)
       yield* plan.deliver
       return plan.wakeAt
     })
@@ -73,7 +77,7 @@ function setup(answer: (push: Push) => Result = () => ({ status: "sent" })) {
       server.watched.add(id)
       yield* tracker.apply({ type: "preferences.updated" }, T)
     })
-  return { server, tracker, shared, registry, pushes, step, watch, notifier }
+  return { server, tracker, shared, registry, activities, pushes, step, watch, notifier }
 }
 
 const bodyOf = (push: Push | undefined) =>
@@ -429,5 +433,128 @@ it.effect("without APNs credentials the hub still stores registrations and repor
     })
     expect(yield* hub.notifications.register(iphone)).toEqual({ push: "unconfigured" })
     expect(shared.values.get(devicesKey)).toHaveLength(1)
+  }),
+)
+
+const theme = {
+  background: "#120f0eff",
+  surface: "#161313ff",
+  border: "#2e2e2dff",
+  textStrong: "#e4e0d6ff",
+  text: "#c9c5baff",
+  textSecondary: "#a29f94ff",
+  textWeak: "#6b6861ff",
+  primary: "#da7c47ff",
+  success: "#83b35fff",
+  warning: "#c67f13ff",
+  error: "#dc6e5eff",
+  accent: "#9988e5ff",
+}
+
+/** The same iPhone with a live Agentes activity (`bb22`), as `custom.live-activity` stores it. */
+const live = (f: ReturnType<typeof setup>, deviceID = iphone.deviceID) =>
+  Effect.gen(function* () {
+    yield* f.activities.register({ deviceID, serverKey: "mac-principal", environment: "production", theme }, T)
+    yield* f.activities.activity({ deviceID, activityID: "act-1", pushToken: "bb22" }, T)
+  })
+
+const channels = (pushes: Push[]) =>
+  pushes.map((push) => [
+    push.token,
+    push.type ?? "liveactivity",
+    (push.body as { aps: { alert?: { body: string } } }).aps.alert?.body ?? null,
+  ])
+
+it.effect("with a live activity a question, a permission and a failure alert once, through it; no notification", () =>
+  Effect.gen(function* () {
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    yield* live(f)
+    yield* f.step(T, created(ids.cache, T - minute), execution("started", ids.cache, T))
+    const form = question("frm_1", ids.cache, T + 1, "Qual banco usar no cache?")
+    f.server.forms.push(form)
+    yield* f.step(T + 1, { type: "form.created", data: { form } })
+    const request = permission("per_1", ids.cache, T + 2, "bash", ["bun test"])
+    f.server.permissions.push(request)
+    yield* f.step(T + 2, { type: "permission.asked", data: request })
+    yield* f.step(T + 2 + limits.permissionMs)
+    f.server.forms.length = 0
+    f.server.permissions.length = 0
+    yield* f.step(T + minute, execution("failed", ids.cache, T + minute))
+    yield* f.step(T + minute + limits.graceMs)
+    expect(channels(f.pushes)).toEqual([
+      ["bb22", "liveactivity", "Pergunta: Qual banco usar no cache?"],
+      ["bb22", "liveactivity", "Permissão: bash · bun test"],
+      ["bb22", "liveactivity", "Parou com erro · core"],
+    ])
+    expect(f.pushes.map((push) => push.priority)).toEqual([10, 10, 10])
+    expect(f.pushes[0]?.body).toHaveProperty(["aps", "alert", "title"], "Escolher banco do cache")
+    expect(f.pushes[0]?.body).toHaveProperty(["aps", "content-state", "v"], 1)
+  }),
+)
+
+it.effect("without a live activity, the notification; with one but nothing on its card, the notification too", () =>
+  Effect.gen(function* () {
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    yield* f.step(T, created(ids.cache, T - minute))
+    const form = question("frm_1", ids.cache, T + 1, "Sem atividade?")
+    f.server.forms.push(form)
+    yield* f.step(T + 1, { type: "form.created", data: { form } })
+    expect(channels(f.pushes)).toEqual([["aa11", "alert", "Pergunta: Sem atividade?"]])
+    // An activity whose card has nothing to show (`null` state) cannot carry the alert.
+    yield* live(f)
+    const next = question("frm_2", ids.cache, T + 2, "E agora?")
+    f.server.forms.push(next)
+    yield* f.tracker.apply({ type: "form.created", data: { form: next } }, T + 2)
+    const plan = yield* f.notifier.evaluate(f.tracker.derive(T + 2, host), T + 2, null)
+    yield* plan.deliver
+    expect(channels(f.pushes).at(-1)).toEqual(["aa11", "alert", "Pergunta: E agora?"])
+  }),
+)
+
+it.effect("an activity token refused at the moment of the question falls back to the notification", () =>
+  Effect.gen(function* () {
+    const f = setup((push) =>
+      push.token === "bb22" ? { status: "invalid", reason: "ExpiredToken" } : { status: "sent" },
+    )
+    yield* f.registry.register(iphone, T)
+    yield* live(f)
+    yield* f.step(T, created(ids.cache, T - minute))
+    const form = question("frm_1", ids.cache, T + 1, "Ainda chega?")
+    f.server.forms.push(form)
+    yield* f.step(T + 1, { type: "form.created", data: { form } })
+    expect(channels(f.pushes)).toEqual([
+      ["bb22", "liveactivity", "Pergunta: Ainda chega?"],
+      ["aa11", "alert", "Pergunta: Ainda chega?"],
+    ])
+    // The dead activity is dropped (and push-to-start rearmed): the next question goes straight to the notification.
+    expect((yield* f.activities.list(T + 2)).at(0)).toMatchObject({ expired: "act-1", rearm: true })
+    const next = question("frm_2", ids.cache, T + 2, "E esta?")
+    f.server.forms.push(next)
+    yield* f.step(T + 2, { type: "form.created", data: { form: next } })
+    expect(channels(f.pushes).at(-1)).toEqual(["aa11", "alert", "Pergunta: E esta?"])
+    expect(f.pushes).toHaveLength(3)
+  }),
+)
+
+it.effect("a bell success goes by notification only, live activity or not; a device with only an activity gets attention", () =>
+  Effect.gen(function* () {
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    yield* live(f)
+    yield* live(f, "ipad-sem-notificacoes")
+    yield* f.watch(ids.live)
+    yield* f.step(T, created(ids.live, T - minute), execution("started", ids.live, T))
+    yield* f.step(T + minute, execution("succeeded", ids.live, T + minute))
+    yield* f.step(T + minute + limits.graceMs)
+    expect(channels(f.pushes)).toEqual([["aa11", "alert", "Terminou · ios-custom"]])
+    const form = question("frm_1", ids.live, T + 2 * minute, "Só pela atividade?")
+    f.server.forms.push(form)
+    yield* f.step(T + 2 * minute, { type: "form.created", data: { form } })
+    expect(channels(f.pushes).slice(1)).toEqual([
+      ["bb22", "liveactivity", "Pergunta: Só pela atividade?"],
+      ["bb22", "liveactivity", "Pergunta: Só pela atividade?"],
+    ])
   }),
 )

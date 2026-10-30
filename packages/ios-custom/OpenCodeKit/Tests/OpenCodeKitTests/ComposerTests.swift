@@ -494,3 +494,72 @@ private func detected(_ text: String) -> ComposerTrigger? {
   #expect(request.files?.first?.object?["data"] == nil)
   #expect(request.agents?.count == 1 && request.skills?.count == 1)
 }
+
+private func mentionSession(_ id: String, title: String, directory: String = "/repo/app", updated: Double = 1,
+  archived: Double? = nil) -> String {
+  #"{"id":"\#(id)","projectID":"p","title":"\#(title)","location":{"directory":"\#(directory)"},"time":{"created":1,"updated":\#(updated)\#(archived.map { #","archived":\#($0)"# } ?? "")}}"#
+}
+
+private final class SessionPages: @unchecked Sendable {
+  let lock = NSLock()
+  var queries: [[String: String]] = []
+  func record(_ request: URLRequest) -> [String: String] {
+    let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+    let query = Dictionary(items.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { $1 })
+    lock.withLock { queries.append(query) }
+    return query
+  }
+}
+
+@Test func sessionMentionsSkipArchivedSessionsAndReadMorePagesForEnoughLiveOnes() async throws {
+  let pages = SessionPages()
+  let client = OpenCodeClient(configuration: .init(url: URL(string: "https://sandbox.invalid")!)) { request in
+    let query = pages.record(request)
+    let first = (0..<50).map { mentionSession("ses_old\($0)", title: "Sessão mestra", updated: Double(1000 - $0), archived: 5) }
+      + [mentionSession("ses_live0", title: "Sessão mestra", updated: 900)]
+    let second = (1..<20).map { mentionSession("ses_live\($0)", title: "Viva \($0)", updated: Double(800 - $0)) }
+    let body = query["cursor"] == nil
+      ? #"{"data":[\#(first.joined(separator: ","))],"cursor":{"next":"page2"}}"#
+      : #"{"data":[\#(second.joined(separator: ","))],"cursor":{}}"#
+    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+  }
+  let recent = try await client.composerSessions("")
+  #expect(recent.count == 10)
+  #expect(recent.allSatisfy { $0.time.archived == nil })
+  #expect(recent.first?.id == "ses_live0")
+  #expect(pages.queries.count == 2)
+  #expect(pages.queries[0]["parentID"] == "null" && pages.queries[0]["search"] == nil)
+  #expect(pages.queries[1]["cursor"] == "page2")
+  // A search keeps its filter on every page and stops when the list ends.
+  let found = try await client.composerSessions("mestra")
+  #expect(found.map(\.id) == ["ses_live0"] + (1..<20).map { "ses_live\($0)" })
+  #expect(pages.queries.suffix(2).allSatisfy { $0["search"] == "mestra" })
+  // A short page ends the list even though the server still returns a next cursor.
+  let short = SessionPages()
+  let single = OpenCodeClient(configuration: .init(url: URL(string: "https://sandbox.invalid")!)) { request in
+    _ = short.record(request)
+    let body = #"{"data":[\#(mentionSession("ses_only", title: "Única"))],"cursor":{"next":"more"}}"#
+    return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+  }
+  #expect(try await single.composerSessions("").map(\.id) == ["ses_only"])
+  #expect(short.queries.count == 1)
+}
+
+@Test func sessionMentionsLabelTheCurrentMasterAndTellRepeatedTitlesApart() throws {
+  let now = Date(timeIntervalSince1970: 1_000_000)
+  let ms = now.timeIntervalSince1970 * 1000
+  let sessions = try decodeComposer(
+    "[" + [
+      mentionSession("ses_master", title: "Sessão mestra", directory: "/Users/a/master", updated: ms - 120_000),
+      mentionSession("ses_twin_a", title: "Revisar PR", directory: "/Users/a/opencode2", updated: ms - 3 * 3_600_000),
+      mentionSession("ses_twin_b", title: "revisar pr", directory: "/Users/a/abacato", updated: ms - 2 * 86_400_000),
+      mentionSession("ses_single", title: "Única", directory: "/Users/a/app", updated: ms),
+    ].joined(separator: ",") + "]", [Session].self)
+  let items = ComposerSources().suggestions(
+    try #require(detected("@")), sessions: sessions, current: "ses_here", master: "ses_master", now: now)
+  #expect(items.map(\.token.id) == ["ses_master", "ses_twin_a", "ses_twin_b", "ses_single"])
+  #expect(items.map(\.subtitle) == ["Mestra atual", "opencode2 · 3h", "abacato · 2d", ""])
+  // Without a known master, a lone "Sessão mestra" is an ordinary row.
+  let plain = ComposerSources().suggestions(try #require(detected("@")), sessions: sessions, now: now)
+  #expect(plain.first?.subtitle == "")
+}

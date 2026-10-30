@@ -3,8 +3,10 @@ import Foundation
 // MARK: Ring
 
 /// The complication and dashboard ring: arcs proportional to the counts, in a fixed order, with a gap at the
-/// bottom for the mascot. Unread sessions are orange (`primary`); an older backend without `unread` shows its recently
-/// finished (`idle`) sessions in gray instead. With no sessions at all the ring is fully gray.
+/// bottom for the mascot. While something needs Alexandre (Option A, 29/10) only those counts draw: questions,
+/// permissions, failures and unread sessions (orange `primary`), and the number is `forYou`. Otherwise working
+/// sessions draw in green; an older backend without `unread` adds its recently finished (`idle`) ones in gray. With
+/// no sessions at all the ring is fully gray.
 public struct WatchRing: Equatable, Sendable {
   public struct Arc: Equatable, Sendable {
     public let role: ThemeRole
@@ -14,13 +16,22 @@ public struct WatchRing: Equatable, Sendable {
   }
 
   public let arcs: [Arc]
+  /// The number in the centre, `forYou` or the active total; 0 shows the mascot alone.
+  public let number: Int
+  /// `primary` while it counts what needs Alexandre.
+  public let numberRole: ThemeRole
   /// Degrees left open at the bottom for the mascot.
   public static let gap: Double = 80
 
   public init(counts: AgentsState.Counts?) {
+    let forYou = counts?.forYou ?? 0
+    number = forYou > 0 ? forYou : counts.map { $0.working + $0.question + $0.permission } ?? 0
+    numberRole = forYou > 0 ? .primary : .textStrong
     let parts: [(ThemeRole, Int)] = counts.map {
-      [(.success, $0.working), (.accent, $0.question), (.warning, $0.permission), (.error, $0.failed),
-       ($0.finished.unread ? .primary : .border, $0.finished.count)]
+      forYou > 0
+        ? [(.accent, $0.question), (.warning, $0.permission), (.error, $0.failed), (.primary, $0.unread ?? 0)]
+        : [(.success, $0.working), (.accent, $0.question), (.warning, $0.permission), (.error, $0.failed),
+           ($0.finished.unread ? .primary : .border, $0.finished.count)]
     } ?? []
     let total = parts.reduce(0) { $0 + max($1.1, 0) }
     guard total > 0 else {
@@ -44,36 +55,55 @@ public struct WatchRing: Equatable, Sendable {
 // MARK: Dashboard
 
 public enum WatchDashboardRow: Hashable, Sendable, Identifiable {
+  /// A pending request the watch can answer (it carries the request ID).
   case attention(AgentsState.Attention)
+  /// A failure, an unread answer, or a request without its attention item.
+  case need(AgentsState.Need)
+  /// The collapsed `Trabalhando N` line.
+  case working(Int)
   case session(AgentsState.Row)
 
   public var id: String {
     switch self {
     case .attention(let item): "attention-\(item.kind.rawValue)-\(item.sessionID)"
+    case .need(let item): "need-\(item.kind.rawValue)-\(item.sessionID)"
+    case .working: "working"
     case .session(let row): "session-\(row.sessionID)"
     }
   }
 }
 
 public extension AgentsState {
-  /// Pending requests first (oldest first, as the backend orders them), then the session rows, without
-  /// repeating a session whose request is already listed above.
-  var dashboardRows: [WatchDashboardRow] {
-    let pending = Set(attention.map { "\($0.kind.rawValue)|\($0.sessionID)" })
-    let rows = sessions.filter { row in
-      guard row.status == .question || row.status == .permission else { return true }
-      return !pending.contains("\(row.status.rawValue)|\(row.sessionID)")
+  /// "Precisa de você" first, in the backend's order (requests answer from the watch), then `Trabalhando N`,
+  /// followed by the working sessions when it is expanded.
+  func dashboardRows(working expanded: Bool = false) -> [WatchDashboardRow] {
+    let requests = Dictionary(attention.map { ("\($0.kind.rawValue)|\($0.sessionID)", $0) }) { first, _ in first }
+    let needs = needItems.map { need in
+      requests["\(need.kind.rawValue)|\(need.sessionID)"].map(WatchDashboardRow.attention) ?? .need(need)
     }
-    return attention.map(WatchDashboardRow.attention) + rows.map(WatchDashboardRow.session)
+    guard counts.working > 0 else { return needs }
+    let working = expanded ? sessions.filter { $0.status == .working }.map(WatchDashboardRow.session) : []
+    return needs + [.working(counts.working)] + working
   }
 
-  /// `N ativas` / `M precisa(m) de você` for the dashboard header and the rectangular complication.
-  var activeLabel: String { "\(activeTotal) \(activeTotal == 1 ? "ativa" : "ativas")" }
-  var attentionLabel: String? {
-    attentionTotal > 0 ? "\(attentionTotal) \(attentionTotal == 1 ? "precisa" : "precisam") de você" : nil
+  /// `N para você`, or nil when nothing needs Alexandre.
+  var forYouLabel: String? { forYou > 0 ? "\(forYou) para você" : nil }
+  var workingLabel: String { "\(counts.working) trabalhando" }
+  /// `1 pergunta · 2 não lidas · 6 trabalhando`: the non-zero counts behind `N para você`, then the work.
+  var forYouDetail: String {
+    let part = { (count: Int, one: String, many: String) in count > 0 ? ["\(count) \(count == 1 ? one : many)"] : [] }
+    return (part(counts.question, "pergunta", "perguntas") + part(counts.permission, "permissão", "permissões")
+      + part(counts.failed, "com erro", "com erro") + part(counts.unread ?? 0, "não lida", "não lidas")
+      + part(counts.working, "trabalhando", "trabalhando")).joined(separator: " · ")
   }
-  /// One line for `accessoryRectangular`: `4 ativas · 1 precisa de você`.
-  var complicationLine: String { [activeLabel, attentionLabel].compactMap { $0 }.joined(separator: " · ") }
+  /// The rectangular complication's main line: `3 para você`, or `6 trabalhando · nada para você`.
+  var complicationLine: String {
+    forYouLabel ?? (counts.working > 0 ? "\(workingLabel) · nada para você" : "nada para você")
+  }
+  /// Its dimmed second line while something needs Alexandre.
+  var complicationDetail: String? { forYou > 0 ? forYouDetail : nil }
+  /// Dashboard header and accessibility: `3 para você · 1 pergunta · 2 não lidas · 6 trabalhando`.
+  var summaryLabel: String { [complicationLine, complicationDetail].compactMap { $0 }.joined(separator: " · ") }
 }
 
 // MARK: Voice captions

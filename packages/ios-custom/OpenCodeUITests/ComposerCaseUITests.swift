@@ -1,8 +1,9 @@
 import XCTest
 
 /// Needs an isolated sandbox prepared by `script/test-composer-case.py`: a conversation in a fake repository with
-/// `README.md` and `src/SafariBridge.ts`, a Session titled "Sessão Revisão Especial", the snippet `commit-push-pr`,
-/// and the skill, command and agent named by the environment. Nothing is sent.
+/// `README.md` and `src/SafariBridge.ts`, a Session titled "Sessão Revisão Especial", an archived one, two titled
+/// "Gemea Repetida" in different directories, the snippet `commit-push-pr`, and the skill, command and agent named by
+/// the environment. Only the `&` case sends a prompt.
 @MainActor final class ComposerCaseUITests: XCTestCase {
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
   private var theme: String { environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
@@ -11,6 +12,37 @@ import XCTest
     attachment.name = name + "-" + theme
     attachment.lifetime = .keepAlways
     add(attachment)
+  }
+
+  /// `@` lists no archived session, and two sessions with one title each show their directory and age.
+  func testSessionMentionsSkipArchivedAndTellRepeatedTitlesApart() throws {
+    continueAfterFailure = false
+    let app = XCUIApplication()
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
+                           "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_CASE_SESSION"])]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
+    app.launch()
+    defer { app.terminate() }
+    try app.requireSandbox()
+    let editor = app.textViews["conversation-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 30))
+    editor.tap()
+    editor.typeText("@Arquivada")
+    XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 10))
+    XCTAssertFalse(app.buttons["suggestion-" + (try XCTUnwrap(environment["OPENCODE_CASE_ARCHIVED"]))].exists)
+    shot("mention-archived-hidden")
+    editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 10))
+    editor.typeText("@Gemea")
+    let twins = try ["OPENCODE_CASE_TWIN_A", "OPENCODE_CASE_TWIN_B"].map { app.buttons["suggestion-" + (try XCTUnwrap(environment[$0]))] }
+    XCTAssertTrue(twins[0].waitForExistence(timeout: 10))
+    XCTAssertTrue(twins[1].exists)
+    // Each repeated title carries its directory and relative age, like the Sessões rows.
+    for directory in ["composer-case", "composer-twin"] {
+      XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", directory + " · ")).firstMatch
+        .waitForExistence(timeout: 5), directory)
+    }
+    shot("mention-repeated-titles")
+    editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6))
   }
 
   func testEveryTriggerIgnoresCase() throws {

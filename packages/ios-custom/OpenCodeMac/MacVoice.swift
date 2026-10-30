@@ -109,6 +109,10 @@ struct MacVoiceSettings: View {
         Text("A conversa usa o serviço privado pelo WARP e delega seus pedidos à Sessão mestra.").font(.caption)
         Button("Abrir permissão do microfone") { MacMicrophonePermission.openSettings() }
       }
+      Section("Ver a tela pela voz") {
+        Text("Diga “olha essa página”, “olha o Simulator” ou “olha minha tela toda”: a mestra recebe a foto. Para ver outros apps, o macOS pede a permissão de Gravação de Tela uma vez; sem ela, só a janela do OpenCode.").font(.caption)
+        Button("Abrir permissão de Gravação de Tela") { NSWorkspace.shared.open(MacVoiceScreen.settingsURL) }
+      }
       MacDictationSettings()
       Section("Memória da voz") {
         Button("Ver transcrição") { transcript = true }.disabled(runtime.store == nil)

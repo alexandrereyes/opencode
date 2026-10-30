@@ -21,6 +21,9 @@ struct MacSubagentBanner: View {
   let parentTitle: String
   let back: () -> Void
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacSubagentBanner")
+    #endif
     HStack(spacing: 13) {
       AgentPixels(color: theme.color(.accent), size: 24, running: conversation.executing, grid: true)
       VStack(alignment: .leading, spacing: 3) {

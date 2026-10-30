@@ -43,8 +43,12 @@ import SwiftUI
   var proxyVisible = false
   /// Atalhos do teclado (⌘/, the keyboard in the project rail).
   var shortcutsVisible = false
+  /// Espaço em disco (⇧⌘D, Janela ▸ Espaço em disco, the disk bar in the project rail).
+  var diskVisible = false
   var sessionSelection = SessionSelection()
   var bulkRequest: MacBulkRequest?
+  /// The project rail's chips after Todas, in the order it shows them now (it reorders after a pause): ⌥2…⌥9.
+  var railOrder: [String] = []
   var newSessionRequest: MacNewSessionRequest?
   var renameRequest: SessionRow?
   var deleteRequest: Session?
@@ -213,7 +217,7 @@ import SwiftUI
 
   func selectNeighbor(_ offset: Int) {
     guard let store else { return }
-    let ids = SessionSections.group(store.filtered, now: .now).flatMap(\.rows).map(\.id)
+    let ids = SessionSections.group(store.filtered, now: .now, held: store.attentionHold).flatMap(\.rows).map(\.id)
     if let next = SessionNavigation.neighbor(ids, current: selection.sessionID, offset: offset) {
       selection = MacSelection(sessionID: next)
     }

@@ -514,7 +514,8 @@ import UniformTypeIdentifiers
     let suggestions = try await composerCatalog?.suggestions(
       trigger, agents: agents, files: files, sessions: sessions, apps: apps,
       current: id, server: client.configuration.url.absoluteString,
-      directory: directory, project: composerProjectID ?? session?.projectID) ?? []
+      directory: directory, project: composerProjectID ?? session?.projectID,
+      master: preferences?.data.masterSessions?["local"]) ?? []
     guard isChild else { return suggestions }
     return suggestions.filter {
       !($0.token.kind == .command && $0.token.value == "client" && $0.token.id == "agent")

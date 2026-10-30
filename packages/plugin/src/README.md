@@ -228,6 +228,16 @@ const permissions = snapshots.flatMap((snapshot) => snapshot.permissions)
 const forms = snapshots.flatMap((snapshot) => snapshot.forms)
 ```
 
+## Reading Background Jobs
+
+`ctx.job.background()` returns the running jobs a Session moved to the background, such as `shell` commands and
+`subagent` runs, with the Session that started each one. Jobs are process-local: none survive a server restart, which
+notifies their Sessions instead.
+
+```ts
+const shells = (await ctx.job.background()).filter((job) => job.type === "shell")
+```
+
 ## Reloading A Domain
 
 When data captured by a transform changes, reload the affected domain:

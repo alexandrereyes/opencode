@@ -9,11 +9,13 @@ import SwiftUI
     let text: String
     let kind: Kind
     let retry: (() -> Void)?
+    /// The button's title when there is an action; retrying by default.
+    var action = "Tentar novamente"
   }
   private(set) var message: Message?
 
-  func show(_ text: String, kind: Kind = .success, retry: (() -> Void)? = nil) {
-    message = Message(text: text, kind: kind, retry: retry)
+  func show(_ text: String, kind: Kind = .success, action: String = "Tentar novamente", retry: (() -> Void)? = nil) {
+    message = Message(text: text, kind: kind, retry: retry, action: action)
     AccessibilityNotification.Announcement(text).post()
   }
   func dismiss(_ id: UUID) {
@@ -38,7 +40,7 @@ private struct ToastOverlay: ViewModifier {
             .foregroundStyle(theme.color(message.kind == .error ? .error : .success))
           }
           if let retry = message.retry {
-            Button("Tentar novamente") {
+            Button(message.action) {
               center.dismiss(message.id)
               retry()
             }

@@ -22,11 +22,14 @@ struct SessionColumnSections<Decorated: View>: View {
   @ViewBuilder let decorate: (SessionRow, SessionColumnRow) -> Decorated
 
   var body: some View {
-    let desired = SessionSections.group(rows, now: now)
+    let desired = SessionSections.group(rows, now: now, held: store.attentionHold)
     let all = store.rows
     let available = Set(all.map(\.id))
     let sections = presentation.order?.resolve(all) ?? desired
-    let counts = Dictionary(uniqueKeysWithValues: desired.map { ($0.kind, $0.rows.count) })
+    // A conversation held open in "Precisa de você" no longer counts: the number matches the bell and the watch.
+    let counts = Dictionary(uniqueKeysWithValues: desired.map {
+      ($0.kind, $0.kind == .attention ? SessionAttention.count($0.rows) : $0.rows.count)
+    })
     Group {
       ForEach(sections) { section in
         let collapsed = collapse.collapsed(section.kind)
@@ -118,13 +121,13 @@ struct SessionColumnSections<Decorated: View>: View {
   }
 }
 
-/// Permissions and questions already have their descriptions. Refresh previews only while an activity or
-/// failure row is on screen, including a state transition that does not recreate the row.
+/// Permissions and questions already have their descriptions. Refresh previews only while an activity, failure or
+/// unread answer row is on screen, including a state transition that does not recreate the row.
 private struct SessionPreviewVisibility: ViewModifier {
   let row: SessionRow
   let store: SessionStore
   @State private var visible = false
-  private var needed: Bool { row.state == .running || row.state == .failed }
+  private var needed: Bool { row.state == .running || row.state == .failed || row.state == .unread }
 
   func body(content: Content) -> some View {
     content.onAppear {
@@ -211,11 +214,14 @@ struct SessionColumnRow: View {
   @ViewBuilder private var content: some View {
     switch kind {
     case .attention:
+      // A row held open keeps the line of the reason it had when opened.
+      let reason = store.attentionHold.reason(row)
       SessionRowView(
         row: row, preview: preview, directory: store.directoryLabel(row.session),
         detail: SessionSections.detail(
-          row, permission: store.permission(row)?.preview, question: store.question(row),
-          failure: store.previews[row.id]?.failure, now: now))
+          row, reason: reason, permission: store.permission(row)?.preview, question: store.question(row),
+          failure: preview.failure, reply: preview.reply, now: now),
+        detailTint: reason?.tint)
     case .running:
       SessionRowView(row: row, preview: preview, directory: store.directoryLabel(row.session))
     default:

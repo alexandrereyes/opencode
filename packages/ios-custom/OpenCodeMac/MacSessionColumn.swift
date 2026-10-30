@@ -35,9 +35,13 @@ struct MacSessionColumn: View {
     let _ = MacPerf.count("MacSessionColumn")
     #endif
     HStack(spacing: 0) {
-      MacProjectRail(store: store) { name, intent in
+      MacProjectRail(store: store, disk: runtime.app.disk) { name, intent in
         projectAction = ProjectAction(name: name, intent: intent)
-      } add: { showProjects = true } shortcuts: { runtime.shortcutsVisible = true }
+      } add: { showProjects = true } shortcuts: { runtime.shortcutsVisible = true } space: {
+        runtime.diskVisible = true
+      } shownOrder: { order in
+        if runtime.railOrder != order { runtime.railOrder = order }
+      }
       sessionList
     }
   }
@@ -85,6 +89,9 @@ struct MacSessionColumn: View {
     .scrollContentBackground(.hidden)
     .background(theme.color(.background))
     .safeAreaInset(edge: .bottom, spacing: 0) { MacMasterAccessory(store: store, runtime: runtime) }
+    // The list would scroll under the title bar, beside the traffic lights and the column's items: cut it at the
+    // bar's bottom edge, like the chat's transcript.
+    .clipped()
     // The approved title bar has no sidebar button: Sessões collapses with ⌃⌘S and Visualizar.
     .toolbar(removing: .sidebarToggle)
     // Voice and Nova sessão at the column's right edge, like Mail's and Notes' sidebar items; they hide with the
@@ -252,7 +259,7 @@ struct MacSessionColumn: View {
 
   /// Rows of the expanded sections, in display order; "Selecionar todas" and the selection use only these.
   private var visibleIDs: [String] {
-    SessionSections.group(store.filtered, now: .now)
+    SessionSections.group(store.filtered, now: .now, held: store.attentionHold)
       .filter { !collapse.collapsed($0.kind) }.flatMap(\.rows).map(\.id)
   }
 
@@ -319,6 +326,9 @@ private struct MacSessionRowCell<Menu: View>: View {
   @ViewBuilder let menu: () -> Menu
 
   var body: some View {
+    #if DEBUG
+    let _ = MacPerf.count("MacSessionRowCell")
+    #endif
     VStack(spacing: 0) {
       content
         .background {
@@ -367,7 +377,7 @@ private struct MacMasterAccessory: View {
         Text("Sessão mestra").fontWeight(.medium).foregroundStyle(theme.color(.textStrong))
         Spacer(minLength: 4)
         Text(store.masterAvailability == .available
-          ? (store.requestCount > 0 ? "\(store.requestCount) precisam de você" : "Tudo em dia")
+          ? (store.attentionCount > 0 ? "\(store.attentionCount) \(store.attentionCount == 1 ? "precisa" : "precisam") de você" : "Tudo em dia")
           : store.masterAvailability.label)
           .foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
         Image(systemName: "arrow.right").font(.system(size: 10, weight: .semibold))

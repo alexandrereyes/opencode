@@ -14,7 +14,14 @@ import OpenCodeKit
   nonisolated static let enabled = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacPerf")
   /// The shown root streams too (`-OpenCodeMacPerfShown`), not only other sessions and its subagents.
   nonisolated static let shownStreams = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacPerfShown")
+  /// `-OpenCodeMacPerfVerify`: incremental results are checked against full ones; `MacPerf divergência` reports one.
+  static let verify = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacPerfVerify")
   private static var counts: [String: Int] = [:]
+
+  static func mismatch(_ name: String) {
+    print("MacPerf divergência \(name)")
+    fflush(stdout)
+  }
   private static var started = false
   private static let mainThread = mach_thread_self()
 
@@ -28,16 +35,35 @@ import OpenCodeKit
     started = true
     _ = mainThread
     try? await Task.sleep(for: .seconds(6))
-    guard let store = runtime.store, let window = runtime.window, let id = runtime.selection.sessionID,
-      let input = runtime.drafts.draft(id).input else { return finish("sem janela, sessão ou composer") }
-    window.makeFirstResponder(input.textView)
+    guard let store = runtime.store, let window = runtime.window, let id = runtime.selection.sessionID
+    else { return finish("sem janela ou sessão") }
+    let input = runtime.drafts.draft(id).input
+    if let input { window.makeFirstResponder(input.textView) }
+    // `-OpenCodeMacPerfLong`: the whole history is loaded, as after scrolling back through it.
+    if MacFixture.value("-OpenCodeMacPerfLong") != nil, let conversation = store.liveConversation(id) {
+      var pages = 0
+      while conversation.hasOlder, pages < 100 {
+        await conversation.older()
+        pages += 1
+      }
+      print("MacPerf conversa longa: \(conversation.messages.count) mensagens em \(pages) páginas")
+      fflush(stdout)
+      try? await Task.sleep(for: .seconds(2))
+    }
     try? await Task.sleep(for: .seconds(1))
     await phase("parado", seconds: 5)
+    // `-OpenCodeMacPerfScrolledUp`: the reader scrolled away from the end, so the transcript stops following it.
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeMacPerfScrolledUp"),
+      let transcript = runtime.memory(id).active {
+      transcript.simulateScroll(by: -600)
+      transcript.simulateRest()
+    }
     let stream = Task { await streamEvents(store.hub) }
     try? await Task.sleep(for: .seconds(2))
     await phase("transmitindo", seconds: 6)
     stream.cancel()
     try? await Task.sleep(for: .seconds(3))
+    guard let input else { return finish("ok") }
     await typing("digitando", window: window, input: input, keys: 50)
     let again = Task { await streamEvents(store.hub) }
     try? await Task.sleep(for: .seconds(2))
@@ -128,7 +154,9 @@ import OpenCodeKit
     }
     while !Task.isCancelled {
       for id in ids {
-        hub.inject(event("session.text.delta", id, extra: ",\"ordinal\":0,\"delta\":\"palavra \(tick) \""))
+        // The shown root's answer gains a paragraph every dozen deltas, like a real one.
+        let paragraph = id == MacFixture.rootID && tick % 12 == 11 ? "\\n\\n" : ""
+        hub.inject(event("session.text.delta", id, extra: ",\"ordinal\":0,\"delta\":\"palavra \(tick) \(paragraph)\""))
       }
       if tick % 25 == 0 {
         for id in ids {

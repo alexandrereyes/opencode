@@ -13,6 +13,10 @@ export const Info = Schema.Struct({
   questionAt: Schema.Finite.pipe(Schema.optional),
   permissionCount: Schema.Int.pipe(Schema.optional),
   questionCount: Schema.Int.pipe(Schema.optional),
+  /** Background work other than subagents (shell commands) still running for this session. */
+  backgroundCount: Schema.Int.pipe(Schema.optional),
+  /** The title (a shell's command) of the newest such work. */
+  backgroundTitle: Schema.String.pipe(Schema.optional),
 }).annotate({ identifier: "Navigation.Info" })
 
 export interface Page extends Schema.Schema.Type<typeof Page> {}

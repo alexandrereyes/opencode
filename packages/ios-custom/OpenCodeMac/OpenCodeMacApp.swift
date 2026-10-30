@@ -126,7 +126,7 @@ private struct MacWindowScene: View {
 
 /// The menu bar: Arquivo (Nova sessão, Nova janela, Atualizar), Visualizar (Contexto, Arquivos, the state filters),
 /// Sessão (the selected session's actions and the selection mode), Ir (search, back, previous/next, Sessão mestra,
-/// voice, ⌘1…⌘9) and the LLM proxy modal in Janela.
+/// voice, ⌘1…⌘9) and the LLM proxy and Espaço em disco modals in Janela.
 private struct MacCommands: Commands {
   @Environment(\.openWindow) private var openWindow
   @FocusedValue(\.macWindow) private var runtime
@@ -171,6 +171,9 @@ private struct MacCommands: Commands {
       Divider()
       Button("LLM proxy") { runtime?.showProxy() }
         .shortcut(.proxy)
+        .disabled(runtime?.store == nil)
+      Button("Espaço em disco") { runtime?.diskVisible = true }
+        .shortcut(.disk)
         .disabled(runtime?.store == nil)
     }
     CommandMenu("Sessão") {
@@ -232,9 +235,18 @@ private struct MacCommands: Commands {
             runtime.voicePresentation.toggle(runtime.app.audio.voice, sessions: store)
           }
           .disabled(runtime.app.audio.voice.busy)
+          // ⌥1…⌥9: Todas, then the project rail's chips in the order it shows them now.
+          Divider()
+          Section("Projetos da faixa") {
+            let keys = [nil] + runtime.railOrder.prefix(8).map(Optional.some)
+            ForEach(Array(keys.enumerated()), id: \.offset) { index, key in
+              Button(railName(key, store: store)) { MacProjectRail.choose(key, store: store) }
+                .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: .option)
+            }
+          }
           // ⌘1…⌘9: the first sessions in the order Sessões shows them, with its filter and collapsed sections.
           let rows = SessionNavigation.numbered(
-            SessionSections.group(store.filtered, now: .now), collapse: collapse)
+            SessionSections.group(store.filtered, now: .now, held: store.attentionHold), collapse: collapse)
           if !rows.isEmpty {
             Divider()
             Section("Sessões da lista") {
@@ -247,5 +259,10 @@ private struct MacCommands: Commands {
         }
       }
     }
+  }
+
+  private func railName(_ key: String?, store: SessionStore) -> String {
+    guard let key else { return "Todas as sessões" }
+    return store.selectedProjects.first { $0.project.id == key }?.project.displayName ?? "Chats"
   }
 }

@@ -50,6 +50,7 @@ struct MacShortcut: Identifiable {
 
   // Sessões (⌘1…⌘9 are bound per row in Ir ▸ Sessões da lista)
   static let numbered = MacShortcut(.sessions, "Abrir sessão 1–9", caps: ["⌘", "1", "…", "⌘", "9"])
+  static let railProjects = MacShortcut(.sessions, "Todas (⌥1) e os projetos da faixa, na ordem", caps: ["⌥", "1", "…", "⌥", "9"])
   static let previous = MacShortcut(.sessions, "Sessão anterior", .upArrow, [.option, .command])
   static let next = MacShortcut(.sessions, "Próxima sessão", .downArrow, [.option, .command])
   static let back = MacShortcut(.sessions, "Voltar à sessão principal", "[")
@@ -81,6 +82,7 @@ struct MacShortcut: Identifiable {
   // NavigationSplitView's own sidebar command.
   static let sidebar = MacShortcut(.window, "Mostrar ou ocultar Sessões", caps: ["⌃", "⌘", "S"])
   static let proxy = MacShortcut(.window, "LLM proxy", "l", [.shift, .command])
+  static let disk = MacShortcut(.window, "Espaço em disco", "d", [.shift, .command])
 
   // Imagem: the image viewer's window. MacImageScrollView handles the zoom keys (⌘= too) and the arrows there,
   // ahead of the menus, so ⌘1 is Tamanho real in it.
@@ -93,9 +95,9 @@ struct MacShortcut: Identifiable {
 
   static let all: [MacShortcut] = [
     search, newSession, newWindow, reload, compose, settings, shortcuts, searchNext, searchPrevious,
-    numbered, previous, next, back, master, fromThis, rename, pin, archive, delete, selectAll,
+    numbered, railProjects, previous, next, back, master, fromThis, rename, pin, archive, delete, selectAll,
     find, model, sideQuestion, send, newline, dictationKey, dictationEditor, createSession,
-    context, files, previousFile, nextFile, sidebar, proxy,
+    context, files, previousFile, nextFile, sidebar, proxy, disk,
     copyImage, zoomIn, zoomOut, zoomFit, zoomActual, panImage,
   ]
 

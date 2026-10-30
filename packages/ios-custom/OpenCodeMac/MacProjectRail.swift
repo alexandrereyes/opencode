@@ -7,9 +7,13 @@ struct MacProjectRail: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.openSettings) private var openSettings
   let store: SessionStore
+  let disk: MacDiskStore
   let action: (String, PreferenceIntent) -> Void
   let add: () -> Void
   let shortcuts: () -> Void
+  let space: () -> Void
+  /// The chips' order as shown, for ⌥2…⌥9 (`MacWindowRuntime.railOrder`).
+  var shownOrder: ([String]) -> Void = { _ in }
   @State private var shown: [String] = []
   @State private var scrolling = false
   @State private var dragging = false
@@ -41,11 +45,13 @@ struct MacProjectRail: View {
     .background(theme.color(.surface).opacity(0.35))
     .overlay(alignment: .trailing) { Rectangle().fill(theme.color(.border)).frame(width: 0.7) }
     .buttonStyle(.plain).accessibilityIdentifier("project-rail")
+    .onChange(of: order, initial: true) { _, value in shownOrder(value) }
   }
 
-  /// Pinned to the rail's foot, outside the scrolling projects: Atalhos do teclado above Ajustes.
+  /// Pinned to the rail's foot, outside the scrolling projects: the disk bar, Atalhos do teclado and Ajustes.
   private var footer: some View {
     VStack(spacing: 9) {
+      MacDiskIndicator(disk: disk, action: space)
       Button(action: shortcuts) { tile(name: "Atalhos do teclado", symbol: "keyboard", selected: false, count: 0) }
         .help("Atalhos do teclado (⌘/)").accessibilityLabel("Atalhos do teclado")
         .accessibilityIdentifier("rail-shortcuts")
@@ -66,10 +72,10 @@ struct MacProjectRail: View {
           .contextMenu {
             ForEach(SessionFilter.allCases) { filter in Button(filter.rawValue) { store.filter = filter } }
           }
-          .help("\(store.filter.rawValue) · \(store.rows.count) sessões")
+          .help("\(store.filter.rawValue) · \(store.rows.count) sessões (⌥1)")
           .accessibilityIdentifier("filter-all")
-          ForEach(order, id: \.self) { key in
-            if let item = items.first(where: { $0.id == key }) { project(item).id(key) }
+          ForEach(Array(order.enumerated()), id: \.element) { index, key in
+            if let item = items.first(where: { $0.id == key }) { project(item, number: index + 2).id(key) }
           }
           Button(action: add) { tile(name: "Adicionar repositório", symbol: "plus", selected: false, count: 0) }
             .help("Adicionar repositório").accessibilityLabel("Adicionar repositório aos filtros")
@@ -92,6 +98,12 @@ struct MacProjectRail: View {
     store.selectedProject = store.selectedProject == key ? nil : key
   }
 
+  /// ⌥1…⌥9: Todas, then the chips as shown. Unlike a click on the selected chip, pressing it again keeps it.
+  static func choose(_ key: String?, store: SessionStore) {
+    if key == nil { store.filter = .all; store.selectedProject = nil; return }
+    store.selectedProject = key
+  }
+
   private func schedule(_ desired: [String]) {
     pending?.cancel()
     guard shown != desired else { return }
@@ -102,14 +114,14 @@ struct MacProjectRail: View {
     }
   }
 
-  private func project(_ item: ProjectRail.Item) -> some View {
+  private func project(_ item: ProjectRail.Item, number: Int) -> some View {
     let selected = store.selectedProjects.first { $0.project.id == item.id }
     let name = selected?.project.displayName ?? "Chats"
     return Button { Self.select(item.id, store: store) } label: {
       tile(name: name, symbol: selected == nil ? "bubble.left" : nil, project: selected?.project,
         selected: store.selectedProject == item.id, count: item.count, group: item.group)
     }
-    .help("\(name) · \(item.count) sessões")
+    .help("\(name) · \(item.count) sessões" + (number <= 9 ? " (⌥\(number))" : ""))
     .accessibilityLabel("\(name), \(item.count) sessões" + (item.group.running ? ", trabalhando" : "")
       + (item.group.requests > 0 ? ", precisa de você" : "") + (item.group.unread ? ", com não lidas" : ""))
     .accessibilityAddTraits(store.selectedProject == item.id ? .isSelected : [])

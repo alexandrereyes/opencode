@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import OpenCodeKit
 import Synchronization
 
 /// `-OpenCodeMacFixture contexto -OpenCodeMacFixtureBell <s>`: two answers wait unread at launch and another arrives
@@ -63,7 +64,7 @@ import Synchronization
     check(!panel.window.canBecomeKey && !panel.window.isKeyWindow && NSApp.keyWindow !== panel.window,
       "painel não vira key")
     check(runtime.window?.firstResponder === responder, "compositor continua com o teclado")
-    check(count(store) == dots(store), "sino igual às bolinhas")
+    check(count(store) == dots(store), "sino igual a Precisa de você")
 
     await at(arrival + 8)
     check(!panel.visible, "painel fechou sozinho")
@@ -74,7 +75,14 @@ import Synchronization
     await at(arrival + 12)
     report("aberta", store: store, runtime: runtime, panel: panel)
     check(!inbox.unread(store.rows, store: store).contains { $0.id == "ses_mac_android" }, "abrir zera a linha")
-    check(count(store) == before - 1 && count(store) == dots(store), "sino igual às bolinhas depois")
+    check(count(store) == before - 1 && count(store) == dots(store), "sino igual a Precisa de você depois")
+    // Read while open, it keeps its place in "Precisa de você" without counting.
+    let attention = SessionSections.group(store.filtered, now: .now, held: store.attentionHold)
+      .first { $0.kind == .attention }?.rows.map(\.id) ?? []
+    check(attention.contains("ses_mac_android"), "aberta fica em Precisa de você")
+    if let path = MacFixture.value("-OpenCodeMacBellShot"), let window = runtime.window {
+      MacCapture.shot(window, theme: .selected, to: path.replacingOccurrences(of: ".png", with: "-aberta.png"))
+    }
     check(inbox.fresh.isEmpty, "sem destaque depois de ler")
     exit(failures.isEmpty ? 0 : 1)
   }
@@ -83,12 +91,12 @@ import Synchronization
     MacRuntime.shared.alertInbox.unread(store.rows, store: store).count
   }
 
-  /// The orange dots of Sessões under Todas.
-  private static func dots(_ store: SessionStore) -> Int { store.rows.filter(\.unread).count }
+  /// The count of "Precisa de você" under Todas.
+  private static func dots(_ store: SessionStore) -> Int { SessionAttention.count(store.rows) }
 
   private static func report(_ moment: String, store: SessionStore, runtime: MacWindowRuntime, panel: MacBellPanel) {
     let responder = runtime.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil"
-    print("MacBellChecks \(moment): sino=\(count(store)) bolinhas=\(dots(store)) painel=\(panel.visible) "
+    print("MacBellChecks \(moment): sino=\(count(store)) precisa=\(dots(store)) painel=\(panel.visible) "
       + "responder=\(responder) fresh=\(runtime.app.alertInbox.fresh.sorted())")
   }
 }

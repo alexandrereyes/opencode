@@ -756,3 +756,43 @@ test("rebuild keeps unread sessions of any age and drops read ones", async () =>
   expect(state.sessions.map((row) => row.sessionID).toSorted()).toEqual([ids.live, ids.oauth].toSorted())
   expect([...tracker.sessions.keys()]).toEqual([ids.live, ids.oauth])
 })
+
+test("needs list what Sessões lists in Precisa de você: working outranks a failure, the Sessão mestra is never unread (rev. 2026-10-29)", async () => {
+  const server = world()
+  const tracker = makeTracker(server.ctx)
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(created(ids.cache, T - 30 * minute), T)
+      yield* tracker.apply(execution("started", ids.cache, T - 9 * minute), T)
+      const form = question("frm_1", ids.cache, T - 4 * minute, "Seguir?")
+      server.forms.push(form)
+      yield* tracker.apply({ type: "form.created", data: { form } }, T)
+      for (const [id, outcome, end] of [
+        [ids.oauth, "failed", T - 6 * minute],
+        [ids.nav, "succeeded", T - 3 * minute],
+        [ids.live, "succeeded", T - minute],
+      ] as const) {
+        yield* tracker.apply(created(id, end - 30 * minute), T)
+        yield* tracker.apply(execution("started", id, end - 10 * minute), T)
+        yield* tracker.apply(execution(outcome, id, end), T)
+      }
+      // A failure whose background shell still runs stays working, like its Sessões row.
+      yield* tracker.apply(created(ids.deploy, T - 30 * minute), T)
+      yield* tracker.apply(execution("started", ids.deploy, T - 20 * minute), T)
+      yield* tracker.apply(shellStarted(ids.deploy, "sh_dev", T - 15 * minute, "bun run dev"), T)
+      yield* tracker.apply(execution("failed", ids.deploy, T - 2 * minute), T)
+      server.settings.master = ids.live
+      yield* tracker.apply({ type: "preferences.updated" }, T)
+    }),
+  )
+  const state = tracker.derive(T, host).state
+  expect(state.counts).toEqual({ working: 1, question: 1, permission: 0, failed: 1, idle: 2, unread: 1 })
+  expect(state.needs?.map((need) => [need.sessionID, need.kind, need.since])).toEqual([
+    [ids.cache, "question", T - 4 * minute],
+    [ids.oauth, "failed", T - 6 * minute],
+    [ids.nav, "unread", T - 3 * minute],
+  ])
+  expect(state.sessions.find((row) => row.sessionID === ids.deploy)?.status).toBe("working")
+  expect(state.sessions.some((row) => row.sessionID === ids.live)).toBe(false)
+  expect(Schema.decodeUnknownSync(LiveActivity.AgentsState)(state)).toEqual(state)
+})

@@ -75,12 +75,38 @@
           "directory": "/Users/alexandremartins/Dev/core-infra",
           "status": "working"
         }
+      ],
+      "needs": [
+        {
+          "sessionID": "ses_01JZCACHEDATABASE000000002",
+          "title": "Escolher banco do cache",
+          "project": "core",
+          "directory": "/Users/alexandremartins/Dev/opencode2",
+          "kind": "question",
+          "since": 1793104680000
+        },
+        {
+          "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+          "title": "Revisar navegação",
+          "project": "app",
+          "directory": "/Users/alexandremartins/Dev/opencode2",
+          "kind": "unread",
+          "since": 1793104560000
+        },
+        {
+          "sessionID": "ses_01JZIDLEA0000000000000006",
+          "title": "Atualizar dependências",
+          "project": "opencode2",
+          "directory": "/Users/alexandremartins/Dev/opencode2",
+          "kind": "unread",
+          "since": 1793104260000
+        }
       ]
     },
     "stale-date": 1793105760,
     "alert": {
-      "title": "Pergunta pendente",
-      "body": "Escolher banco do cache · core"
+      "title": "Escolher banco do cache",
+      "body": "Pergunta: Qual banco usar no cache?"
     }
   }
 }

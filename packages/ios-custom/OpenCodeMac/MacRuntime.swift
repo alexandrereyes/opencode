@@ -17,6 +17,8 @@ import SwiftUI
   var windows: [UUID: MacWindowRuntime] = [:]
   /// The bell's list in every window (`MacNotificationBell`).
   let alertInbox = MacAlertInbox()
+  /// Espaço em disco: the rail's bar and the sheet, shared by every window.
+  let disk = MacDiskStore()
   weak var front: MacWindowRuntime?
   var initialSelection: MacSelection?
   var pendingNotification: (id: String, server: String?)?
@@ -102,7 +104,7 @@ import SwiftUI
         }
         alertInbox.record(message)
       }
-      MacNotifications.shared.badge(store.requestCount)
+      MacNotifications.shared.badge(store.attentionCount)
       if let id = store.conversationPath.last?.id {
         Task { @MainActor [weak self] in
           self?.front?.select(id)
@@ -150,5 +152,8 @@ struct MacNewSessionRequest: Identifiable {
 }
 
 enum MacLaunch {
+  /// A fixture or an offline check: no notifications, finish banners or real voice. The voice screen check
+  /// talks to an isolated sandbox server instead of the in-memory fixture.
   static let fixture = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFixture")
+    || ProcessInfo.processInfo.arguments.contains("-OpenCodeMacVoiceScreenCheck")
 }

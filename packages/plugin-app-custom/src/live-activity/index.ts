@@ -86,16 +86,12 @@ export function makeHub(options: HubOptions) {
         host,
         client
           ? {
-              lifecycle: makeLifecycle({
-                registry: running.registry,
+              lifecycle: makeLifecycle({ registry: running.registry, send: client.send }),
+              notifier: makeNotifier({
+                registry: running.notifications,
+                activities: running.registry,
                 send: client.send,
-                // Devices that receive the session alerts themselves: their activity updates stay silent.
-                alerted: (now) =>
-                  running.notifications
-                    .list(now)
-                    .pipe(Effect.map((devices) => new Set(devices.map((device) => device.deviceID)))),
               }),
-              notifier: makeNotifier({ registry: running.notifications, send: client.send }),
             }
           : undefined,
       )
@@ -131,7 +127,7 @@ export function makeHub(options: HubOptions) {
           Effect.catchCause((cause) => Effect.logWarning("Live Activity push delivery failed", { cause })),
           Effect.forkIn(running.scope),
         )
-        const alerts = yield* push.notifier.evaluate(derived, now)
+        const alerts = yield* push.notifier.evaluate(derived, now, state)
         if (alerts.wakeAt !== undefined) wakes.push(alerts.wakeAt)
         yield* alerts.deliver.pipe(
           Effect.catchCause((cause) => Effect.logWarning("Session notification delivery failed", { cause })),
@@ -157,15 +153,21 @@ export function makeHub(options: HubOptions) {
   )
 
   /**
-   * The `snapshot` state with the host name and each attention session's oldest pending request, for other
-   * surfaces of the same hub (the watch gateway). The request IDs never enter the Live Activity state or pushes.
+   * The state with the host name and each attention session's oldest pending request, for other surfaces of the
+   * same hub (the watch gateway). The request IDs never enter the Live Activity state or pushes. Unlike `snapshot`,
+   * `state` stays while only unread answers wait (rev. 2026-10-29), so the watch counts what Sessões counts.
    */
   const view = Effect.gen(function* () {
     const running = yield* current
     const ready = yield* Deferred.await(running.ready)
     const now = yield* Clock.currentTimeMillis
     const derived = running.tracker.derive(now, ready.host)
-    return { state: visible(derived.state, now), host: ready.host, requests: derived.requests }
+    return {
+      state: visible(derived.state, now, true),
+      live: visible(derived.state, now),
+      host: ready.host,
+      requests: derived.requests,
+    }
   })
 
   const change = <A>(run: (running: Running, now: number) => Effect.Effect<A>) =>
@@ -190,7 +192,7 @@ export function makeHub(options: HubOptions) {
       change((running, now) => running.registry.ended(input, now).pipe(Effect.as({}))),
     unregister: (input: { readonly deviceID: string }) =>
       change((running, now) => running.registry.unregister(input.deviceID, now).pipe(Effect.as({}))),
-    snapshot: () => view.pipe(Effect.map((result) => ({ state: result.state }))),
+    snapshot: () => view.pipe(Effect.map((result) => ({ state: result.live }))),
   }
 
   const notifications = {
@@ -233,9 +235,12 @@ export function makeHub(options: HubOptions) {
 
 export type Hub = ReturnType<typeof makeHub>
 
-/** `null` while nothing is working, waiting or failed; otherwise the state trimmed to fit an update push. */
-function visible(state: LiveActivity.AgentsState, now: number) {
-  if (state.activeTotal === 0 && state.counts.failed === 0) return null
+/**
+ * `null` while nothing is working, waiting or failed (nor, with `unread`, any answer unread); otherwise the state
+ * trimmed to fit an update push. Unread answers never keep a Live Activity alive.
+ */
+function visible(state: LiveActivity.AgentsState, now: number, unread = false) {
+  if (state.activeTotal === 0 && state.counts.failed === 0 && !(unread && (state.counts.unread ?? 0) > 0)) return null
   return fit({ event: "update", state, now })
 }
 
@@ -283,6 +288,7 @@ export const registerLiveActivity = Effect.fn("LiveActivity.register")(function*
             Effect.map((profile) => ({
               notify: marksFrom(profile).notify,
               autoApprove: profile.data.settings.autoApprove,
+              master: profile.data.masterSessions?.local,
             })),
             Effect.orElseSucceed(() => ({ notify: [], autoApprove: false })),
           ),

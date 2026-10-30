@@ -69,6 +69,7 @@ AgentsState {
   attention: Attention[]            // pending questions/permissions, oldest first, at most 3
   attentionTotal: number            // question + permission (may exceed attention.length)
   sessions: Row[]                   // rows for the expanded Dynamic Island, at most 4, ordered (see below)
+  needs?: Need[]                    // rev. 2026-10-29: what needs Alexandre, at most 3, ordered (see "Needs")
 }
 
 SessionRef { sessionID: string, title: string /* ≤ 80 */, project: string /* ≤ 40 */, directory: string }
@@ -91,6 +92,11 @@ Row = SessionRef & {
   status: "question" | "permission" | "failed" | "working" | "idle"
   progress?: Progress               // only for working rows
 }
+
+Need = SessionRef & {
+  kind: "question" | "permission" | "failed" | "unread"
+  since: number                     // asked (oldest pending request), failed (execution end) or answered (unread time)
+}
 ```
 
 `unit` is an enum so a future task list can add `"tasks"`; iOS renders unknown units as a bare `done/total`.
@@ -109,7 +115,9 @@ Row = SessionRef & {
   executes. It stops counting when the task ends; the completion notice then wakes the session as a new execution.
   Without any known turn of the top-level session, `startedAt` falls back to the earliest start among executing
   descendants and unfinished tasks. With only tasks pending, `activity` describes the newest one (`Rodando <command>`).
-- **Status precedence per session:** question > permission > failed > working > idle.
+- **Status precedence per session:** question > permission > working > failed > idle (rev. 2026-10-29: working
+  outranked by failed before; now a failure whose family still works, such as a background shell, is working, like
+  its Sessões row).
 - **Failed:** the session's latest execution ended with `session.execution.failed` (a user interruption is not a
   failure). It stays failed until a new execution starts, the session is viewed (`session.viewed`), archived or
   deleted, or 24 hours pass.
@@ -119,9 +127,15 @@ Row = SessionRef & {
   whose latest assistant output is newer than its viewed watermark (`time.viewed`) — the same rule as the orange
   unread dot in Sessões. Muting is gone (2026-10-28: "Avisar ao terminar" replaced it, see
   [session-notifications.md](session-notifications.md)), so `mutedSessions` no longer hides anything. No time window: it stays
-  unread until the session is viewed (`session.viewed`), archived or deleted. Chats and the current Sessão mestra
-  follow the same rule as other top-level sessions. Unread sessions never keep a Live Activity alive (the end rule
-  is unchanged).
+  unread until the session is viewed (`session.viewed`), archived or deleted. Chats follow the same rule as other
+  top-level sessions; the current Sessão mestra (`masterSessions.local`), which Sessões never lists, is never unread
+  (rev. 2026-10-29). Unread sessions never keep a Live Activity alive (the end rule is unchanged).
+- **Needs (rev. 2026-10-29):** every session that needs Alexandre, the rows of the Sessões "Precisa de você" section
+  and the iOS `counts.forYou` = question + permission + failed + unread (one per session, by the precedence above):
+  question, permission (oldest `since` first), failed (most recent first), unread (most recent first); cut to 3.
+  `attention` keeps only requests, so older apps (and the watch's Responder, which needs a request) are unchanged.
+  The watch gateway's `/state` also answers while only unread sessions wait; `snapshot` and `changed` stay `null`
+  then.
 - **Focus:** among working sessions, keep the current focus while it is still working; otherwise pick the one whose
   execution started most recently. Absent when `counts.working == 0`.
 - **activity** (from the latest step activity of the most recently active **executing** session in the focus
@@ -136,7 +150,7 @@ Row = SessionRef & {
   unread sessions** (rev. 2026-10-28; read sessions no longer appear as rows). The status string stays `idle` so older
   builds keep decoding it; newer builds label it `Não lida`.
 - **Size:** the whole APNs body must stay ≤ 4096 bytes. Trim in this order until it fits: `attention[].text`, then
-  `sessions` beyond 3, then `attention` beyond 2, then shorten titles.
+  `needs` beyond 2, then `sessions` beyond 3, then `attention` beyond 2, then shorten titles.
 
 ## RPC `custom.live-activity`
 
@@ -180,9 +194,11 @@ device showed an ended card lingering above a new one). Ended activities never s
 
 **Update.** The backend pushes `update` to every registered activity token:
 
-- Immediately with `apns-priority: 10` when the set of attention items or failed sessions changes. Only additions
-  carry an `alert`: `Pergunta pendente` / `Permissão pendente` / `Sessão parou com erro`, body
-  `<title> · <project>`.
+- Immediately with `apns-priority: 10` when the set of attention items or failed sessions changes, without an
+  `alert` (rev. 2026-10-30). The buzz is the session alert of
+  [session-notifications.md](session-notifications.md#live-activity-alerts), which goes through this activity as one
+  more priority-10 update carrying `alert` (`<session title>` / `Pergunta: …`, `Permissão: …` or `Parou com erro ·
+  <project>`), as in `push-update.json`.
 - Otherwise coalesced, `apns-priority: 5`, at most one every 10 seconds per activity.
 - A heartbeat update every 10 minutes while active. Every push sets `stale-date` = now + 15 minutes.
 
@@ -235,6 +251,14 @@ singles one out as "the" session; `focus` is no longer rendered here (it stays i
 - **Failed only** (`activeTotal == 0`, `failed > 0`): ring with the red and gray arcs, centre `0` / `ativas`, counters
   `com erro` and `não lidas`, no attention line.
 - Fixed metrics; the card must fit the 160 pt Lock Screen limit in every state without vertical `ViewThatFits`.
+
+**Attention first (rev. 2026-10-29, Option A of `.agent-artifacts/atencao/live-atencao.png`).** While `forYou`
+(question + permission + failed + unread) is above zero, the ring draws only those arcs (same colors, same order)
+with `forYou` / `para você` in the centre; the counters list them first and `N trabalhando` last in `textSecondary`,
+dropped first beyond four lines; the attention line shows the first `needs` item with its kind (`pergunta`,
+`permissão`, `erro`, `respondeu`) and `+K` = `forYou` − 1. Compact: `forYou` in a `primary` pill. Expanded: `forYou
+para você · N trabalhando` over the first two `needs`. Card taps open the first `needs` session. With `forYou` zero
+the rules below apply unchanged. Without `needs` (older backends) the app uses `attention`, then failed and idle rows.
 
 **Dynamic Island** (from `opcao-3-painel-cotas.png`):
 
@@ -360,15 +384,15 @@ push-to-start requires an observed `activeTotal` of 0 after the device's last st
 registered activity covered active work, so work already running at boot or registration does not start one, while an
 activity that ended during the calm (the backend's own `end`, sent with `dismissal-date` = now) leaves the device
 armed for the next rise. Push-to-start is only sent while no activity is registered: a failed `end` keeps the
-activity registered and is retried, so no new card starts beside it. Alerts: when several items are added at once, the
-first in the order question, permission, failed. An activity registered with `activity` gets a routine update within
+activity registered and is retried, so no new card starts beside it. An activity registered with `activity` gets a routine update within
 10 s. `end` is sent with priority 10 and also respects the 10 s per-activity spacing; after it is delivered (or the
 token is invalid) the activity is removed from the registration. A failed update clears the "already sent" marker so
 the next 10 s slot retries; a failed start is retried after the 5-minute window.
 
-**Alerts with session notifications (rev. 2026-10-29).** A device also registered in `custom.notifications` gets
-its urgent updates without `alert`, since the session alert already buzzes; others keep the alert as the fallback (see
-[session-notifications.md](session-notifications.md#live-activity-alerts)).
+**One alert per device (rev. 2026-10-30).** Questions, permissions and failures alert once per device, decided by the
+session alerts: through the live activity when the device has one (iPhone, and the watch mirrors it), otherwise as a
+notification (see [session-notifications.md](session-notifications.md#live-activity-alerts)). The updates this
+lifecycle sends never carry an `alert`; push-to-start keeps its own.
 
 **Expiry (rev. 2026-10-29).** ActivityKit ends an activity after 8 hours. Its token then fails (APNs 410/invalid):
 the registry drops it, remembers the activity as `expired` and sets `rearm`, which arms push-to-start while work goes

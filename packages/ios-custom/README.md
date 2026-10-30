@@ -200,7 +200,7 @@ app, without the web's "Projetos" and "Worktrees" groups.
 
   | Order | Section | Rows | Order inside |
   | --- | --- | --- | --- |
-  | 1 | Precisa de você (`primary` dot) | permission, question or failure, chats included | permissions, questions, then failures by `time.idle` (newest first) |
+  | 1 | Precisa de você (`primary` dot) | permission, question, failure or unread answer (29/10), chats and pins included | permissions, questions, then failures, then unread answers, both by `time.idle` (newest first) |
   | 2 | Trabalhando (`success`) | running, nothing pending | `SessionList.rows` |
   | 3 | Fixadas (pin icon) | other pinned rows | pin order |
   | 4 | Hoje, Ontem, Esta semana (neutral) | the rest by local day of `interactionAt`; "Esta semana" is 2–6 days ago | `SessionList.rows` |
@@ -235,8 +235,18 @@ app, without the web's "Projetos" and "Worktrees" groups.
   (`interrupted`) is not a failure — the Live Activity contract's "Failed" rule. The message comes from the preview:
   the app now decodes `idle` transcript messages (`TranscriptMessage.idle`), and `SessionPreview.failure` holds
   `error.message` when the latest message is a failed `idle`. Without it the line says `erro · parou com erro`; the
-  elapsed time comes from `time.idle`. The "Precisa de você" filter includes failures; the tab badge and chip request
-  counts still count only permissions and questions. No server change was needed.
+  elapsed time comes from `time.idle`. The "Precisa de você" filter includes failures; the chip request counts still
+  count only permissions and questions. No server change was needed.
+- **Attention first (29/10, mock `.agent-artifacts/atencao/sessoes-precisa-de-voce.png`):** an unread root that is not
+  working (`SessionState.unread`; a background shell keeps it `.running`) joins "Precisa de você" after the failures.
+  Its row keeps the existing unread look (bold title, orange dot) and its colored line reads `respondeu · <first line of
+  the answer>` in `primary`; an unread failure stays one failure. **One count** (`SessionAttention.count`, one per
+  root) feeds the section header, the Mac bell, the Dock and the Sessão mestra bar, and matches `counts.forYou` of the
+  Live Activity and the watch. **Nothing jumps while you read:** opening a failure or an unread answer marks it viewed;
+  `SessionAttentionHold` (in `SessionStore`, fed by the iPhone's `conversationPath` and every Mac window's selection
+  through `shownConversations`) keeps that row in its place, without the dot and without counting, until no open
+  conversation shows it, it works again or a newer run ends. `SessionSections.group(_:now:held:)` takes it, so the
+  scroll hold of `SessionListPresentation`, the Mac neighbors and ⌘1…⌘9 see the same order.
 
 **Reuse on the Mac.** Logic lives in OpenCodeKit (iOS 27 + macOS 15) with Swift Testing coverage
 (`SessionSectionsTests`): `SessionList.rows` (failure state and precedence), `SessionSections` (grouping, order, days,
@@ -375,7 +385,9 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   turn's start only plays a selection haptic. An inline bubble keeps its old taps, so its truncated text expands;
   pinned, expansion is the **Mostrar mensagem completa** control. Its buttons (**Mostrar mensagem completa**,
   **Ir ao trecho citado**, context cards, image thumbnails) and the actions below the bubble (redefinir, copiar) keep their
-  own behavior, as does the long-press menu. VoiceOver offers **Ir para o começo da resposta** on the prompt text. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
+  own behavior, as does the long-press menu. **Alexandre, 29/10:** **Mostrar mensagem completa** answers only at its
+  text's exact frame (the bubble's tap tells it apart), since a SwiftUI button's touch area reached the gap above it
+  and the bubble's bottom padding, where a pinned bubble expanded instead of returning to its turn. VoiceOver offers **Ir para o começo da resposta** on the prompt text. The text/context area has internal scrolling capped at 40% of the view; attachments, timestamp and copy
   actions stay outside it. Attachments use 48-point square image thumbnails in a horizontal strip, no repeated image
   filename, and wrapping one-line file chips (filename up to 140 points). **Alexandre, 24/10:** while the bubble is
   folded (so **Mostrar mensagem completa** is shown), image thumbnails are hidden; expanding reveals them. File/PDF
@@ -706,8 +718,22 @@ results are merged by recency; accents are still matched as typed there ("sessao
 composer does the same in `composer/session-search.ts`.
 
 After `build-for-testing`, `script/test-composer-case.py` (same environment variables as `test-app-mentions.py`)
-creates a fake repository, two disposable Sessions and one snippet, runs `ComposerCaseUITests` (`&`, `@`, `$`, `#`,
+creates a fake repository, five disposable Sessions and one snippet, runs `ComposerCaseUITests` (`&`, `@`, `$`, `#`,
 `/` in several cases, then Return on `#COMMIT`) and removes them.
+
+### Session mentions — 29 October
+
+**Alexandre, 29/10: o `@` listava cinco "Sessão mestra" iguais (a atual, três mestras e uma sessão arquivadas).**
+Session suggestions now skip archived sessions, on iOS and on the Mac (both use `ConversationStore.suggestions`).
+`GET /api/session` has no archive filter, so `composerSessions` reads root pages of 50 newest first, drops archived
+ones and reads up to four pages until 10 recent (30 when searching) live sessions remain; each case variant pages on
+its own. The current master (`masterSessions.local`) stays mentionable, because another session may need what was
+decided there, and shows "Mestra atual"; inside the master it is the current session and is hidden as before.
+Sessions sharing a title (case- and accent-folded) show the directory's last component and the compact age of their
+last update, as in the Sessões rows (`opencode2 · 3h`); unique titles show nothing extra. The session switcher and
+the Mac search read the navigation list and the archive separately, and are unchanged.
+`ComposerCaseUITests/testSessionMentionsSkipArchivedAndTellRepeatedTitlesApart` covers it with an archived session
+and two "Gemea Repetida" in different directories.
 
 ### Files on `&` — 28 October
 
@@ -2896,6 +2922,44 @@ after integrating the parallel search fix. The exact trace is `mac-escolhas-prin
 Comparisons are `comparacao-paleta.png`, `comparacao-trilho.png` and `comparacao-subagente.png`; the latter compares
 the combined banner/tree against both approved subagent references. `nova-sessao-paleta.png` captures the second host.
 
+### Espaço em disco — 29 October
+
+Approved mocks: `.agent-artifacts/mac-app/disco-indicador-opcoes.png` (option B) and `disco-tela-a-folha.png`
+(screen A) of the `mac-disco` worktree. Rules in OpenCodeKit's `DiskCleanup` (`DiskCleanupTests`); the Mac side
+is `MacDiskSpace.swift` (`MacDiskStore`, app-wide), `MacDiskScan.swift` (git, processes, `fts` sizes, off the main
+thread), `MacDiskCleaner.swift` and `MacDiskSheet.swift`.
+
+- **Rail bar** above Atalhos do teclado: used share, free space below, green above 25% free, neutral to 15%,
+  orange below 15%, red below 5% (`volumeAvailableCapacityForImportantUsage`, every 3 min, on opening the sheet
+  and after cleaning). A click, ⇧⌘D or Janela ▸ Espaço em disco opens the sheet.
+- **Worktrees**: linked worktrees of the projects' repositories (`git worktree list`) plus every folder of
+  `~/Worktrees`. Live (unarchived) sessions whose `location.directory` is inside (resolved through the nearest
+  existing folder), a process working there (the kernel's arguments and working folders, `KERN_PROCARGS2` and
+  `PROC_PIDVNODEPATHINFO`, so paths with spaces count), initialized submodules, a remote server (its `/api/info`
+  `paths.tmp` is not in this user's temporary folder), clones and plain folders lock a row. Archived sessions do not
+  hold a worktree ("Só sessões arquivadas"). Uncommitted files, commits on no remote and ignored files nothing
+  regenerates (`.env`, local databases; `node_modules`, `build`, `dist`, caches and the like do not count) need a
+  confirmation tied to that exact state (HEAD, status, unsent count) and are never marked by default; cancelling the
+  preview voids it. Changes within 24 h are not marked either. Removal is `git worktree remove` (`--force` only for
+  confirmed uncommitted files) and `prune`; branches stay.
+- **Sujeira dos agentes** (`$TMPDIR/opencode`): DerivedData (`Build/`, logs or index, an `info.plist` with
+  `WorkspacePath`; up to three levels down), `.xcresult` and copied `.app` bundles (with their `Info.plist`) and logs
+  are removable when no process uses them, everything inside could be read and nothing changed for 24 h. A checkout
+  (`.git`) is never classified nor entered. Captures, uploads, other temporary items, simulators (except
+  `simctl delete unavailable`), AVDs, OpenCode snapshots, Xcode's DerivedData and caches only show their size and a
+  Finder button. Sizes count hard links once and are estimates.
+- Limpar shows a preview and goes one item at a time. Before each worktree it reads the sessions from the server
+  again (a failed read, another connection or a server no longer on this Mac stops the run), the processes and git;
+  before each leftover, the processes, the whole tree's newest change and the path itself (no link on the way, same
+  device and inode). Git runs without fsmonitor, with timeouts, and Parar ends the run. The result shows the volume's
+  free space before and after; every item goes to `~/Library/Logs/OpenCode/limpeza-de-disco.log`. Sizes are cached
+  in `disk-sizes.json`.
+- **Checks**: `script/test-mac-disk.sh` builds a throwaway fixture (fake repositories, worktrees, submodule,
+  sessions and temporary folder, processes standing in for work) and runs `MacDiskChecks` against it, including
+  changes made in the middle of the cleanup (a new session, a new process, an edit inside a bundle, a link swapped
+  into the path, a change after a confirmation, a server that stops answering); then it deletes it. DEBUG
+  `-OpenCodeMacDiskSurvey <folder>` reads this Mac's real folders with `clean` disabled.
+
 ### Chat (polish 1) — 27 October
 
 Briefing: `.agent-artifacts/mac-app/POLIMENTO-CHAT.md` of the `mac-polish-chat` worktree. The chat column is the
@@ -3142,22 +3206,24 @@ separate track.
 - **Alerts and notifications**: the in-app banner (`SessionAlertCenter`) stays silent for the session on screen
   while the app is in front. While the app is not in front, each banner (answered or finished, failed, permission,
   question; mutes and deduplication included) also becomes a macOS notification (`MacNotifications`), and clicking
-  it opens that session. The Dock icon shows `requestCount` (permissions and questions), like the iPhone's tab badge.
+  it opens that session. The Dock icon shows the count of "Precisa de você" (`SessionAttention.count`, 29/10).
   The fixture never asks for the notification permission nor posts anything.
-- **Bell (`MacNotificationBell`, rev. 29/10)**: no state of its own. Its count and **Não lidas** are the rows with
-  Sessões' orange dot (`SessionRow.unread`, the server's `viewed`) or a pending permission or question, one line per
-  session, so reading a conversation on any device clears its line. **Anteriores** are recent answers already read,
+- **Bell (`MacNotificationBell`, rev. 29/10)**: no state of its own. Its count and **Não lidas** are the rows of
+  "Precisa de você" in its order (`SessionAttention.ordered`: requests, failures, unread answers of sessions that are
+  not working, against the server's `viewed`), one line per session, so reading a conversation on any device clears
+  its line. **Anteriores** are recent answers already read,
   dimmed; Limpar hides only them. A new line (a dot or a request appears, never for the conversation on screen)
   bounces the bell, fills it orange until read and, in the key window with no sheet, search or palette over it,
   opens the list for 4.5 s (longer under the pointer) with the line highlighted. The list is a nonactivating child
   panel that cannot become key, so the composer keeps typing; opening it never marks anything read. Check:
   `-OpenCodeMacFixture contexto -OpenCodeMacFixtureBell 12 [-OpenCodeMacBellShot <png>]` (`MacBellChecks`, in the
-  background and off-screen) prints `MacBellChecks ok|FAIL …` and exits 0 or 1.
+  background and off-screen) prints `MacBellChecks ok|FAIL …` and exits 0 or 1. It also checks that the bell equals
+  "Precisa de você" and that the line it opens stays there while open (a second shot, `<png>-aberta.png`).
 - **Menus and shortcuts**: Arquivo (Nova sessão ⌘N, Nova janela ⌥⌘N, Atualizar ⌘R), Visualizar (Contexto ⌥⌘I,
   Arquivos ⇧⌘F, Filtrar sessões), Sessão (Nova sessão a partir desta ⇧⌘N, Renomear ⇧⌘R, Fixar ⇧⌘P, Silenciar,
   Marcar como lida, Arquivar ⌥⌘⌫, Excluir ⌘⌫, both confirmed and acting on the selection while there is one, Reiniciar Sessão mestra), Editar (Buscar
   na conversa ⌘F), Ir (Buscar projetos e sessões ⌘K, Voltar à sessão principal ⌘[, previous/next session ⌥⌘↑ ⌥⌘↓,
-  Sessão mestra ⇧⌘M, Conversar por voz, and the first nine sessions of the list, ⌘1…⌘9) and Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
+  Sessão mestra ⇧⌘M, Conversar por voz, the first nine sessions of the list, ⌘1…⌘9, and Todas then the project rail's chips in the order it shows them, ⌥1…⌥9) and Janela (LLM proxy ⇧⌘L). ⌘[ is the Mac's Back (Finder, Safari, Xcode), so it leaves a subagent; the neighbors moved
   to ⌥⌘↑/⌥⌘↓, up and down Sessões. The title bar's `…` shows the same session actions and Buscar na conversa.
   Shortcuts avoid the text editing keys (⌘A, bare arrows) and the transcript's (Page Up/Down, space, ⌘↑/⌘↓); ⌘⌫ typed
   in an editable field (`MacTextKeys`) still deletes to the start of the line there instead of excluding the session.
@@ -3650,8 +3716,10 @@ project filter replacing the chips and the highlight of the open subagent.
 
 **Checks.** `MacAdjustmentsTests` (cost format, ⌘1–⌘9 order, archived search, remembered width and its range,
 absolute breadcrumb, run label, model rows, the right Option key's rules). `script/test-mac-ajustes.sh` runs
-`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider`)
-in the fixture through real AppKit events: line heights, wrapping width and scroll position with one line, three,
+`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider|edge`)
+in the fixture through real AppKit events (`edge` scrolls the columns and requires each one cut at the title bar's
+bottom edge, like the chat; Contexto and Sessões are `.clipped()` because macOS 26 extends their scroll views under
+the bar): line heights, wrapping width and scroll position with one line, three,
 tokens and twelve; a click, Shift+Return, Return and Esc in a question; a pending quote opening focused, Return and
 Esc; ⌘C in the viewer (the clipboard is restored afterwards) and the drag provider; the archived search; the Ir
 menu's ⌘1–⌘9 and ⌘2; Contexto at 60% of a 2400-pt window; the right Option key's tap, hold, left Option and
@@ -3723,6 +3791,42 @@ A key re-evaluates no `body` of `MacWindow`, `MacChatColumn`, `MacConversationVi
 after. While streaming, `MacWindow` went from 0.3 evaluations a second to none and, with the shown root streaming,
 `MacConversationView` from 23 to 1.5 and the transcript host's update from 23 to 2; what remains there is the
 transcript's own rebuild of the growing answer. These are shared-machine Debug samples, comparable with each other only.
+
+**Round 2: the open conversation streaming.** With the shown root answering, the window was laid out and the
+transcript rebuilt on every delta, and the transcript grew with the conversation's length. What changed:
+
+- **Secondary information is sampled** (`MacSampled`, in `MacConversationInput.swift`): the title ring's context share
+  and the tray's execution start read the transcript, which every delta changes; they are republished at most every
+  200 ms and only when they change (the last change always lands). The tray takes the sampled start through
+  `ConversationTray(started:)` (iOS still reads it from the messages). The search follows the revision only while it
+  is open.
+- **Transcript** (`MacTranscriptController.swift`): at most 30 rebuilds a second (was 60; the last change always
+  rebuilds); `TranscriptProjection.Cache` reuses each response's items while its inputs (activity entry, marks, gap,
+  each text's completion, divider and parse, disclosures) are unchanged; items are compared once, index by index, and
+  unchanged unmeasured items keep their estimate instead of being estimated again; the reading identities are built
+  once per change. `-OpenCodeMacPerfVerify` checks every cached projection against a full one. The growing block's
+  `fittingHeight` no longer resets the text container's size (which laid the whole text out again); off screen it was
+  already neither configured nor measured.
+- `TranscriptMarks` finds each calendar day once instead of asking the calendar about every message, and counts texts
+  without building arrays (same marks; OpenCodeKit's 616 tests pass). The composer keeps its heights per width until
+  its text changes, so a window layout no longer lays out a copy of the draft for every width SwiftUI asks about.
+  `ContextColumnStore` matches events against a set kept with its members.
+
+`-OpenCodeMacPerfLong <n>` adds `n` earlier turns to the root, served in pages of the requested size; the run loads
+them all (`older()`) before measuring. `-OpenCodeMacPerfScrolledUp` measures with the reader away from the end.
+Medians of two interleaved runs per side, before → after (main-thread CPU, the shown root streaming):
+
+| Scenario | Debug | Debug `-O` |
+| --- | --- | --- |
+| Short conversation, streaming | 39.5% → 36% | 39% → 34% |
+| Short conversation, typing while streaming | 43% → 38.5% | (noisy) |
+| 300 turns (905 messages), streaming | 89.5% → 74% | 62.5% → 46.5% |
+| 300 turns, typing while streaming | 86.5% → 52.5% | 64% → 24.5% |
+
+Rebuilds went from 45 to 29 a second; `MacChatAvatar` from 23 evaluations a second to none. Still open: the
+growing block's TextKit 2 view replaces its layout fragment views on every update, and since the transcript sits in
+SwiftUI's constraint-based host, each change invalidates the window's root layout (`constraintsDidChangeInEngine` in
+`AppKitPlatformViewHost`); `ConversationActivity.project` and the Markdown parse of a long answer remain whole-history.
 
 ## Platform and distribution
 
@@ -3940,8 +4044,10 @@ session (provider retries do not count); a success only with "Avisar ao terminar
    and the APNs environment go to `custom.notifications/register` on every event-stream connection (several devices
    are supported; APNs-invalid tokens are dropped by the server).
 3. **Delivery (plugin):** through the Live Activity APNs client and credentials, `thread-id` = session,
-   `apns-collapse-id` = `attention:<session>` for attention alerts. The Agentes Live Activity update for a device
-   registered here carries no `alert`, so nothing buzzes twice; unregistered devices keep it as the fallback.
+   `apns-collapse-id` = `attention:<session>` for attention alerts. One alert per device (rev. 30/10): with a live
+   Agentes activity, a question, permission or failure goes as that activity's update carrying the `alert` (the watch
+   mirrors it) and no notification is sent; without one, or if that update is refused, the notification. A bell
+   success is always a notification.
 4. **Presentation (`willPresent`):** hidden only with the app in the foreground and that session open on the same
    server (`SessionPushAlert.presents`); otherwise banner, list and sound. While the server pushes, the in-app banner
    skips what arrives by push (questions, permissions, failures, bell finishes).
@@ -3997,6 +4103,16 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   island, the Smart Stack card and the watch Painel; the watch complication and Painel ring use the same orange arc.
   Without `unread` (older backends) everything keeps `idle`: gray arc, `concluídas há pouco`, `Concluída`
   (`AgentsState.Counts.finished`, `AgentsState.statusLabel(_:)`).
+- **Attention first (29/10, Option A of `.agent-artifacts/atencao/live-atencao.png`):** small changes to the same
+  views. While `counts.forYou` (questions + permissions + failures + unread, the Sessões count) is above zero, the
+  ring draws only those arcs with `N`/`para você` in the centre, the counters list them first and `N trabalhando` last
+  in gray (dropped first beyond four lines), the bottom line shows the first of `needs` with its kind (`pergunta`,
+  `permissão`, `erro`, `respondeu`), its time and `+K`, the compact island shows the number in an orange pill, and the
+  expanded island reads `N para você · M trabalhando` over the first two `needs` (each opens its session). With
+  nothing for you everything is as before (green ring, `N ativas`). Older backends without `needs` fall back to
+  `attention` and the failed/unread rows, without times (`AgentsState.needItems`). Left out, as bigger layout changes:
+  the second bottom line of the card (it would pass 160 points), the thin outer work arc and Responder/Abrir buttons
+  (the Live Activity has no intents). The Smart Stack card lists `needs` first too.
 - **Apple Watch:** the Lock Screen closure branches on `activityFamily`; `.supplementalActivityFamilies([.small])`
   shows the mascot inside a segmented subagent ring (up to 8 segments, a continuous arc above), the minimal island's
   `!N`/`?N`/hand badge and the first two sessions, in fixed metrics for the smallest Smart Stack (152 × 69.5 points).
@@ -4074,6 +4190,13 @@ watch's own Wi-Fi or cellular. The contract with the backend is
 - **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
   mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
   state in the same Keychain group and reloads on WidgetKit push, when the app updates it, and otherwise every hour.
+- **Attention first (29/10, Option A of `.agent-artifacts/atencao/watch-atencao.png`):** while `counts.forYou` is
+  above zero, `WatchRing` draws only questions, permissions, failures and unread answers, with the orange number; the
+  rectangular line reads `N para você` over a dimmed `1 pergunta · 2 não lidas · 6 trabalhando`; the corner shows the
+  same number. Otherwise the green ring and `N trabalhando · nada para você`. The Painel lists `needs` first (requests
+  still open Responder; failures and answers show their kind and time) and then a collapsed `Trabalhando N` that
+  expands to the working sessions. The gateway now answers a state while only unread answers wait, so the watch counts
+  what Sessões counts. The thin inner work arc of the mock was left out.
 - **Sync within the WidgetKit budget (rev. 29/10).** WidgetKit counts every complication reload outside the app in
   front (push, timeline or background request) against one daily budget, 40 to 70 for a widget looked at often; the
   server's 150 pushes a day plus a 15-minute timeline exhausted it, so only opening the app updated the complication.

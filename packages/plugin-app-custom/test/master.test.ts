@@ -126,6 +126,8 @@ test("Mestra agent is primary, hidden, keeps its rules and hides the native work
     "skill opencode",
     "session_mark_read",
     "só quando ele pedir",
+    "Nunca diga que não consegue ver telas",
+    "O app tentou anexar a tela, mas não conseguiu",
     ...controlNames,
   ])
     expect(system).toContain(phrase)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Local cleartext HTTP/2 stand-in for APNs, for a sandbox started with `OPENCODE_APNS_ORIGIN=http://127.0.0.1:<port>`.
- * Answers 200 to everything and appends each request (path, APNs headers and body; never the provider token) to a
+ * Answers 200 (410 for tokens starting with "dead") and appends each request (path, APNs headers and body; never the provider token) to a
  * JSONL file, so tests can read what the server would have sent without reaching Apple or any device.
  *
  *   bun packages/ios-custom/script/fake-apns.ts --port 4190 --log /path/to/apns.jsonl
@@ -27,9 +27,11 @@ server.on("stream", (stream, headers) => {
       expiration: headers["apns-expiration"],
       body: JSON.parse(Buffer.concat(chunks).toString("utf8") || "null"),
     }
-    void appendFile(log, JSON.stringify(entry) + "\n", { mode: 0o600 })
-    stream.respond({ ":status": 200, "apns-id": crypto.randomUUID() })
-    stream.end()
+    // A token starting with "dead" stands for one APNs refuses, like an expired Live Activity's.
+    const dead = String(headers[":path"]).split("/").at(-1)?.startsWith("dead")
+    void appendFile(log, JSON.stringify({ ...entry, status: dead ? 410 : 200 }) + "\n", { mode: 0o600 })
+    stream.respond({ ":status": dead ? 410 : 200, "apns-id": crypto.randomUUID() })
+    stream.end(dead ? JSON.stringify({ reason: "ExpiredToken" }) : undefined)
   })
 })
 server.listen(Number(args.values.port), "127.0.0.1", () => console.log(`fake APNs on http://127.0.0.1:${args.values.port}`))

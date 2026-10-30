@@ -38,6 +38,7 @@ const Background = Schema.Struct({
 export type Background = typeof Background.Type
 export type Recovery = Background["recovery"]
 export type Status = Background["status"]
+export type Backgrounded = Info & { readonly recovery?: Recovery }
 
 const decodeBackground = Schema.decodeUnknownResult(Background)
 const backgroundPrefix = "job.background/"
@@ -141,6 +142,8 @@ export interface Interface {
   readonly pendingBackground: Effect.Effect<readonly Background[]>
   readonly runningBackground: Effect.Effect<readonly Recovery[]>
   readonly completeBackground: (notificationID: SessionMessage.ID) => Effect.Effect<void>
+  /** Running jobs of this process that were moved to the background. */
+  readonly backgrounded: Effect.Effect<readonly Backgrounded[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Job") {}
@@ -478,6 +481,16 @@ export const make = Effect.gen(function* () {
     ),
   )
 
+  const backgrounded: Interface["backgrounded"] = SynchronizedRef.get(state.jobs).pipe(
+    Effect.map((jobs) =>
+      [...jobs.values()].flatMap((job) =>
+        job.isBackgrounded && job.info.status === "running"
+          ? [{ ...snapshot(job), ...(job.recovery ? { recovery: job.recovery } : {}) }]
+          : [],
+      ),
+    ),
+  )
+
   return Service.of({
     get,
     start,
@@ -489,6 +502,7 @@ export const make = Effect.gen(function* () {
     pendingBackground,
     runningBackground,
     completeBackground,
+    backgrounded,
   })
 })
 

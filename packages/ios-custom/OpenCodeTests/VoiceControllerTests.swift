@@ -265,7 +265,7 @@ private actor LiveMemoryHTTP {
       try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap($0.httpBody)).object?["session"]?.object?["instructions"]?.string
     }
     // The edited server prompt is used as is; the app adds only its fixed screen capability.
-    XCTAssertEqual(prompts, ["Prompt do servidor 1", "Prompt do servidor 2"].map(VoiceProtocol.withScreen))
+    XCTAssertEqual(prompts, ["Prompt do servidor 1", "Prompt do servidor 2"].map { VoiceProtocol.withScreen($0, for: .iPhone) })
     XCTAssertNil(controller.toast.message)
   }
   func testUnavailableServerPromptDoesNotReachProxy() async {
@@ -426,7 +426,7 @@ private actor LiveMemoryHTTP {
     let requests = await http.requests
     let offer = try XCTUnwrap(requests.first { $0.url?.path.hasSuffix("/calls") == true })
     let session = try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap(offer.httpBody)).object?["session"]?.object
-    XCTAssertEqual(session?["instructions"]?.string, VoiceProtocol.withScreen("Instruções da fixture de voz."))
+    XCTAssertEqual(session?["instructions"]?.string, VoiceProtocol.withScreen("Instruções da fixture de voz.", for: .iPhone))
     XCTAssertTrue(session?["initial_items"]?.array?.first?.object?["content"]?.array?.first?.object?["text"]?.string?.contains("pitanga violeta") == true)
     await controller.end()
     await memory.stop()
@@ -435,7 +435,7 @@ private actor LiveMemoryHTTP {
   // MARK: Screen for the master
 
   private func screenController(_ transport: VoiceTestTransport, _ master: VoiceTestMaster, _ http: VoiceTestHTTP,
-    screen: @escaping @MainActor (String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot) -> VoiceController {
+    screen: @escaping @MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot) -> VoiceController {
     VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
       master: { update in master.update = update; return master }, request: { try await http.respond($0) }, screen: screen))
   }
@@ -443,7 +443,7 @@ private actor LiveMemoryHTTP {
   func testScreenDelegationAttachesTheCaptureTakenWhenGPTLiveDelegated() async throws {
     let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
     var captured: [String?] = []
-    let controller = screenController(transport, master, http) { id throws(VoiceScreenRefusal) in
+    let controller = screenController(transport, master, http) { _, id throws(VoiceScreenRefusal) in
       captured.append(id); return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 9]), sessionID: id)
     }
     let answered = expectation(description: "answered")
@@ -468,9 +468,70 @@ private actor LiveMemoryHTTP {
     await controller.end()
   }
 
+  /// The two phrases of 29/10: GPT Live delegated without `"screen"`. The app still sends the capture.
+  func testScreenQuestionsDelegatedAsPlainTextStillCarryTheCapture() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    var targets: [VoiceScreenTarget] = []
+    let controller = screenController(transport, master, http) { target, id throws(VoiceScreenRefusal) in
+      targets.append(target); return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 5]), sessionID: id)
+    }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    func say(_ text: String) {
+      let piece = try! JSONEncoder().encode(JSONValue.object(["type": .string("input_transcript.added"),
+        "item": .object(["id": .string(UUID().uuidString), "text": .string(text)])]))
+      transport.event?(.data(piece))
+    }
+    func delegate(_ id: String, _ text: String) async {
+      let asked = expectation(description: id)
+      master.asked = { asked.fulfill() }
+      let event = try! JSONEncoder().encode(JSONValue.object(["type": .string("delegation.created"), "item": .object([
+        "type": .string("delegation"), "target": .string("client"), "id": .string(id),
+        "content": .array([.object(["type": .string("input_text"), "text": .string(text)])])])]))
+      transport.event?(.data(event))
+      await fulfillment(of: [asked], timeout: 3)
+    }
+    // A question about the screen, delegated as it was said.
+    say(" Você está vendo a minha tela aí?")
+    await delegate("q1", "Você está vendo a minha tela aí?")
+    // A question GPT Live answered itself, then a follow-up that does not name the screen.
+    say(" Você está vendo a minha tela aí?")
+    say(" Não, vai lá na Mestra que você consegue")
+    await delegate("q2", "Não, vai lá na Mestra que você consegue")
+    // Unrelated: no capture.
+    say(" Cria uma sessão no abacato")
+    await delegate("q3", "Cria uma sessão no abacato")
+    XCTAssertEqual(targets, [.front, .front])
+    XCTAssertEqual(master.requests.map(\.screen), [.front, .front, nil])
+    XCTAssertEqual(master.requests.map(\.text), ["Você está vendo a minha tela aí?",
+      "Não, vai lá na Mestra que você consegue", "Cria uma sessão no abacato"])
+    XCTAssertEqual(master.screens.map { $0 != nil }, [true, true, false])
+    await controller.end()
+  }
+
+  func testInferredCaptureThatFailsStillSendsTheTextWithTheReason() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    let controller = screenController(transport, master, http) { _, _ throws(VoiceScreenRefusal) in throw .background }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    let asked = expectation(description: "asked")
+    master.asked = { asked.fulfill() }
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"q4","content":[{"type":"input_text","text":"Tá conseguindo ver minha tela"}]}}"#.utf8)))
+    await fulfillment(of: [asked], timeout: 3)
+    XCTAssertEqual(master.requests.first?.text,
+      "Tá conseguindo ver minha tela\n\n[O app tentou anexar a tela, mas não conseguiu: " + VoiceScreenRefusal.background.reason + "]")
+    XCTAssertNil(master.requests.first?.screen)
+    XCTAssertNil(master.screens.first!)
+    await controller.end()
+  }
+
   func testRefusedScreenReachesOnlyGPTLiveWithAClearReason() async throws {
     let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
-    let controller = screenController(transport, master, http) { _ throws(VoiceScreenRefusal) in throw .background }
+    let controller = screenController(transport, master, http) { _, _ throws(VoiceScreenRefusal) in throw .background }
     let answered = expectation(description: "answered")
     transport.answered = { answered.fulfill() }
     controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
@@ -486,6 +547,32 @@ private actor LiveMemoryHTTP {
     XCTAssertEqual(spoken, VoiceScreenRefusal.background.localizedDescription)
     XCTAssertEqual(controller.toast.message?.text, VoiceScreenRefusal.background.localizedDescription)
     XCTAssertEqual(controller.state.phase, .listening)
+    await controller.end()
+  }
+
+  func testScreenTargetReachesTheCaptureAndANoticeIsSpokenAfterSending() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    var targets: [VoiceScreenTarget] = []
+    let controller = screenController(transport, master, http) { target, _ throws(VoiceScreenRefusal) in
+      targets.append(target)
+      return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 7]), sessionID: nil, subject: "da janela do OpenCode",
+        notice: VoiceScreenPlanner.deniedNotice)
+    }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    let asked = expectation(description: "asked")
+    master.asked = { asked.fulfill() }
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"s4","content":[{"type":"input_text","text":"{\"text\":\"Olha o simulador\",\"screen\":\"app\",\"screen_app\":\"Simulator\"}"}]}}"#.utf8)))
+    await fulfillment(of: [asked], timeout: 3)
+    XCTAssertEqual(targets, [.app("Simulator")])
+    XCTAssertEqual(master.screens.first??.notice, VoiceScreenPlanner.deniedNotice)
+    let deadline = Date.now.addingTimeInterval(3)
+    while transport.frames.isEmpty, Date.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+    let spoken = transport.frames.compactMap { try? JSONDecoder().decode(JSONValue.self, from: $0).object?["content"]?.array?.first?.object?["text"]?.string }.joined()
+    XCTAssertEqual(spoken, VoiceScreenPlanner.deniedNotice)
+    XCTAssertEqual(controller.toast.message?.text, VoiceScreenPlanner.deniedNotice)
     await controller.end()
   }
 

@@ -343,9 +343,13 @@ recebe a imagem**; só a mestra a vê. O probe opt-in `testExplicitSilentLiveIma
 `delegation.function_call_output.create` e outros de áudio/sessão) e `session.context.append` com
 `input_image` falha com `missing_required_parameter: content[0].text`.
 
-- **Descrição fixa:** a delegação embutida não tem descrição editável. O app acrescenta
-  `VoiceProtocol.screenInstructions` ao prompt devolvido pelo servidor (`VoiceProtocol.withScreen`),
-  salvo se o texto já contiver `"screen":true`; vale mesmo com `voice.md` editado. Só o iPhone o faz.
+- **Parâmetro:** `"screen": true | "front" | "app" | "display"` e `"screen_app": "Simulator"`
+  (`VoiceScreenTarget`). `true` equivale a `"front"`; um `screen_app` não vazio implica `"app"`; `false`
+  desliga. O iPhone aceita todos e sempre captura só o OpenCode.
+- **Descrição fixa:** a delegação embutida não tem descrição editável. Cada app acrescenta a sua
+  (`VoiceProtocol.screenInstructions(.iPhone | .mac)`, via `withScreen(_:for:)`) ao prompt devolvido
+  pelo servidor, salvo se ele já trouxer a forma daquela plataforma (`"screen":true` no iPhone,
+  `"screen_app"` no Mac); vale mesmo com `voice.md` editado. O `voice.md` padrão só remete a esse bloco.
 - **Captura:** `VoiceScreenCapture` começa no próprio evento da delegação (`Task.immediate`), antes de
   esperar pedidos anteriores. Exige o app ativo na frente e dados protegidos disponíveis (iPhone
   desbloqueado); renderiza só a janela principal do OpenCode (`drawHierarchy`), a no máximo 2×, JPEG
@@ -361,7 +365,70 @@ recebe a imagem**; só a mestra a vê. O probe opt-in `testExplicitSilentLiveIma
   capturado nem enviado à mestra. O motivo vai ao GPT Live por `delegation.context.append` (por
   exemplo “Não consigo ver a tela: o OpenCode não está aberto na frente. Só vejo a tela do próprio
   OpenCode, nunca a de outros apps. Nada foi enviado à Sessão mestra.”) e aparece num toast do app.
-- O app do Mac não captura; um pedido com `screen` é recusado com motivo próprio.
+
+#### Quando o GPT Live não marca `screen` (29/10)
+
+Nos testes de 29/10 o GPT Live respondeu "não tô vendo" a "Você está vendo a minha tela aí?" sem delegar e,
+depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples. Duas defesas:
+
+- **Instruções na frente:** o bloco fixo de cada app agora vem **antes** do prompt do servidor (que é editável
+  e longo), afirma que ele consegue ver a tela, lista perguntas ("tá vendo minha tela?", "consegue ver isso?",
+  "o que você acha disso aqui?"…), manda usar `screen` na dúvida e proíbe dizer que não vê sem delegar.
+- **Rede de segurança no app:** uma delegação sem `screen` ganha a captura (alvo `front`) quando o texto
+  delegado ou o que Alexandre falou desde a delegação anterior (até 45 s, pelos trechos de transcrição de
+  entrada) fala da tela (`VoiceScreenIntent`: tela, print, captura, janela, página, "isso aqui", "olha
+  aqui", "vê isso", "o que acha disso", "que erro é esse"…). Se essa captura inferida falhar, o texto vai
+  mesmo assim, com `[O app tentou anexar a tela, mas não conseguiu: motivo]`; só o `screen` explícito
+  continua bloqueando o envio.
+- **Mestra:** o prompt dela manda analisar a imagem, repetir esse motivo quando houver e nunca dizer que
+  não vê telas; sem imagem nem motivo, diz que a captura não veio e pede "olha a tela".
+- Alternativa avaliada e não feita: uma ferramenta da mestra que pede a captura ao aparelho da ligação
+  pelo canal de dados do iPhone/Mac. Resolveria também pedidos sem nenhuma palavra de tela, mas exige
+  RPC nova no plugin, fonte nova nos dois apps, tempo limite e app em primeiro plano; a heurística cobre
+  os dois casos relatados só no app.
+
+#### No Mac (outros apps também)
+
+`MacVoiceScreen` decide com `VoiceScreenPlanner` (Kit, puro e testado) a partir do app da frente
+(`NSWorkspace`), das janelas na tela (`CGWindowListCopyWindowInfo`, da frente para trás) e dos monitores:
+
+- **`front`** (padrão): a janela comum (camada 0) da frente do app em primeiro plano. O OpenCode só
+  entra quando **ele** é o app da frente; aí é a sua janela da frente (`MacRuntime.front`). Faixa de voz,
+  sino, paleta e outros painéis do OpenCode nunca cobrem o app que Alexandre está olhando.
+- **`app`** + `screen_app`: a janela da frente do app pelo nome, sem diferenciar caixa e acentos, exato,
+  depois prefixo, depois contido ("chrome" → Google Chrome). "OpenCode" é a própria janela.
+- **`display`**: o monitor da janela da frente (senão o principal), sem as janelas do OpenCode, a menos
+  que ele esteja na frente.
+- **Permissão:** a janela do próprio OpenCode sai do window server (`CGWindowListCreateImage`, lido em
+  tempo de execução) e não precisa de permissão. Outros apps usam ScreenCaptureKit
+  (`SCShareableContent` + `SCScreenshotManager`, um quadro, sem stream) e precisam de **Gravação de
+  Tela**. Sem ela (`CGPreflightScreenCaptureAccess`, que não pergunta nada), a mestra recebe só a janela
+  do OpenCode e o GPT Live ouve um aviso, também num toast com **Abrir Ajustes**. Na primeira vez o app
+  chama `CGRequestScreenCaptureAccess` (pedido do macOS) e grava `OpenCodeVoiceScreenPermissionAsked`;
+  depois não pede de novo. Ajustes da voz no Mac tem o atalho **Abrir permissão de Gravação de Tela**.
+  O macOS exige reabrir o app depois de liberar e, desde o Sequoia, pede de tempos em tempos para
+  "continuar permitindo" apps que capturam a tela; isso é do sistema e não se evita com ScreenCaptureKit.
+  `SCContentSharingPicker` dispensaria a permissão, mas obriga escolher a janela à mão a cada captura,
+  o que não serve a um pedido falado.
+- **Assinatura:** o TCC guarda a permissão pela regra de assinatura designada do app instalado
+  (`identifier "br.com.alexandrem.opencode.mac" and anchor apple generic and certificate leaf[subject.CN]
+  = "Apple Development: …"`), não pelo hash do binário. Builds novos assinados pelo mesmo certificado de
+  desenvolvimento do time mantêm a permissão; um build ad-hoc ou outro certificado pediria de novo.
+- **Faixa de voz:** como no iPhone, a faixa e os toasts do OpenCode ficam invisíveis (~80 ms) no quadro
+  capturado; o layout não muda.
+- **Linha para a mestra:** só identificadores: `[Captura da janela de Google Chrome (“Título”) anexada.]`,
+  `[Captura da janela do OpenCode anexada. Sessão aberta no app: ses_…]` ou
+  `[Captura da tela inteira do Mac (Simulator na frente) anexada.]`. JPEG 0,72 com no máximo 2000 px no lado maior, o limite de imagem do servidor
+  (acima dele o servidor reduz e regrava como PNG, maior).
+- **Falhas** (nada é enviado; o GPT Live repete o motivo): app pedido não está aberto, app sem janela
+  visível, nenhuma janela na frente, janela que o sistema não compartilha (ausente do conteúdo
+  compartilhável ou erro do ScreenCaptureKit), sem permissão e sem janela do OpenCode para mandar.
+- **Verificação:** `script/test-mac-voice-screen.py` roda uma cópia Debug (bundle próprio, assinatura
+  ad-hoc, `open -g`, sem ativar o app) contra um sandbox isolado, com `-OpenCodeMacVoiceScreenCheck
+  own|first|denied|granted|display|missing`: um sistema falso faz o papel do app da frente, da lista de
+  janelas e da permissão (nada pede permissão ao macOS nem lê as janelas de Alexandre); a janela do
+  OpenCode é capturada de verdade, fora da tela. A mestra real do sandbox recebe o prompt e é
+  interrompida assim que ele chega.
 
 ## Background e Live Activity
 

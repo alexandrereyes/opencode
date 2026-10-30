@@ -8,6 +8,7 @@ import type { AISDKDomain } from "./aisdk.js"
 import type { CommandDomain } from "./command.js"
 import type { EventDomain } from "./event.js"
 import type { IntegrationDomain } from "./integration.js"
+import type { JobDomain } from "./job.js"
 import type { MessageDomain } from "./message.js"
 import type { MCPDomain } from "./mcp.js"
 import type { ModelDomain } from "./model.js"
@@ -40,6 +41,7 @@ export interface Context {
     readonly generate: ExperimentalGenerateApi
   }
   readonly integration: IntegrationDomain
+  readonly job: JobDomain
   readonly message: MessageDomain
   readonly mcp: MCPDomain
   readonly model: ModelDomain
