@@ -178,7 +178,7 @@ Switching from server mode back to local mode (rollback of the server) starts fr
 
 ## Storage
 
-Plugin KV (`ctx.storage`, SQLite `kv`, namespaced by plugin): `quotes:session:<sessionID>` holds the Session document (quotes, attachment index, tombstones, dismissals) and every change is one atomic `update` of that key. Bytes live in `quotes:attachment:<sessionID>:<sha256>` as `{ data: base64 }`, so listings never read them. The plugin subscribes to `session.deleted` and removes both. No Core, Protocol, Server or generated client change was needed.
+Plugin KV (`ctx.storage`, SQLite `kv`, namespaced by plugin): `quotes:session:<sessionID>` holds the Session document (quotes, attachment index, tombstones, dismissals) and every change is one atomic `update` of that key (`src/storage.ts`, see `host-context.md`). Bytes live in `quotes:attachment:<sessionID>:<sha256>` as `{ data: base64 }`, so listings never read them. The plugin subscribes to `session.deleted` and removes both. No Core, Protocol, Server or generated client change was needed.
 
 ## Phase 2 checklist
 

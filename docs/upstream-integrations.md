@@ -31,6 +31,123 @@ resolved as dropped.
   lines, 63 → 59 removed lines**. Across all shared paths (outside the custom packages, `docs` and `.agents`): 90 → 75
   modified files.
 
+## Customizations in upstream code
+
+Every custom change that remains in upstream-owned packages after the plugin offload of 2026-10-30 (branch
+`plugin-offload` from `2bf5bb098`), against the integrated upstream revision `79349e840` (2.2.1). Each was kept because
+the custom plugin (`packages/plugin-app-custom`) cannot provide it through upstream's plugin API without losing behavior
+or guarantees; the plugin never calls the server's own HTTP API as a workaround.
+
+### Overlap
+
+Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD`:
+
+- `packages/{core,server,protocol,schema,plugin,client,tui}/src`, `packages/cli/src` and `packages/cli/script`: **43 →
+  30 modified files, +698 → +494 lines, −30 → −22 lines**.
+- All shared paths outside `packages/plugin-app-custom`, `packages/ios-custom`, `docs`, `.agents` and `bun.lock`: **69 →
+  44 modified files, +1300 → +740 lines, −84 → −28 lines**.
+
+### Removed or moved by the offload
+
+- Retry hook HTTP metadata (`event.http` in the `retry` session hook): removed with its test and docs; no plugin used
+  it.
+- `Effect.die(new Error(...))` in `tool/read-filesystem.ts`, `tool/runtime.ts`, `workspace.ts` and
+  `database/sqlite.workerd.ts`: back to upstream's `Effect.die("...")` (merge residue; no test or lint depends on it).
+- `storage.update` (`KV.update`, host, both SDKs, adapter): now `src/storage.ts` in the plugin, `update` over
+  `get`/`set` under one process-wide lock (`packages/plugin-app-custom/docs/host-context.md`).
+- `storage.adoptLegacy` (`KV.adoptLegacy`, host, SDKs): removed. The production database already has both adoption
+  markers (`plugin-adopted:<custom.app-mentions hex>:snippets:catalog` and `…:preferences:profile`) and both namespaced
+  keys; checked read-only on 2026-10-30. The orphaned legacy `snippets:catalog` row stays untouched.
+- `created` on permission requests and forms (Schema, Core, OpenAPI, Client): now `src/request-times.ts` in the plugin,
+  from the `permission.asked`/`form.created` event times; `permission.test.ts` and `session-instances.test.ts` are
+  upstream's again. No native app decodes `created` on those payloads.
+- `session.archive` in the plugin SDK: replaced by upstream's `session.update({ archived })`, which the host now honors
+  (see below). The plugin interrupts and waits before its children and again before the archive, as the host did.
+- The custom "Finding and reading previous sessions" section of the built-in OpenCode skill
+  (`core/src/plugin/skill/opencode.md`): removed. The user's own `~/.agents/skills/opencode` replaces the built-in skill
+  (same ID) and carries an updated version of that workflow, so the section never reached a session.
+- Custom server tests (`packages/server/test/plugin-*.test.ts` and the shared-cursor case of `message.test.ts`) moved to
+  `packages/plugin-app-custom/test/server-*.test.ts`; `packages/server/package.json` and `packages/cli/package.json` (an
+  unused `@opencode/core` devDependency left by the removed updater) are upstream's again. The plugin takes
+  devDependencies on `@opencode/client`, `@opencode/core`, `@opencode/server` and `@opencode/util`.
+- Test additions whose custom subject is gone are upstream's again:
+  `client/test/{import-boundaries,promise,solid-data}`, `schema/test/contract-hygiene`, `server/test/process` (removed
+  maintenance route) and `core/test/worktree`.
+- The stale `revert.plan` section of `services/www/.../build/plugins/effect.mdx`.
+- `packages/protocol/openapi.json` was stale at `2bf5bb098` (`check:generated` failed: it lacked
+  `session.permissions.updated`); it is regenerated.
+
+### Remaining customizations
+
+Plugin context extensions. Files: `packages/core/src/plugin/host.ts`;
+`packages/plugin/src/{job,mcp,message,request}.ts`,
+`packages/plugin/src/{effect,promise}/{job,message,request,mcp,plugin,session,index}.ts` and `promise/adapter.ts`; test
+hosts `packages/core/test/plugin/{host,fixture}.ts` and `packages/core/test/fixture/policy.ts`; docs in
+`services/www/.../build/plugins/{server,effect}.mdx` and `packages/plugin/src/{,effect/}README.md`. Upstream's plugin
+context has no equivalent for any of them; each is an upstream proposal candidate, and leaves when upstream ships it.
+
+- `session.active` and `session.view`: upstream's HTTP operations of the same name, exposed to plugins. Consumers:
+  `master` (inventory, mark read), `live-activity` tracker, `watch` delegation, `voice`.
+- `session.form.reply` and `permission.reply`, resolved in the session's Location (upstream's `permission.reply` looks
+  in the plugin's own Location, so a request of another Location is not found). Consumers: `master` `request_answer`,
+  `watch` replies.
+- `message.list`, with `MessagePage.Cursor` in `packages/schema/src/session-message-page.ts` (re-exported as
+  `@opencode/plugin/message`, tested by `schema/test/session-message-page.test.ts`): paged transcripts with the server's
+  cursor encoding (`plugin-app-custom/test/server-message-cursor.test.ts`). Core cannot import the plugin, so the cursor
+  stays shared in Schema while `message.list` is in Core. Consumers: `session_read` tool, `transcript`, `master`,
+  `voice`, `watch` delegation, `live-activity`.
+- `request.pending`: pending permissions and forms of the live Locations, without booting historical Locations.
+  Consumers: `navigation`, `requests`, `watch`, `live-activity`, `master`, `session-family`.
+- `job.background`, with `Job.backgrounded` in `packages/core/src/job.ts` (`core/test/job.test.ts`): running background
+  shells and subagents with their sessions. Consumers: `navigation`, `live-activity`.
+- `mcp.callTool` (`MCP.ToolResult`/`CallToolError` in `packages/plugin/src/mcp.ts`). Consumer: `app-mentions`
+  (`list_apps` of the Codex computer-use server).
+- `session.family` and `familyBoundaries` (`packages/core/src/session/family.ts`,
+  `packages/schema/src/session-family.ts`, `core/test/session-family.test.ts`): recursive descendant summaries, pages
+  and revert boundaries in SQLite without decoding transcripts. Consumers: `custom.session-family` (context column,
+  revert), `master`.
+- `session.scan` (`packages/core/src/session/store.ts` and `session.ts`, `packages/schema/src/session-scan.ts`,
+  `core/test/session-scan.test.ts`, `schema/test/session-scan.test.ts`): ID-ordered pages with `messageAt` (latest user
+  or assistant message) and `completionAt` (latest durable succeeded or failed execution). Consumers: `navigation` (the
+  apps sort rows by `messageAt`, `SessionList.interactionAt`), `master`, `archive`, `chats`, `live-activity`. Upstream's
+  `session.list` pages by time and its `Session.Info` has neither time (`time.updated` moves on renames, metadata and
+  archive; `time.idle` is not the last message), so the plugin would need one message read per session.
+- `session.update` honors `archived` (two lines, as upstream's HTTP handler; the SDK input already accepts it, the host
+  ignored it). Consumers: `custom.archive`, `master` `session_archive`. Exit: upstream fixes its host.
+
+Other customizations:
+
+- Agent-scoped tools: `agents` in `packages/schema/src/tool.ts`, the filter in `Tool.snapshot(permissions, agent)`
+  (`packages/core/src/tool.ts`) and its call in `packages/core/src/session/context.ts`; tests in
+  `core/test/tool-registry.test.ts` and `core/test/tool-opencode-master-visibility.test.ts`. Consumer: the Mestra tools
+  (`master`), visible only to the `mestra` agent, both directly and in the Code Mode catalog. Deny rules added to the
+  other agents by an agent transform are not equivalent: the last matching rule wins and the session's own permissions
+  come after the agent's (`Permission.merge(agent, session)`), so a session allowing `*` would show the tools again;
+  agents added by plugins activated later would miss the rule; and the `context` hook sees only direct tools, after the
+  Code Mode catalog is built. Exit: upstream per-agent tool visibility.
+- Skill `slash` (`packages/schema/src/skill.ts`, frontmatter `slash` / `metadata.opencode/slash` in
+  `packages/core/src/config/plugin/skill-file.ts`, `slash: true` on the built-in Report skill in
+  `packages/core/src/plugin/skill.ts`, OpenAPI and Client types). Consumer: the iOS and Mac composer, which lists skills
+  with `slash: true` from `/api/skill` in its `/` menu (`OpenCodeKit/ComposerSources.swift`), and user skills that set
+  it. The field must be in the public schema to be encoded. Exit: upstream skill slash flag.
+- Replay-only durable event `session.permissions.updated` (`packages/schema/src/session-event.ts`, projector, message
+  updater, Client types, OpenAPI event enums, `schema/test/event-manifest.test.ts`): stored events of custom releases
+  written before upstream's rename. Exit: a read-only count shows none in the production database, or a data migration
+  rewrites them.
+- `Plugin.awaitActivation` in `packages/server/src/handlers/mcp.ts` (#54191, see `docs/upstream-overrides.md`) and in
+  `shell.create` of `packages/server/src/handlers/shell.ts` (plugin `shell` hooks on a cold Location, see
+  `packages/plugin-app-custom/docs/resources.md`); tests `server/test/{mcp,shell}.test.ts`.
+- Compatibility skill watcher reconciliation in `packages/core/src/config/plugin/compatibility.ts` and
+  `core/test/config/skill.test.ts` (see `docs/upstream-overrides.md`).
+- Tests only: custom tests that drive plugin code through Core's fixtures stay in Core, because they need Core's test
+  preload and HOME isolation: `core/test/tool-opencode-master-{ensure,ensure-bundle,model,visibility}.test.ts`,
+  `core/test/tool-opencode-session-read.test.ts`, `core/test/plugin/app-mentions.test.ts`; host tests
+  `core/test/plugin/{pending,session-controls}.test.ts`; adapter test `plugin/test/session-controls.test.ts`. In
+  `cli/test/debug-paths.test.ts` the spawned CLI drops `OPENCODE_CONFIG_DIR` and `OPENCODE_DB`, so a run from a shell
+  with the live server's environment cannot reach production paths.
+- Repository level, not upstream code: root `AGENTS.md`, `package.json` (`custom:*` scripts, `@expo/serve-sim` patch),
+  `.gitignore`, `packages/cli/script/custom-*.ts` and `packages/cli/test/custom-*.test.ts`.
+
 ## Upstream source branch
 
 Integrate from `upstream/dev`. Since 2.0.27 (2026-10-12), upstream publishes the
