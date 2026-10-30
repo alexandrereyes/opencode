@@ -148,6 +148,30 @@ Other customizations:
 - Repository level, not upstream code: root `AGENTS.md`, `package.json` (`custom:*` scripts, `@expo/serve-sim` patch),
   `.gitignore`, `packages/cli/script/custom-*.ts` and `packages/cli/test/custom-*.test.ts`.
 
+### Validation
+
+- Root `bun run check` passes (oxlint: 1,477 warnings, as on `2bf5bb098`); `check:generated` in `packages/protocol`
+  passes.
+- `bun run test` per package in a clean environment (`env -i` with `HOME`, `TMPDIR`, an empty `AZURE_CONFIG_DIR`, no
+  `OPENCODE_*`/`XDG_*`), `2bf5bb098` → offload: Schema 93 → 92, Util 135, Protocol 10, Client 242 → 241, Plugin 39,
+  custom plugin 294 → 304 (two skipped, no failure), SDK 39, Server 120 + 1 failure → 112, CLI 400 (nine skipped),
+  CodeMode 1,473, Core 7,034 → 7,029 (23 skipped). The counts move with the removed and moved tests listed above (Server
+  also drops the custom "defaults message pages to 50 entries" case of upstream behavior). The only failures left are
+  Core's 11 GitLab OAuth cases (port 8080 held by OrbStack), on both revisions. The Server failure `serves custom app
+  RPCs from the same Location plugin over HTTP`, now in the custom plugin, is fixed: Effect's default `ConfigProvider`
+  snapshots `process.env` when first used in the process, so the test now provides a fresh one after setting
+  `OPENCODE_LLM_PROXY_URL`.
+- A bundled build of `src/storage.ts`, evaluated twice (two Effect copies, as the release bundle is per Location), keeps
+  40 concurrent increments through the host's storage.
+- Isolated source sandbox (4177, own home, credentials copied read-only, production untouched): a permission request
+  (`POST /api/session/:id/permission`) and a question form carry no `created`; `custom.navigation` reports
+  `permissionAt` and `questionAt` within the creation window, identical from two Locations; `custom.live-activity`
+  `snapshot` reports the same `since`; `custom.session-family` and `custom.requests` list both requests, and replies
+  clear them; 20 concurrent `custom.snippets` saves and 20 concurrent `custom.preferences` mutations alternating between
+  two Locations all persist; `/api/skill` keeps `slash` from frontmatter and serves the user's OpenCode skill;
+  `custom.transcript` `list` answers; `custom.archive` on a `claude-haiku-5-5` session that was still generating
+  interrupts it (outcome `interrupted`), archives it and leaves no active execution.
+
 ## Upstream source branch
 
 Integrate from `upstream/dev`. Since 2.0.27 (2026-10-12), upstream publishes the
