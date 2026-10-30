@@ -370,12 +370,9 @@ function fixture(
         calls.viewed.push({ sessionID: view.sessionID, idle: DateTime.toEpochMillis(view.idle) })
         return Effect.void
       },
-      archive: ({ sessionID }) => {
-        calls.archived.push(sessionID)
-        return Effect.void
-      },
       update: (update) => {
-        calls.updates.push(update)
+        if (update.archived) calls.archived.push(update.sessionID)
+        if (!update.archived) calls.updates.push(update)
         return Effect.void
       },
       move: (move) => {
@@ -789,7 +786,8 @@ test("mark read views unread or failed sessions at their idle time; archive goes
     archived: [{ sessionID: failed.id, title: failed.id }],
     skipped: [{ sessionID: self }],
   })
-  expect(f.calls.interrupted).toEqual([failed.id])
+  // Stopped before its subagents are archived and again right before it is archived.
+  expect(f.calls.interrupted).toEqual([failed.id, failed.id])
   expect(f.calls.archived).toEqual([failed.id])
 })
 

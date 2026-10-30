@@ -661,7 +661,6 @@ export function fromPromise(plugin: Plugin) {
                   Effect.flatMap(Schema.encodeEffect(SessionScan.Page)),
                 ),
               ),
-            archive: (input) => run(host.session.archive(input)),
             instructions: {
               entry: {
                 list: adaptApiMethod(

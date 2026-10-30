@@ -224,5 +224,4 @@ export type SessionDomain = Pick<
     ) => Effect.Effect<typeof SessionFamily.Boundaries.Type, unknown>
     readonly family: (input: SessionFamily.Input) => Effect.Effect<SessionFamily.Info, unknown>
     readonly scan: (input?: SessionScan.Input) => Effect.Effect<SessionScan.Page>
-    readonly archive: (input: { readonly sessionID: Session.ID }) => Effect.Effect<void, unknown>
   }

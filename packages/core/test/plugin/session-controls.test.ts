@@ -52,31 +52,18 @@ testEffect(PluginTestLayer).live(
     }),
 )
 
-testEffect(PluginTestLayer).live("plugin archive interrupts active work and waits for it before archiving", () =>
+testEffect(PluginTestLayer).live("plugin update archives and unarchives a session as the HTTP route does", () =>
   Effect.gen(function* () {
     const plugins = yield* Plugin.Service
     const sessions = yield* Session.Service
-    const entered = yield* Deferred.make<void>()
-    const coordinator = yield* SessionRunCoordinator.make<Session.ID, never>({
-      drain: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
-    })
-    const ctx = yield* PluginHost.make(plugins).pipe(
-      Effect.provideService(Session.Service, {
-        ...sessions,
-        active: coordinator.active,
-        interrupt: (sessionID) => coordinator.interrupt(sessionID),
-        wait: (sessionID) => sessions.get(sessionID).pipe(Effect.andThen(coordinator.awaitIdle(sessionID))),
-      }),
-    )
-    const session = yield* ctx.session.create({ title: "Archive while running" })
-    yield* coordinator.run(session.id).pipe(Effect.forkChild)
-    yield* Deferred.await(entered)
-    expect(yield* ctx.session.active()).toEqual({ [session.id]: { type: "running" } })
+    const ctx = yield* PluginHost.make(plugins)
+    const session = yield* ctx.session.create({ title: "Archive through update" })
 
-    yield* ctx.session.archive({ sessionID: session.id })
-
-    expect(yield* ctx.session.active()).toEqual({})
+    yield* ctx.session.update({ sessionID: session.id, archived: true })
     expect((yield* sessions.get(session.id)).time.archived).toBeDefined()
+
+    yield* ctx.session.update({ sessionID: session.id, archived: false })
+    expect((yield* sessions.get(session.id)).time.archived).toBeUndefined()
   }),
 )
 

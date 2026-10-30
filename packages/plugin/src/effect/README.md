@@ -168,20 +168,13 @@ const page =
   })
 ```
 
-## Scanning And Archiving Sessions
+## Scanning Sessions
 
 `ctx.session.scan` reads bounded, ID-ordered metadata without loading transcripts. Use `parentID` to select direct
 children, `parentID: null` to select roots, and omit `archived` when archived and unarchived sessions are both required.
 
 ```ts
 const page = yield * ctx.session.scan({ parentID: sessionID, archived: false, limit: 500 })
-```
-
-`ctx.session.archive` archives exactly one session. It interrupts active execution, waits for idle, and records the
-native archive event without deleting history. It does not archive descendants.
-
-```ts
-yield * ctx.session.archive({ sessionID })
 ```
 
 ## Reloading A Domain

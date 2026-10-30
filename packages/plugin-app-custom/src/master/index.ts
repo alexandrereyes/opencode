@@ -481,7 +481,6 @@ export type MasterContext = {
     | "wait"
     | "form"
     | "view"
-    | "archive"
     | "update"
     | "move"
     | "switchModel"

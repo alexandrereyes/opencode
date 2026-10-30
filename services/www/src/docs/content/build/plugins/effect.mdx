@@ -879,14 +879,6 @@ effect: (ctx) =>
   }),
 ```
 
-Archive exactly one session with the native session capability. It stops active execution, waits for idle, and records
-the archive event without deleting history. It does not archive descendants; scan and archive
-descendants explicitly when the plugin owns a tree policy.
-
-```ts
-yield * ctx.session.archive({ sessionID })
-```
-
 Remove a temporary session with `remove`. Removal stops active execution and recursively deletes child sessions.
 
 ```ts
@@ -949,7 +941,6 @@ type SessionDomain = Pick<
   | "instructions"
 > & {
   readonly scan: (input?: SessionScan.Input) => Effect.Effect<SessionScan.Page>
-  readonly archive: (input: { readonly sessionID: Session.ID }) => Effect.Effect<void, unknown>
 }
 ```
 

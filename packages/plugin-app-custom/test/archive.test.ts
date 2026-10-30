@@ -46,19 +46,21 @@ test("archives every page and archived intermediate descendants before their par
             calls.push(`scan:${parentID}:${after ?? ""}`)
             return pages.get(`${parentID}:${after ?? ""}`) ?? { data: [] }
           }),
-        archive: ({ sessionID }) => Effect.sync(() => calls.push(`archive:${sessionID}`)),
+        update: ({ sessionID, archived }) => Effect.sync(() => calls.push(`archive:${sessionID}:${archived}`)),
       },
       { sessionID: root },
     ),
   )
 
   expect(calls.filter((call) => call.startsWith("archive:"))).toEqual([
-    `archive:${first}`,
-    `archive:${grandchild}`,
-    `archive:${second}`,
-    `archive:${root}`,
+    `archive:${first}:true`,
+    `archive:${grandchild}:true`,
+    `archive:${second}:true`,
+    `archive:${root}:true`,
   ])
   expect(calls.indexOf(`wait:${root}`)).toBeLessThan(calls.indexOf(`scan:${root}:`))
+  // The root is stopped again after its descendants, right before it is archived.
+  expect(calls.slice(-3)).toEqual([`interrupt:${root}`, `wait:${root}`, `archive:${root}:true`])
   expect(calls).toContain(`scan:${root}:${first}`)
   expect(Archive.Definition.id).toBe("custom.archive")
 })
@@ -73,7 +75,7 @@ test("propagates a descendant archive failure and does not archive its ancestors
           wait: () => Effect.void,
           scan: (input) =>
             Effect.succeed({ data: input?.parentID === root ? [{ session: session(first, root) }] : [] }),
-          archive: ({ sessionID }) =>
+          update: ({ sessionID }) =>
             sessionID === first
               ? Effect.fail(new Error("archive failed"))
               : Effect.sync(() => archived.push(sessionID)),

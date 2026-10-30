@@ -206,7 +206,6 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       familyBoundaries: overrides.session?.familyBoundaries ?? (() => Effect.die("unused session.familyBoundaries")),
       family: overrides.session?.family ?? (() => Effect.die("unused session.family")),
       scan: overrides.session?.scan ?? (() => Effect.die("unused session.scan")),
-      archive: overrides.session?.archive ?? (() => Effect.die("unused session.archive")),
       instructions: overrides.session?.instructions ?? {
         entry: {
           list: () => Effect.die("unused session.instructions.entry.list"),

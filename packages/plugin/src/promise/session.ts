@@ -224,5 +224,4 @@ export type SessionDomain = Pick<
     ) => Promise<typeof SessionFamily.Boundaries.Encoded>
     readonly family: (input: typeof SessionFamily.Input.Encoded) => Promise<typeof SessionFamily.Info.Encoded>
     readonly scan: (input?: typeof SessionScan.Input.Encoded) => Promise<typeof SessionScan.Page.Encoded>
-    readonly archive: (input: { readonly sessionID: Session.ID }) => Promise<void>
   }

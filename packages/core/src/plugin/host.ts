@@ -701,6 +701,9 @@ export const make = Effect.fn("PluginHost.make")(function* (
           yield* sessions.setMetadata({ sessionID: input.sessionID, metadata: input.metadata })
         if (input.permissions !== undefined)
           yield* sessions.setPermissions({ sessionID: input.sessionID, permissions: input.permissions })
+        // As the HTTP route does; the plugin update input already accepts `archived`.
+        if (input.archived !== undefined)
+          yield* (input.archived ? sessions.archive : sessions.unarchive)(input.sessionID)
       }),
       move: sessions.move,
       synthetic: sessions.synthetic,
@@ -736,12 +739,6 @@ export const make = Effect.fn("PluginHost.make")(function* (
         return yield* family.read(input, yield* sessions.active)
       }),
       scan: sessions.scan,
-      // Archiving stops the session's work first, as deletion does.
-      archive: Effect.fn(function* (input) {
-        yield* sessions.interrupt(input.sessionID)
-        yield* sessions.wait(input.sessionID)
-        yield* sessions.archive(input.sessionID)
-      }),
       instructions: {
         entry: {
           list: Effect.fn(function* (input) {

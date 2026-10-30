@@ -838,18 +838,13 @@ await ctx.session.command({ sessionID, name: "review", text: "--staged" })
 const synthetic = await ctx.session.synthetic({ sessionID, text: "Deployment completed" })
 ```
 
-Rename, interrupt, wait for, or archive a session.
+Rename, interrupt, or wait for a session.
 
 ```ts
 await ctx.session.update({ sessionID, title: "Review" })
 await ctx.session.interrupt({ sessionID, resume: false })
 await ctx.session.wait({ sessionID })
-await ctx.session.archive({ sessionID })
 ```
-
-`archive` affects exactly the target session: it stops active execution, waits for idle, and records the native archive
-event without deleting history. It does not archive descendants; scan and archive descendants explicitly when your
-plugin owns a tree policy.
 
 Remove a temporary session with `remove`. Removal stops active execution and recursively deletes child sessions.
 
@@ -906,7 +901,6 @@ interface SessionContext {
   interrupt(input: SessionInterruptInput, requestOptions?: RequestOptions): Promise<{ interrupted: boolean }>
   wait(input: ExperimentalSessionWaitInput, requestOptions?: RequestOptions): Promise<void>
   scan(input?: SessionScanInput): Promise<SessionScanPage>
-  archive(input: { sessionID: string }): Promise<void>
 }
 ```
 

@@ -199,14 +199,6 @@ Omit `archived` to include all sessions, pass `false` for active history, or `tr
 the latest user or assistant message timestamp, while `completionAt` is the latest durable succeeded or failed execution
 timestamp. Promise-plugin session values use their browser-safe encoded form, including millisecond timestamps.
 
-`ctx.session.archive({ sessionID })` archives exactly one session. It interrupts active execution, waits for idle, closes
-the model transport, and records the native archive event without deleting history. It does not archive descendants;
-plugins implementing tree policy must scan and archive those descendants explicitly.
-
-```ts
-await ctx.session.archive({ sessionID })
-```
-
 ## Reading A Session Family
 
 `ctx.session.family({ sessionID })` returns descendant `count`, total descendant `cost`, and metadata for currently `active` descendants. The root must exist; archived descendants are included. No messages or historical Locations are loaded. Supply `limit` (1–100) to also read a stable Session-ID ordered `data` page; pass `next` back as `after` for the following page. Omit `limit` for summary-only reads. Counts and costs exclude the root.

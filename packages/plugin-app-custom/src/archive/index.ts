@@ -7,7 +7,7 @@ interface ArchiveContext {
   readonly interrupt: Plugin.Context["session"]["interrupt"]
   readonly wait: Plugin.Context["session"]["wait"]
   readonly scan: Plugin.Context["session"]["scan"]
-  readonly archive: Plugin.Context["session"]["archive"]
+  readonly update: Plugin.Context["session"]["update"]
 }
 
 export const registerArchive = Effect.fn("Archive.register")(function* (ctx: Plugin.Context) {
@@ -19,7 +19,7 @@ export const registerArchive = Effect.fn("Archive.register")(function* (ctx: Plu
             interrupt: ctx.session.interrupt,
             wait: ctx.session.wait,
             scan: ctx.session.scan,
-            archive: ctx.session.archive,
+            update: ctx.session.update,
           },
           input,
         ).pipe(
@@ -35,7 +35,10 @@ export const archive: (ctx: ArchiveContext, input: { readonly sessionID: Session
     yield* ctx.wait({ sessionID: input.sessionID })
     const children = yield* scanChildren(ctx, input.sessionID)
     yield* Effect.forEach(children, (sessionID) => archive(ctx, { sessionID }), { concurrency: 1, discard: true })
-    yield* ctx.archive({ sessionID: input.sessionID })
+    // Stopping the children can wake this session again (subagent completions), so stop it right before archiving.
+    yield* ctx.interrupt({ sessionID: input.sessionID, resume: false })
+    yield* ctx.wait({ sessionID: input.sessionID })
+    yield* ctx.update({ sessionID: input.sessionID, archived: true })
     return {}
   })
 

@@ -78,7 +78,7 @@ testEffect(PluginTestLayer).live(
       const profile = yield* rpc.call("custom.preferences", "get", {})
       expect(profile).toMatchObject({ data: { masterSessions: { local: replaced.sessionID } } })
 
-      yield* ctx.session.archive({ sessionID: replaced.sessionID })
+      yield* ctx.session.update({ sessionID: replaced.sessionID, archived: true })
       const unarchived = yield* master.ensure({})
       expect(unarchived.created).toBe(true)
       expect([first.sessionID, replaced.sessionID]).not.toContain(Session.ID.make(unarchived.sessionID))
