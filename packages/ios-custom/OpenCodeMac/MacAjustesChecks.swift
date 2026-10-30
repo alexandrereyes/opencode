@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -45,6 +45,8 @@ import SwiftUI
       case "divider": try await divider(window: window, runtime: runtime)
       case "edge": try await edge(window: window, shot: shot)
       case "markdown": try await markdown(window: window, runtime: runtime, shot: shot)
+      case "arquivos": try await arquivos(window: window, runtime: runtime, shot: shot)
+      case "ampliar": try await ampliar(window: window, runtime: runtime, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -788,6 +790,102 @@ import SwiftUI
     try await Task.sleep(for: .seconds(1))
     guard table() else { throw Failure(description: "a tabela saiu da vista depois da segunda leitura") }
     shot("relatorio")
+  }
+
+  // MARK: Arquivos in two columns
+
+  /// A link opens its file with every folder above it expanded and the file marked; ‹ › and ⌃⌘← ⌃⌘→ walk the
+  /// history; Recentes keep the order; the filter and Alterados (the fixture's working changes) reshape the tree.
+  private static func arquivos(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
+    let folder = try require(MacFixture.current?.root, "fixture") + "/packages/ios-custom/script/fixtures/mac-markdown"
+    let report = folder + "/Relatório com tabela larga.md"
+    let simple = folder + "/simples.md"
+    runtime.contextWidth = 1000
+    runtime.showFiles(at: folder, file: report)
+    let files = try await wait("Arquivos") { MacFilesStore.shown }
+    try await wait("arquivo do link marcado com as pastas abertas", timeout: 15) {
+      let rows = files.rows
+      let chain = ["packages", "ios-custom", "script", "fixtures", "mac-markdown"].allSatisfy { name in
+        rows.contains { $0.directory && $0.name == name && $0.open }
+      }
+      return chain && files.selected == report && rows.contains { $0.id == report } ? true : nil
+    }
+    guard !files.folded else { throw Failure(description: "a árvore recolheu num painel largo") }
+    try await rendered("A configuração existe, mas nenhuma oferta confirma o prazo", visible: true, in: window)
+    try await Task.sleep(for: .milliseconds(600))
+    shot("largo")
+    files.activate(try require(files.rows.first { $0.id == simple }, "simples.md na árvore"))
+    try await rendered("Título simples", visible: true, in: window)
+    guard files.recents.paths.prefix(2) == [simple, report] else {
+      throw Failure(description: "Recentes: \(files.recents.paths)")
+    }
+    let left = String(UnicodeScalar(UInt16(NSLeftArrowFunctionKey))!)
+    let right = String(UnicodeScalar(UInt16(NSRightArrowFunctionKey))!)
+    func press(_ character: String, code: UInt16, flags: NSEvent.ModifierFlags) {
+      let event = key(character, code: code, flags: flags, window: window)
+      if !window.performKeyEquivalent(with: event) { _ = NSApp.mainMenu?.performKeyEquivalent(with: event) }
+    }
+    try await Task.sleep(for: .milliseconds(400))
+    press(left, code: 123, flags: [.control, .command])
+    try await wait("⌃⌘← voltou") { files.selected == report ? true : nil }
+    guard files.history.canGoForward, files.recents.paths.first == simple else {
+      throw Failure(description: "voltar no histórico mexeu nos Recentes ou perdeu o avanço")
+    }
+    // The › button's shortcut binds once it re-renders enabled.
+    try await Task.sleep(for: .milliseconds(400))
+    press(right, code: 124, flags: [.control, .command])
+    try await wait("⌃⌘→ avançou") { files.selected == simple ? true : nil }
+    files.back()
+    try await wait("‹ voltou") { files.selected == report ? true : nil }
+    files.filter = "SIMPLES"
+    try await wait("filtro") {
+      files.rows.filter { !$0.directory }.map(\.name) == ["simples.md"] ? true : nil
+    }
+    try await Task.sleep(for: .milliseconds(400))
+    shot("filtro")
+    files.filter = ""
+    files.onlyChanged = true
+    try await wait("Alterados") {
+      let rows = files.rows
+      return rows.contains { $0.name == "SessionRowView.swift" && $0.status != nil }
+        && rows.allSatisfy { $0.directory ? $0.open && $0.containsChanges : $0.status != nil } ? true : nil
+    }
+    try await Task.sleep(for: .milliseconds(400))
+    shot("alterados")
+    files.onlyChanged = false
+  }
+
+  /// Ampliar (⇧⌘E) leaves the chat at its minimum without touching the width chosen with the divider, and the same
+  /// key gives it back; closing Arquivos ends it. A narrow panel folds the tree into its rail.
+  private static func ampliar(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
+    let folder = try require(MacFixture.current?.root, "fixture") + "/packages/ios-custom/script/fixtures/mac-markdown"
+    let report = folder + "/Relatório com tabela larga.md"
+    runtime.contextWidth = 560
+    runtime.showFiles(at: folder, file: report)
+    try await rendered("A configuração existe, mas nenhuma oferta confirma o prazo", visible: true, in: window)
+    try await Task.sleep(for: .milliseconds(500))
+    let chosen = runtime.contextWidth
+    let before = runtime.measuredContextWidth
+    let widen = key("e", code: 14, flags: [.shift, .command], window: window)
+    func press() { if !window.performKeyEquivalent(with: widen) { _ = NSApp.mainMenu?.performKeyEquivalent(with: widen) } }
+    press()
+    try await wait("Ampliar") {
+      runtime.filesWide && abs(runtime.measuredChatWidth - 460) < 2 && runtime.measuredContextWidth > before + 100 ? true : nil
+    }
+    guard runtime.contextWidth == chosen else { throw Failure(description: "Ampliar mudou a largura escolhida") }
+    try await Task.sleep(for: .milliseconds(500))
+    shot("ampliado")
+    press()
+    try await wait("Reduzir") { !runtime.filesWide && abs(runtime.measuredContextWidth - before) < 2 ? true : nil }
+    runtime.toggleFilesWide()
+    runtime.selection.files = nil
+    guard !runtime.filesWide else { throw Failure(description: "fechar Arquivos manteve o painel ampliado") }
+    runtime.contextWidth = 420
+    runtime.showFiles(at: folder, file: report)
+    try await wait("árvore recolhida no painel estreito") { MacFilesStore.shown?.folded == true ? true : nil }
+    try await rendered("A configuração existe, mas nenhuma oferta confirma o prazo", visible: true, in: window)
+    try await Task.sleep(for: .milliseconds(500))
+    shot("estreito")
   }
 
   /// A Markdown text view of the window whose text contains `text`, laid out with height (and on screen).

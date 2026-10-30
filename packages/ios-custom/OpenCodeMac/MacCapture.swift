@@ -37,8 +37,9 @@ import SwiftUI
       window.setFrame(NSRect(x: -6000, y: 40, width: 1600, height: 1000), display: true)
       return
     }
-    // An inactive window desaturates its glass tints; the capture shows the window as it looks in use.
-    NSApp.activate(ignoringOtherApps: true)
+    // An inactive window desaturates its glass tints; the capture shows the window as it looks in use. A
+    // background test copy (`MacLaunch.background`) never takes the focus: its pictures show the inactive window.
+    if !MacLaunch.background { NSApp.activate(ignoringOtherApps: true) }
     window.makeKeyAndOrderFront(nil)
     // Outside the visible screens, so a capture run never sits under Alexandre's pointer. The approved mocks
     // are a 1269×794-pt window drawn at 1.25×: `-OpenCodeMacCaptureSize 1269x794` matches them.
@@ -185,7 +186,7 @@ import SwiftUI
     guard let folder, MacProxyLaunch.pane != nil else { return }
     try? await Task.sleep(for: .milliseconds(500))
     guard let window = NSApp.windows.first(where: { $0.attachedSheet != nil && $0.canBecomeMain }) else { return }
-    NSApp.activate(ignoringOtherApps: true)
+    if !MacLaunch.background { NSApp.activate(ignoringOtherApps: true) }
     window.makeKeyAndOrderFront(nil)
     let size = MacFixture.value("-OpenCodeMacCaptureSize")?.split(separator: "x").compactMap { Double($0) }
     let frame = NSRect(x: -4000, y: 40, width: size?.first ?? 1200, height: size?.last ?? 800)

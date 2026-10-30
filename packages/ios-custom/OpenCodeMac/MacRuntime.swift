@@ -156,4 +156,7 @@ enum MacLaunch {
   /// talks to an isolated sandbox server instead of the in-memory fixture.
   static let fixture = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFixture")
     || ProcessInfo.processInfo.arguments.contains("-OpenCodeMacVoiceScreenCheck")
+  /// `-OpenCodeMacBackground` with a fixture: a test copy that never takes the user's focus. No Dock icon or menu
+  /// bar (an accessory app) and no activation; its windows stay off-screen as the captures already put them.
+  static let background = fixture && ProcessInfo.processInfo.arguments.contains("-OpenCodeMacBackground")
 }

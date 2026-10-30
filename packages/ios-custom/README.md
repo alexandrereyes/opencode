@@ -3096,14 +3096,35 @@ hit below 80% amber, and the amber `?` of a subagent asking for permission. Top 
    the resource's window (see [Adjustment round](#adjustment-round--28-october)).
 
 **Arquivos** (over the column; `Arquivos ›`, ⇧⌘F, or a file named in the chat), at the same level: `‹ Contexto`
-(Esc), the centered title and the search (`/api/fs/find`); the folder's absolute path as a gray clickable
-breadcrumb, truncated in the middle, with a copy button; `PASTA` with
-`Todos · Alterados` as text; a Finder-like list with monochrome `doc`/`folder` icons, `+N −N` in color, a gray dot
-for folders holding changes (date and size, read from this Mac, in the tooltip); then
-`ARQUIVO · N LINHAS` with the links `Abrir no Xcode · Finder · Ver diff` (only when the path exists on this Mac; Ver
-diff also needs `/usr/bin/opendiff` and FileMerge and writes `git show HEAD:<file>`, or an empty file for a new one,
-next to the working copy) and the code in SF Mono with line numbers and the highlight.js colors blended halfway to
-the plain code color, or Quick Look.
+(Esc), the centered title, Ampliar (⇧⌘E) and the search across the session (`/api/fs/find`); the folder's absolute
+path as a gray clickable breadcrumb, truncated in the middle, with a copy button. Below, two columns (approved
+mock "opção A", 30/10):
+
+- **The tree** (`FileTree` in OpenCodeKit, shared with the iPhone's drawer): "Filtrar arquivos" (the listed names,
+  ignoring case and accents, opening the folders that lead to a match), `Todos · Alterados` (Alterados is drawn from
+  the working-copy changes alone, every folder open), folders listed on demand with a disclosure chevron, monochrome
+  `doc`/`folder` icons, `+N −N` in color, a gray dot for folders holding changes (date and size, read from this Mac,
+  in the tooltip) and the open file marked with the primary color. A file opened from the chat lands with every
+  folder above it expanded and scrolled into view; a path outside the session makes its folder the tree's top. ↑ ↓
+  move (a file opens as the cursor reaches it), → opens a folder and ← closes it or goes to its folder. The divider
+  sets the tree's width (180–420 pt, `OpenCodeMacFilesTreeWidth`); the button at its foot hides it.
+- **The file:** ‹ › walk the history (`FileHistory`, ⌃⌘← ⌃⌘→, Xcode's keys: ⌘[ already returns to the main
+  session) and ⌄ lists Recentes (`FileRecents`: the last 8 files under the session folder on this server, saved
+  across launches; sessions in the same checkout share them). Then the name, its folder and line count;
+  `Visualizar | Fonte` for Markdown and HTML; `Abrir no Xcode · Finder · Ver diff` (only when the path exists on
+  this Mac; Ver diff also needs `/usr/bin/opendiff` and FileMerge and writes `git show HEAD:<file>`, or an empty
+  file for a new one, next to the working copy), copy path and share. ⌥⌘← ⌥⌘→ still page through the folder's
+  files. Markdown renders with the chat's renderer (`MacMarkdownText`, wide tables scroll sideways), code in SF Mono
+  with line numbers and the highlight.js colors blended halfway to the plain code color, and images, PDF, audio,
+  video and HTML in Quick Look; the reading player stays at the bottom.
+- **Ampliar** (the arrows beside the search, ⇧⌘E) widens Arquivos to everything but the chat's minimum (past the
+  60% cap) and the same button gives the previous width back. It is the window's state only (`filesWide`): it never
+  writes `contextWidth`, and closing Arquivos ends it.
+- **Narrow** (Arquivos below 620 pt): the tree folds into a 34-pt rail (show the tree over the file, search) and
+  the file's actions move into `•••`.
+- The working-copy diff stays in FileMerge (Ver diff): the server's `/api/vcs/diff` has counts but no patch, and
+  the Mac has no working-copy diff renderer to reuse (the timeline's patches come from tool parts), so
+  `Arquivo | Diff` inside the panel is left for later.
 
 **Not provided by the server (shown as `—`, no backend change):** a subagent's context before its first measured
 step; per-subagent cache when the child has no `tokens`; the resource ↔ subagent link is inferred from
@@ -3207,7 +3228,13 @@ separate track.
   30/10 it started empty, and a lazy stack never builds a row of zero height, so its `.task` never ran and every
   Markdown file showed a blank pane. Keep it non-empty from the start in any lazy list. `-OpenCodeMacAjustes markdown`
   opens a short file and a long report with wide tables and links (`script/fixtures/mac-markdown`) as a chat link
-  does and requires their text and the table on screen.
+  does and requires their text and the table on screen. `-OpenCodeMacAjustes arquivos` checks the tree (a link
+  expands and marks its file, ‹ › and ⌃⌘← ⌃⌘→, Recentes, the filter, Alterados) and `ampliar` checks Ampliar and
+  Reduzir (⇧⌘E, the chosen width untouched, closing ends it) and the narrow rail. The script runs its copy with
+  `-OpenCodeMacBackground` (fixture only): an accessory app with no Dock icon or menu bar that never activates, its
+  windows off-screen, so a run does not take the focus from whoever is using the Mac. `question`, `numbers` and
+  `dictation` need the app in front (text input in the key window, the Ir menu SwiftUI fills only for the active
+  app) and fail while another app has the focus, with or without the flag.
 - **Alerts and notifications**: the in-app banner (`SessionAlertCenter`) stays silent for the session on screen
   while the app is in front. While the app is not in front, each banner (answered or finished, failed, permission,
   question; mutes and deduplication included) also becomes a macOS notification (`MacNotifications`), and clicking
@@ -3731,7 +3758,7 @@ project filter replacing the chips and the highlight of the open subagent.
 
 **Checks.** `MacAdjustmentsTests` (cost format, ⌘1–⌘9 order, archived search, remembered width and its range,
 absolute breadcrumb, run label, model rows, the right Option key's rules). `script/test-mac-ajustes.sh` runs
-`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider|edge|markdown`)
+`MacAjustesChecks` (`-OpenCodeMacAjustes composer|question|quote|image|archived|numbers|width|dictation|jump|master|divider|edge|markdown|arquivos|ampliar`)
 in the fixture through real AppKit events (`edge` scrolls the columns and requires each one cut at the title bar's
 bottom edge, like the chat; Contexto and Sessões are `.clipped()` because macOS 26 extends their scroll views under
 the bar): line heights, wrapping width and scroll position with one line, three,

@@ -43,13 +43,20 @@ struct MacWindow: View {
           .frame(minWidth: chatMinimum, maxWidth: .infinity)
           .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { runtime.measuredChatWidth = $0 }
         if runtime.contextVisible {
-          MacColumnDivider(width: $runtime.contextWidth, range: contextRange) { width in
-            if !MacLaunch.fixture { DesktopWindowState.rememberContextWidth(width, defaults: .standard) }
+          let wide = runtime.filesWide && runtime.selection.files != nil
+          if wide {
+            Rectangle().fill(theme.color(.border)).frame(width: 1)
+          } else {
+            MacColumnDivider(width: $runtime.contextWidth, range: contextRange) { width in
+              if !MacLaunch.fixture { DesktopWindowState.rememberContextWidth(width, defaults: .standard) }
+            }
           }
           // Offered the room first, up to the dragged width (at most 60% of the window); a narrower window shrinks
           // it to 400 pt before the chat goes below its 460, so the window's minimum stays the two minimums.
-          inspector.frame(minWidth: 400,
-            maxWidth: max(400, min(runtime.contextWidth, windowWidth * DesktopWindowState.maximumContextShare)))
+          // Widened Arquivos takes everything but the chat's minimum, past the 60%.
+          inspector.frame(minWidth: wide ? max(400, detailWidth - chatMinimum - 1) : 400,
+            maxWidth: wide ? max(400, detailWidth - chatMinimum - 1)
+              : max(400, min(runtime.contextWidth, windowWidth * DesktopWindowState.maximumContextShare)))
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { runtime.measuredContextWidth = $0 }
             .layoutPriority(1)
         }
@@ -191,10 +198,12 @@ private struct MacSelectionKeeper: View {
 
 /// The hairline between the chat and Contexto; dragging it resizes Contexto within `range`, and the width it ends
 /// at is remembered (`ended`).
-private struct MacColumnDivider: View {
+struct MacColumnDivider: View {
   @Environment(\.appTheme) private var theme
   @Binding var width: Double
   let range: ClosedRange<Double>
+  /// The resized column is on the divider's left (Arquivos' tree) instead of its right (Contexto).
+  var leading = false
   let ended: (Double) -> Void
   @State private var start: Double?
 
@@ -205,7 +214,7 @@ private struct MacColumnDivider: View {
           // A width remembered from a wider window starts the drag from what is shown.
           let origin = start ?? min(max(width, range.lowerBound), range.upperBound)
           start = origin
-          width = min(max(origin - translation, range.lowerBound), range.upperBound)
+          width = min(max(leading ? origin + translation : origin - translation, range.lowerBound), range.upperBound)
         } ended: {
           start = nil
           ended(width)

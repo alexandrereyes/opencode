@@ -5,6 +5,10 @@ import OpenCodeKit
 import SwiftUI
 
 final class MacVoiceAppDelegate: NSObject, NSApplicationDelegate {
+  func applicationWillFinishLaunching(_ notification: Notification) {
+    if MacLaunch.background { NSApp.setActivationPolicy(.accessory) }
+  }
+
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     Task { @MainActor in
       await MacRuntime.shared.audio.stop()

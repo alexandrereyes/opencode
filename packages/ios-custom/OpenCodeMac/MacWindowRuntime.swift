@@ -20,7 +20,10 @@ import SwiftUI
   }
   var selection: MacSelection {
     get { state.selection }
-    set { state.selection = newValue }
+    set {
+      state.selection = newValue
+      if newValue.files == nil && filesWide { filesWide = false }
+    }
   }
   var contextVisible: Bool {
     get { state.contextVisible }
@@ -60,6 +63,9 @@ import SwiftUI
   var archiveRequest: SessionRow?
   /// Pergunta paralela over the shown conversation, presented by this window only (`askSideQuestion`).
   var sideQuestion: SideQuestionLaunch?
+  /// Arquivos widened for reading ("Ampliar"): the chat at its minimum, until "Reduzir" or closing Arquivos. Not
+  /// saved and never written to `contextWidth`, so the width chosen with the divider comes back.
+  var filesWide = false
   /// The widths the columns got in the last layout, for checks (not observed).
   @ObservationIgnored var measuredContextWidth: CGFloat = 0
   @ObservationIgnored var measuredChatWidth: CGFloat = 0
@@ -134,6 +140,10 @@ import SwiftUI
     #endif
     inputs[conversation.id] = input
     return input
+  }
+
+  func toggleFilesWide() {
+    filesWide = selection.files != nil && !filesWide
   }
 
   func showFiles(at path: String? = nil, file: String? = nil) {

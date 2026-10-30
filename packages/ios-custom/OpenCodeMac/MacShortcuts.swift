@@ -79,6 +79,12 @@ struct MacShortcut: Identifiable {
   static let files = MacShortcut(.window, "Arquivos", "f", [.shift, .command])
   static let previousFile = MacShortcut(.window, "Arquivo anterior", .leftArrow, [.option, .command])
   static let nextFile = MacShortcut(.window, "Próximo arquivo", .rightArrow, [.option, .command])
+  // Xcode's history keys: ⌘[ is already "Voltar à sessão principal".
+  static let fileBack = MacShortcut(.window, "Arquivos: voltar no histórico", .leftArrow, [.control, .command])
+  static let fileForward = MacShortcut(.window, "Arquivos: avançar no histórico", .rightArrow, [.control, .command])
+  static let widenFiles = MacShortcut(.window, "Ampliar ou reduzir Arquivos", "e", [.shift, .command])
+  /// `MacFilesTree` handles them while the tree has the focus.
+  static let fileTree = MacShortcut(.window, "Arquivos: andar na árvore, abrir e fechar pastas", caps: ["↑", "↓", "←", "→"])
   // NavigationSplitView's own sidebar command.
   static let sidebar = MacShortcut(.window, "Mostrar ou ocultar Sessões", caps: ["⌃", "⌘", "S"])
   static let proxy = MacShortcut(.window, "LLM proxy", "l", [.shift, .command])
@@ -97,7 +103,7 @@ struct MacShortcut: Identifiable {
     search, newSession, newWindow, reload, compose, settings, shortcuts, searchNext, searchPrevious,
     numbered, railProjects, previous, next, back, master, fromThis, rename, pin, archive, delete, selectAll,
     find, model, sideQuestion, send, newline, dictationKey, dictationEditor, createSession,
-    context, files, previousFile, nextFile, sidebar, proxy, disk,
+    context, files, previousFile, nextFile, fileBack, fileForward, widenFiles, fileTree, sidebar, proxy, disk,
     copyImage, zoomIn, zoomOut, zoomFit, zoomActual, panImage,
   ]
 

@@ -1,9 +1,10 @@
 #!/bin/zsh
 # Offline checks of the Mac adjustment round (MacAjustesChecks) on the production views, with AppKit captures.
 # Uses its own app copy and defaults domain, the closed in-memory fixture and no microphone; restores the
-# clipboard after the image check and exits every app process.
+# clipboard after the image check and exits every app process. The copy runs in the background
+# (`-OpenCodeMacBackground`): no Dock icon, menu bar or focus taken, windows off-screen.
 #
-#   OPENCODE_MAC_DERIVED=<DerivedData> OPENCODE_MAC_CAPTURES=<folder> zsh packages/ios-custom/script/test-mac-ajustes.sh [mode …]
+#   [OPENCODE_MAC_THEME=openchamber-light] OPENCODE_MAC_DERIVED=<DerivedData> OPENCODE_MAC_CAPTURES=<folder> zsh packages/ios-custom/script/test-mac-ajustes.sh [mode …]
 set -euo pipefail
 package=${0:A:h:h}
 derived=${OPENCODE_MAC_DERIVED:-${TMPDIR%/}/opencode/mac-ajustes-work/mac-derived}
@@ -18,7 +19,7 @@ codesign --force --deep --sign - "$copy" 2>/dev/null
 trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
 failed=0
 # Without arguments, every mode (zsh does not split `${@:-…}` into words).
-modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown)
+modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar)
 (( $# )) && modes=("$@")
 for mode in $modes; do
   # Each mode starts from a fresh window: no restored window, reading place or Contexto width.
@@ -31,13 +32,15 @@ for mode in $modes; do
     width) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     jump) extra=(-OpenCodeMacCaptureSize 1500x700) ;;
     divider) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
+    arquivos) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
+    ampliar) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
     # The sheets' composers (Nova sessão, Pergunta paralela, a comment) record with the fake microphone too.
     dictation) extra=(-OpenCodeMacFakeDictation) ;;
   esac
   set +e
   timeout 150 "$copy/Contents/MacOS/OpenCodeMac" -OpenCodeMacFixture contexto \
-    -OpenCodeMacFixtureRoot "${package:h:h}" -OpenCodeTheme openchamber-dark "${extra[@]}" \
-    -OpenCodeMacAjustes "$mode" -OpenCodeMacCapture "$prints" -OpenCodeMacCaptureName "$mode" \
+    -OpenCodeMacFixtureRoot "${package:h:h}" -OpenCodeTheme "${OPENCODE_MAC_THEME:-openchamber-dark}" "${extra[@]}" \
+    -OpenCodeMacBackground -OpenCodeMacAjustes "$mode" -OpenCodeMacCapture "$prints" -OpenCodeMacCaptureName "$mode" \
     -OpenCodeMacCaptureQuit >"$prints/$mode.log" 2>&1
   set -e
   if grep -q "MacAjustes $mode ok" "$prints/$mode.log"; then
