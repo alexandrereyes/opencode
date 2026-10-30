@@ -693,17 +693,6 @@ export type ExperimentalSessionLogOutput =
           readonly id: Event.ID
           readonly created: number
           readonly metadata?: { readonly [x: string]: unknown } | undefined
-          readonly type: "session.permissions.updated"
-          readonly durable: { readonly aggregateID: string; readonly seq: Event.Seq; readonly version: Event.Version }
-          readonly location?:
-            | { readonly directory: AbsolutePath; readonly workspaceID?: Workspace.ID | undefined }
-            | undefined
-          readonly data: { readonly sessionID: Session.ID; readonly permissions: Permission.Ruleset }
-        }
-      | {
-          readonly id: Event.ID
-          readonly created: number
-          readonly metadata?: { readonly [x: string]: unknown } | undefined
           readonly type: "session.metadata.updated"
           readonly durable: { readonly aggregateID: string; readonly seq: Event.Seq; readonly version: Event.Version }
           readonly location?:
@@ -2070,7 +2059,6 @@ export type EventSubscribeInput = {
         | "session.model.selected"
         | "session.moved"
         | "session.renamed"
-        | "session.permissions.updated"
         | "session.metadata.updated"
         | "session.permissions"
         | "session.viewed"

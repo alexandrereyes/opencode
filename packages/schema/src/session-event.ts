@@ -99,17 +99,6 @@ export const Renamed = Event.durable({
 })
 export type Renamed = typeof Renamed.Type
 
-// Retained for replay of custom releases written before the upstream event rename.
-export const PermissionsUpdated = Event.durable({
-  type: "session.permissions.updated",
-  ...options,
-  schema: {
-    ...Base,
-    permissions: Permission.Ruleset,
-  },
-})
-export type PermissionsUpdated = typeof PermissionsUpdated.Type
-
 export const MetadataUpdated = Event.durable({
   type: "session.metadata.updated",
   ...options,
@@ -668,7 +657,6 @@ export const Definitions = Event.inventory(
   ModelSelected,
   Moved,
   Renamed,
-  PermissionsUpdated,
   MetadataUpdated,
   Permissions,
   Viewed,

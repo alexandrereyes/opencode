@@ -2265,16 +2265,6 @@ export type SessionCreated = {
   }
 }
 
-export type SessionPermissionsUpdated = {
-  id: EventID
-  created: number
-  metadata?: { [x: string]: any }
-  type: "session.permissions.updated"
-  durable: { aggregateID: string; seq: EventSeq; version: 1 }
-  location?: LocationRef
-  data: { sessionID: SessionID; permissions: PermissionRuleset }
-}
-
 export type SessionPermissions = {
   id: EventID
   created: number
@@ -2695,7 +2685,6 @@ export type SessionEventDurable =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
-  | SessionPermissionsUpdated
   | SessionMetadataUpdated
   | SessionPermissions
   | SessionViewed
@@ -2753,7 +2742,6 @@ export type V2Event =
   | SessionModelSelected
   | SessionMoved
   | SessionRenamed
-  | SessionPermissionsUpdated
   | SessionMetadataUpdated
   | SessionPermissions
   | SessionViewed
@@ -4223,7 +4211,6 @@ export type EventSubscribeInput = {
         | "session.model.selected"
         | "session.moved"
         | "session.renamed"
-        | "session.permissions.updated"
         | "session.metadata.updated"
         | "session.permissions"
         | "session.viewed"
