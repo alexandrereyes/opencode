@@ -305,3 +305,57 @@ private func usage(limit: Double?) throws -> ContextUsage? {
   #expect(ContextColumn.highlightSource("x", path: "/repo/Makefile") == nil)
   #expect(MarkdownSyntax.keyword.role == .syntaxKeyword)
 }
+
+@Test func contextCheckoutNamesTheWorktreeFolderAndItsBranch() throws {
+  let worktree = "/Users/a/Worktrees/abacato-v2-feat-qa-usuario-isolado"
+  let vcs = { (current: String?) in
+    try decode(VCSInfo.self, #"{"provider":"git","branch":{"#
+      + (current.map { #""current":"\#($0)","# } ?? "") + #""default":"main"}}"#)
+  }
+  let located = { (directory: String, worktree: String, canonical: String, branch: String?) in
+    try decode(LocatedDirectory.self, #"{"directory":"\#(directory)","worktree":"\#(worktree)","canonical":"\#(canonical)""#
+      + (branch.map { #","branch":"\#($0)""# } ?? "") + "}")
+  }
+
+  // A linked worktree whose locate lost its branch (an unreadable worktree list): the core's VCS names it.
+  let linked = ContextColumn.checkout(
+    directory: worktree, located: try located(worktree, worktree, worktree, nil), vcs: try vcs("feat/qa-usuario-isolado"))
+  #expect(linked == .init(name: "abacato-v2-feat-qa-usuario-isolado", help: worktree,
+    branch: "feat/qa-usuario-isolado", branchHelp: "Branch feat/qa-usuario-isolado"))
+  #expect(linked.branchText == "feat/qa-usuario-isolado")
+
+  // The main checkout shows the repository's own folder; a session below the root names it in the tooltip.
+  let main = ContextColumn.checkout(
+    directory: "/Users/a/Dev/opencode2/packages/core",
+    located: try located("/Users/a/Dev/opencode2/packages/core", "/Users/a/Dev/opencode2", "/Users/a/Dev/opencode2", "custom"),
+    vcs: nil)
+  #expect(main.name == "opencode2")
+  #expect(main.help == "/Users/a/Dev/opencode2\nPasta da sessão: packages/core")
+  #expect(main.branch == "custom")
+
+  // A detached HEAD: "—", and the tooltip says why (no SHA: neither read carries the commit).
+  let detached = ContextColumn.checkout(
+    directory: worktree, located: try located(worktree, worktree, "/Users/a/Dev/abacato-v2", nil), vcs: try vcs(nil))
+  #expect(detached.branch == nil && detached.branchText == "—")
+  #expect(detached.branchHelp == "Sem branch: HEAD solto (detached)")
+  #expect(detached.name == "abacato-v2-feat-qa-usuario-isolado")
+  // The core's VCS wins over an older locate that still had a branch; before it names a provider, locate counts.
+  #expect(ContextColumn.checkout(directory: worktree, located: try located(worktree, worktree, worktree, "velha"),
+    vcs: try vcs(nil)).branch == nil)
+  let loading = try decode(VCSInfo.self, #"{"branch":{}}"#)
+  #expect(ContextColumn.checkout(directory: worktree, located: try located(worktree, worktree, worktree, "feat/x"),
+    vcs: loading).branch == "feat/x")
+
+  // Outside Git: the session's folder and "—"; with neither read, the branch is only unavailable.
+  let plain = try decode(VCSInfo.self, #"{"branch":{}}"#)
+  let outside = ContextColumn.checkout(directory: "/Users/a/Notas", located: nil, vcs: plain)
+  #expect(outside == .init(name: "Notas", help: "/Users/a/Notas", branch: nil, branchHelp: "Pasta fora do Git"))
+  #expect(ContextColumn.checkout(directory: "/Users/a/Notas", located: nil, vcs: nil).branchHelp == "Branch indisponível")
+  #expect(ContextColumn.checkout(directory: nil, located: nil, vcs: nil).name == "—")
+
+  // A long name stays whole (the view cuts it in the middle) and the tooltip keeps the full path.
+  let long = "/Users/a/Worktrees/" + String(repeating: "worktree-com-nome-longo-", count: 4) + "fim"
+  let named = ContextColumn.checkout(directory: long + "/", located: nil, vcs: try vcs("x"))
+  #expect(named.name == String(repeating: "worktree-com-nome-longo-", count: 4) + "fim")
+  #expect(named.help == long + "/")
+}

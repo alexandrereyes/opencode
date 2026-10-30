@@ -1102,9 +1102,12 @@ import SwiftUI
         ContextColumnStore.shown.flatMap { $0.id == id && $0.loaded && $0.subagents.total == subagents ? $0 : nil }
       }
     }
+    /// The running subagents' titles; the resource on Recursos' stage shimmers too while an agent uses it.
     func shimmers(_ count: Int) async throws -> [MacShimmerText.ShimmerView] {
       try await wait("\(count) títulos com brilho") {
-        let views = views(window).compactMap { $0 as? MacShimmerText.ShimmerView }.filter { $0.window != nil }
+        let staged = Set(ContextColumnStore.shown?.resources.map(ContextColumn.title) ?? [])
+        let views = views(window).compactMap { $0 as? MacShimmerText.ShimmerView }
+          .filter { $0.window != nil && !staged.contains($0.text) }
         return views.count == count && views.allSatisfy { $0.phase != nil && $0.bounds.width > 40 } ? views : nil
       }
     }
@@ -1158,9 +1161,23 @@ import SwiftUI
     }
     running.forEach { $0.hold(at: nil) }
     try await shimmerCPU(runtime: runtime)
+    try await checkout(root, runtime: runtime, shot: shot)
 
     runtime.contextWidth = 400
-    try await wait("painel estreito") { MacContextProbe.narrow ? true : nil }
+    do {
+      try await wait("painel estreito") { MacContextProbe.narrow ? true : nil }
+    } catch {
+      // What keeps it wide: the column's own width against its content's, and the widest native views in it.
+      let edge = (window.contentView?.bounds.width ?? 0) - runtime.measuredContextWidth
+      let content = views(window).compactMap { $0 as? NSScrollView }
+        .filter { $0.window != nil && $0.convert($0.bounds, to: nil).maxX > edge + 10 }
+        .compactMap { $0.documentView.map { Int($0.frame.width) } }
+      let wide = views(window).filter { $0.window != nil && $0.convert($0.bounds, to: nil).minX > edge - 400 }
+        .sorted { $0.frame.width > $1.frame.width }.prefix(6)
+        .map { "\(type(of: $0)) \(Int($0.convert($0.bounds, to: nil).minX))+\(Int($0.frame.width))" }
+      throw Failure(description: "Contexto \(runtime.measuredContextWidth) · documentos \(content) · recursos largos "
+        + "\(MacResourcesProbe.wide) · \(wide)")
+    }
     print("MacAjustes contexto larguras: janela \(Int(window.frame.width)) · Contexto \(Int(runtime.measuredContextWidth))")
     try margins(try await shimmers(3))
     try await Task.sleep(for: .milliseconds(800))
@@ -1181,6 +1198,11 @@ import SwiftUI
     try margins(try await shimmers(1))
     guard opened.sessions.subagentPath(root: rootID, child: child).map(\.id) == [child] else {
       throw Failure(description: "caminho do subagente")
+    }
+    // Its first line is its own folder's.
+    try await wait("linha do subagente") {
+      MacContextProbe.checkout == opened.checkout && opened.vcs != nil
+        && opened.checkout.name == URL(fileURLWithPath: opened.directory ?? "/").lastPathComponent ? true : nil
     }
     try await Task.sleep(for: .milliseconds(800))
     shot("subagente-largo")
@@ -1227,6 +1249,54 @@ import SwiftUI
     }
     try await Task.sleep(for: .milliseconds(800))
     shot("voltou")
+  }
+
+  /// The first line, `<worktree> · <branch> · +N −N · Arquivos ›`: the worktree's folder and the branch the core's VCS
+  /// reads, also when locate lost it (the unreadable worktree list behind "—" in QA Autonomo!); a checkout updates it
+  /// live through `vcs.branch.updated` without reloading the column, and a detached HEAD shows "—".
+  private static func checkout(_ root: ContextColumnStore, runtime: MacWindowRuntime, shot: (String) -> Void)
+    async throws
+  {
+    let folder = URL(fileURLWithPath: root.directory ?? "/").lastPathComponent
+    func line(_ branch: String?, _ what: String) async throws {
+      try await wait(what) {
+        MacContextProbe.checkout.flatMap { $0.name == folder && $0.branch == branch ? $0 : nil }
+      }
+    }
+    func checkedOut() throws {
+      runtime.store?.hub.inject(.update(try JSONDecoder().decode(ConversationEvent.self, from: Data(
+        #"{"type":"\#(OpenCodeClient.branchUpdatedEvent)","created":\#(Date.now.timeIntervalSince1970 * 1000),"location":{"directory":"\#(root.directory ?? "")"},"data":{}}"#.utf8))))
+    }
+    func reloaded(_ what: String, _ done: @escaping @MainActor () -> Bool) async throws {
+      let loads = root.loads
+      runtime.store?.hub.inject(event("session.updated", MacFixture.rootID))
+      try await wait(what) { root.loads > loads && done() ? true : nil }
+    }
+    try await line("mac-app", "linha com worktree e branch")
+    MacCheckoutScenario.shared.set(branch: "mac-app", located: false)
+    try await reloaded("locate sem branch") { root.located != nil && root.located?.branch == nil }
+    try await line("mac-app", "branch do VCS sem a do locate")
+    // A checkout: only the VCS is read again.
+    try await Task.sleep(for: .seconds(1))
+    let loads = root.loads
+    MacCheckoutScenario.shared.set(branch: "feat/qa-usuario-isolado", located: false)
+    try checkedOut()
+    try await line("feat/qa-usuario-isolado", "branch nova ao vivo")
+    try await Task.sleep(for: .milliseconds(800))
+    shot("linha-branch")
+    MacCheckoutScenario.shared.set(branch: nil, located: false)
+    try checkedOut()
+    try await line(nil, "HEAD solto")
+    guard MacContextProbe.checkout?.branchText == "—", MacContextProbe.checkout?.branchHelp == "Sem branch: HEAD solto (detached)",
+      MacContextProbe.checkout?.help == root.directory, root.loads == loads
+    else {
+      throw Failure(description: "linha sem branch: \(String(describing: MacContextProbe.checkout)) · recargas \(root.loads - loads)")
+    }
+    try await Task.sleep(for: .milliseconds(800))
+    shot("linha-sem-branch")
+    MacCheckoutScenario.shared.set(branch: "mac-app", located: true)
+    try await reloaded("branch de volta") { root.located?.branch == "mac-app" }
+    try await line("mac-app", "linha de volta")
   }
 
   /// The shimmer's cost, with the three running titles on screen against Contexto hidden: the main thread, the

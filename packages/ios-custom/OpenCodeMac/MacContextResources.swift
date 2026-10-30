@@ -211,20 +211,12 @@ private struct MacResourceStage: View {
           .foregroundStyle(theme.color(index == 0 && line.hasPrefix("agora") ? .text : .textWeak))
           .lineLimit(1).truncationMode(.tail)
       }
-      // Narrow, only control keeps its words; the others are icons with their names in the tooltip.
-      HStack(spacing: wide ? 16 : 12) {
-        action("macwindow", "Abrir janela", compact: !wide, actions.open)
-        action(model.inControl ? "hand.raised.slash" : "hand.tap", model.inControl ? "Devolver controle" : "Assumir controle",
-          tone: .primary, compact: false) {
-          Task { model.inControl ? await model.giveBack() : await model.takeControl() }
-        }
-        .disabled(model.busy || !resource.live.input || model.holder == .elsewhere)
-        .help(resource.live.input ? "Clique e teclado vão para o recurso; o agente espera até você devolver"
-          : "Este recurso não aceita controle")
-        .accessibilityIdentifier("resource-stage-control")
-        action("camera", "Captura", compact: !wide, actions.capture)
-        action("xmark.circle", "Encerrar", compact: !wide, actions.close)
-          .help("Encerrar (tira da lista; volta se um agente usar de novo)")
+      // Narrow, or wide without room for every word, only control keeps its words; the others are icons with their
+      // names in the tooltip. Shrinking keeps the wide layout under its 600-pt threshold: otherwise a narrowed column
+      // would stay wide (and overflow) with an iPhone beside its details.
+      ViewThatFits(in: .horizontal) {
+        if wide { controls(compact: false) }
+        controls(compact: true)
       }
       .padding(.top, 8)
       if let text = model.failure ?? model.notice {
@@ -265,6 +257,23 @@ private struct MacResourceStage: View {
     guard using, history.first?.hasPrefix("agora") != true,
       let owner = resource.owner?.sessionID, let activity = store.activities[owner] else { return history }
     return Array((["agora: " + activity] + history).prefix(3))
+  }
+
+  private func controls(compact: Bool) -> some View {
+    HStack(spacing: compact ? 12 : 16) {
+      action("macwindow", "Abrir janela", compact: compact, actions.open)
+      action(model.inControl ? "hand.raised.slash" : "hand.tap", model.inControl ? "Devolver controle" : "Assumir controle",
+        tone: .primary, compact: false) {
+        Task { model.inControl ? await model.giveBack() : await model.takeControl() }
+      }
+      .disabled(model.busy || !resource.live.input || model.holder == .elsewhere)
+      .help(resource.live.input ? "Clique e teclado vão para o recurso; o agente espera até você devolver"
+        : "Este recurso não aceita controle")
+      .accessibilityIdentifier("resource-stage-control")
+      action("camera", "Captura", compact: compact, actions.capture)
+      action("xmark.circle", "Encerrar", compact: compact, actions.close)
+        .help("Encerrar (tira da lista; volta se um agente usar de novo)")
+    }
   }
 
   private func action(_ symbol: String, _ title: String, tone: ThemeRole = .text, compact: Bool,

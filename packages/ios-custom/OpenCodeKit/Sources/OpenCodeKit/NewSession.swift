@@ -391,6 +391,8 @@ extension OpenCodeClient {
   public func worktreeBranches(directory: String) async throws -> [WorktreeBranch] {
     try await rpc("custom.worktrees", "branches", input: Empty(), directory: directory)
   }
+  /// A Location's branch changed (a checkout); `data.branch` is the new one, absent for a detached HEAD.
+  public static let branchUpdatedEvent = "vcs.branch.updated"
   public func vcs(directory: String) async throws -> VCSInfo {
     let value: DataResponse<VCSInfo> = try await get(
       "/api/vcs", query: [.init(name: "location[directory]", value: directory)])

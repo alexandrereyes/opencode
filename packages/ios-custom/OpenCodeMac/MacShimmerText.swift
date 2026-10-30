@@ -47,6 +47,10 @@ struct MacShimmerText: NSViewRepresentable {
     required init?(coder: NSCoder) { nil }
 
     override var isFlipped: Bool { true }
+    #if DEBUG
+    /// The title, for `MacAjustesChecks`.
+    var text: String { baseLine.string.string }
+    #endif
     // Clicks and the context menu belong to the SwiftUI row around it.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 

@@ -21,6 +21,8 @@ import SwiftUI
   private(set) var agents: [AgentInfo] = []
   private(set) var changes: [WorkingChange] = []
   private(set) var located: LocatedDirectory?
+  /// The folder's VCS (`GET /api/vcs`): its current branch, read again when a checkout changes it.
+  private(set) var vcs: VCSInfo?
   private(set) var resources: [SessionResource] = []
   /// The current tool of each live subagent ("rodando bun test"), from its transcript preview.
   private(set) var activities: [String: String] = [:]
@@ -45,6 +47,7 @@ import SwiftUI
   }
   @ObservationIgnored private var scheduled: Task<Void, Never>?
   @ObservationIgnored private var resourcesTask: Task<Void, Never>?
+  @ObservationIgnored private var branchTask: Task<Void, Never>?
   #if DEBUG
   /// The column listening to the events (the one on screen) and how many times it read the server, for
   /// `MacAjustesChecks`.
@@ -62,6 +65,8 @@ import SwiftUI
   var directory: String? { session?.location.directory }
   /// The checkout root: working-copy diff paths are relative to it.
   var root: String { located?.worktree ?? directory ?? "/" }
+  /// The summary line's worktree and branch.
+  var checkout: ContextColumn.Checkout { ContextColumn.checkout(directory: directory, located: located, vcs: vcs) }
   var active: Set<String> { sessions.active.union(family?.active.map(\.id) ?? []) }
   var work: [SessionWork] {
     ConversationProjection.work(
@@ -112,6 +117,7 @@ import SwiftUI
       case .connected: schedule()
       case .disconnected: break
       case .update(let event) where event.type == OpenCodeClient.resourcesChangedEvent: scheduleResources()
+      case .update(let event) where event.type == OpenCodeClient.branchUpdatedEvent: scheduleBranch()
       case .update(let event):
         guard event.data.owner.map(familyIDs.contains) == true || event.type.hasPrefix("rpc.") else { continue }
         // Streaming deltas only move the subagents' "agora" line; structural events reload everything.
@@ -120,6 +126,7 @@ import SwiftUI
     }
     scheduled?.cancel()
     resourcesTask?.cancel()
+    branchTask?.cancel()
   }
 
   func load() async {
@@ -137,6 +144,7 @@ import SwiftUI
       async let agentsValue = agents.isEmpty ? try? client.agents(directory: directory) : agents
       async let changesValue = try? client.workingChanges(directory: directory)
       async let locatedValue = try? client.locate([directory]).first
+      async let vcsValue = try? client.vcs(directory: directory)
       async let resourcesValue = try? client.resources()
       let family = try await familyValue
       let members = try await membersValue
@@ -149,6 +157,7 @@ import SwiftUI
       agents = await agentsValue ?? []
       changes = await changesValue ?? []
       located = await locatedValue
+      vcs = await vcsValue ?? vcs
       resources = owned(await resourcesValue ?? [])
       loaded = true
       error = nil
@@ -211,6 +220,18 @@ import SwiftUI
       guard !Task.isCancelled, let all = try? await client.resources() else { return }
       let next = owned(all)
       if next != resources { resources = next }
+    }
+  }
+
+  /// A checkout in any folder (the app does not decode the event's location): the shown folder's VCS is read again,
+  /// one cached read on the server, like the web app does on the same event.
+  private func scheduleBranch() {
+    guard branchTask == nil else { return }
+    branchTask = Task {
+      try? await Task.sleep(for: .milliseconds(300))
+      branchTask = nil
+      guard !Task.isCancelled, let directory, let next = try? await client.vcs(directory: directory) else { return }
+      vcs = next
     }
   }
 

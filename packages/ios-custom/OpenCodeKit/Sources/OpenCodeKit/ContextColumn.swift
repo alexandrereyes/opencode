@@ -294,6 +294,39 @@ public enum ContextColumn {
     return "há \(minutes / 1_440) d"
   }
 
+  // MARK: Checkout
+
+  /// The summary line's start, `abacato-v2-feat-qa-usuario-isolado · feat/qa-usuario-isolado`: the folder of the
+  /// session's checkout and its current branch. The main checkout follows the same rule, so it shows the repository's
+  /// own folder (`opencode2`); outside Git, the session's folder. Without a branch (a detached HEAD, outside Git) the
+  /// branch is "—".
+  public struct Checkout: Sendable, Equatable {
+    public let name: String
+    /// The checkout's full path, and the session's folder when it is below it.
+    public let help: String
+    public let branch: String?
+    public let branchHelp: String
+    public var branchText: String { branch ?? "—" }
+  }
+
+  /// `vcs` is the folder's `GET /api/vcs`, the core's own read and the authority for the branch once it names its
+  /// provider; `located` is the plugin's `custom.worktrees/locate`, for the checkout root and the branch until then
+  /// (its worktree list may fail, then it has no branch). Neither carries a detached HEAD's commit, so that tooltip
+  /// names no SHA.
+  public static func checkout(directory: String?, located: LocatedDirectory?, vcs: VCSInfo?) -> Checkout {
+    let root = located?.worktree ?? directory ?? ""
+    let name = root.split(separator: "/").last.map(String.init) ?? (root.isEmpty ? "—" : root)
+    let inside = directory.flatMap { $0.hasPrefix(root + "/") ? String($0.dropFirst(root.count + 1)) : nil }
+    let branch = vcs?.provider != nil ? vcs?.branch.current : vcs?.branch.current ?? located?.branch
+    let branchHelp: String =
+      if let branch { "Branch \(branch)" }
+      else if vcs?.provider != nil || located != nil { "Sem branch: HEAD solto (detached)" }
+      else if vcs != nil { "Pasta fora do Git" }
+      else { "Branch indisponível" }
+    return Checkout(
+      name: name, help: inside.map { root + "\nPasta da sessão: " + $0 } ?? root, branch: branch, branchHelp: branchHelp)
+  }
+
   // MARK: Files
 
   public struct FileStatus: Sendable, Equatable {

@@ -3204,14 +3204,22 @@ child and traces once a second what it shows (`-OpenCodeMacLiveTrace`). Capture 
 `ContextColumnStore` reads, for the session open in the middle column (the root, or the subagent open over it; see
 [Subagentes sem colunas e a sessão aberta](#subagentes-sem-colunas-e-a-sessão-aberta--30-october)), the same sources
 as the iPhone's conversation and "Agentes e tarefas": `GET /api/session/:id`, `custom.session-family/snapshot` and `/page`, the root's transcript page (links
-`subagent` calls), `/api/shell`, `/api/model`, `/api/agent`, `/api/vcs/diff`, `custom.worktrees/locate` and
-`custom.resources/list`, and reloads on the shared event stream. `ContextColumn` (OpenCodeKit) does the math.
+`subagent` calls), `/api/shell`, `/api/model`, `/api/agent`, `/api/vcs`, `/api/vcs/diff`, `custom.worktrees/locate`
+and `custom.resources/list`, and reloads on the shared event stream. `ContextColumn` (OpenCodeKit) does the math.
 
 Only neutral grays and hairlines, no cards and no colored icons. The only colors: `+N` green and `−N` coral, a cache
 hit below 80% amber, and the amber `?` of a subagent asking for permission. Top to bottom:
 
-1. `mac-app · +128 −14 · Arquivos ›`: the branch (its right-click menu copies it or the path, or shows it in the
-   Finder; the path is its tooltip), the working diff and a plain link to Arquivos.
+1. `opencode2-mac-app · mac-app · +128 −14 · Arquivos ›` (`ContextColumn.checkout`): the worktree's folder, cut in
+   the middle when long, with its full path as the tooltip (and the session's folder when it is below the root; the
+   right-click menu copies the path or shows it in the Finder); the branch, or "—" without one (a detached HEAD,
+   outside Git; the tooltip says which, without the commit: neither read carries it), copied from its menu; the
+   working diff and a plain link to Arquivos. The main checkout follows the same rule, so it shows the repository's
+   own folder (`opencode2`). The branch comes from the folder's `GET /api/vcs` (the core's read, once it names its
+   provider), with `custom.worktrees/locate`'s as the fallback: locate lists the repository's worktrees and loses
+   the branch when that list fails (a pruned worktree whose folder is gone made "QA Autonomo!" show `—`, 30
+   October). `vcs.branch.updated` (a checkout in any folder: the app does not decode its location) reads the VCS
+   again without reloading the column.
 2. One metrics line in the subagents' format at 18 pt: the context ring, `28%` and `278,6k / 1M` (latest measured
    step, transcript fallback), `⚡ 99,5% cache` of the session, then `US$ 78,25 total`; it breaks after the context
    when the column cannot hold one line.
@@ -3305,8 +3313,12 @@ Approved mocks: option B (`opcao-b.png`) and, without the gutter, B1 with the `?
   the band (`-brilho-1…3`), the shimmer's CPU against Contexto hidden, narrow at 400 pt, then a subagent opened (its
   context, costs and grandchildren, a reload on its grandchild's event and none on another session's), its own
   subagent with the path through the middle one, and the way back through the path's action and `backToParent`
-  (⌘[ and the banner). The fixture's Backend da Live Activity has two subagents (one running) and Mapear apps Mac
-  de agentes runs a model outside the catalog.
+  (⌘[ and the banner). The first line (`MacCheckoutScenario` changes the root checkout's branch): the worktree's
+  folder and `mac-app`, then locate without a branch (the VCS still names it), a checkout to
+  `feat/qa-usuario-isolado` through `vcs.branch.updated` with no reload of the column (`-linha-branch`), a detached
+  HEAD as "—" (`-linha-sem-branch`), and an opened subagent's line from its own folder. The running titles counted
+  leave out the resource on Recursos' stage, which shimmers too. The fixture's Backend da Live Activity has two
+  subagents (one running) and Mapear apps Mac de agentes runs a model outside the catalog.
 
 ### Recursos em palco — 30 October
 
@@ -3326,10 +3338,12 @@ state (following, chosen, in control, Limpar parados) in `ContextColumnStore`.
   controle`), `agora: …` (a command still running, else the subagent's current tool) and the latest commands
   (`há 20 s: agent-device fill …`, from the resource's `activity`, see the plugin's `docs/resources.md`
   "Activity"), then Abrir janela, **Assumir controle** / Devolver controle, Captura and Encerrar (icons with their
-  names in the tooltip when narrow, control keeps its words). Assumir controle follows the window's rules: a click is
-  a touch, a drag moves it, the trackpad scrolls, the keyboard types (⌘V pastes) and the agent's commands on it wait;
-  closing the column, opening another session or the resource leaving the stage gives control back. In use now, the
-  title shimmers (`MacShimmerText`) and the video gets a 1.5-pt orange outline with a soft glow; in control too.
+  names in the tooltip when narrow or short of room, control keeps its words: shrinking keeps the wide layout, an
+  iPhone beside its details, under its 600-pt threshold, else a narrowed column stayed wide and overflowed).
+  Assumir controle follows the window's rules: a click is a touch, a drag moves it, the trackpad scrolls, the
+  keyboard types (⌘V pastes) and the agent's commands on it wait; closing the column, opening another session or the
+  resource leaving the stage gives control back. In use now, the title shimmers (`MacShimmerText`) and the video gets
+  a 1.5-pt orange outline with a soft glow; in control too.
 - **Seguir o agente** (on by default, at the header's right): the stage shows the resource an agent uses now (one
   whose command is still running first, else the latest use); otherwise it keeps what it shows. A click on a thumbnail
   puts it on the stage and turns following off until Alexandre turns it back on. While he holds control from the

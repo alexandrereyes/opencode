@@ -102,7 +102,11 @@ struct MacFixtureServer: Sendable {
     case "/api/reference": return #"{"data":[]}"#
     case "/api/model/default": return #"{"data":{"id":"opus-5.5","providerID":"llm-proxy","name":"Opus 5.5","variants":[{"id":"high"},{"id":"xhigh"}],"limit":{"context":1000000}}}"#
     // Nova sessão: the opencode2 project with two worktrees, its branches, configuration and MCPs.
-    case "/api/vcs": return #"{"data":{"provider":"git","branch":{"current":"custom"}}}"#
+    case "/api/vcs":
+      // The root checkout's branch follows `MacCheckoutScenario`; every other folder is on `custom`.
+      let branch = query.first { $0.name == "location[directory]" }?.value == root
+        ? MacCheckoutScenario.shared.current.branch : "custom"
+      return #"{"data":{"provider":"git","branch":{"# + (branch.map { #""current":"\#($0)""# } ?? "") + "}}}"
     case "/api/vcs/branch": return #"{"data":["custom","mac-app","dev","upstream-dev","transcript-rewrite"]}"#
     case "/api/worktree":
       return #"[{"directory":"\#(home)/Worktrees/opencode2-mac-app"},{"directory":"\#(home)/Worktrees/opencode2-sidebar"}]"#
@@ -178,8 +182,10 @@ struct MacFixtureServer: Sendable {
       #"[{"directory":"\#(home)/Dev/opencode2","branch":"custom"},{"directory":"\#(home)/Worktrees/opencode2-mac-app","branch":"mac-app"},{"directory":"\#(home)/Worktrees/opencode2-sidebar","branch":"sidebar-v2"}]"#
     case "custom.worktrees/locate":
       "[" + (input?["directories"]?.array?.compactMap(\.string) ?? []).map { directory in
-        let branch = directory == root ? "mac-app" : "main"
-        return #"{"directory":"\#(directory)","worktree":"\#(directory)","canonical":"\#(directory)","branch":"\#(branch)"}"#
+        let scenario = MacCheckoutScenario.shared.current
+        let branch = directory != root ? "main" : scenario.located ? scenario.branch : nil
+        return #"{"directory":"\#(directory)","worktree":"\#(directory)","canonical":"\#(directory)""#
+          + (branch.map { #","branch":"\#($0)""# } ?? "") + "}"
       }.joined(separator: ",") + "]"
     // Every descendant of the root, its grandchildren included; Backend da Live Activity has subagents of its own.
     case "custom.session-family/snapshot":
@@ -576,6 +582,17 @@ struct MacFixtureServer: Sendable {
   }
 
   private struct RPC: Decodable { let input: [String: JSONValue]? }
+}
+
+/// `-OpenCodeMacAjustes contexto`: the root checkout's branch (nil: a detached HEAD), which the check changes as a
+/// checkout would; `located` false drops it from `custom.worktrees/locate`, as an unreadable worktree list does.
+final class MacCheckoutScenario: @unchecked Sendable {
+  static let shared = MacCheckoutScenario()
+  private let lock = NSLock()
+  private var value: (branch: String?, located: Bool) = ("mac-app", true)
+
+  var current: (branch: String?, located: Bool) { lock.withLock { value } }
+  func set(branch: String?, located: Bool) { lock.withLock { value = (branch, located) } }
 }
 
 /// `-OpenCodeMacAjustes recursos`: the resources the fixture serves, which the check changes as agents would (who is

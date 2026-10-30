@@ -90,6 +90,8 @@ struct ContextColumnSections: View {
 /// What the column decided, for `MacAjustesChecks`: its background test copy has no accessibility tree to read.
 @MainActor enum MacContextProbe {
   static var narrow = false
+  /// The summary line's worktree and branch as drawn.
+  static var checkout: ContextColumn.Checkout?
 }
 #endif
 
@@ -164,28 +166,36 @@ extension ContextSectionLabel where Trailing == EmptyView {
 
 // MARK: - Summary and figures
 
-/// `mac-app · +128 −14 · Arquivos ›`. The branch's menu copies it or the path, or shows it in the Finder.
+/// `opencode2-mac-app · mac-app · +128 −14 · Arquivos ›` (`ContextColumn.checkout`): the worktree's folder, cut in
+/// the middle with its path as the tooltip (its menu copies the path or shows it in the Finder), the branch or "—"
+/// (its menu copies it), the working diff and a plain link to Arquivos.
 private struct ContextSummaryLine: View {
   @Environment(\.appTheme) private var theme
   let store: ContextColumnStore
   let runtime: MacWindowRuntime
 
-  private var label: SessionDirectoryLabel? { store.session.flatMap { store.sessions.directoryLabel($0) } }
-  private var branch: String? { label?.branch ?? store.located?.branch }
-
   var body: some View {
     let summary = store.summary
+    let checkout = store.checkout
     HStack(alignment: .firstTextBaseline, spacing: 6) {
-      Text(branch ?? "—").foregroundStyle(theme.color(.textStrong)).lineLimit(1)
-        .help(label?.path ?? store.directory ?? "")
+      Text(checkout.name).foregroundStyle(theme.color(.textStrong)).lineLimit(1).truncationMode(.middle)
+        .help(checkout.help)
+        .accessibilityLabel("Worktree \(checkout.name)")
         .contextMenu {
-          if let branch { Button("Copiar branch") { copy(branch) } }
           if let directory = store.directory {
             Button("Copiar caminho") { copy(directory) }
             if FileManager.default.fileExists(atPath: directory) {
               Button("Mostrar no Finder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: directory) }
             }
           }
+        }
+      Text("·").foregroundStyle(theme.color(.textWeak))
+      Text(checkout.branchText).foregroundStyle(theme.color(checkout.branch == nil ? .textSecondary : .text))
+        .lineLimit(1).truncationMode(.middle)
+        .help(checkout.branchHelp)
+        .accessibilityLabel(checkout.branch.map { "Branch \($0)" } ?? checkout.branchHelp)
+        .contextMenu {
+          if let branch = checkout.branch { Button("Copiar branch") { copy(branch) } }
         }
       Text("·").foregroundStyle(theme.color(.textWeak))
       HStack(spacing: 5) {
@@ -209,6 +219,9 @@ private struct ContextSummaryLine: View {
       Spacer(minLength: 0)
     }
     .appFont(.secondary)
+    #if DEBUG
+    .onChange(of: checkout, initial: true) { _, value in MacContextProbe.checkout = value }
+    #endif
   }
 
   private func copy(_ value: String) {

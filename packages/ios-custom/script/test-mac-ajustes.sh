@@ -38,7 +38,8 @@ for mode in $modes; do
     divider) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
     arquivos) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     ampliar) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
-    # Wide and narrow Contexto, a subagent open over the root, its own subagent and the way back, in one launch.
+    # Wide and narrow Contexto, its first line's worktree and branch (from the core's VCS, live on a checkout, "—"
+    # on a detached HEAD), a subagent open over the root, its own subagent and the way back, in one launch.
     contexto) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     # The stage: three, one and no ligados, wide and narrow, following, a thumbnail, control and Limpar parados.
     recursos) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
