@@ -87,9 +87,11 @@ Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD`:
   `packages/core/src/tool.ts`, its call in `packages/core/src/session/context.ts`, the custom case of
   `core/test/tool-registry.test.ts`, `core/test/tool-opencode-master-visibility.test.ts`): removed on 2026-10-30 by
   Alexandre's decision; those files equal upstream again. Hiding the Mestra tools from other agents was context hygiene,
-  not a security boundary (an agent with a shell can drive the server through `opencode2 api`). They are now ordinary,
-  unpinned tools of a `mestra` namespace that any agent may call; the Mestra's instructions name their exact paths.
-  Measurements and the behavior for other callers: `docs/custom-master-session.md`, "Agent scoping removed".
+  not a security boundary (an agent with a shell can drive the server through `opencode2 api`). They are now ordinary
+  tools that any agent may call, in the custom `sessions` namespace (`tools.sessions.<name>`, with the former
+  `opencode.session_read` as `tools.sessions.read`, the only pinned one; `packages/plugin-app-custom/docs/sessions.md`);
+  the Mestra's instructions name their exact paths. Measurements and the behavior for other callers:
+  `docs/custom-master-session.md`, "Agent scoping removed" and "Session tools outside the Mestra".
 
 ### Remaining customizations
 
@@ -101,17 +103,17 @@ hosts `packages/core/test/plugin/{host,fixture}.ts` and `packages/core/test/fixt
 context has no equivalent for any of them; each is an upstream proposal candidate, and leaves when upstream ships it.
 
 - `session.active` and `session.view`: upstream's HTTP operations of the same name, exposed to plugins. Consumers:
-  `master` (inventory, mark read), `live-activity` tracker, `watch` delegation, `voice`.
+  `sessions` (inventory, `mark_read`), `live-activity` tracker, `watch` delegation, `voice`.
 - `session.form.reply` and `permission.reply`, resolved in the session's Location (upstream's `permission.reply` looks
-  in the plugin's own Location, so a request of another Location is not found). Consumers: `master` `request_answer`,
+  in the plugin's own Location, so a request of another Location is not found). Consumers: `sessions` `answer`,
   `watch` replies.
 - `message.list`, with `MessagePage.Cursor` in `packages/schema/src/session-message-page.ts` (re-exported as
   `@opencode/plugin/message`, tested by `schema/test/session-message-page.test.ts`): paged transcripts with the server's
   cursor encoding (`plugin-app-custom/test/server-message-cursor.test.ts`). Core cannot import the plugin, so the cursor
-  stays shared in Schema while `message.list` is in Core. Consumers: `session_read` tool, `transcript`, `master`,
-  `voice`, `watch` delegation, `live-activity`.
+  stays shared in Schema while `message.list` is in Core. Consumers: `sessions` (`read`, `status`, `search`),
+  `transcript`, `voice`, `watch` delegation, `live-activity`.
 - `request.pending`: pending permissions and forms of the live Locations, without booting historical Locations.
-  Consumers: `navigation`, `requests`, `watch`, `live-activity`, `master`, `session-family`.
+  Consumers: `navigation`, `requests`, `watch`, `live-activity`, `sessions`, `session-family`.
 - `job.background`, with `Job.backgrounded` in `packages/core/src/job.ts` (`core/test/job.test.ts`): running background
   shells and subagents with their sessions. Consumers: `navigation`, `live-activity`.
 - `mcp.callTool` (`MCP.ToolResult`/`CallToolError` in `packages/plugin/src/mcp.ts`). Consumer: `app-mentions`
@@ -119,15 +121,16 @@ context has no equivalent for any of them; each is an upstream proposal candidat
 - `session.family` and `familyBoundaries` (`packages/core/src/session/family.ts`,
   `packages/schema/src/session-family.ts`, `core/test/session-family.test.ts`): recursive descendant summaries, pages
   and revert boundaries in SQLite without decoding transcripts. Consumers: `custom.session-family` (context column,
-  revert), `master`.
+  revert), `sessions`.
 - `session.scan` (`packages/core/src/session/store.ts` and `session.ts`, `packages/schema/src/session-scan.ts`,
   `core/test/session-scan.test.ts`, `schema/test/session-scan.test.ts`): ID-ordered pages with `messageAt` (latest user
   or assistant message) and `completionAt` (latest durable succeeded or failed execution). Consumers: `navigation` (the
-  apps sort rows by `messageAt`, `SessionList.interactionAt`), `master`, `archive`, `chats`, `live-activity`. Upstream's
-  `session.list` pages by time and its `Session.Info` has neither time (`time.updated` moves on renames, metadata and
-  archive; `time.idle` is not the last message), so the plugin would need one message read per session.
+  apps sort rows by `messageAt`, `SessionList.interactionAt`), `sessions`, `master`, `archive`, `chats`,
+  `live-activity`. Upstream's `session.list` pages by time and its `Session.Info` has neither time (`time.updated` moves
+  on renames, metadata and archive; `time.idle` is not the last message), so the plugin would need one message read per
+  session.
 - `session.update` honors `archived` (two lines, as upstream's HTTP handler; the SDK input already accepts it, the host
-  ignored it). Consumers: `custom.archive`, `master` `session_archive`. Exit: upstream fixes its host.
+  ignored it). Consumers: `custom.archive`, `sessions` `archive`. Exit: upstream fixes its host.
 
 Other customizations:
 

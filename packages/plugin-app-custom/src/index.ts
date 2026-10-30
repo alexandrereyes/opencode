@@ -7,7 +7,7 @@ import { registerAppMentions } from "./app-mentions/index.js"
 import { registerNativeApps } from "./native-apps/index.js"
 import { registerDirectories } from "./directories/index.js"
 import { registerSubscriptions } from "./subscriptions/index.js"
-import { registerSessionRead } from "./session-read/index.js"
+import { registerSessions } from "./sessions/index.js"
 import { registerSnippets } from "./snippets/index.js"
 import { registerWorktrees } from "./worktrees/index.js"
 import { registerNavigation } from "./navigation/index.js"
@@ -40,7 +40,7 @@ export default Plugin.define({
       yield* registerDirectories(ctx)
       yield* registerSubscriptions(ctx)
       yield* registerCodexSearch(ctx)
-      yield* registerSessionRead(ctx)
+      yield* registerSessions(ctx)
       yield* registerSnippets(ctx)
       yield* registerWorktrees(ctx)
       yield* registerNavigation(ctx)

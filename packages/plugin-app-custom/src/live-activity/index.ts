@@ -3,7 +3,7 @@ import { Cause, Clock, Deferred, Effect, Exit, Queue, Scope, Semaphore, Stream }
 import os from "node:os"
 import { load, type Client } from "./apns.js"
 import { fit, makeLifecycle, makeRegistry, stateKey, type Lifecycle, type Storage } from "./lifecycle.js"
-import { marksFrom } from "../master/inventory.js"
+import { marksFrom } from "../sessions/inventory.js"
 import { makeNotificationRegistry, makeNotifier, type Notifier } from "../notifications/index.js"
 import { Notifications } from "../notifications/rpc.js"
 import { Preferences } from "../preferences/rpc.js"

@@ -96,12 +96,12 @@ await api(`/api/session/${runner.id}/prompt`, Schema.Unknown, {
   text: "Teste controlado: execute shell sleep 90, depois diga OK. Não altere arquivos.",
 })
 const prompt = `Verificação explicitamente autorizada por Alexandre, somente nestas sessões de teste. Use suas ferramentas, não shell/CLI. Em ordem:
-1. sessions_list (limit 20) e também filtro running; session_status de ${root.id}; session_read de ${root.id}.
-2. requests_list (sessionID ${root.id}); request_answer question ${question.data.id}, answer {"answer":"ok"}; request_answer permission ${permission.data.id}, allow true.
-3. session_send a ${root.id}: "Responda somente ALFA, sem ferramentas", delivery steer. Outro session_send a ela: "Responda somente BETA, sem ferramentas", delivery queue.
-4. session_create directory ${directories[1]}, agent build, model {"providerID":"llm-proxy","id":"gpt-6-luna","variant":"low"}, title "Mestra · criada pela ferramenta", text "Responda somente CRIADA, sem ferramentas".
-5. session_interrupt ${runner.id}; session_wait de ${root.id} com timeoutSeconds 60.
-6. sessions_list state idle e resuma os resultados em até 5 linhas. Não controle ${child.id}, que é filho. Não controle esta própria sessão. Execute todas as etapas solicitadas agora.`
+1. sessions.list (limit 20) e também filtro running; sessions.status de ${root.id}; sessions.read de ${root.id}.
+2. sessions.requests (sessionID ${root.id}); sessions.answer question ${question.data.id}, answer {"answer":"ok"}; sessions.answer permission ${permission.data.id}, allow true.
+3. sessions.send a ${root.id}: "Responda somente ALFA, sem ferramentas", delivery steer. Outro sessions.send a ela: "Responda somente BETA, sem ferramentas", delivery queue.
+4. sessions.create directory ${directories[1]}, agent build, model {"providerID":"llm-proxy","id":"gpt-6-luna","variant":"low"}, title "Mestra · criada pela ferramenta", text "Responda somente CRIADA, sem ferramentas".
+5. sessions.interrupt ${runner.id}; sessions.wait de ${root.id} com timeoutSeconds 60.
+6. sessions.list state idle e resuma os resultados em até 5 linhas. Não controle ${child.id}, que é filho. Não controle esta própria sessão. Execute todas as etapas solicitadas agora.`
 await api(`/api/session/${master.id}/prompt`, Schema.Unknown, { text: prompt })
 const deadline = Date.now() + 180_000
 const activeSchema = Schema.Struct({ data: Schema.Record(Schema.String, Schema.Struct({ type: Schema.String })) })
@@ -117,7 +117,7 @@ async function waitMaster() {
 await waitMaster()
 // Force a separate read-only call: IDs in the first request must not make the model skip discovery.
 await api(`/api/session/${master.id}/prompt`, Schema.Unknown, {
-  text: `Execute agora requests_list({sessionID:"${root.id}"}). Faça a chamada efetiva, não somente search, e informe a quantidade de pendências.`,
+  text: `Execute agora tools.sessions.requests({sessionID:"${root.id}"}). Faça a chamada efetiva, não somente search, e informe a quantidade de pendências.`,
 })
 await waitMaster()
 const messages = await api(
@@ -146,17 +146,9 @@ const used = new Set(
     .filter((call) => call.status === "completed")
     .map((call) => call.tool),
 )
-const missing = [
-  "sessions_list",
-  "session_status",
-  "session_read",
-  "session_send",
-  "session_create",
-  "session_interrupt",
-  "requests_list",
-  "request_answer",
-  "session_wait",
-].filter((name) => !used.has(`opencode.${name}`))
+const missing = ["list", "status", "read", "send", "create", "interrupt", "requests", "answer", "wait"].filter(
+  (name) => !used.has(`sessions.${name}`),
+)
 if (missing.length)
   throw new Error(
     `Live verification missed tools: ${missing.join(", ")}; ask this test master explicitly before collecting evidence`,

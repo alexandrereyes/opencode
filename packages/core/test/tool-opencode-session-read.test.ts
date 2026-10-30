@@ -22,7 +22,7 @@ import { MessagePage } from "@opencode/plugin/message"
 import { Model } from "@opencode/schema/model"
 import { Money } from "@opencode/schema/money"
 import { Provider } from "@opencode/schema/provider"
-import { ReadOutput } from "../../plugin-app-custom/src/session-read"
+import { ReadOutput } from "../../plugin-app-custom/src/sessions/read"
 import { testEffect } from "./lib/effect"
 import { codeModeListings, executeTool, toolIdentity, waitForCodeModeTool } from "./lib/tool"
 import { tmpdirScoped } from "./fixture/tmpdir"
@@ -125,7 +125,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
       yield* plugins.activate([builtIn, custom, { id: promise.id, revision: "test", effect: promise.effect }])
 
       const registry = yield* Tool.Service
-      yield* waitForCodeModeTool(registry, "opencode.session_read")
+      yield* waitForCodeModeTool(registry, "sessions.read")
       const first = yield* executeTool(registry, {
         sessionID: caller.id,
         ...toolIdentity,
@@ -133,7 +133,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
           type: "tool-call",
           id: "call-session-read-1",
           name: "execute",
-          input: { code: `return await tools.opencode.session_read({ sessionID: "${referenced.id}", limit: 2 })` },
+          input: { code: `return await tools.sessions.read({ sessionID: "${referenced.id}", limit: 2 })` },
         },
       })
       expect(first.status).toBe("completed")
@@ -156,7 +156,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
           id: "call-session-read-2",
           name: "execute",
           input: {
-            code: `return await tools.opencode.session_read({ sessionID: "${referenced.id}", limit: 2, cursor: "${next}" })`,
+            code: `return await tools.sessions.read({ sessionID: "${referenced.id}", limit: 2, cursor: "${next}" })`,
           },
         },
       })
@@ -234,7 +234,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
           type: "tool-call",
           id: "call-session-read-filtered",
           name: "execute",
-          input: { code: `return await tools.opencode.session_read({ sessionID: "${referenced.id}", limit: 1 })` },
+          input: { code: `return await tools.sessions.read({ sessionID: "${referenced.id}", limit: 1 })` },
         },
       })
       expect(decodeReadOutput(filtered.output).messages).toEqual([
@@ -251,7 +251,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
           type: "tool-call",
           id: "call-session-read-bounded",
           name: "execute",
-          input: { code: `return await tools.opencode.session_read({ sessionID: "${referenced.id}", limit: 1 })` },
+          input: { code: `return await tools.sessions.read({ sessionID: "${referenced.id}", limit: 1 })` },
         },
       })
       const boundedPage = decodeReadOutput(bounded.output)
@@ -267,7 +267,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
           id: "call-session-read-missing",
           name: "execute",
           input: {
-            code: 'return await tools.opencode.session_read({ sessionID: "ses_missing_12345678901234567890" })',
+            code: 'return await tools.sessions.read({ sessionID: "ses_missing_12345678901234567890" })',
           },
         },
       })
@@ -276,7 +276,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
         output: {
           error: true,
           output: "Unable to read session ses_missing_12345678901234567890",
-          toolCalls: [{ tool: "opencode.session_read", status: "error" }],
+          toolCalls: [{ tool: "sessions.read", status: "error" }],
         },
       })
 
@@ -293,7 +293,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
           type: "tool-call",
           id: "call-session-read-untitled",
           name: "execute",
-          input: { code: `return await tools.opencode.session_read({ sessionID: "${untitled.id}" })` },
+          input: { code: `return await tools.sessions.read({ sessionID: "${untitled.id}" })` },
         },
       })
       expect(decodeReadOutput(untitledResult.output)).toEqual({
@@ -320,7 +320,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
           type: "tool-call",
           id: "call-session-read-default",
           name: "execute",
-          input: { code: `return await tools.opencode.session_read({ sessionID: "${defaults.id}" })` },
+          input: { code: `return await tools.sessions.read({ sessionID: "${defaults.id}" })` },
         },
       })
       const defaultPage = decodeReadOutput(defaultResult.output)
@@ -335,7 +335,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
         : []
       expect(paths).toContain("opencode.session_rename")
       expect(paths).toContain("opencode.session_move")
-      expect(paths).not.toContain("opencode.session_read")
+      expect(paths).not.toContain("sessions.read")
     }),
   )
 })

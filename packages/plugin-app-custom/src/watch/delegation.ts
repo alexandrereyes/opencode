@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin/effect"
 import { Session } from "@opencode/schema/session"
 import { Clock, Effect, Option, Schema, Scope, Semaphore, Stream } from "effect"
+import { sessionTool } from "../sessions/index.js"
 
 export const limits = {
   /** Progress narration is a latest-value mailbox spoken at most this often; results skip the wait. */
@@ -209,19 +210,18 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
             })
           : undefined
     if (!call?.name) return undefined
-    const name = call.name.split(".").at(-1) ?? call.name
     const sessionID =
       typeof call.input === "object" && call.input !== null && "sessionID" in call.input
         ? call.input.sessionID
         : undefined
-    if (["session_read", "session_status", "session_wait"].includes(name) && typeof sessionID === "string") {
+    if (["read", "status", "wait"].includes(sessionTool(call.name) ?? "") && typeof sessionID === "string") {
       const title = yield* ctx.session.get({ sessionID: Session.ID.make(sessionID) }).pipe(
         Effect.map((session) => session.title),
         Effect.orElseSucceed(() => undefined),
       )
       if (title) return `A mestra está conferindo a sessão “${title.slice(0, 120)}”.`
     }
-    return describeTool(name)
+    return describeTool(call.name)
   })
 
   /** The result is final only once the Mestra is idle; then the latest reply after the prompt is spoken. */
@@ -318,21 +318,22 @@ export function parse(raw: string) {
 }
 
 export function describeTool(name: string) {
-  switch (name) {
-    case "session_read":
-    case "session_status":
+  const session = sessionTool(name)
+  switch (session ? `sessions.${session}` : (name.split(".").at(-1) ?? name)) {
+    case "sessions.read":
+    case "sessions.status":
       return "A mestra está conferindo uma sessão."
-    case "sessions_list":
+    case "sessions.list":
       return "A mestra está consultando suas sessões."
-    case "session_send":
+    case "sessions.send":
       return "A mestra está encaminhando seu pedido."
-    case "session_create":
+    case "sessions.create":
       return "A mestra está criando a sessão solicitada."
-    case "session_wait":
+    case "sessions.wait":
       return "A mestra está acompanhando o trabalho da sessão."
-    case "requests_list":
+    case "sessions.requests":
       return "A mestra está verificando os pedidos pendentes."
-    case "request_answer":
+    case "sessions.answer":
       return "A mestra está respondendo ao pedido autorizado."
     case "read":
     case "grep":

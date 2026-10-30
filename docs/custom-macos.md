@@ -501,7 +501,8 @@ apps' project explorer uses it for **Criar e adicionar**.
 
 ## Session references
 
-The `opencode.session_read` tool retrieves another session's text on demand in newest-first pages:
+The `tools.sessions.read` tool (formerly `opencode.session_read`; see
+`packages/plugin-app-custom/docs/sessions.md`) retrieves another session's text on demand in newest-first pages:
 20 messages by default, up to 50, with a 20,000-character message-text budget. Tool payloads and
 reasoning are omitted; truncated messages are marked.
 

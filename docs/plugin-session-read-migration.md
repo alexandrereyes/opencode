@@ -2,6 +2,9 @@
 
 Base: `origin/custom` at `a289af884`.
 
+Since 2026-10-30 the tool is `tools.sessions.read`, in `packages/plugin-app-custom/src/sessions/read.ts`, with the
+other session tools (`packages/plugin-app-custom/docs/sessions.md`); this record describes the earlier migration.
+
 ## Preserved feature contract
 
 Move only `opencode.session_read` from the built-in OpenCode tools to a

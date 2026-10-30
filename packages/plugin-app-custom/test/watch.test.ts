@@ -9,7 +9,7 @@ import { key, limits as widgetLimits, makeWidgetPush } from "../src/watch/widget
 import { makeStats } from "../src/watch/stats"
 import { limits as gatewayLimits, redact } from "../src/watch/gateway"
 import { chunks, limits as voiceLimits, rejectsVoice } from "../src/watch/voice"
-import { limits as delegationLimits, parse } from "../src/watch/delegation"
+import { describeTool, limits as delegationLimits, parse } from "../src/watch/delegation"
 import { Watch } from "../src/watch/rpc"
 import {
   T,
@@ -407,7 +407,7 @@ it.effect("delegations keep tool activity on screen and send only updates and re
       },
     ])
     // Routine tools update the screen, never the speech mailbox, even after its throttle expires.
-    yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_master", "call_1", "mestra.sessions_list"))
+    yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_master", "call_1", "sessions.list"))
     yield* PubSub.publish(server.bus, masterEvents.toolCalled("ses_master", "call_1", {}))
     yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_other", "call_x", "read"))
     yield* settled
@@ -438,6 +438,9 @@ it.effect("delegations keep tool activity on screen and send only updates and re
         .filter((event: Watch.VoiceEvent) => event.type === "master")
         .map((event: Watch.VoiceEvent) => event.type === "master" && event.state),
     ).toEqual(["running", "running", "running", "idle"])
+    expect(page.events.map((event: Watch.VoiceEvent) => event.type === "master" && event.text)).toContain(
+      "A mestra está consultando suas sessões.",
+    )
     // Queue requests keep their delivery.
     delegation("item_d2", JSON.stringify({ text: "Depois veja os pedidos", delivery: "queue" }))
     yield* settled
@@ -447,6 +450,30 @@ it.effect("delegations keep tool activity on screen and send only updates and re
       delivery: "queue",
     })
   }).pipe(Effect.map(() => undefined)),
+)
+
+it.effect("delegation narration knows the session tools by their current and former names", () =>
+  Effect.sync(() => {
+    for (const name of ["sessions.read", "sessions_read", "opencode.session_read", "session_read", "sessions.status"])
+      expect(describeTool(name)).toBe("A mestra está conferindo uma sessão.")
+    for (const name of ["sessions.list", "mestra.sessions_list", "opencode.sessions_list"])
+      expect(describeTool(name)).toBe("A mestra está consultando suas sessões.")
+    for (const [current, former, text] of [
+      ["sessions.send", "mestra.session_send", "A mestra está encaminhando seu pedido."],
+      ["sessions.create", "mestra.session_create", "A mestra está criando a sessão solicitada."],
+      ["sessions.wait", "mestra.session_wait", "A mestra está acompanhando o trabalho da sessão."],
+      ["sessions.requests", "mestra.requests_list", "A mestra está verificando os pedidos pendentes."],
+      ["sessions.answer", "mestra.request_answer", "A mestra está respondendo ao pedido autorizado."],
+    ]) {
+      expect(describeTool(current)).toBe(text)
+      expect(describeTool(former)).toBe(text)
+    }
+    // Short session tool names never shadow the native tools that share them.
+    expect(describeTool("read")).toBe("A mestra está consultando os arquivos.")
+    expect(describeTool("search")).toBe("A mestra está usando uma ferramenta.")
+    expect(describeTool("sessions.unknown")).toBe("A mestra está usando uma ferramenta.")
+    expect(describeTool("execute")).toBe("A mestra está consultando as ferramentas.")
+  }),
 )
 
 it.effect("helpers: delegation parsing, append chunks, voice rejection and diagnostics redaction", () =>

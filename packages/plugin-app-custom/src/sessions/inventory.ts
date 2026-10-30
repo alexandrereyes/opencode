@@ -11,7 +11,7 @@ import { Session } from "@opencode/schema/session"
 import type { SessionScan } from "@opencode/schema/session-scan"
 import { DateTime, Effect, Schema } from "effect"
 import { Preferences } from "../preferences/rpc.js"
-import { Master } from "./rpc.js"
+import { Master } from "../master/rpc.js"
 
 const agentID = Master.agentID
 
@@ -112,7 +112,7 @@ const scanAll = (
       ),
     )
 
-export const inventory = Effect.fn("Master.inventory")(function* (ctx: InventoryContext) {
+export const inventory = Effect.fn("Sessions.inventory")(function* (ctx: InventoryContext) {
   const rows = (yield* scanAll(ctx, { parentID: null }))
     .filter((row) => !row.session.parentID && row.session.agent !== agentID)
     .toSorted((a, b) => activity(b) - activity(a) || b.session.id.localeCompare(a.session.id))
@@ -144,7 +144,7 @@ export const inventory = Effect.fn("Master.inventory")(function* (ctx: Inventory
 })
 
 /** Walks a session up to its top-level ancestor; missing sessions (e.g. global forms) have no root. */
-const rootOf = Effect.fn("Master.rootOf")(function* (
+const rootOf = Effect.fn("Sessions.rootOf")(function* (
   ctx: InventoryContext,
   sessionID: string,
   known: Map<string, Session.Info>,
@@ -165,7 +165,7 @@ const rootOf = Effect.fn("Master.rootOf")(function* (
   return current && !current.parentID ? current.id : undefined
 })
 
-const projects = Effect.fn("Master.projects")(function* (rows: readonly SessionScan.Info[], chatsRoot?: string) {
+const projects = Effect.fn("Sessions.projects")(function* (rows: readonly SessionScan.Info[], chatsRoot?: string) {
   const groups = Map.groupBy(rows, (row) => row.session.projectID)
   const result = new Map<string, ProjectInfo>()
   for (const [id, members] of groups) {

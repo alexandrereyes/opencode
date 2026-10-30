@@ -7,8 +7,9 @@ UI and Session UI trees. This is a new custom capability, not an early upstream 
 ## Policy ownership
 
 `packages/plugin-app-custom/src/master` owns the hidden Mestra agent, its short invisible instructions, preferred
-Sol ultrafast/medium selection and server-default fallback, typed control tools, root/self filtering,
-compact outputs and `custom.master` prompt-origin metadata. Existing native Session services
+Sol ultrafast/medium selection and server-default fallback and `custom.master`. Since 2026-10-30 the typed session tools,
+with their root/self filtering, compact outputs and prompt-origin metadata, are `src/sessions`, open to every agent (see
+"Session tools outside the Mestra" below). Existing native Session services
 still own creation, durable prompt admission, queue/steer delivery, interruption, waiting, form validation and permissions.
 `custom.preferences` adds optional per-server master pointers plus set/clear intents without a profile-version change.
 
@@ -103,7 +104,8 @@ Installed `1042585c28` predates this fix; Alexandre must trigger another `custom
 Goal: Mestra answers anything the app lists show and performs what their controls do. A baseline run against the owned
 4183 sandbox showed four tool-level gaps the prompt could not fix: no unread or failed state, subagent requests and work
 invisible to the root, no mark-as-read, and every turn starting with a catalog `search`. The plugin now owns a session
-inventory (`master/inventory.ts`) and thirteen pinned controls; see `packages/plugin-app-custom/docs/master-session.md`.
+inventory (`master/inventory.ts`, now `sessions/inventory.ts`) and thirteen pinned controls; see
+`packages/plugin-app-custom/docs/sessions.md`.
 
 The only runtime extension is `session.view` in the plugin context, the existing client operation, with the same shape
 as the earlier `active`/`form.reply` additions. Five upstream-owned files, **7 additions / 1 removal**:
@@ -153,3 +155,61 @@ Calls from other sessions: the caller is the calling session's top-level ancesto
 out of the lists and refused as a target ("it is the calling session"); Mestra sessions stay excluded and refused; only
 the Mestra's messages carry `custom.master` (shown as "Sessão mestra" by the apps), others carry
 `custom.sender: {sessionID, agent}`.
+
+## Session tools outside the Mestra (2026-10-30)
+
+The thirteen controls and the custom `tools.opencode.session_read` are a generic capability, so they leave `master/`
+for `packages/plugin-app-custom/src/sessions` (`index.ts`, `inventory.ts`, `read.ts`) and one Code Mode namespace with
+neutral descriptions, `sessions`. `master/` keeps the agent, its persona, instructions and permissions, the
+`custom.master` RPC (`info`, `ensure`, the pointer) and the model memory.
+
+| Former path                      | New path                   |
+| -------------------------------- | -------------------------- |
+| `tools.mestra.sessions_list`     | `tools.sessions.list`      |
+| `tools.mestra.projects_list`     | `tools.sessions.projects`  |
+| `tools.mestra.session_status`    | `tools.sessions.status`    |
+| `tools.opencode.session_read`    | `tools.sessions.read`      |
+| `tools.mestra.sessions_search`   | `tools.sessions.search`    |
+| `tools.mestra.session_send`      | `tools.sessions.send`      |
+| `tools.mestra.session_create`    | `tools.sessions.create`    |
+| `tools.mestra.session_update`    | `tools.sessions.update`    |
+| `tools.mestra.session_interrupt` | `tools.sessions.interrupt` |
+| `tools.mestra.session_mark_read` | `tools.sessions.mark_read` |
+| `tools.mestra.session_archive`   | `tools.sessions.archive`   |
+| `tools.mestra.session_wait`      | `tools.sessions.wait`      |
+| `tools.mestra.requests_list`     | `tools.sessions.requests`  |
+| `tools.mestra.request_answer`    | `tools.sessions.answer`    |
+
+`read` and `search` repeat the names of the native file tool and of Code Mode's `search(...)`, but the call forms
+differ (`tools.sessions.read(...)`, `tools.sessions.search(...)` against a bare `read` call and `search(...)`), so they
+stay; narration resolves the qualified name and never a bare one. Tool IDs and permission actions follow the namespace
+(`sessions_<name>`, formerly `mestra_<name>` and `opencode_session_read`); no configuration, test or plugin rule named
+the former actions. The custom registration no longer redefines the `opencode` namespace description, so upstream's
+applies.
+
+Pinning, measured in the owned 4177 sandbox (`build` and `mestra` sessions, rendered catalog, characters / estimated
+tokens at 4 characters per token):
+
+| Revision                                                          | `build` catalog | `mestra` catalog | whole `mestra` context, characters | `sessions` listings shown                             |
+| ----------------------------------------------------------------- | --------------: | ---------------: | ---------------------------------: | ----------------------------------------------------- |
+| Before (`bb29a8eed`: `mestra` namespace, `opencode.session_read`) |   8,846 / 2,212 |    8,846 / 2,212 |                             34,584 | `session_read` in `opencode`                          |
+| `sessions`, nothing pinned                                        |   8,805 / 2,201 |    8,805 / 2,201 |                             34,477 | `answer`, `archive`, `interrupt`, `mark_read`, `send` |
+| `sessions`, `read` pinned (chosen)                                |   8,917 / 2,229 |    8,917 / 2,229 |                             34,590 | `answer`, `archive`, `interrupt`, `read`, `send`      |
+
+`session_read` was never pinned: it was listed because it fitted the inline budget. Unpinned in the larger `sessions`
+namespace it no longer fits, and shorter listings take its place. Pinning `read` costs 28 tokens over nothing pinned
+(18 over before) and displaces `mark_read`, which other agents rarely need; `read` is what other agents use routinely,
+and the apps' session mentions name it. The other tools stay unpinned: the Mestra's instructions name every path and
+input key, so it calls them without `search`, and other agents find them with `search`.
+
+Compatibility: the Watch narration (`watch/delegation.ts`) and the apps' voice narration (`VoiceMasterProgress` in
+`OpenCodeKit/Voice.swift`, used by `VoiceMaster.swift`) map the current path, the tool ID and every former name to the
+same text, so an older server or transcript still narrates. The apps' session mention now reads "Use
+tools.sessions.read (tools.opencode.session_read on older servers)"; an older app talking to a newer server names only
+the former path, whose call fails as an unknown tool, and the model falls back to `search`.
+
+Sandbox (4177, own home, shell denied and the probe guard blocking the launchers): a Mestra session (`claude-haiku-5-5`)
+answered "quais sessões precisam de mim?" with `tools.sessions.requests` and `tools.sessions.list`, created a throwaway
+session with `tools.sessions.create`, waited with `tools.sessions.wait`, sent with `tools.sessions.send`, all without
+`search`; both admitted prompts carry `custom.master`. A `build` session given an app-style session mention read it with
+`tools.sessions.read` directly and found `tools.sessions.list` with one `search`.
