@@ -125,8 +125,32 @@ it.live("serves one persistent snippet catalog across Locations", () =>
             ),
           catch: (error) => error,
         }).pipe(Effect.flip)
-        expect(conflict).toMatchObject({ type: "conflict", data: { name: "NAME-1" } })
+        expect(conflict).toMatchObject({
+          type: "conflict",
+          data: { name: "NAME-1", field: "name", value: "NAME-1", existing: "name-1" },
+        })
+        const refused = (snippet: Snippets.Info) =>
+          Effect.tryPromise({
+            try: () => snippets.save(snippet, { location: { directory: first } }),
+            catch: (error) => error,
+          }).pipe(Effect.flip)
+        // Rev. 2026-10-30: aliases count as handles of their scope, and both must be typeable after `#`.
+        expect(yield* refused({ ...entries[2], id: "alias-clash", name: "fresh", aliases: ["ALIAS-2"] })).toMatchObject(
+          {
+            type: "conflict",
+            data: { name: "fresh", field: "alias", value: "ALIAS-2", existing: "name-2" },
+          },
+        )
+        expect(yield* refused({ ...entries[2], id: "bad-name", name: "a@b", aliases: [] })).toMatchObject({
+          type: "invalid",
+          data: { field: "name", reason: "format", value: "a@b" },
+        })
+        const removal = client.event.subscribe()[Symbol.asyncIterator]()
+        expect((yield* Effect.promise(() => removal.next())).value?.type).toBe("server.connected")
         yield* Effect.promise(() => snippets.remove({ id: "snippet-0" }, { location: { directory: first } }))
+        expect((yield* Effect.promise(() => removal.next())).value?.type).toBe("rpc.custom.snippets.updated")
+        const closeRemoval = removal.return
+        if (closeRemoval) yield* Effect.promise(() => closeRemoval.call(removal))
         yield* Effect.promise(() => snippets.remove({ id: "snippet-0" }, { location: { directory: second } }))
 
         const old = yield* Effect.promise(() =>

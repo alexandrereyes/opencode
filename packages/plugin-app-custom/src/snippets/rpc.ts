@@ -20,6 +20,25 @@ export const Info = Schema.Struct({
 
 const Empty = Schema.Struct({})
 
+/**
+ * `save` refused a handle that another snippet of the same scope already has (rev. 2026-10-30: aliases count too).
+ * `name` is the saved snippet's name; `field` and `value` say which of its handles collided, `existing` with whom.
+ * Older servers send only `name`.
+ */
+export const Conflict = Schema.Struct({
+  name: Schema.String,
+  field: optional(Schema.Literals(["name", "alias"])),
+  value: optional(Schema.String),
+  existing: optional(Schema.String),
+})
+
+/** `save` refused a malformed name or alias, or an alias repeated in the same snippet (rev. 2026-10-30). */
+export const Invalid = Schema.Struct({
+  field: Schema.Literals(["name", "aliases"]),
+  reason: Schema.Literals(["format", "duplicate"]),
+  value: Schema.String,
+})
+
 export const Definition = Rpc.define({
   id: "custom.snippets",
   methods: {
@@ -31,7 +50,8 @@ export const Definition = Rpc.define({
       input: Schema.toStandardSchemaV1(Info),
       output: Schema.toStandardSchemaV1(Info),
       errors: {
-        conflict: Schema.toStandardSchemaV1(Schema.Struct({ name: Schema.String })),
+        conflict: Schema.toStandardSchemaV1(Conflict),
+        invalid: Schema.toStandardSchemaV1(Invalid),
       },
     },
     remove: {
