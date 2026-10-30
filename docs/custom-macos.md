@@ -440,8 +440,20 @@ OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/opencode-mac`). Diffe
   (first line `# Runtime <home>`, which owns it), started with the login environment (`/etc/profile`),
   `Restart=always`, log in `<home>/logs/server.log`. It needs lingering (`loginctl enable-linger`).
   Inspect with `systemctl --user status local.opencode.custom-manual`.
-- The 4096 proxy stays on the Mac (`installProxy` is launchd-only): OrbStack forwards the machine's
-  `127.0.0.1:4178` and `:4179` to the Mac's loopback, where `proxy.mjs` already points.
+- `KillMode=process`: a stop signals only the server, as launchd does on the Mac. Everything agents start from their
+  shells lives in the unit's cgroup (`custom:update` itself, tmux sessions, `nohup`/`setsid` processes, `mac` clients,
+  whose death ends their process on the Mac); with `mixed` or `control-group` the stop of an activation would kill
+  them, leaving the server stopped and `.manual-lock` behind. systemd logs "left-over process" for them at the next
+  start; that is expected. A stop first rewrites an outdated unit and runs `daemon-reload`, so the new `KillMode`
+  already applies to the stop that replaces an older unit.
+- The 4096 proxy stays on the Mac and reaches the server through OrbStack, which forwards the machine's
+  `127.0.0.1:4178` to the Mac's loopback; its `/resources/*` go to the Mac's hub on `127.0.0.1:4179` (below), not to
+  Linux. After a successful activation, `installMacProxy` does what `installProxy` does on macOS through the mounted
+  `/Users`: only when `~/Library/LaunchAgents/com.alexandrem.opencode2-ui.plist` exists and its `ProgramArguments`
+  (read with `mac plutil`) run the Mac runtime's `~/.local/share/opencode-custom-v2/bin/proxy.mjs`, and only when the
+  content changed, it replaces that file and restarts the job with
+  `mac launchctl kickstart -k gui/$(mac id -u)/com.alexandrem.opencode2-ui`. A failure is reported without undoing the
+  activation.
 - `custom:migrate` is macOS-only. Moving the runtime from the Mac: `core-infra/opencode-mac/opencode-migrate.sh`.
 
 #### Resources hub on the Mac

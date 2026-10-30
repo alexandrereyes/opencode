@@ -13,6 +13,7 @@ import {
   backup,
   command,
   health,
+  installMacProxy,
   installProxy,
   launchd,
   label,
@@ -1269,6 +1270,9 @@ test("systemd unit runs serve with the login environment and quotes the runtime 
     'ExecStart=/bin/sh -c ". /etc/profile >/dev/null 2>&1; exec \\"$$0\\"" "/home/u/odd $$dir%%x/bin/serve"',
   )
   expect(text).toContain("Restart=always")
+  // Only the server gets the stop signal: agents' commands in the unit's cgroup (custom:update itself) survive it.
+  expect(text).toContain("\nKillMode=process\n")
+  expect(text).not.toContain("KillMode=mixed")
   expect(text).toContain("StandardOutput=append:/home/u/odd $dir%%x/logs/server.log")
 })
 
@@ -1288,4 +1292,88 @@ test("systemd installs, starts, waits for the previous process and refuses anoth
   expect(fixtureHost.state.time).toBe(1000)
   expect(await service.pid()).toBeUndefined()
   await expect(systemd("/other", fixtureHost.host).stop()).rejects.toThrow("another runtime")
+})
+
+test("systemd stop reloads an older unit first, so its KillMode never kills the running custom:update", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "systemd-"))
+  homes.push(directory)
+  const fixtureHost = systemdHost(directory)
+  const service = systemd("/runtime", fixtureHost.host)
+  await Bun.write(path.join(directory, unitName), unit("/runtime").replace("KillMode=process", "KillMode=mixed"))
+  await service.stop()
+  expect(fixtureHost.state.calls).toEqual([
+    `show ${unitName} --property=ActiveState,MainPID`,
+    "daemon-reload",
+    `stop ${unitName}`,
+  ])
+  expect(await Bun.file(path.join(directory, unitName)).text()).toBe(unit("/runtime"))
+  // Already current: no reload.
+  fixtureHost.state.active = true
+  fixtureHost.state.calls.length = 0
+  await service.stop()
+  expect(fixtureHost.state.calls).toEqual([`show ${unitName} --property=ActiveState,MainPID`, `stop ${unitName}`])
+})
+
+/** The Mac as the Linux machine sees it: `/Users/<user>` mounted, and `mac` answering plutil, id and launchctl. */
+async function macProxyFixture(options: { program?: string; installed?: boolean; kickstart?: number } = {}) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "mac-proxy-"))
+  homes.push(root)
+  const home = path.join(root, "Users/u")
+  const target = path.join(home, ".local/share/opencode-custom-v2/bin/proxy.mjs")
+  const plist = path.join(home, "Library/LaunchAgents", `${proxyLabel}.plist`)
+  const program = options.program ?? target
+  if (options.installed ?? true) await Bun.write(plist, "<plist/>")
+  await Bun.write(target, "// old proxy")
+  const calls: string[][] = []
+  const host = {
+    home,
+    async mac(args: string[]) {
+      calls.push(args)
+      if (args[0] === "/usr/bin/plutil")
+        return {
+          code: 0,
+          stdout: JSON.stringify({ ProgramArguments: ["/opt/homebrew/bin/node", program] }),
+          stderr: "",
+        }
+      if (args[0] === "id") return { code: 0, stdout: "501\n", stderr: "" }
+      return { code: options.kickstart ?? 0, stdout: "", stderr: options.kickstart ? "kickstart failed" : "" }
+    },
+  }
+  return { home, target, plist, calls, host }
+}
+
+test("a Linux activation updates the Mac's 4096 proxy through /Users and restarts it with mac", async () => {
+  const source = await Bun.file(path.join(import.meta.dir, "../script/custom-proxy.mjs")).text()
+  const mac = await macProxyFixture()
+  expect(await installMacProxy(mac.host)).toBe("proxy updated and restarted")
+  expect(await Bun.file(mac.target).text()).toBe(source)
+  expect(mac.calls).toEqual([
+    ["/usr/bin/plutil", "-convert", "json", "-o", "-", mac.plist],
+    ["id", "-u"],
+    ["launchctl", "kickstart", "-k", `gui/501/${proxyLabel}`],
+  ])
+  mac.calls.length = 0
+  expect(await installMacProxy(mac.host)).toBe("proxy unchanged")
+  expect(mac.calls).toHaveLength(1)
+})
+
+test("the Mac's proxy is left alone without its job, or when the job runs another proxy; restart failures surface", async () => {
+  const missing = await macProxyFixture({ installed: false })
+  expect(await installMacProxy(missing.host)).toContain("skipped")
+  expect(missing.calls).toEqual([])
+  const other = await macProxyFixture({ program: "/elsewhere/bin/proxy.mjs" })
+  expect(await installMacProxy(other.host)).toContain("skipped")
+  expect(await Bun.file(other.target).text()).toBe("// old proxy")
+  const failing = await macProxyFixture({ kickstart: 113 })
+  await expect(installMacProxy(failing.host)).rejects.toThrow("restart failed (113)")
+})
+
+test("the Linux service installs the Mac's proxy after activation", async () => {
+  const service = systemd(
+    "/runtime",
+    systemdHost(os.tmpdir()).host,
+    async () => "hub",
+    async () => "proxy ok",
+  )
+  expect(await service.proxy!()).toBe("proxy ok")
 })

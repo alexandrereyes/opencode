@@ -628,7 +628,9 @@ Description=OpenCode custom
 ExecStart=/bin/sh -c ". /etc/profile >/dev/null 2>&1; exec \\"$$0\\"" ${argument(`${home}/bin/serve`)}
 Restart=always
 RestartSec=2
-KillMode=mixed
+# Like launchd on the Mac: stop signals only the server. Agents' commands live in this cgroup too (custom:update
+# itself, tmux, nohup, mac clients whose death ends their Mac process) and must outlive a restart.
+KillMode=process
 TimeoutStopSec=60
 StandardOutput=append:${value(`${home}/logs/server.log`)}
 StandardError=append:${value(`${home}/logs/server.log`)}
@@ -665,6 +667,7 @@ export function systemd(
     sleep: (ms: number) => Bun.sleep(ms),
   },
   hub: Service["hub"] = (release) => publishResourcesHub(release),
+  proxy: Service["proxy"] = () => installMacProxy(),
 ): Service {
   const file = path.join(host.directory, unitName)
   const owned = async () => {
@@ -684,20 +687,25 @@ export function systemd(
     if (state === "inactive" || state === "failed") return
     return { pid: Number(result.stdout.match(/^MainPID=(\d+)$/m)?.[1]) || undefined }
   }
+  const install = async () => {
+    await mkdir(host.directory, { recursive: true })
+    await Bun.write(file, unit(home))
+    const reload = await host.run(["daemon-reload"])
+    if (reload.code !== 0) throw new Error(`systemctl daemon-reload failed (${reload.code}): ${reload.stderr.trim()}`)
+  }
   return {
     hub,
-    async install() {
-      await mkdir(host.directory, { recursive: true })
-      await Bun.write(file, unit(home))
-      const reload = await host.run(["daemon-reload"])
-      if (reload.code !== 0) throw new Error(`systemctl daemon-reload failed (${reload.code}): ${reload.stderr.trim()}`)
-    },
+    proxy,
+    install,
     async pid() {
       return (await query())?.pid
     },
     async stop() {
       const running = await query()
       if (!running) return
+      // An older unit (KillMode=mixed) would kill this very custom:update when an agent runs it; the reloaded
+      // definition applies to the running unit's stop.
+      if ((await Bun.file(file).text()) !== unit(home)) await install()
       const result = await host.run(["stop", unitName])
       if (result.code !== 0) throw new Error(`systemctl stop failed (${result.code}): ${result.stderr.trim()}`)
       const deadline = host.now() + 65_000
@@ -739,8 +747,38 @@ export async function installProxy(home: string, agents = path.join(os.homedir()
     stderr: "ignore",
   })
   const parsed: unknown = await new Response(definition.stdout).json().catch(() => undefined)
+  return replaceProxy(target, parsed, () => launchctl(["kickstart", "-k", `gui/${process.getuid!()}/${proxyLabel}`]))
+}
+
+/**
+ * `installProxy` for a Linux server whose 4096 proxy stays on the Mac: through the mounted `/Users`, replaces the
+ * Mac runtime's `bin/proxy.mjs` and restarts the job with `mac launchctl kickstart`, under the same conditions.
+ */
+export async function installMacProxy(host = { home: `/Users/${os.userInfo().username}`, mac: onMac }) {
+  const plist = path.join(host.home, "Library/LaunchAgents", `${proxyLabel}.plist`)
+  if (!(await Bun.file(plist).exists())) return `proxy skipped (${plist} not installed)`
+  const definition = await host.mac(["/usr/bin/plutil", "-convert", "json", "-o", "-", plist])
+  if (definition.code !== 0)
+    throw new Error(`Cannot read ${plist} through mac (${definition.code}): ${definition.stderr.trim()}`)
+  const parsed: unknown = await Promise.resolve()
+    .then(() => JSON.parse(definition.stdout))
+    .catch(() => undefined)
+  return replaceProxy(path.join(host.home, ".local/share/opencode-custom-v2/bin/proxy.mjs"), parsed, async () => {
+    const uid = (await host.mac(["id", "-u"])).stdout.trim()
+    if (!/^\d+$/.test(uid)) return { code: 1, stderr: `cannot read the Mac user ID: ${JSON.stringify(uid)}` }
+    return host.mac(["launchctl", "kickstart", "-k", `gui/${uid}/${proxyLabel}`])
+  })
+}
+
+async function replaceProxy(
+  target: string,
+  definition: unknown,
+  restart: () => Promise<{ code: number; stderr: string }>,
+) {
   const program =
-    typeof parsed === "object" && parsed !== null && "ProgramArguments" in parsed ? parsed.ProgramArguments : []
+    typeof definition === "object" && definition !== null && "ProgramArguments" in definition
+      ? definition.ProgramArguments
+      : []
   if (!Array.isArray(program) || !program.includes(target)) return "proxy skipped (job not installed for this runtime)"
   const source = await Bun.file(path.join(import.meta.dirname, "custom-proxy.mjs")).text()
   const installed = await Bun.file(target)
@@ -750,7 +788,7 @@ export async function installProxy(home: string, agents = path.join(os.homedir()
   await Bun.write(`${target}.tmp`, source)
   await chmod(`${target}.tmp`, 0o644)
   await rename(`${target}.tmp`, target)
-  const result = await launchctl(["kickstart", "-k", `gui/${process.getuid!()}/${proxyLabel}`])
+  const result = await restart()
   if (result.code !== 0) throw new Error(`Proxy installed but restart failed (${result.code}): ${result.stderr.trim()}`)
   return "proxy updated and restarted"
 }
