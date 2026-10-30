@@ -79,7 +79,7 @@ export const registerWatch = Effect.fn("Watch.register")(function* (ctx: Context
       ensureMaster: () =>
         ctx
           .rpc(Master.Definition)
-          .ensure({})
+          .ensure({ voice: true })
           .pipe(Effect.map((ensured) => ensured.sessionID)),
       memory: {
         context: () => ctx.rpc(Voice.Definition).context({ version: Voice.version, scope: "global" }),

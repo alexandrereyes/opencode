@@ -2,6 +2,7 @@ import { Plugin } from "@opencode/plugin/effect"
 import type { Context } from "../context.js"
 import { Model } from "@opencode/schema/model"
 import { Clock, Effect, Schema, Scope } from "effect"
+import { clearVoiceNote } from "../master/index.js"
 import { Preferences } from "../preferences/rpc.js"
 import { Voice } from "./rpc.js"
 import { loadInstructions } from "./instructions.js"
@@ -55,6 +56,11 @@ export const registerVoice = Effect.fn("Voice.register")(function* (ctx: Context
         voice.context(input.scope).pipe(Effect.mapError((cause) => failure(context.error, cause))),
       end: (input, context) =>
         voice.schedule(input.scope).pipe(
+          Effect.tap(() =>
+            clearVoiceNote(ctx).pipe(
+              Effect.catchCause((cause) => Effect.logWarning("Mestra voice note could not be cleared", { cause })),
+            ),
+          ),
           Effect.map((compactionScheduled) => ({ ...input, compactionScheduled })),
           Effect.mapError((cause) => failure(context.error, cause)),
         ),

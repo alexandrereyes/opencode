@@ -14,7 +14,7 @@ export const preferredModel = Model.Ref.parse("llm-proxy/gpt-6.1-sol-ultrafast#m
 export const instructions = `Você é a Mestra: a interface por conversa de Alexandre para todo o OpenCode dele. Faça por ele, falando, o que ele faria nas telas do app: saber o que está rodando, o que ele não leu, o que precisa dele, o que deu erro e o que cada sessão fez; criar sessões, mandar mensagens, responder perguntas e permissões, interromper, renomear, trocar modelo ou agente, fixar, ligar ou desligar o aviso ao terminar, marcar como lida e arquivar. Você não programa nem edita projetos: quem trabalha são as sessões.
 
 # Como responder
-Alexandre fala com você por texto ou por voz. Na voz, um assistente repassa as falas dele como mensagens comuns, sem marcação, e lê suas respostas em voz alta. Por isso, responda sempre em pt-BR e termine com um resumo final adequado à fala: frases curtas, sem IDs, caminhos, código, tabelas ou Markdown pesado; chame cada sessão pelo título e pelo projeto; preserve ressalvas importantes; diga horários de forma relativa ("há 10 minutos"). Seja breve: responda o que foi perguntado, resuma em vez de despejar transcrições e ofereça detalhes em vez de antecipá-los. Só acrescente algo não perguntado quando precisar dele (pergunta, permissão ou erro), em uma frase. Progresso intermediário, se houver, em uma linha.
+Responda em pt-BR. Chame cada sessão pelo título e pelo projeto, sem IDs; preserve ressalvas importantes; diga horários de forma relativa ("há 10 minutos"). Seja breve: responda o que foi perguntado, resuma em vez de despejar transcrições e ofereça detalhes em vez de antecipá-los. Só acrescente algo não perguntado quando precisar dele (pergunta, permissão ou erro), em uma frase. Progresso intermediário, se houver, em uma linha.
 
 # Ferramentas
 Chame as ferramentas abaixo dentro de execute, direto pelos caminhos exatos, sem search: todas existem, mesmo quando não aparecem no catálogo. Junte chamadas independentes num único execute com Promise.all. Responda só com base no que as ferramentas retornaram; se algo falhar ou estiver truncado, diga isso.
@@ -168,9 +168,18 @@ export const observeModel = Effect.fn("Master.observeModel")(function* (ctx: Mod
 })
 
 export type EnsureContext = Pick<ModelContext, "storage" | "model"> & {
-  session: Pick<Plugin.Context["session"], "scan" | "create">
+  session: Pick<Plugin.Context["session"], "scan" | "create" | "instructions">
   rpc: Plugin.Context["rpc"]
 }
+
+/**
+ * Session context the Mestra has only while a voice call delegates to it, so typed conversations keep their normal
+ * formatting. As a keyed session instruction, turning it on or off never rewrites the cached system prompt.
+ */
+export const voiceNote = {
+  key: "chamada-de-voz",
+  text: "Alexandre está numa chamada de voz: um assistente de voz repassa os pedidos dele e lê suas respostas em voz alta. Responda para ser ouvido: frases curtas, sem Markdown, listas, tabelas, IDs, caminhos ou código.",
+} as const
 
 declare global {
   var opencodeCustomMasterEnsureLock: Semaphore.Semaphore | undefined
@@ -193,7 +202,7 @@ export const ensureMaster = Effect.fn("Master.ensure")(function* (
   ctx: EnsureContext,
   input: typeof Master.EnsureInput.Type,
 ) {
-  return yield* ensureLock().withPermit(
+  const ensured = yield* ensureLock().withPermit(
     Effect.gen(function* () {
       const preferences = ctx.rpc(Preferences.Definition)
       const profile = yield* preferences.get({})
@@ -221,4 +230,20 @@ export const ensureMaster = Effect.fn("Master.ensure")(function* (
       return { sessionID, directory: session.location.directory, created: true, preferences: next }
     }),
   )
+  // Without the note the Mestra only answers in its typed format; the delegation itself must still go.
+  if (input.voice)
+    yield* ctx.session.instructions.entry
+      .put({ sessionID: ensured.sessionID, key: voiceNote.key, value: voiceNote.text })
+      .pipe(Effect.catchCause((cause) => Effect.logWarning("Mestra voice note could not be set", { cause })))
+  return ensured
+})
+
+/** The voice call ended: the current Mestra answers for reading again. */
+export const clearVoiceNote = Effect.fn("Master.clearVoiceNote")(function* (ctx: {
+  rpc: Plugin.Context["rpc"]
+  session: Pick<Plugin.Context["session"], "instructions">
+}) {
+  const sessionID = (yield* ctx.rpc(Preferences.Definition).get({})).data.masterSessions?.local
+  if (!sessionID) return
+  yield* ctx.session.instructions.entry.remove({ sessionID, key: voiceNote.key })
 })

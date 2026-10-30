@@ -16,7 +16,11 @@ export const Info = Schema.Struct({
   model: Schema.optionalKey(Model.Ref),
 })
 
-export const EnsureInput = Schema.Struct({ model: Schema.optionalKey(Model.Ref) })
+export const EnsureInput = Schema.Struct({
+  model: Schema.optionalKey(Model.Ref),
+  /** A voice call is about to delegate: the master gets the voice-call note until the call ends. */
+  voice: Schema.optionalKey(Schema.Boolean),
+})
 export const Ensured = Schema.Struct({
   sessionID: Session.ID,
   directory: AbsolutePath,

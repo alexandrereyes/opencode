@@ -5,7 +5,7 @@ import { Session } from "@opencode/schema/session"
 import { Effect, Schema } from "effect"
 import { it } from "../../core/test/lib/effect"
 import { Chats } from "../src/chats/rpc"
-import type { EnsureContext, ensureMaster } from "../src/master"
+import { clearVoiceNote, ensureMaster, voiceNote, type EnsureContext } from "../src/master"
 import { applyIntent } from "../src/preferences"
 import { Preferences } from "../src/preferences/rpc"
 
@@ -35,7 +35,10 @@ function fixture() {
       },
     } satisfies Preferences.Profile as Preferences.Profile,
     sessions: [] as Session.Info[],
+    notes: new Map<string, Schema.Json>(),
+    failNotes: false,
   }
+  const note = (sessionID: string, key: string) => `${sessionID}/${key}`
   const clients: Record<string, unknown> = {
     [Preferences.Definition.id]: {
       get: () => Effect.sync(() => state.profile),
@@ -70,12 +73,38 @@ function fixture() {
           state.sessions.push(session)
           return session
         }),
+      instructions: {
+        entry: {
+          list: () => Effect.succeed([]),
+          put: (input) =>
+            state.failNotes
+              ? Effect.die(new Error("instructions unavailable"))
+              : Effect.sync(() => void state.notes.set(note(input.sessionID, input.key), input.value)),
+          remove: (input) => Effect.sync(() => void state.notes.delete(note(input.sessionID, input.key))),
+        },
+      },
     },
     // SAFETY: ensureMaster only calls the two RPC clients defined above.
     rpc: ((definition: { readonly id: string }) => clients[definition.id]) as unknown as Plugin.Context["rpc"],
   }
-  return { ctx, state }
+  return { ctx, state, note }
 }
+
+it.live("a voice ensure gives the Mestra the voice-call note, and the end of the call takes it away", () =>
+  Effect.gen(function* () {
+    const { ctx, state, note } = fixture()
+    const typed = yield* ensureMaster(ctx, {})
+    expect(state.notes.size).toBe(0)
+    const voice = yield* ensureMaster(ctx, { voice: true })
+    expect(voice.sessionID).toBe(typed.sessionID)
+    expect(state.notes.get(note(voice.sessionID, voiceNote.key))).toBe(voiceNote.text)
+    yield* clearVoiceNote(ctx)
+    expect(state.notes.size).toBe(0)
+    // The note only shapes the answer: a failure to set it never blocks the delegation.
+    state.failNotes = true
+    expect((yield* ensureMaster(ctx, { voice: true })).sessionID).toBe(voice.sessionID)
+  }),
+)
 
 it.live("concurrent ensures from two plugin instances create one Mestra session", () =>
   Effect.gen(function* () {

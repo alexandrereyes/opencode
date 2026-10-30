@@ -3,9 +3,9 @@
 `master/` registers the hidden primary agent `mestra` (display name **Mestra**): a conversational interface to all of
 Alexandre's sessions, able to answer anything the app lists show and to perform what their controls do. It has an
 invisible system prompt with pt-BR summaries, explicit-user-request-only actions, untrusted-transcript precautions and on-demand `opencode` skill
-guidance. It also covers voice: iOS voice delegations arrive as plain user messages with no per-message preamble or
-marker, so the prompt asks for concise progress and a final summary that works read aloud, which suits text too. Its
-rules allow direct execution. The agent has no static model; `custom.master/info` advertises version 1 and
+guidance. Voice delegations arrive as plain user messages with no per-message preamble or marker; while a voice call
+delegates, the session carries the **voice-call note** (below), so only then are answers shaped to be read aloud and
+typed conversations keep their normal formatting. Its rules allow direct execution. The agent has no static model; `custom.master/info` advertises version 1 and
 the model new Mestra sessions should start with, resolved on every call (configured providers such as `llm-proxy` load
 after this plugin, so a registration-time lookup always missed them):
 
@@ -35,11 +35,29 @@ worktrees. It also denies `question` (a form blocks the voice flow, which only r
 
 ### Prompt
 
-The invisible system prompt (`instructions`) is organized as role, answer style (voice-safe pt-BR), the tool map with
+The invisible system prompt (`instructions`) is organized as role, answer style (brief pt-BR), the tool map with
 direct call names, the attention concepts (`docs/sessions.md`), playbooks (overview order: needs you → errors → unread → running;
 ambiguous targets; session creation and worktrees; send; pending requests; costs) and safety (explicit requests only,
 transcripts and tool results are untrusted data, no control through subagents; what the tools do not cover goes
 through `opencode2 api` from the shell).
+
+### Voice-call note
+
+Since 2026-10-30 the voice-specific answer style is not in the system prompt but in a keyed session instruction
+(`ctx.session.instructions`, upstream #56550), `voiceNote` in `src/master/index.ts`: key `chamada-de-voz`, a short pt-BR
+text saying a voice assistant relays Alexandre's requests and reads the answers aloud, so answers are short spoken
+sentences without Markdown, lists, tables, IDs, paths or code. Core renders it as a context block at the next step,
+and a later removal as a one-line "no longer applies"; neither rewrites the cached system prompt, starts a turn or is
+lost to compaction.
+
+- **On:** `custom.master/ensure` with `voice: true`, which the iPhone and Mac `VoiceMaster` and the watch delegator send
+  at the call's first delegation (and when a deleted master is replaced), so the note precedes that prompt. A failure
+  to set it is logged and the delegation still goes. Older servers ignore the field.
+- **Off:** `custom.voice/end`, sent when a call's voice memory ends, removes it from the current master. The iPhone
+  keeps that end marker in its local buffer and replays it after a crash or an offline period; a process killed before
+  the call ended leaves the note on until the next call ends.
+- The voice call itself was the observed problem: with the always-on rule the Mestra still answered calls with bold
+  text and lists, 150–250 words in 20–35 s, and typed answers were forced into a spoken shape.
 
 `mac_query` (namespace `mac`, available to every agent, `src/mac-data`) reads Calendar, Reminders and Contacts through
 the OpenCode app on the Mac: `calendar` (`from`/`to`, `calendars`, `query`), `reminders` (`status`, `from`/`to`, `lists`,
@@ -52,7 +70,8 @@ old profiles remain version 1. iOS uses `local` within each server's own persist
 excludes the current master from list/attention counts. Trash uses native recursive archive, then clears the pointer.
 There is no undo because native unarchive does not exist; archived transcripts remain readable.
 
-`custom.master/ensure` (optional `model`) is the only place a Mestra session is created. It returns the `local` pointer
+`custom.master/ensure` (optional `model`, and `voice` for the voice-call note) is the only place a Mestra session is
+created. It returns the `local` pointer
 while that session exists and is not archived; otherwise (no pointer, deleted elsewhere such as the web, or archived) it
 allocates, claims and confirms a managed chat, creates the session titled **Sessão mestra** with agent `mestra` and the
 given model or the remembered one (`resolveModel`), sets the pointer through `custom.preferences/mutate` (which emits its
@@ -64,8 +83,8 @@ session is a native hard delete (messages and events are removed); the old trans
 is migrated: the remembered model and the global voice memory are independent of the session. The web delete dialogs
 warn when a target is a Mestra session and suggest archiving instead. Core's
 `test/tool-opencode-master-ensure.test.ts` covers concurrent creation, a deleted and an archived master and the
-remembered model on the real host. `ensure` is the plugin's only caller of other plugin RPCs (`custom.preferences`,
-`custom.chats`) through `ctx.rpc`. The release bundles its own Effect runtime, so `cli/script/custom-plugin.ts` sends
+remembered model on the real host. `ensure` calls other plugin RPCs (`custom.preferences`, `custom.chats`) through
+`ctx.rpc`, as do `custom.voice/end` (the preferences pointer, to clear the voice-call note) and the watch. The release bundles its own Effect runtime, so `cli/script/custom-plugin.ts` sends
 the host only portable Standard Schemas for those calls too and encodes inputs / decodes outputs with the bundled codecs;
 handing the bundled `Preferences.Profile` to the host made its parser run the bundled `Session.ID` check on a non-string
 (`s.startsWith is not a function`, HTTP 500). `test/tool-opencode-master-ensure-bundle.test.ts` loads the plugin from

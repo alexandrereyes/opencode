@@ -268,7 +268,8 @@ events stay readable for 60 s. A new call ends the device's previous one (`reaso
 `client_end`, `heartbeat_timeout`, `lease_refused`, `lease_lost`, `max_duration`, `session_closed`,
 `sideband_closed`, `shutdown`.
 
-**Delegation.** Like `VoiceMaster`: `custom.master.ensure`, one replacement ensure when the prompt fails, prompt
+**Delegation.** Like `VoiceMaster`: `custom.master.ensure` with `voice: true` (the Mestra's voice-call note, removed by
+the call's memory `end`), one replacement ensure when the prompt fails, prompt
 text only (`steer`, or `queue` for `{"text":…,"delivery":"queue"}`), duplicate delegation IDs ignored. Progress
 lines are the iPhone's pt-BR texts (tool names from `session.tool.input.started`, Code Mode `toolCalls`, text,
 failures, pending requests). Only text updates (`Atualização: …`), pending requests, results and execution failures

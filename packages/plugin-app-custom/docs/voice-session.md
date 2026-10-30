@@ -82,7 +82,9 @@ authenticated normal plugin transport, for example
   schema for older clients).
 - **`end({version:2, scope:"global"})`** triggers a compaction **check**, not an
   unconditional summary. It returns whether work was scheduled, not completion.
-  Short calls incur no summary request. No call/Session ID is required.
+  Short calls incur no summary request. No call/Session ID is required. It also
+  removes the current Mestra's voice-call note (`docs/master-session.md`); a
+  failure there is only logged.
 
 Batches accept 1–128 turns. IDs are nonempty and at most 200 characters; each
 text is at most 64,000 characters. Roles are strictly `user` and `assistant`.
