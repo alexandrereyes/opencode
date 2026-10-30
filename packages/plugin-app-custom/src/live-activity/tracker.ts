@@ -237,7 +237,10 @@ type Request = {
   readonly text?: string
 }
 
-/** Push alert of one attention item or failed session; keyed by `<status>:<sessionID>`. */
+/**
+ * One thing that needs Alexandre, keyed by `<status>:<sessionID>` (`unread:<sessionID>` for an unread answer): any
+ * addition or removal makes the next Live Activity update urgent, so the "para você" badge follows at once.
+ */
 export type Mark = { readonly title: string; readonly body: string }
 
 /** A known top-level session: whether its family still works and how its own last run ended. */
@@ -263,7 +266,7 @@ export type Pending = {
 
 export type Derived = {
   readonly state: LiveActivity.AgentsState
-  /** Every attention item and failed session, untruncated, in alert priority order. */
+  /** Every attention item, failed session and unread answer, untruncated: the urgency keys of activity updates. */
   readonly marks: ReadonlyMap<string, Mark>
   /** When the state changes by itself next (an idle or failed row expiring). */
   readonly wakeAt?: number
@@ -835,20 +838,28 @@ export function makeTracker(ctx: TrackerContext) {
     }
     const waiting = rows.filter((row) => row.status === "question" || row.status === "permission").toSorted(bySince)
     const focusProgress = focused ? progress(focused) : undefined
-    const marks = new Map(
-      [...of("question"), ...of("permission"), ...of("failed")].map((row) => [
-        `${row.status}:${row.entry.id}`,
-        {
-          title:
-            row.status === "question"
-              ? "Pergunta pendente"
-              : row.status === "permission"
-                ? "Permissão pendente"
-                : "Sessão parou com erro",
-          body: `${row.ref.title} · ${row.ref.project}`,
-        },
-      ]),
-    )
+    const marks = new Map<string, Mark>([
+      ...[...of("question"), ...of("permission"), ...of("failed")].map(
+        (row) =>
+          [
+            `${row.status}:${row.entry.id}`,
+            {
+              title:
+                row.status === "question"
+                  ? "Pergunta pendente"
+                  : row.status === "permission"
+                    ? "Permissão pendente"
+                    : "Sessão parou com erro",
+              body: `${row.ref.title} · ${row.ref.project}`,
+            },
+          ] as const,
+      ),
+      // Reading a session (on any device) or a new answer changes the badge: never left to a coalesced update.
+      ...unread.map(
+        (row) =>
+          [`unread:${row.entry.id}`, { title: "Não lida", body: `${row.ref.title} · ${row.ref.project}` }] as const,
+      ),
+    ])
     const expiries = rows.flatMap((row) =>
       row.status === "idle" && idle(row.entry) && row.entry.ended
         ? [row.entry.ended.at + limits.idleMs]

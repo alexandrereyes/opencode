@@ -220,6 +220,45 @@ it.effect("attention updates are urgent but silent: the session alerts carry the
   }),
 )
 
+it.effect("an unread answer and its reading on another device update the badge at once, urgent and silent", () =>
+  Effect.gen(function* () {
+    const { registry, pushes, evaluate } = setup()
+    const tracker = yield* scene("working")
+    yield* registry.register(iphone, T - 2 * minute)
+    yield* registry.activity({ deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" }, T - minute)
+    yield* evaluate(tracker, T - 30_000)
+    const forYou = () => {
+      const counts = (pushes.at(-1)?.body as { aps: { "content-state": LiveActivity.AgentsState } }).aps[
+        "content-state"
+      ].counts
+      return counts.question + counts.permission + counts.failed + (counts.unread ?? 0)
+    }
+    const before = forYou()
+    // An answer finishes: the badge rises right away, not in the next 10-second slot.
+    yield* tracker.apply(execution("succeeded", ids.deploy, T), T)
+    expect(yield* evaluate(tracker, T)).toBe(T + limits.coalesceMs)
+    expect(pushes.at(-1)).toMatchObject({ token: "bb22", priority: 10 })
+    expect(pushes.at(-1)?.body).not.toHaveProperty("aps.alert")
+    expect(forYou()).toBe(before + 1)
+    // Read on the Mac one second later: the badge drops at once too, ahead of the coalesced routine slot.
+    yield* tracker.apply(
+      { type: "session.viewed", created: T + 1000, data: { sessionID: ids.deploy, idle: T } },
+      T + 1000,
+    )
+    yield* evaluate(tracker, T + 1000)
+    expect(pushes.at(-1)).toMatchObject({ priority: 10 })
+    expect(pushes.at(-1)?.body).not.toHaveProperty("aps.alert")
+    expect(forYou()).toBe(before)
+    // A routine change right after still coalesces at priority 5.
+    yield* tracker.apply({ type: "session.text.started", created: T + 2000, data: { sessionID: ids.live } }, T + 2000)
+    const count = pushes.length
+    expect(yield* evaluate(tracker, T + 2000)).toBe(T + 1000 + limits.coalesceMs)
+    expect(pushes).toHaveLength(count)
+    yield* evaluate(tracker, T + 1000 + limits.coalesceMs)
+    expect(pushes.at(-1)).toMatchObject({ priority: 5 })
+  }),
+)
+
 it.effect("an activity that expires (about 8 h) while work goes on rearms push-to-start and is no dismissal", () =>
   Effect.gen(function* () {
     const hours = 3_600_000

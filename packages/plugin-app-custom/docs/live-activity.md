@@ -205,8 +205,10 @@ device showed an ended card lingering above a new one). Ended activities never s
 
 **Update.** The backend pushes `update` to every registered activity token:
 
-- Immediately with `apns-priority: 10` when the set of attention items or failed sessions changes, without an
-  `alert` (rev. 2026-10-30). The buzz is the session alert of
+- Immediately with `apns-priority: 10` when the set of attention items, failed sessions or unread answers changes,
+  without an `alert` (rev. 2026-10-30). Unread answers count since rev. 2026-10-30b: a session read on any device
+  (the Mac included) or a new answer moves the "para você" badge at once, instead of in a priority-5 update the system
+  may hold back while the routine 10-second updates keep coming. The buzz is the session alert of
   [session-notifications.md](session-notifications.md#live-activity-alerts), which goes through this activity as one
   more priority-10 update carrying `alert` (`<session title>` / `Pergunta: …`, `Permissão: …` or `Parou com erro ·
 <project>`), as in `push-update.json`.
