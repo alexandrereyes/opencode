@@ -4,7 +4,7 @@ import { expect } from "bun:test"
 import { Config } from "@opencode/core/config"
 import { Generate } from "@opencode/core/generate"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
-import { Effect, Layer, Predicate } from "effect"
+import { Effect, Layer, Predicate, Stream } from "effect"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { ServerFetch } from "../src/fetch"
@@ -24,6 +24,7 @@ const generate = makeLocationNode({
               }),
             ),
           ),
+        textStream: () => Stream.die("unused"),
         image: () => Effect.die("unused"),
         decisions: () => Effect.die("unused"),
       })

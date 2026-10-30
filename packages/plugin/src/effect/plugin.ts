@@ -1,6 +1,7 @@
 import type { CredentialApi, ExperimentalApi, ExperimentalGenerateApi, PluginApi } from "@opencode/client/effect/api"
 import type { Location } from "@opencode/schema/location"
-import type { Effect, Scope } from "effect"
+import type { Model } from "@opencode/schema/model"
+import type { Effect, Scope, Stream } from "effect"
 import type { PluginOptions } from "../options.js"
 import type { App } from "../app.js"
 import type { AgentDomain } from "./agent.js"
@@ -38,7 +39,13 @@ export interface Context {
   readonly experimental: {
     readonly terminal: Pick<ExperimentalApi<unknown>["persistentPty"], "read">
     /** Stateless generation with a model and a prompt: no session, history or tools. */
-    readonly generate: ExperimentalGenerateApi<unknown>
+    readonly generate: ExperimentalGenerateApi<unknown> & {
+      /** `text` as the deltas arrive, in process (no HTTP route); a failed call is not retried. */
+      readonly textStream: (input: {
+        readonly prompt: string
+        readonly model?: Model.Ref
+      }) => Stream.Stream<string, { readonly _tag: string; readonly message: string }>
+    }
   }
   readonly integration: IntegrationDomain
   readonly job: JobDomain

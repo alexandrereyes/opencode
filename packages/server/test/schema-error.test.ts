@@ -1,7 +1,7 @@
 import { expect } from "bun:test"
 import { Generate } from "@opencode/core/generate"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { it } from "../../core/test/lib/effect"
 import { ServerFetch } from "../src/fetch"
 
@@ -12,6 +12,7 @@ const generate = makeLocationNode({
     Generate.Service,
     Generate.Service.of({
       text: () => Effect.succeed(42 as unknown as string),
+      textStream: () => Stream.die("unused"),
       image: () => Effect.die("unused"),
       decisions: () => Effect.die("unused"),
     }),

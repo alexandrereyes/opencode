@@ -123,7 +123,13 @@ interface Context {
   readonly event: EventDomain
   readonly experimental: {
     readonly terminal: Pick<ExperimentalApi<unknown>["persistentPty"], "read">
-    readonly generate: GenerateApi<unknown>
+    readonly generate: GenerateApi<unknown> & {
+      /** `text` as the deltas arrive, in process; a failed call is not retried. */
+      readonly textStream: (input: {
+        readonly prompt: string
+        readonly model?: Model.Ref
+      }) => Stream.Stream<string, { readonly _tag: string; readonly message: string }>
+    }
   }
   readonly integration: IntegrationDomain
   readonly mcp: MCPDomain

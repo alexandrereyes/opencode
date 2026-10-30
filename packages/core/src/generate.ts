@@ -1,10 +1,10 @@
 export * as Generate from "./generate.js"
 
-import { AIError, Decision, DecisionClient, Image, ImageClient, LLM, LLMClient, Media } from "@opencode/ai/effect"
+import { AIError, Decision, DecisionClient, Image, ImageClient, LLM, LLMClient, LLMEvent, Media } from "@opencode/ai/effect"
 import type { DecisionRequest, DecisionResult, ImageRequest, ImageResult } from "@opencode/schema/generate"
 import { Money } from "@opencode/schema/money"
 import { SessionID } from "@opencode/schema/session-id"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { RequestExecutor } from "@opencode/ai/route"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { llmClient, requestExecutor } from "./effect/app-node-platform.js"
@@ -72,6 +72,8 @@ export type Error =
 
 export interface Interface {
   readonly text: (input: TextInput) => Effect.Effect<string, Error>
+  /** The same stateless generation as `text`, as the text deltas arrive; it is not retried. */
+  readonly textStream: (input: TextInput) => Stream.Stream<string, Error>
   readonly image: (input: ImageRequest) => Effect.Effect<ImageResult, Error>
   readonly decisions: (input: DecisionRequest) => Effect.Effect<DecisionResult, Error>
 }
@@ -89,7 +91,7 @@ export const layer = Layer.effect(
     const images = yield* ImageClient.Service
     const decisionClient = yield* DecisionClient.Service
 
-    const runText = Effect.fn("Generate.text")(function* (input: TextInput) {
+    const chatModel = Effect.fn("Generate.chatModel")(function* (input: TextInput) {
       const resolved = yield* resolver.resolve(input.model).pipe(
         Effect.catchTag(
           [
@@ -111,6 +113,11 @@ export const layer = Layer.effect(
       if (!resolved && input.model) return yield* missing(input.model, "chat")
       if (!resolved)
         return yield* new UnavailableError({ message: "No model specified and no supported model is available" })
+      return resolved
+    })
+
+    const runText = Effect.fn("Generate.text")(function* (input: TextInput) {
+      const resolved = yield* chatModel(input)
       const response = yield* llm
         .generate(
           LLM.request({
@@ -126,6 +133,33 @@ export const layer = Layer.effect(
         )
       return response.text
     })
+
+    const runTextStream = (input: TextInput) =>
+      Stream.unwrap(
+        chatModel(input).pipe(
+          Effect.map((resolved) =>
+            llm
+              .stream(
+                LLM.request({
+                  model: resolved.model,
+                  prompt: input.prompt,
+                  http: { headers: { "x-opencode-session": SessionID.create() } },
+                }),
+              )
+              .pipe(
+              Stream.mapError((error) => providerError(resolved.ref, error)),
+              Stream.mapEffect((event) =>
+                LLMEvent.is.providerError(event)
+                  ? Effect.fail(
+                      new ProviderRequestError({ providerID: resolved.ref.providerID, reason: "provider", message: event.message }),
+                    )
+                  : Effect.succeed(LLMEvent.is.textDelta(event) ? event.text : ""),
+              ),
+              Stream.filter((text) => text.length > 0),
+            ),
+          ),
+        ),
+      )
 
     // A ref no model of this type has: another type's model (422) or no model at all (404).
     const missing = Effect.fnUntraced(function* (ref: Model.Ref, type: Model.Type) {
@@ -224,6 +258,12 @@ export const layer = Layer.effect(
 
     return Service.of({
       text: (input) => credentials(runText(input)),
+      textStream: (input) =>
+        runTextStream(input).pipe(
+          Stream.catchTag("Integration.Authorization", () =>
+            Stream.fail(new UnavailableError({ message: "Generation credentials are unavailable" })),
+          ),
+        ),
       image: (input) => credentials(image(input)),
       decisions: (input) => credentials(decisions(input)),
     })

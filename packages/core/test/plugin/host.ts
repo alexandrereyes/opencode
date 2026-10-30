@@ -74,6 +74,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       },
       generate: {
         text: () => Effect.die("unused experimental.generate.text"),
+        textStream: () => Stream.die("unused experimental.generate.textStream"),
         image: () => Effect.die("unused experimental.generate.image"),
         decisions: () => Effect.die("unused experimental.generate.decisions"),
       },

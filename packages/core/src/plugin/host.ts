@@ -292,6 +292,7 @@ export const make = Effect.fn("PluginHost.make")(function* (
       },
       generate: {
         text: generateText,
+        textStream: generate.textStream,
         image: generate.image,
         decisions: generate.decisions,
       },

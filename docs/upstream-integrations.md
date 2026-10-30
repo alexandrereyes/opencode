@@ -133,6 +133,13 @@ context has no equivalent for any of them; each is an upstream proposal candidat
   session.
 - `session.update` honors `archived` (two lines, as upstream's HTTP handler; the SDK input already accepts it, the host
   ignored it). Consumers: `custom.archive`, `sessions` `archive`. Exit: upstream fixes its host.
+- `experimental.generate.textStream`, with `Generate.textStream` in `packages/core/src/generate.ts` (the model
+  resolution of `text` shared as `chatModel`; tests in `core/test/generate.test.ts`, stubs in
+  `core/test/tool-image-generate.test.ts`, `server/test/{generate,schema-error}.test.ts` and the test hosts): the stateless `text` generation as its deltas arrive,
+  in process only (no HTTP route or Client type), not retried, a `provider-error` event failing as
+  `ProviderRequestError`. Upstream's `generate.text` returns only at the end, so a plugin cannot tell a slow reply
+  that keeps streaming from a stalled one. Consumer: `custom.dictation` (5 s inactivity limit,
+  `packages/plugin-app-custom/docs/dictation-review.md`). Exit: upstream ships a streamed stateless generation.
 
 Other customizations:
 
@@ -199,6 +206,12 @@ packages/plugin/src/README.md
 packages/plugin/src/effect/README.md
 services/www/src/docs/content/build/plugins/effect.mdx
 services/www/src/docs/content/build/plugins/server.mdx
+# generate.textStream
+packages/core/src/generate.ts
+packages/core/test/generate.test.ts
+packages/core/test/tool-image-generate.test.ts
+packages/server/test/generate.test.ts
+packages/server/test/schema-error.test.ts
 # message.list cursor
 packages/schema/src/session-message-page.ts
 packages/schema/test/session-message-page.test.ts

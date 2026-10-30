@@ -6,6 +6,7 @@ import {
   InvalidRequestError,
   LanguageModel,
   LLMClient,
+  LLMEvent,
   ProviderInternalError,
   QuotaExceededError,
   RateLimitError,
@@ -26,7 +27,7 @@ import { Provider } from "@opencode/core/provider"
 import { Variant } from "@opencode/core/variant"
 import { Money } from "@opencode/schema/money"
 import { Npm } from "@opencode/util/npm"
-import { Effect, Exit, Fiber, Layer } from "effect"
+import { Effect, Exit, Fiber, Layer, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { testEffect } from "./lib/effect"
@@ -98,6 +99,60 @@ it.effect("loads dynamic AI SDK models", () =>
     })
 
     expect(result).toBe("OK")
+  }),
+)
+
+retryIt.effect("streams the text deltas of a stateless call", () =>
+  Effect.gen(function* () {
+    const generate = yield* Generate.Service
+    const llm = yield* TestLLM.Test
+    yield* llm.push(
+      TestLLM.stop(
+        LLMEvent.textStart({ id: "t" }),
+        LLMEvent.textDelta({ id: "t", text: "Fresh " }),
+        LLMEvent.textDelta({ id: "t", text: "answer" }),
+        LLMEvent.textEnd({ id: "t" }),
+      ),
+    )
+    const chunks = yield* Stream.runCollect(generate.textStream({ prompt: "Answer privately", model: reference }))
+    expect([...chunks]).toEqual(["Fresh ", "answer"])
+  }),
+)
+
+retryIt.effect("fails a streamed call on a provider error event", () =>
+  Effect.gen(function* () {
+    const generate = yield* Generate.Service
+    const llm = yield* TestLLM.Test
+    yield* llm.push([LLMEvent.providerError({ message: "Overloaded" })])
+    const error = yield* Stream.runCollect(generate.textStream({ prompt: "Answer privately", model: reference })).pipe(
+      Effect.flip,
+    )
+    expect(error).toMatchObject({ _tag: "Generate.ProviderRequestError", message: "Overloaded" })
+  }),
+)
+
+retryIt.effect("does not retry a streamed call", () =>
+  Effect.gen(function* () {
+    const generate = yield* Generate.Service
+    const llm = yield* TestLLM.Test
+    yield* llm.push(
+      TestLLM.failAfter(
+        new AIError({
+          reason: new TransportError({
+            message: "connect ECONNREFUSED",
+            transport: "http",
+            operation: "request",
+            code: "ECONNREFUSED",
+          }),
+        }),
+      ),
+      TestLLM.text("Fresh answer", "success"),
+    )
+    const error = yield* Stream.runCollect(generate.textStream({ prompt: "Answer privately", model: reference })).pipe(
+      Effect.flip,
+    )
+    expect(error).toMatchObject({ _tag: "Generate.ProviderRequestError" })
+    expect(yield* llm.requests()).toHaveLength(1)
   }),
 )
 
