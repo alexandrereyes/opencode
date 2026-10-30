@@ -39,12 +39,22 @@ final class ComposerSuggestionReturn {
   func selected(for trigger: ComposerTrigger) -> ComposerSuggestion? { self.trigger == trigger ? selected : nil }
 }
 
+/// The `#` panel's footer (rev. 2026-10-30): create a snippet, or manage them (Ajustes ▸ Snippets on the Mac, Você ▸
+/// Snippets on the iPhone), each platform opening its own screen.
+struct ComposerSnippetActions {
+  let new: () -> Void
+  let manage: () -> Void
+  /// The shortcut shown beside "Novo snippet…" (the Mac's ⌘N while the panel is open).
+  var shortcut: String? = nil
+}
+
 struct ComposerSuggestions: View {
   @Environment(\.appTheme) private var theme
   let store: ConversationStore
   let trigger: ComposerTrigger
   var ready: ComposerSuggestionReturn? = nil
   var highlight: ComposerSuggestionHighlight? = nil
+  var snippetActions: ComposerSnippetActions? = nil
   let select: (ComposerSuggestion) -> Void
   @State private var items: [ComposerSuggestion] = []
   @State private var loading = true
@@ -57,6 +67,7 @@ struct ComposerSuggestions: View {
   /// The highlighted row: the movable selection where there is one, else the first item (Return's pick).
   private var highlighted: String? { highlight?.selected(for: trigger)?.id ?? items.first?.id }
   var body: some View {
+    VStack(spacing: 0) {
     ScrollViewReader { proxy in
     ScrollView {
       VStack(alignment: .leading, spacing: 2) {
@@ -111,6 +122,8 @@ struct ComposerSuggestions: View {
       proxy.scrollTo(id)
     }
     }.frame(maxHeight: 250).fixedSize(horizontal: false, vertical: true)
+    if let snippetActions, trigger.character == "#" { snippetFooter(snippetActions) }
+    }
       .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
       .overlay {
         RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(.border), lineWidth: 0.7)
@@ -157,6 +170,34 @@ struct ComposerSuggestions: View {
         ready?.first = nil
         highlight?.clear()
       }
+  }
+  private func snippetFooter(_ actions: ComposerSnippetActions) -> some View {
+    VStack(spacing: 0) {
+      Rectangle().fill(theme.color(.border)).frame(height: 0.7)
+      HStack(spacing: 6) {
+        Button(action: actions.new) {
+          HStack(spacing: 6) {
+            Image(systemName: "plus")
+            Text("Novo snippet…")
+            if let shortcut = actions.shortcut { Text(shortcut).foregroundStyle(theme.color(.textWeak)) }
+          }
+          .foregroundStyle(theme.color(.primary)).padding(.horizontal, 10).padding(.vertical, 7)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityIdentifier("snippet-panel-new")
+        Spacer(minLength: 4)
+        Button(action: actions.manage) {
+          HStack(spacing: 6) {
+            Image(systemName: "gearshape")
+            Text("Gerenciar snippets…")
+          }
+          .foregroundStyle(theme.color(.textSecondary)).padding(.horizontal, 10).padding(.vertical, 7)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityIdentifier("snippet-panel-manage")
+      }
+      .appFont(.caption).padding(.horizontal, 6).padding(.vertical, 2)
+    }
   }
   private func selectable(_ item: ComposerSuggestion) -> Bool {
     !(store.isNewSession && item.token.value == "client" && ["compact", "btw"].contains(item.token.id))

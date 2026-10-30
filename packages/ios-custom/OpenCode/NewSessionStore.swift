@@ -45,7 +45,8 @@ import OpenCodeKit
     let server = sessions.client.configuration.url.absoluteString
     draft = sessions.drafts.draft("new-session")
     composer = ConversationStore(
-      id: "new-session", client: sessions.client, hub: sessions.hub, catalog: sessions.catalog)
+      id: "new-session", client: sessions.client, hub: sessions.hub, catalog: sessions.catalog,
+      snippets: sessions.snippets)
     memoryKey = "OpenCodeNewSession." + server
     categories = defaults.dictionary(forKey: memoryKey + ".categories") as? [String: String] ?? [:]
     composer.newSessionSubmit = { [weak self] draft in await self?.send(draft) }

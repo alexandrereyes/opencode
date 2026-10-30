@@ -75,7 +75,7 @@ private struct EmptyMasterView: View {
     draft = ConversationDraft(server: sessions.client.configuration.url.absoluteString,
       id: "master-draft-" + UUID().uuidString)
     composer = ConversationStore(id: "master-draft", client: sessions.client,
-      hub: sessions.hub, catalog: sessions.catalog)
+      hub: sessions.hub, catalog: sessions.catalog, snippets: sessions.snippets)
     composer.masterMode = true
     composer.newSessionSubmit = { [weak self] draft in await self?.send(draft) }
   }

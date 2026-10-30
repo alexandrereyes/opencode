@@ -20,14 +20,6 @@ public struct ComposerFile: Codable, Sendable {
   public let path: String
   public let type: String
 }
-public struct ComposerSnippet: Codable, Sendable {
-  public let id: String
-  public let name: String
-  public let aliases: [String]
-  public let description: String
-  public let content: String
-  public let project: String?
-}
 public struct ComposerSuggestion: Sendable, Identifiable {
   public let section: String
   public let title: String

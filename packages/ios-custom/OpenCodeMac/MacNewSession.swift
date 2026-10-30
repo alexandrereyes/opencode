@@ -382,7 +382,7 @@ private struct MacBaseBranchPicker: View {
     MacSyntheticKey.fakeDictation(draft)
     #endif
     composer = ConversationStore(id: "new-session", client: sessions.client, hub: sessions.hub,
-      catalog: sessions.catalog)
+      catalog: sessions.catalog, snippets: sessions.snippets)
     categories = UserDefaults.standard.dictionary(forKey: memoryKey + ".categories") as? [String: String] ?? [:]
     composer.newSessionSubmit = { [weak self] _ in await self?.send() }
     composer.newSessionApps = { [weak self] in

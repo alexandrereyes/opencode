@@ -96,6 +96,9 @@ import UniformTypeIdentifiers
   /// The screen's event loop is running; off screen, `SessionStore` feeds the stream log instead.
   @ObservationIgnored private var live = false
   @ObservationIgnored private var composerCatalog: ComposerSources?
+  /// The server's snippets shared with Ajustes; `#` reads them instead of its own copy, so a snippet saved anywhere
+  /// shows at once. Nil in stores without a session list (fixtures).
+  @ObservationIgnored let snippets: SnippetCatalog?
   private(set) var composerLocation: String?
   private(set) var composerProjectID: String?
   private var composerConfiguration: [NewSessionConfiguration] = []
@@ -133,9 +136,10 @@ import UniformTypeIdentifiers
     id: String, client: OpenCodeClient, hub: EventHub,
     expansions: ConversationExpansionMemory? = nil, catalog: ModelCatalogCache? = nil,
     reversion: ConversationRevert? = nil, quoteDismissals: ChatQuoteDismissals? = nil,
-    quoteModes: QuoteModes? = nil, draft: ConversationDraft? = nil
+    quoteModes: QuoteModes? = nil, draft: ConversationDraft? = nil, snippets: SnippetCatalog? = nil
   ) {
     self.id = id
+    self.snippets = snippets
     self.client = client
     self.reversion = reversion ?? ConversationRevert(client: client)
     mcps = ConversationMCPStore(client: client, toast: toast)
@@ -525,6 +529,10 @@ import UniformTypeIdentifiers
     if trigger.character == "@" { prepareApps(open: true) }
     if composerCatalog == nil {
       composerCatalog = try await client.composerSources(directory: directory)
+    }
+    if trigger.character == "#", let snippets {
+      await snippets.loadIfNeeded()
+      if snippets.loaded { composerCatalog?.snippets = snippets.items }
     }
     async let files =
       trigger.character == "&"

@@ -122,7 +122,7 @@ final class SessionStore {
       let store = ConversationStore(
         id: id, client: client, hub: hub, expansions: expansions, catalog: catalog,
         reversion: reversions.value(id, client: client), quoteDismissals: quoteDismissals,
-        quoteModes: quoteModes, draft: drafts.draft(id))
+        quoteModes: quoteModes, draft: drafts.draft(id), snippets: snippets)
       store.masterMode = master
       return store
     }
@@ -140,6 +140,8 @@ final class SessionStore {
   let toast = ToastCenter()
   let alerts: SessionAlertCenter
   let catalog: ModelCatalogCache
+  /// The server's snippets, shared by Ajustes and every composer's `#`; it follows `rpc.custom.snippets.updated`.
+  let snippets: SnippetCatalog
 
   @ObservationIgnored let client: OpenCodeClient
   let voiceMemory: VoiceMemoryStore
@@ -204,6 +206,7 @@ final class SessionStore {
     quota = SubscriptionStore(server: configuration.url.absoluteString,
                               client: subscriptionClient(configuration: configuration, client: client))
     catalog = ModelCatalogCache(server: configuration.url.absoluteString)
+    snippets = SnippetCatalog(client: client)
     drafts = ConversationDrafts(server: configuration.url.absoluteString, root: draftRoot)
     reading = ReadingPositionStore(server: configuration.url.absoluteString)
     quoteDismissals = ChatQuoteDismissals(server: configuration.url.absoluteString)
@@ -377,7 +380,11 @@ final class SessionStore {
         connected = true
         alerts.connect(at: frame.receivedAt)
         scheduleReload()
-        if didConnect { quota.reconnect() }
+        if didConnect {
+          quota.reconnect()
+          // Changes sent while disconnected are lost; a catalog nobody loaded yet stays unloaded.
+          if snippets.loaded { Task { await snippets.load() } }
+        }
         didConnect = true
       case .disconnected:
         connected = false
@@ -388,6 +395,11 @@ final class SessionStore {
         // The current master is an accessory-only destination, not a global alert shortcut.
         if masterID == nil || id != masterID { await alerts.receive(event, store: self) }
         if type == "session.deleted", id != nil, id == masterID { masterDeletions += 1 }
+        // Only the snippet catalog changed: no navigation reload.
+        if type == Snippet.updatedEvent {
+          Task { await snippets.receive(type) }
+          continue
+        }
         if type.hasPrefix("session.") || type.hasPrefix("permission.")
           || type.hasPrefix("form.") || type.hasPrefix("rpc.") || type.hasPrefix("project.")
           || type.hasPrefix("worktree.")

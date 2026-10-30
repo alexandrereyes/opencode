@@ -273,8 +273,8 @@ public struct OpenCodeClient: Sendable {
       input: Input(decision: allow ? "once" : "reject"))
   }
 
-  private struct RPCInput<Value: Encodable>: Encodable { let input: Value }
-  private struct RPCOutput<Value: Decodable>: Decodable { let output: Value }
+  struct RPCInput<Value: Encodable>: Encodable { let input: Value }
+  struct RPCOutput<Value: Decodable>: Decodable { let output: Value }
 
   public func rpc<Input: Encodable, Output: Decodable>(
     _ id: String, _ method: String, input: Input, directory: String? = nil, timeout: TimeInterval? = nil
@@ -332,6 +332,11 @@ public struct OpenCodeClient: Sendable {
     _ = try await data(request)
   }
   func data(_ request: URLRequest) async throws -> Data {
+    let (data, response) = try await exchange(request)
+    return try checked(data, response)
+  }
+  /// The raw answer, for callers that read an error body themselves (`saveSnippet`).
+  func exchange(_ request: URLRequest) async throws -> (Data, URLResponse) {
     #if DEBUG
     let started = ContinuousClock.now
     try await OpeningDiagnostics.delay(request)
@@ -345,6 +350,9 @@ public struct OpenCodeClient: Sendable {
     #if DEBUG
     OpeningDiagnostics.record("HTTP_" + (request.url?.lastPathComponent ?? "request"), started: started, bytes: data.count)
     #endif
+    return (data, response)
+  }
+  func checked(_ data: Data, _ response: URLResponse) throws -> Data {
     if let response = response as? HTTPURLResponse, !(200..<300).contains(response.statusCode),
       let value = try? JSONDecoder().decode(JSONValue.self, from: data)
     {
