@@ -1,4 +1,4 @@
-import type { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import { optional } from "@opencode/schema/schema"
 import { Clock, Effect, Option, Schema } from "effect"
 import { createHash, randomBytes } from "node:crypto"
@@ -23,7 +23,7 @@ const decode = (value: Schema.Json | undefined) =>
   Option.getOrElse(Schema.decodeUnknownOption(Devices)(value ?? []), () => [])
 const encode = Schema.encodeSync(Devices)
 
-export type Storage = Pick<Plugin.Context["storage"], "get" | "update">
+export type Storage = Pick<Context["storage"], "get" | "update">
 
 export function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex")

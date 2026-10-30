@@ -1021,17 +1021,6 @@ effect: (ctx) =>
   }),
 ```
 
-Use `update` for an atomic read-modify-write shared by every Location running the same plugin ID. Its callback is
-synchronous and returns the next JSON value together with a local result. If it throws, the stored value is unchanged.
-
-```ts
-effect: (ctx) =>
-  ctx.storage.update("counter", (current) => {
-    const next = typeof current === "number" ? current + 1 : 1
-    return [next, next]
-  }),
-```
-
 Scan keys by prefix with cursor pagination.
 
 ```ts
@@ -1054,10 +1043,6 @@ interface StorageDomain {
   readonly set: (key: string, value: Schema.Json) => Effect.Effect<void>
   readonly remove: (key: string) => Effect.Effect<void>
   readonly scan: (options: StorageScanOptions) => Effect.Effect<StorageScanResult>
-  readonly update: <A>(
-    key: string,
-    update: (current: Schema.Json | undefined) => readonly [next: Schema.Json, result: A],
-  ) => Effect.Effect<A>
 }
 ```
 

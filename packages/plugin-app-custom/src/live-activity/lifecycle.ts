@@ -1,4 +1,4 @@
-import type { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import { optional } from "@opencode/schema/schema"
 import { Effect, Option, Schema } from "effect"
 import type { Client, Push, Result } from "./apns.js"
@@ -46,7 +46,7 @@ const decodeDevices = (value: Schema.Json | undefined) =>
   Option.getOrElse(Schema.decodeUnknownOption(Devices)(value ?? []), () => [])
 const encodeDevices = Schema.encodeSync(Devices)
 
-export type Storage = Pick<Plugin.Context["storage"], "get" | "update">
+export type Storage = Pick<Context["storage"], "get" | "update">
 
 /** Device registrations, kept in plugin storage so every Location's instance shares them. */
 export function makeRegistry(storage: Storage) {

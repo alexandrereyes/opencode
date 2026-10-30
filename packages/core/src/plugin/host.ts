@@ -806,7 +806,6 @@ export function storage(kv: KV.Interface, pluginID: string): Plugin.Context["sto
     get: (key) => kv.get(namespace + key),
     set: (key, value) => kv.set(namespace + key, value),
     remove: (key) => kv.remove(namespace + key),
-    update: (key, update) => kv.update(namespace + key, update),
     scan: (options) =>
       kv
         .scan({

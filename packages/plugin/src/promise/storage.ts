@@ -6,8 +6,4 @@ export interface StorageDomain {
   readonly set: (key: string, value: Schema.Json) => Promise<void>
   readonly remove: (key: string) => Promise<void>
   readonly scan: (options: StorageScanOptions) => Promise<StorageScanResult>
-  readonly update: <A>(
-    key: string,
-    update: (current: Schema.Json | undefined) => readonly [next: Schema.Json, result: A],
-  ) => Promise<A>
 }

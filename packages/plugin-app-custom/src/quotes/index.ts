@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import type { RpcRegistration } from "@opencode/plugin/effect/rpc"
 import type { Session } from "@opencode/schema/session"
 import { Effect, Exit, Schema, Stream } from "effect"
@@ -158,7 +158,7 @@ export function decodeAttachment(data: string) {
   return { bytes, id: createHash("sha256").update(bytes).digest("hex") }
 }
 
-export const registerQuotes = Effect.fn("Quotes.register")(function* (ctx: Plugin.Context) {
+export const registerQuotes = Effect.fn("Quotes.register")(function* (ctx: Context) {
   const read = (sessionID: string) =>
     ctx.storage.get(docKey(sessionID)).pipe(Effect.map((value) => (value === undefined ? empty : decode(value))))
   const exists = (sessionID: Session.ID) => ctx.session.get({ sessionID }).pipe(Effect.exit, Effect.map(Exit.isSuccess))

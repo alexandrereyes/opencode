@@ -1,4 +1,4 @@
-import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import type { AgentEditor } from "@opencode/plugin/effect/agent"
 import type { ToolEditor } from "@opencode/plugin/effect/tool"
 import { optional } from "@opencode/schema/schema"
@@ -73,13 +73,13 @@ export const QueryOutput = Schema.Struct({
 export type QueryOutput = typeof QueryOutput.Type
 
 export type DeviceContext = {
-  storage: Pick<Plugin.Context["storage"], "get" | "update">
+  storage: Pick<Context["storage"], "get" | "update">
   /** The Location of this plugin instance; responses must be routed back to it. */
   directory: string
   emit: (request: Device.Request) => Effect.Effect<void, unknown>
 }
 
-export const registerDevice = Effect.fn("Device.register")(function* (ctx: Plugin.Context) {
+export const registerDevice = Effect.fn("Device.register")(function* (ctx: Context) {
   const emitter = yield* Deferred.make<(request: Device.Request) => Effect.Effect<void, unknown>>()
   const device = makeDevice({
     storage: ctx.storage,

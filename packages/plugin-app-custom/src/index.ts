@@ -1,5 +1,6 @@
 import { Plugin } from "@opencode/plugin/effect"
 import { Effect } from "effect"
+import { atomic } from "./storage.js"
 import { registerAppMentions } from "./app-mentions/index.js"
 import { registerNativeApps } from "./native-apps/index.js"
 import { registerDirectories } from "./directories/index.js"
@@ -28,8 +29,9 @@ import { registerFamily } from "./session-family/index.js"
 
 export default Plugin.define({
   id: "custom.app-mentions",
-  effect: (ctx) =>
+  effect: (host) =>
     Effect.gen(function* () {
+      const ctx = { ...host, storage: atomic(host.storage) }
       yield* registerAppMentions(ctx)
       yield* registerNativeApps(ctx)
       yield* registerDirectories(ctx)

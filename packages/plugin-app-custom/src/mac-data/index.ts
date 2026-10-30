@@ -1,4 +1,4 @@
-import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import type { ToolEditor } from "@opencode/plugin/effect/tool"
 import { optional } from "@opencode/schema/schema"
 import { Tool } from "@opencode/schema/tool"
@@ -117,13 +117,13 @@ const decodePresence = (value: Schema.Json | undefined) =>
 const encodePresence = Schema.encodeSync(Presence)
 
 export type MacContext = {
-  storage: Pick<Plugin.Context["storage"], "get" | "update">
+  storage: Pick<Context["storage"], "get" | "update">
   /** The Location of this plugin instance; answers must be routed back to it. */
   directory: string
   emit: (request: MacData.Request) => Effect.Effect<void, unknown>
 }
 
-export const registerMacData = Effect.fn("MacData.register")(function* (ctx: Plugin.Context) {
+export const registerMacData = Effect.fn("MacData.register")(function* (ctx: Context) {
   const emitter = yield* Deferred.make<(request: MacData.Request) => Effect.Effect<void, unknown>>()
   const mac = makeMac({
     storage: ctx.storage,

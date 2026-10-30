@@ -1,4 +1,4 @@
-import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import type { RpcRegistration } from "@opencode/plugin/effect/rpc"
 import { Effect, Schema } from "effect"
 import { Snippets } from "./rpc.js"
@@ -7,7 +7,7 @@ const key = "snippets:catalog"
 const decode = Schema.decodeUnknownSync(Schema.Array(Snippets.Info))
 const encode = Schema.encodeSync(Schema.Array(Snippets.Info))
 
-export const registerSnippets = Effect.fn("Snippets.register")(function* (ctx: Plugin.Context) {
+export const registerSnippets = Effect.fn("Snippets.register")(function* (ctx: Context) {
   yield* ctx.storage.update(key, (current) => [encode(decode(current ?? [])), undefined])
   const registration: RpcRegistration<typeof Snippets.Definition> = yield* ctx.rpc
     .register(Snippets.Definition, {

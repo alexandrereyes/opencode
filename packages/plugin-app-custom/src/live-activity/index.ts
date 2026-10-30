@@ -1,4 +1,4 @@
-import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import { Cause, Clock, Deferred, Effect, Exit, Queue, Scope, Semaphore, Stream } from "effect"
 import os from "node:os"
 import { load, type Client } from "./apns.js"
@@ -270,7 +270,7 @@ export function sharedHub() {
   return globalThis.opencodeCustomLiveActivityHub
 }
 
-export const registerLiveActivity = Effect.fn("LiveActivity.register")(function* (ctx: Plugin.Context) {
+export const registerLiveActivity = Effect.fn("LiveActivity.register")(function* (ctx: Context) {
   const hub = sharedHub()
   const registration = yield* ctx.rpc.register(LiveActivity.Definition, hub.handlers).pipe(Effect.orDie)
   yield* ctx.rpc.register(Notifications.Definition, hub.notifications).pipe(Effect.orDie)

@@ -57,7 +57,9 @@
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
     "@opencode/client": "workspace:*",
+    "@opencode/core": "workspace:*",
     "@opencode/server": "workspace:*",
+    "@opencode/util": "workspace:*",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
     "typescript": "catalog:",

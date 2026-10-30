@@ -1,4 +1,4 @@
-import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import { Config, Effect, Schema } from "effect"
 import os from "node:os"
 import path from "node:path"
@@ -50,7 +50,7 @@ export function sharedGateway() {
   return globalThis.opencodeCustomWatchGateway
 }
 
-export const registerWatch = Effect.fn("Watch.register")(function* (ctx: Plugin.Context) {
+export const registerWatch = Effect.fn("Watch.register")(function* (ctx: Context) {
   const gateway = sharedGateway()
   yield* ctx.rpc
     .register(Watch.Definition, {

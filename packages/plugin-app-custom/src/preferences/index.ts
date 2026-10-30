@@ -1,4 +1,4 @@
-import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import type { RpcRegistration } from "@opencode/plugin/effect/rpc"
 import { Effect, Schema } from "effect"
 import { Preferences } from "./rpc.js"
@@ -135,7 +135,7 @@ export function importProfile(profile: Preferences.Profile, input: { hasLegacyDa
   }
 }
 
-export const registerPreferences = Effect.fn("Preferences.register")(function* (ctx: Plugin.Context) {
+export const registerPreferences = Effect.fn("Preferences.register")(function* (ctx: Context) {
   yield* ctx.storage.update(key, (current) => [encode(decode(current ?? defaults)), undefined])
   const registration: RpcRegistration<typeof Preferences.Definition> = yield* ctx.rpc
     .register(Preferences.Definition, {

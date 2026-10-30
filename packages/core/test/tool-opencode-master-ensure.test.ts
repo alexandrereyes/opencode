@@ -14,6 +14,7 @@ import { Chats } from "../../plugin-app-custom/src/chats/rpc"
 import { agentID, registerMaster } from "../../plugin-app-custom/src/master"
 import { Master } from "../../plugin-app-custom/src/master/rpc"
 import { registerPreferences } from "../../plugin-app-custom/src/preferences"
+import { atomic } from "../../plugin-app-custom/src/storage"
 
 const providerID = Provider.ID.make("llm-proxy")
 const luna = Model.Ref.make({ providerID, id: Model.ID.make("gpt-6-luna"), variant: Model.VariantID.make("low") })
@@ -37,7 +38,7 @@ testEffect(PluginTestLayer).live(
           confirm: (input) => Effect.sync(() => void claims.push(`confirm:${input.sessionID}`)).pipe(Effect.as({})),
         })
         .pipe(Effect.orDie)
-      yield* registerPreferences(ctx)
+      yield* registerPreferences({ ...ctx, storage: atomic(ctx.storage) })
       yield* registerMaster(ctx)
       yield* ctx.provider.transform((editor) =>
         editor.add({

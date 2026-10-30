@@ -1,4 +1,5 @@
 import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import { Model } from "@opencode/schema/model"
 import { Clock, Effect, Schema, Scope } from "effect"
 import { Preferences } from "../preferences/rpc.js"
@@ -22,13 +23,13 @@ const encode = Schema.encodeSync(Voice.Record)
 const empty: Voice.Record = { version: 1, summary: "", turns: [], approxTokens: 0, updatedAt: 0, seenTurnIDs: [] }
 
 export type VoiceContext = {
-  storage: Pick<Plugin.Context["storage"], "get" | "update">
+  storage: Pick<Context["storage"], "get" | "update">
   generate: Plugin.Context["generate"]
   session: Pick<Plugin.Context["session"], "get" | "active">
   message: Pick<Plugin.Context["message"], "list">
 }
 
-export const registerVoice = Effect.fn("Voice.register")(function* (ctx: Plugin.Context) {
+export const registerVoice = Effect.fn("Voice.register")(function* (ctx: Context) {
   const scope = yield* Effect.scope
   const voice = makeVoice(ctx, scope)
   yield* ctx.rpc

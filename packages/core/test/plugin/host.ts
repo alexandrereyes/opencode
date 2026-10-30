@@ -12,10 +12,8 @@ import { WebSearch } from "@opencode/core/websearch"
 import { Effect, Stream } from "effect"
 
 type EventSource = ReturnType<Plugin.Context["event"]["subscribe"]>
-type Overrides = Partial<Omit<Plugin.Context, "options" | "session" | "event" | "storage">> & {
+type Overrides = Partial<Omit<Plugin.Context, "options" | "session" | "event">> & {
   readonly session?: Partial<Plugin.Context["session"]>
-  // Custom storage methods default to unused stubs, so upstream tests that pass only the native methods still type.
-  readonly storage?: Partial<Plugin.Context["storage"]>
   readonly event?: { readonly subscribe: () => EventSource }
 }
 export function host(overrides: Overrides = {}): Plugin.Context {
@@ -144,13 +142,11 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       transform: () => Effect.die("unused skill.transform"),
       reload: () => Effect.die("unused skill.reload"),
     },
-    storage: {
+    storage: overrides.storage ?? {
       get: () => Effect.die("unused storage.get"),
       set: () => Effect.die("unused storage.set"),
       remove: () => Effect.die("unused storage.remove"),
       scan: () => Effect.die("unused storage.scan"),
-      update: () => Effect.die("unused storage.update"),
-      ...overrides.storage,
     },
     shell: overrides.shell ?? {
       hook: () => Effect.die("unused shell.hook"),

@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import type { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import { Clock, Config, Effect, Option, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { Speech } from "./rpc.js"
@@ -29,7 +30,7 @@ export type Options = {
 
 export type SpeechContext = {
   integration: Pick<Plugin.Context["integration"], "connection">
-  storage: Pick<Plugin.Context["storage"], "get" | "update">
+  storage: Pick<Context["storage"], "get" | "update">
 }
 
 /** The starting rate counts as this many characters, so the first pieces move the estimate without jolting it. */
@@ -42,7 +43,7 @@ export class SynthesisFailed extends Schema.TaggedError<SynthesisFailed>()("Spee
   message: Schema.String,
 }) {}
 
-export const registerSpeech = Effect.fn("Speech.register")(function* (ctx: Plugin.Context) {
+export const registerSpeech = Effect.fn("Speech.register")(function* (ctx: Context) {
   const options = yield* readOptions
   yield* prune(options.cache).pipe(Effect.ignore, Effect.forkScoped)
   yield* ctx.rpc

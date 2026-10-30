@@ -4,6 +4,7 @@ import type { Stats } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../storage.js"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/schema/session"
 import { Effect, Schema, Semaphore, Stream } from "effect"
@@ -45,7 +46,7 @@ function decode(value: unknown): Allocation[] {
   })
 }
 
-export const registerChats = Effect.fn("Chats.register")(function* (ctx: Plugin.Context) {
+export const registerChats = Effect.fn("Chats.register")(function* (ctx: Context) {
   yield* ctx.storage.update(key, (current) => [encode(decode(current ?? [])), undefined])
   const reconcileLock = Semaphore.makeUnsafe(1)
   const registration = ctx.rpc
@@ -110,7 +111,7 @@ function operation<A, E>(
 }
 
 function mutation<E>(
-  ctx: Pick<Plugin.Context, "storage">,
+  ctx: Pick<Context, "storage">,
   input: { id: string; directory: AbsolutePath; sessionID: Session.ID },
   status: "pending" | "confirmed",
   error: (type: "operation_failed", message: string, data: { message: string }) => E,
@@ -163,7 +164,7 @@ export function mutationConflict(
     return "Chat allocation is not pending creation"
 }
 
-function markDeletedAndReconcile(ctx: Plugin.Context, lock: Semaphore.Semaphore, sessionID: Session.ID) {
+function markDeletedAndReconcile(ctx: Context, lock: Semaphore.Semaphore, sessionID: Session.ID) {
   return ctx.storage
     .update(key, (current) => [
       encode(markDeleted(decode(current ?? []), sessionID)),
@@ -181,7 +182,7 @@ export function markDeleted(allocations: readonly Allocation[], sessionID: Sessi
 }
 
 export interface ChatReconcileContext {
-  readonly storage: Pick<Plugin.Context["storage"], "get" | "update">
+  readonly storage: Pick<Context["storage"], "get" | "update">
   readonly session: Pick<Plugin.Context["session"], "scan">
 }
 
