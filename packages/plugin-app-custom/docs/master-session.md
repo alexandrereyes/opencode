@@ -91,8 +91,10 @@ There is no undo because native unarchive does not exist; archived transcripts r
 while that session exists and is not archived; otherwise (no pointer, deleted elsewhere such as the web, or archived) it
 allocates, claims and confirms a managed chat, creates the session titled **Sessão mestra** with agent `mestra` and the
 given model or the remembered one (`resolveModel`), sets the pointer through `custom.preferences/mutate` (which emits its
-`updated` event) and returns `{sessionID, directory, created, preferences}`. A module-scope lock serializes callers from
-every Location instance in the process, so concurrent screen, voice and other clients converge on one master. Deleting a
+`updated` event) and returns `{sessionID, directory, created, preferences}`. A lock in a global slot
+(`globalThis.opencodeCustomMasterEnsureLock`) serializes callers from every Location instance in the process, so
+concurrent screen, voice and other clients converge on one master; module scope would not do, because the plugin loader
+evaluates the module again for every Location (`test/master-ensure.test.ts` evaluates it twice). Deleting a
 session is a native hard delete (messages and events are removed); the old transcript cannot be recovered and nothing
 is migrated: the remembered model and the global voice memory are independent of the session. The web delete dialogs
 warn when a target is a Mestra session and suggest archiving instead. Core's

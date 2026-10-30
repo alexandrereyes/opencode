@@ -409,8 +409,18 @@ export type EnsureContext = Pick<ModelContext, "storage" | "model"> & {
   rpc: Plugin.Context["rpc"]
 }
 
-// Module scope on purpose: every Location runs its own plugin instance, and all of them share one pointer.
-const ensureLock = Semaphore.makeUnsafe(1)
+declare global {
+  var opencodeCustomMasterEnsureLock: Semaphore.Semaphore | undefined
+}
+
+/**
+ * Serializes `ensureMaster` across the process. Every Location runs its own plugin instance and all of them share one
+ * pointer, but the plugin loader evaluates this module again for every Location, so only a global slot is shared.
+ */
+function ensureLock() {
+  globalThis.opencodeCustomMasterEnsureLock ??= Semaphore.makeUnsafe(1)
+  return globalThis.opencodeCustomMasterEnsureLock
+}
 
 /**
  * The usable Mestra session: the stored pointer while its session exists and is not archived; otherwise a new one
@@ -420,7 +430,7 @@ export const ensureMaster = Effect.fn("Master.ensure")(function* (
   ctx: EnsureContext,
   input: typeof Master.EnsureInput.Type,
 ) {
-  return yield* ensureLock.withPermit(
+  return yield* ensureLock().withPermit(
     Effect.gen(function* () {
       const preferences = ctx.rpc(Preferences.Definition)
       const profile = yield* preferences.get({})
