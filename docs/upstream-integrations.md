@@ -145,6 +145,17 @@ against `d4a6223d0` before this merge).
   the custom `created` field, and the iOS simulator input-channel test assumed the config message arrives before
   `connect` resolves, which Bun 1.4.4 no longer guarantees (the same test passes with Bun 1.4.2 on both revisions and
   fails with Bun 1.4.4 on both before the fix).
+- Compiled artifact, built from `4fcd17a15` with Bun 1.4.4 (fixture evidence, not a prepared release): the plugin build
+  and `script/build.ts --single --skip-install` pass; the 222,378,722-byte binary reports
+  `opencode v0.0.0-custom.4fcd17a15…`. `script/custom-smoke.ts` on it passes the parser smoke, seals the release
+  (221,642,726 bytes) and its temporary server answers health and the embedded web with 200 and passes the plugin RPC
+  save, list and invalid-input checks.
+- Real check on an isolated source sandbox (4177, credentials copied read-only from production, production untouched):
+  `/api/info` reports the commit and the new `hostname`; the first `GET /api/mcp` on a new directory lists the
+  configured servers; a prompt to `anthropic/claude-haiku-5-5` completes; `custom.transcript` `list` and `skills`,
+  `custom.navigation` `list` and `custom.worktrees` `locate` and `available` answer; `custom.archive` on a session
+  that is still generating interrupts it (`idle` with outcome `interrupted`) and archives it; `/api/event` streams
+  `server.connected` and heartbeats; and upstream's 2.2.1 web app loads and lists the session at 1440×900.
 
 ## V2 integration — 2026-10-17
 
