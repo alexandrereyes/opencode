@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds OpenCodeWatch for the watchOS simulator and captures its DEBUG fixture screens (no network, no
 # pairing). Usage: script/capture-watch.sh <simulator-udid> <output-dir> [fixture …]
-# OPENCODE_WATCH_COMBO=working|working-unread|question-working-unread|nothing picks the state ring's combination
-# (the files get it as a suffix).
+# OPENCODE_WATCH_COMBO=working|working-unread|question-working-unread|nothing|progress picks the state ring's
+# combination (the files get it as a suffix); `progress` opens the Painel on two sessions with a Progresso.
 set -euo pipefail
 
 package="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"

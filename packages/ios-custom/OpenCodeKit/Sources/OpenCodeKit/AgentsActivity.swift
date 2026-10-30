@@ -58,8 +58,16 @@ public struct AgentsState: Codable, Hashable, Sendable {
   public struct Progress: Codable, Hashable, Sendable {
     public var done: Int
     public var total: Int
-    /// `subagents` today; a future unit (such as `tasks`) renders as a bare `done/total`.
+    /// `subagents`, or `todos` (rev. 2026-10-30): the session's Progresso. Unknown units render as a bare `done/total`.
     public var unit: String
+    /// `todos` only: the item in hand (`Agora: …`); absent from older backends.
+    public var current: String?
+    public init(done: Int, total: Int, unit: String, current: String? = nil) {
+      self.done = done
+      self.total = total
+      self.unit = unit
+      self.current = current
+    }
   }
 
   public struct Focus: Codable, Hashable, Sendable {
@@ -209,6 +217,15 @@ public struct AgentsCounter: Equatable, Sendable {
   public let emphasized: Bool
 }
 
+/// The Lock Screen card's bottom line when nothing needs Alexandre: the focus session's Progresso (rev. 2026-10-30).
+public struct AgentsProgressLine: Equatable, Sendable {
+  public let title: String
+  /// `3/7`.
+  public let count: String
+  /// The item in hand, when the backend sends it.
+  public let current: String?
+}
+
 /// The Lock Screen card's bottom line: the first session that needs Alexandre and how many others do.
 public struct AgentsAttentionLine: Equatable, Sendable {
   public let role: ThemeRole
@@ -340,6 +357,12 @@ public extension AgentsState {
       more: others > 0 ? others : nil)
   }
 
+  /// The focus session's Progresso, in the attention line's place while nothing needs Alexandre.
+  var progressLine: AgentsProgressLine? {
+    guard attentionLine == nil, let focus, let progress = focus.progress, progress.unit == "todos" else { return nil }
+    return AgentsProgressLine(title: focus.title, count: "\(progress.done)/\(progress.total)", current: progress.now)
+  }
+
   /// Session opened by tapping the Lock Screen card: the first that needs Alexandre, else the focus, else none
   /// (the Sessões list).
   var tapTarget: (sessionID: String, directory: String)? {
@@ -372,14 +395,17 @@ public extension AgentsState.Kind {
 }
 
 public extension AgentsState.Progress {
-  /// `2/3 subagentes`; unknown units render as a bare `2/3`.
+  /// `2/3 subagentes`; a Progresso and unknown units render as a bare `2/3`.
   var label: String { unit == "subagents" ? "\(done)/\(total) subagentes" : "\(done)/\(total)" }
+  /// The item in hand of a Progresso (`todos`), when the backend sends it.
+  var now: String? { unit == "todos" ? current.flatMap { $0.isEmpty ? nil : $0 } : nil }
   var fraction: Double { total > 0 ? min(max(Double(done) / Double(total), 0), 1) : 0 }
 }
 
 public extension AgentsState {
   /// Row status text and colour. `idle` rows are unread sessions on backends that send `counts.unread`.
   func statusLabel(_ row: Row) -> String { row.statusLabel(unread: counts.unread != nil) }
+  func islandStatus(_ row: Row) -> String { row.islandStatus(unread: counts.unread != nil) }
   func statusRole(_ row: Row) -> ThemeRole { row.statusRole(unread: counts.unread != nil) }
 }
 
@@ -395,6 +421,16 @@ public extension AgentsState.Row {
     case .idle: unread ? "Não lida" : "Concluída"
     case .unknown: ""
     }
+  }
+  /// The watch's short status: `3/7 · <item>` for a working row with a Progresso item, else `statusLabel`.
+  func compactStatus(unread: Bool) -> String {
+    guard status == .working, let progress, let now = progress.now else { return statusLabel(unread: unread) }
+    return "\(progress.done)/\(progress.total) · \(now)"
+  }
+  /// The expanded island's status: a bare `3/7` beside `Agora: …`, so the item keeps the room; else `statusLabel`.
+  func islandStatus(unread: Bool) -> String {
+    guard status == .working, let progress, progress.now != nil else { return statusLabel(unread: unread) }
+    return "\(progress.done)/\(progress.total)"
   }
   func statusRole(unread: Bool) -> ThemeRole {
     switch status {

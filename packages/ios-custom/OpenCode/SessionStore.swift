@@ -20,6 +20,9 @@ final class SessionStore {
   private(set) var archived: [Session] = [] { didSet { derived = nil } }
   private(set) var directoryMetadata = SessionDirectoryCache()
   private(set) var active: Set<String> = [] { didSet { derived = nil } }
+  /// Progresso lists the event stream brought since the last snapshot, which the next `custom.navigation` replaces.
+  private(set) var liveProgress: [String: SessionProgress] = [:] { didSet { derived = nil } }
+  @ObservationIgnored private var progressTracker = SessionProgress.Tracker()
   private(set) var loading = false
   private(set) var connected = false
   private(set) var serverVersion: String?
@@ -260,9 +263,13 @@ final class SessionStore {
       entries: entries.filter { $0.session.id != masterID }, projects: projects, active: active,
       pins: preferences?.data.pinnedSessions ?? [], notify: preferences?.data.notifySessions ?? [],
       autoApprove: preferences?.data.settings.autoApprove ?? false, ranks: order.ranks,
-      chatRoot: chatRoot)
+      chatRoot: chatRoot, progress: liveProgress)
     derived = (rows, nil)
     return rows
+  }
+  /// A session's latest known Progresso list (open or not), for a conversation whose loaded tail does not reach it.
+  func progress(_ id: String) -> SessionProgress? {
+    liveProgress[id] ?? entries.first { $0.session.id == id }?.progress.map { SessionProgress(items: $0.todos) }
   }
   var filtered: [SessionRow] {
     #if DEBUG && os(iOS)
@@ -388,6 +395,10 @@ final class SessionStore {
           if let id, type.hasPrefix("session.execution.") {
             order.observe(id, running: type == "session.execution.started")
           }
+          // A `todowrite` success moves its row at once, without a navigation reload.
+          if type.hasPrefix("session.tool."), let update = progressTracker.apply(event) {
+            liveProgress[update.sessionID] = SessionProgress(items: update.items)
+          }
           if type.hasPrefix("session.text.") || type.hasPrefix("session.tool.")
             || type.hasPrefix("session.step.")
           {
@@ -431,6 +442,8 @@ final class SessionStore {
       let snapshot = try await (navigation, prefs, inventory, running, requests, archives)
       try Task.checkCancellation()
       entries = snapshot.0.filter { !deletedIDs.contains($0.session.id) }
+      // The snapshot folds the same events on the server, revert and `experimental.todo` included.
+      if !liveProgress.isEmpty { liveProgress = [:] }
       if snapshot.1.revision >= (preferences?.revision ?? -1) { preferences = snapshot.1 }
       projects = snapshot.2
       active = Set(snapshot.3.filter { $0.value.isRunning }.map(\.key))

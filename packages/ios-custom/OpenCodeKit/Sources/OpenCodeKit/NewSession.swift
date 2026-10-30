@@ -261,11 +261,14 @@ public struct NewSessionConfiguration: Decodable, Sendable {
     public let model: ModelReference?
     public let default_agent: String?
     public let mcp: MCP?
-    private enum CodingKeys: CodingKey { case model, default_agent, mcp }
+    /// Present when this document sets `experimental` at all: the highest such document decides each flag.
+    public let experimental: Experimental?
+    private enum CodingKeys: CodingKey { case model, default_agent, mcp, experimental }
     init() {
       model = nil
       default_agent = nil
       mcp = nil
+      experimental = nil
     }
     public init(from decoder: any Decoder) throws {
       let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -286,6 +289,11 @@ public struct NewSessionConfiguration: Decodable, Sendable {
       }
       default_agent = try values.decodeIfPresent(String.self, forKey: .default_agent)
       mcp = try values.decodeIfPresent(MCP.self, forKey: .mcp)
+      experimental = try? values.decodeIfPresent(Experimental.self, forKey: .experimental)
+    }
+    public struct Experimental: Decodable, Sendable {
+      /// The Progresso (`todowrite`) flag.
+      public let todo: Bool?
     }
     public struct MCP: Decodable, Sendable {
       public let servers: [String: Server]?

@@ -11,7 +11,8 @@ struct DashboardView: View {
   let voice: VoiceCall
   @State private var reply: ReplyRoute?
   @State private var showVoice = false
-  @State private var showWorking = false
+  // The `progress` capture fixture opens on its working sessions.
+  @State private var showWorking = WatchFixture.combo == .progress
 
   var body: some View {
     NavigationStack {
@@ -250,6 +251,11 @@ private struct SessionRow: View {
           .lineLimit(1).minimumScaleFactor(0.8)
         Text(row.statusLabel(unread: unread)).font(.system(size: 12)).foregroundStyle(Color.watch(role)).lineLimit(1)
           .monospacedDigit()
+        // The item in hand of the session's Progresso (rev. 2026-10-30).
+        if let now = row.progress?.now {
+          Text(verbatim: "Agora: \(now)").font(.system(size: 12)).foregroundStyle(Color.watch(.textSecondary))
+            .lineLimit(2).accessibilityIdentifier("watch-progress-now")
+        }
       }
       Spacer(minLength: 0)
     }

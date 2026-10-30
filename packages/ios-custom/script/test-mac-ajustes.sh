@@ -19,7 +19,7 @@ codesign --force --deep --sign - "$copy" 2>/dev/null
 trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
 failed=0
 # Without arguments, every mode (zsh does not split `${@:-…}` into words).
-modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar)
+modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso)
 (( $# )) && modes=("$@")
 for mode in $modes; do
   # Each mode starts from a fresh window: no restored window, reading place or Contexto width.

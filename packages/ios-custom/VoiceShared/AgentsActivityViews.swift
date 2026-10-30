@@ -40,6 +40,9 @@ struct AgentsLockScreenView: View {
       if let line = state.attentionLine {
         rule
         AgentsAttentionRow(attributes: attributes, line: line).frame(height: AgentsLayout.lockAttention)
+      } else if let line = state.progressLine {
+        rule
+        AgentsProgressRow(attributes: attributes, line: line).frame(height: AgentsLayout.lockAttention)
       }
     }
     .padding(.horizontal, 14).padding(.vertical, AgentsLayout.lockPadding)
@@ -112,6 +115,29 @@ struct AgentsAttentionRow: View {
         // Neutral: the others may be of the other kind.
         Text(verbatim: "  +\(more)").font(.system(size: 12, weight: .semibold))
           .foregroundStyle(attributes.color(.text)).lineLimit(1).layoutPriority(1)
+      }
+      Spacer(minLength: 0)
+    }
+  }
+}
+
+/// `● Live Activity no iOS · 3/7 · Agora: Atualizar o relógio` (rev. 2026-10-30): the focus session's Progresso in
+/// the attention line's slot while nothing needs Alexandre. The title and the item share the room (a short title stays
+/// whole); the count never truncates.
+struct AgentsProgressRow: View {
+  let attributes: AgentsActivityAttributes
+  let line: AgentsProgressLine
+
+  var body: some View {
+    HStack(spacing: 0) {
+      Circle().fill(attributes.color(.success)).frame(width: 8, height: 8).padding(.trailing, 8)
+      Text(line.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
+        .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+      Text(verbatim: " · \(line.count)").font(.system(size: 12)).monospacedDigit()
+        .foregroundStyle(attributes.color(.success)).lineLimit(1).layoutPriority(2)
+      if let current = line.current {
+        Text(verbatim: " · Agora: \(current)").font(.system(size: 12)).foregroundStyle(attributes.color(.textSecondary))
+          .lineLimit(1).truncationMode(.tail).layoutPriority(1)
       }
       Spacer(minLength: 0)
     }
@@ -216,10 +242,11 @@ struct AgentsIslandExpanded: View {
   private func line(_ row: AgentsState.Row) -> some View {
     HStack(spacing: 8) {
       AgentsAvatar(attributes: attributes, project: row.project, size: 16)
-      Text("\(Text(row.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong)))  \(Text(row.project).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)))")
+      // A row with a Progresso item says what it is doing instead of where (rev. 2026-10-30).
+      Text("\(Text(row.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong)))  \(Text(row.progress?.now.map { "Agora: \($0)" } ?? row.project).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)))")
         .lineLimit(1).truncationMode(.tail)
       Spacer(minLength: 6)
-      Text(state.statusLabel(row)).font(.system(size: 12)).foregroundStyle(attributes.color(state.statusRole(row)))
+      Text(state.islandStatus(row)).font(.system(size: 12)).foregroundStyle(attributes.color(state.statusRole(row)))
         .lineLimit(1).monospacedDigit().fixedSize()
     }
     .frame(maxHeight: .infinity)
@@ -293,7 +320,7 @@ struct AgentsWatchView: View {
         .lineLimit(1).truncationMode(.tail)
       // The status label wins over the time, which truncates first.
       HStack(spacing: 0) {
-        Text(state.statusLabel(row)).layoutPriority(1)
+        Text(row.compactStatus(unread: state.counts.unread != nil)).layoutPriority(1)
         if let asked = state.asked(row) {
           Text(verbatim: " · ")
           Text(.currentDate, format: AgentsText.ago(since: asked))

@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -28,6 +28,8 @@ import SwiftUI
   /// composers taking the recorded text (`dictation`). A background copy (`MacLaunch.background`) comes forward
   /// only for these, once its pictures are taken, and quits right after; its window stays off-screen.
   static let foreground: Set<String> = ["numbers", "viewer", "dictation"]
+  /// `progresso`: the fixture server answers that the root's run ended (read off the main actor by the server).
+  nonisolated(unsafe) static var progressEnded = false
 
   /// Once per launch: a second window (one SwiftUI restores and one the capture opens) would drive the same views.
   static func run(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String) async {
@@ -58,6 +60,7 @@ import SwiftUI
       case "markdown": try await markdown(window: window, runtime: runtime, shot: shot)
       case "arquivos": try await arquivos(window: window, runtime: runtime, shot: shot)
       case "ampliar": try await ampliar(window: window, runtime: runtime, shot: shot)
+      case "progresso": try await progresso(window: window, runtime: runtime, theme: theme, folder: folder, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -1052,6 +1055,49 @@ import SwiftUI
       return children.lazy.compactMap { search($0, depth: depth + 1) }.first
     }
     return search(window, depth: 0)
+  }
+
+  // MARK: Progresso — the pill, its popover and the Sessões row (rev. 2026-10-30)
+
+  private static func progresso(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String,
+    shot: (String) -> Void) async throws
+  {
+    let store = try require(runtime.store, "sessões")
+    let conversation = try await wait("conversa") { store.liveConversation(MacFixture.rootID) }
+    // The background copy has no accessibility client, so SwiftUI builds no accessibility tree: the pill reports
+    // what it shows itself.
+    let pill = try await wait("pílula do Progresso", timeout: 12) { ConversationProgressPill.shown }
+    guard pill == "Progresso: 3 de 7. Agora: Atualizar a Live Activity e o relógio" else {
+      throw Failure(description: "pílula: \(pill)")
+    }
+    let row = try await wait("linha com Progresso") {
+      store.rows.first { $0.id == MacFixture.rootID }?.progress
+    }
+    guard row.count == "3/7", row.current?.content == "Atualizar a Live Activity e o relógio" else {
+      throw Failure(description: "linha: \(row.count) \(row.current?.content ?? "-")")
+    }
+    try await Task.sleep(for: .milliseconds(600))
+    shot("pilula")
+    NotificationCenter.default.post(name: ConversationProgressPill.openRequest, object: nil)
+    let popover = try await wait("popover") {
+      NSApp.windows.first { $0 !== window && $0.isVisible && $0.className.contains("Popover") }
+    }
+    try await Task.sleep(for: .milliseconds(700))
+    MacCapture.shot(popover, theme: theme, to: folder + "/\(MacCapture.name)-popover.png")
+    shot("popover-janela")
+    // The run ends with the popover open: the server no longer lists the root as running, both reads follow it,
+    // and the pill leaves with its popover.
+    progressEnded = true
+    conversation.revalidate()
+    await store.reload()
+    try await wait("pílula e popover sumiram") {
+      ConversationProgressPill.shown == nil && !conversation.executing && !popover.isVisible ? true : nil
+    }
+    try await wait("linha sem Progresso") {
+      store.rows.first { $0.id == MacFixture.rootID }.map { $0.progress == nil ? true : nil } ?? nil
+    }
+    try await Task.sleep(for: .milliseconds(600))
+    shot("fim")
   }
 
   // MARK: Helpers

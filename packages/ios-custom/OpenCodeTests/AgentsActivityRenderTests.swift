@@ -46,7 +46,7 @@ import XCTest
   /// hold on device, where the system clips instead of proposing its limit.
   func testRenderedHeightsMatchTheFixedLayout() throws {
     for name in ["state-one-question", "state-two-questions", "state-mixed", "state-working", "state-failed-only",
-      "state-long-rows"]
+      "state-long-rows", "state-progress", "state-progress-calm"]
     {
       let (attributes, state) = try fixture(name)
       for width in [360.0, 412.0] {
@@ -75,7 +75,7 @@ import XCTest
   /// The Apple Watch `.small` card at the smallest Smart Stack size (40 mm, 152 × 69.5 points). Set
   /// `TEST_RUNNER_OPENCODE_WATCH_DIR` to keep `ios-small-<state>.png`.
   func testWatchCardFitsTheSmallestSmartStack() throws {
-    for name in ["state-mixed", "state-working", "state-one-question", "state-failed-only"] {
+    for name in ["state-mixed", "state-working", "state-one-question", "state-failed-only", "state-progress-calm"] {
       var (attributes, state) = try fixture(name)
       // Like the launch fixture: keep "há 3 min" whenever the test runs.
       let shift = (Date.now.timeIntervalSince1970 * 1000).rounded() - state.updatedAt
@@ -88,7 +88,7 @@ import XCTest
       renderer.scale = 3
       let image = try XCTUnwrap(renderer.uiImage)
       if let directory = ProcessInfo.processInfo.environment["OPENCODE_WATCH_DIR"],
-        ["state-mixed", "state-working"].contains(name)
+        ["state-mixed", "state-working", "state-progress-calm"].contains(name)
       {
         try image.pngData()?.write(to: URL(fileURLWithPath: directory).appending(path: "ios-small-\(name).png"))
       }

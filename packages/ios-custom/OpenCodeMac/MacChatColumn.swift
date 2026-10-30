@@ -364,6 +364,9 @@ struct MacConversationView: View {
     VStack(spacing: 8) {
       FloatingVoiceHost(sessions: sessions)
       if conversation.session?.revert != nil, !conversation.isChild { revertBar }
+      if let progress = conversation.progress(fallback: sessions.progress(conversation.id)) {
+        ConversationProgressPill(progress: progress)
+      }
       ConversationTray(store: conversation, draft: draft, started: .some(input.executionStarted.value))
       // Without a margin wide enough beside the column, ↓ sits on the composer card's top right corner.
       MacComposer(store: conversation, draft: draft,

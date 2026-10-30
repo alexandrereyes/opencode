@@ -51,6 +51,8 @@ public struct NavigationEntry: Codable, Sendable {
   public let backgroundCount: Int?
   /// The newest such work's command.
   public let backgroundTitle: String?
+  /// Its Progresso while it shows (`SessionProgress`); absent on older servers.
+  public let progress: Progress?
 }
 
 public struct NavigationPage: Codable, Sendable {

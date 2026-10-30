@@ -326,9 +326,10 @@ Web projection sources: `packages/session-ui-custom/src/timeline/{projection,det
   current group and collapses finished groups; tapping expands without another transcript request.
 - Tool IDs are real wire IDs. Stable text/reasoning UI IDs are respectively `${message.id}:text:${ordinal}` and
   `${message.id}:reasoning:${ordinal}`, with ordinals counted **within that content type**. Use these for quotes.
-- Failed tools remain visible even if a display category is hidden, except `todowrite`: V2 removed that tool with
-  no replacement. Its historical parts, including errors, are suppressed in iOS, do not count in “Usou” or its
-  kinds summary, and contribute no final-answer boundary. The web's `idle` marker is not itself rendered as a row.
+- Failed tools remain visible even if a display category is hidden. `todowrite` (behind `experimental.todo`, rev.
+  2026-10-30) is shown as the Progresso pill above the composer instead (`plugin-app-custom/docs/progress.md`): its
+  successful calls do not render as rows, do not count in “Usou” or its kinds summary, and contribute no final-answer
+  boundary; a failed call stays visible like any failed tool. The web's `idle` marker is not itself rendered as a row.
   Compaction and selection/location notices split groups.
 - Final-answer separators are projected over each whole user group, including history: completed, error-free,
   retry-free `finish:"stop"` text rows form sequences delimited by rendered activity. Prefer the first

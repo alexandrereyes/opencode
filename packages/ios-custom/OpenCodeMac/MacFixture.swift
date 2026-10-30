@@ -63,6 +63,10 @@ private struct MacFixtureServer: Sendable {
   /// "Precisa de você" section, the Dock badge and the alerts.
   private let attention = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFixtureAttention")
   private let searchFixture = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSearchFixture")
+  /// `-OpenCodeMacAjustes progresso`: `experimental.todo` on and the root's running turn keeps a Progresso, until
+  /// the check ends that run (`MacAjustesChecks.progressEnded`).
+  private let progress = MacAjustesChecks.mode == "progresso"
+  private static let todos = #"[{"content":"Ler o rastreador da Live Activity","status":"completed"},{"content":"Somar o progresso do plano no plugin","status":"completed"},{"content":"Adicionar a unidade todos ao contrato","status":"completed"},{"content":"Atualizar a Live Activity e o relógio","status":"in_progress"},{"content":"Rodar os testes do OpenCodeKit","status":"pending"},{"content":"Capturar as telas no iPhone 14","status":"pending"},{"content":"Migrar as fixtures antigas","status":"cancelled"}]"#
 
   func respond(_ request: URLRequest) -> String? {
     guard let url = request.url else { return nil }
@@ -74,8 +78,9 @@ private struct MacFixtureServer: Sendable {
     case "/api/info": return #"{"version":"0.0.0-mac-fixture","paths":{"tmp":"/tmp"}}"#
     case "/api/project": return projects
     case "/api/session/active":
+      let ended = progress && MacAjustesChecks.progressEnded
       return #"{"data":{"#
-        + (["ses_mac_root", "ses_mac_live"] + Self.live.map(\.id)).map { #""\#($0)":{"type":"running"}"# }
+        + ((ended ? [] : ["ses_mac_root"]) + ["ses_mac_live"] + Self.live.map(\.id)).map { #""\#($0)":{"type":"running"}"# }
           .joined(separator: ",") + "}}"
     case "/api/session": return #"{"data":[\#(searchFixture ? archivedSession : "")],"cursor":{}}"#
     case "/api/model" where MacFixture.value("-OpenCodeMacLargeCatalog") != nil: return largeCatalog
@@ -103,6 +108,8 @@ private struct MacFixtureServer: Sendable {
     case "/api/worktree/refresh": return "{}"
     case "/api/location": return #"{"directory":"\#(root)"}"#
     case "/api/provider": return #"{"data":[{"id":"llm-proxy","name":"LLM proxy"}]}"#
+    case "/api/config" where progress:
+      return #"[{"type":"document","info":{"default_agent":"build","experimental":{"subagent_depth":2}}},{"type":"document","info":{"experimental":{"todo":true}}}]"#
     case "/api/config": return #"[{"type":"document","info":{"default_agent":"build"}}]"#
     // Detalhes: the plugins of the directory.
     case "/api/plugin":
@@ -324,7 +331,10 @@ private struct MacFixtureServer: Sendable {
       let at = now - value.minutes * minute
       let requests = (value.permission ? #","permissionAt":\#(at),"permissionCount":1"# : "")
         + (value.question ? #","questionAt":\#(at),"questionCount":1"# : "")
-      return #"{"session":\#(rootSession(value)),"messageAt":\#(at)\#(requests)}"#
+      let plan = progress && value.id == MacFixture.rootID && !MacAjustesChecks.progressEnded
+        ? #","progress":{"done":3,"finished":4,"total":7,"current":"Atualizar a Live Activity e o relógio","todos":\#(Self.todos)}"#
+        : ""
+      return #"{"session":\#(rootSession(value)),"messageAt":\#(at)\#(requests)\#(plan)}"#
     }.joined(separator: ",")
   }
 
@@ -439,12 +449,16 @@ private struct MacFixtureServer: Sendable {
       return #"{"type":"tool","id":"call_\#(child.id)","name":"subagent","state":{"status":"running","input":{"agent":"\#(child.agent)","description":"\#(child.title)"},"metadata":{"sessionID":"\#(child.id)"}},"time":{"created":\#(start),"ran":\#(start)}}"#
     }.joined(separator: ",")
     let model = #"{"id":"opus-5.5","providerID":"llm-proxy","variant":"xhigh"}"#
+    let plan = now - 130_000
+    let todo = progress
+      ? #"{"type":"tool","id":"call_todo","name":"todowrite","state":{"status":"completed","input":{"todos":\#(Self.todos)},"metadata":{"todos":\#(Self.todos)}},"time":{"created":\#(plan),"ran":\#(plan),"completed":\#(plan + 300)}},"#
+      : ""
     return longHistory(before: first) + [
       #"{"id":"msg_root_1","type":"user","time":{"created":\#(first)},"text":"Gera o app de Mac com a coluna de contexto ao vivo"}"#,
       #"{"id":"msg_root_2","type":"assistant","agent":"build","model":\#(model),"time":{"created":\#(first + 5_000),"completed":\#(done)},"content":[{"type":"text","text":\#(encoded)},\#(tools.joined(separator: ","))]}"#,
       #"{"id":"msg_root_3","type":"idle","time":{"created":\#(done + 1_000)}}"#,
       #"{"id":"msg_root_4","type":"user","time":{"created":\#(now - 25 * minute)},"text":"Agora liga os subagentes ao vivo na coluna 3"}"#,
-      #"{"id":"msg_root_5","type":"assistant","agent":"build","model":\#(model),"time":{"created":\#(now - 134_000)},"content":[\#(calls)]}"#,
+      #"{"id":"msg_root_5","type":"assistant","agent":"build","model":\#(model),"time":{"created":\#(now - 134_000)},"content":[\#(todo)\#(calls)]}"#,
     ]
   }
 

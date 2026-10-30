@@ -345,6 +345,9 @@ struct ConversationView: View {
               } else { openChild(parent) }
             }.appFont(.caption).foregroundStyle(theme.color(.textSecondary))
           }
+          if let progress = conversation.progress(fallback: sessions.progress(conversation.id)) {
+            ConversationProgressPill(progress: progress).padding(.bottom, 8)
+          }
           ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))
             .padding(.bottom, 8)
           ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id), footer: false)

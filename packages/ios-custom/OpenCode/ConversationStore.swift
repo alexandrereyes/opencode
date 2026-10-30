@@ -255,6 +255,19 @@ import UniformTypeIdentifiers
   var waiting: Bool { family?.permissions.isEmpty == false || family?.forms.isEmpty == false }
   var working: Bool { active.contains(id) || family?.active.isEmpty == false }
   var executing: Bool { active.contains(id) }
+  /// `experimental.todo` for this session's Location, read when the conversation opens and again whenever it starts
+  /// executing (not on every refresh, which runs after almost every event of a working session).
+  private(set) var progressEnabled = false
+  @ObservationIgnored private var progressGateDirectory: String?
+  /// Progresso, with the upstream web's rules (`SessionProgress`): the latest completed `todowrite` list before the
+  /// revert boundary, while the session itself executes and the list still has an open item. `fallback` is the
+  /// Sessões row's list, for a loaded tail that does not reach the latest call.
+  func progress(fallback: SessionProgress?) -> SessionProgress? {
+    guard executing, progressEnabled else { return nil }
+    let visible = SessionRevert.visible(messages, boundary: reversion.boundary(session))
+    let current = SessionProgress.latest(in: visible).map(SessionProgress.init(items:)) ?? (hasOlder ? fallback : nil)
+    return current?.open == true ? current : nil
+  }
   /// Server inbox plus optimistic admissions awaiting their echo.
   var pendingInbox: [InboxItem] {
     let admitted = Set(inbox.map(\.id))
@@ -775,6 +788,7 @@ import UniformTypeIdentifiers
           continue
         }
         if event.type.hasPrefix("session.revert.") { replaceHistory = true }
+        if event.type == "session.execution.started", event.data.owner == id { progressGateDirectory = nil }
         // Recorded on arrival, even when not applied now: a read in flight may not carry it.
         if event.data.owner == id { streams.record(event, sequence: frame.sequence) }
         // Snapshot and stream race: buffered deltas may already be in the snapshot.
@@ -1124,6 +1138,10 @@ import UniformTypeIdentifiers
       branch = snapshots.2.first?.branch ?? URL(fileURLWithPath: directory).lastPathComponent
       self.located = snapshots.2.first
       ownerMessages = parentMessages
+      if progressGateDirectory != directory {
+        progressGateDirectory = directory
+        progressEnabled = SessionProgress.enabled((try? await client.newSessionConfiguration(directory: directory)) ?? [])
+      }
       inbox = queueValue
       let observed = Set(queueValue.map(\.id) + messages.map(\.id)).union(settled)
       outbox.removeAll { observed.contains($0.id) }

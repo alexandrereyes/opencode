@@ -49,7 +49,14 @@ enum AgentsActivityFixtures {
 }
 """#
 
-  static let states: [String: String] = contract.merging(["state-long-rows": longRows]) { first, _ in first }
+  static let states: [String: String] = contract.merging([
+    "state-long-rows": longRows, "state-progress-calm": progressCalm,
+  ]) { first, _ in first }
+
+  /// Not a contract fixture: `state-progress` without its unread answer, so the Lock Screen shows the Progresso line.
+  static let progressCalm = #"""
+{"v":1,"updatedAt":1793104860000,"host":"MacBook Pro","counts":{"working":2,"question":0,"permission":0,"failed":0,"idle":0,"unread":0},"activeTotal":2,"focus":{"sessionID":"ses_01JZLIVEACTIVITY0000000001","title":"Live Activity no iOS","project":"ios-custom","directory":"/Users/alexandremartins/Worktrees/opencode2-live-activity","startedAt":1793104136000,"activity":"Editando ConversationStore.swift","progress":{"done":3,"total":7,"unit":"todos","current":"Atualizar a Live Activity e o relógio"}},"attention":[],"attentionTotal":0,"sessions":[{"sessionID":"ses_01JZLIVEACTIVITY0000000001","title":"Live Activity no iOS","project":"ios-custom","directory":"/Users/alexandremartins/Worktrees/opencode2-live-activity","status":"working","progress":{"done":3,"total":7,"unit":"todos","current":"Atualizar a Live Activity e o relógio"}},{"sessionID":"ses_01JZDEPLOYSWARM00000000005","title":"Deploy no Swarm","project":"core-infra","directory":"/Users/alexandremartins/Dev/core-infra","status":"working","progress":{"done":1,"total":2,"unit":"todos","current":"Atualizar o serviço no Swarm"}}],"needs":[]}
+"""#
 
   /// Not a contract fixture: four working rows with long titles and projects, like the device report.
   static let longRows = #"""
@@ -360,6 +367,83 @@ enum AgentsActivityFixtures {
       "project": "app",
       "directory": "/Users/alexandremartins/Dev/opencode2",
       "status": "idle"
+    }
+  ]
+}
+"""#,
+    "state-progress": #"""
+{
+  "v": 1,
+  "updatedAt": 1793104860000,
+  "host": "MacBook Pro",
+  "counts": {
+    "working": 2,
+    "question": 0,
+    "permission": 0,
+    "failed": 0,
+    "idle": 1,
+    "unread": 1
+  },
+  "activeTotal": 2,
+  "focus": {
+    "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+    "title": "Live Activity no iOS",
+    "project": "ios-custom",
+    "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+    "startedAt": 1793104136000,
+    "activity": "Editando ConversationStore.swift",
+    "progress": {
+      "done": 3,
+      "total": 7,
+      "unit": "todos",
+      "current": "Atualizar a Live Activity e o relógio"
+    }
+  },
+  "attention": [],
+  "attentionTotal": 0,
+  "sessions": [
+    {
+      "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+      "title": "Live Activity no iOS",
+      "project": "ios-custom",
+      "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+      "status": "working",
+      "progress": {
+        "done": 3,
+        "total": 7,
+        "unit": "todos",
+        "current": "Atualizar a Live Activity e o relógio"
+      }
+    },
+    {
+      "sessionID": "ses_01JZDEPLOYSWARM00000000005",
+      "title": "Deploy no Swarm",
+      "project": "core-infra",
+      "directory": "/Users/alexandremartins/Dev/core-infra",
+      "status": "working",
+      "progress": {
+        "done": 1,
+        "total": 2,
+        "unit": "todos",
+        "current": "Atualizar o serviço no Swarm"
+      }
+    },
+    {
+      "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+      "title": "Revisar navegação",
+      "project": "app",
+      "directory": "/Users/alexandremartins/Dev/opencode2",
+      "status": "idle"
+    }
+  ],
+  "needs": [
+    {
+      "sessionID": "ses_01JZNAVIGATIONREVIEW000004",
+      "title": "Revisar navegação",
+      "project": "app",
+      "directory": "/Users/alexandremartins/Dev/opencode2",
+      "kind": "unread",
+      "since": 1793104560000
     }
   ]
 }

@@ -18,6 +18,9 @@ struct SessionRowView: View {
   var detailTint: ThemeRole? = nil
 
   private var status: (text: String, tint: ThemeRole)? {
+    if row.state == .running, let progress = row.progress {
+      return ("trabalhando · \(progress.count)\(progress.current.map { " " + $0.content } ?? "")", .success)
+    }
     if row.state == .running { return (row.workingStatus(activity: preview.activity), .success) }
     if let detail, let tint = detailTint ?? row.state.tint { return (detail, tint) }
     return nil
@@ -42,7 +45,18 @@ struct SessionRowView: View {
               Circle().fill(theme.color(status.tint)).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) {
                 $0[VerticalAlignment.center] + 4
               }
-              Text(status.text).foregroundStyle(theme.color(status.tint))
+              if row.state == .running, let progress = row.progress {
+                // `trabalhando · ◔ 3/7 item…`: the item truncates, the ring and the count stay.
+                Text("trabalhando ·").foregroundStyle(theme.color(status.tint)).layoutPriority(1)
+                ConversationProgressRing(fraction: progress.fraction, color: theme.color(.primary),
+                  track: theme.color(.border))
+                  .frame(width: 12, height: 12)
+                  .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                Text("\(progress.count)\(progress.current.map { " " + $0.content } ?? "")")
+                  .monospacedDigit().foregroundStyle(theme.color(status.tint))
+              } else {
+                Text(status.text).foregroundStyle(theme.color(status.tint))
+              }
             }
             .appFont(.preview)
             .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)

@@ -2,8 +2,8 @@ import Foundation
 import OpenCodeKit
 
 /// DEBUG-only screens for captures: `-OpenCodeWatchFixture dashboard|question|permission|voice|unpaired|offline|
-/// complications`, optionally with `-OpenCodeWatchCombo working|working-unread|question-working-unread|nothing` for
-/// the state ring's combinations. Fixtures never touch the network, the Keychain or the shared cache.
+/// complications`, optionally with `-OpenCodeWatchCombo working|working-unread|question-working-unread|nothing|
+/// progress` for the state ring's combinations. Fixtures never touch the network, the Keychain or the shared cache.
 struct WatchFixture {
   enum Screen: String {
     case dashboard, question, permission, voice, unpaired, offline, complications
@@ -51,6 +51,8 @@ struct WatchFixture {
   /// The state ring's combinations (rev. 30/10), each with sessions that match its counts.
   enum Combo: String {
     case working, workingUnread = "working-unread", questionWorkingUnread = "question-working-unread", nothing
+    /// Two working sessions with a Progresso (rev. 2026-10-30), shown expanded.
+    case progress
 
     func state(now: Int) -> String {
       let work = """
@@ -83,6 +85,12 @@ struct WatchFixture {
            question + "," + unread("s5", "Gravador de voz", 360_000),
            row("s1", "Escolher banco do cache", "question") + "," + work + "," + row("s5", "Gravador de voz", "idle"))
         case .nothing: ("", 0, "", "", "")
+        case .progress:
+          (#""working":2,"question":0,"permission":0,"failed":0,"idle":0,"unread":0"#, 2, "", "",
+           #"{"sessionID":"s2","title":"Live Activity no iOS","project":"ios","directory":"/r/ios","status":"working","#
+             + #""progress":{"done":3,"total":7,"unit":"todos","current":"Atualizar a Live Activity e o relógio"}},"#
+             + #"{"sessionID":"s3","title":"Deploy no Swarm","project":"infra","directory":"/r/infra","status":"working","#
+             + #""progress":{"done":1,"total":2,"unit":"todos","current":"Atualizar o serviço no Swarm"}}"#)
         }
       guard self != .nothing else { return #"{"state":null,"host":"MacBook Pro"}"# }
       return """

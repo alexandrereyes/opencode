@@ -23,6 +23,8 @@ public struct SessionRow: Sendable, Identifiable {
   public let rank: Double
   /// A managed `custom.chats` conversation: listed in Todas and Chats, never under a repository filter.
   public var chat = false
+  /// Its Progresso while the session itself executes and the list still has an open item (`SessionProgress`).
+  public var progress: SessionProgress?
   public var id: String { entry.session.id }
   public var session: Session { entry.session }
   public var interactionAt: Double { entry.messageAt ?? session.time.created }
@@ -64,7 +66,8 @@ public enum SessionList {
   public static func rows(
     entries: [NavigationEntry], projects: [Project], active: Set<String>,
     pins: [String], notify: [String], autoApprove: Bool,
-    ranks: [String: Double], chatRoot: String?
+    ranks: [String: Double], chatRoot: String?,
+    progress: [String: SessionProgress] = [:]
   ) -> [SessionRow] {
     let pinnedIDs = pins.compactMap(SessionPreferenceKey.sessionID)
     let notifyIDs = Set(notify.compactMap(SessionPreferenceKey.sessionID))
@@ -117,7 +120,11 @@ public enum SessionList {
         requestCount: permissions + questions, working: running,
         background: executing ? nil : shells.first.map { $0.backgroundTitle ?? "" },
         rank: ranks[session.id] ?? session.time.updated,
-        chat: chatRoot.map { session.location.directory.hasPrefix($0 + "/") } ?? false)
+        chat: chatRoot.map { session.location.directory.hasPrefix($0 + "/") } ?? false,
+        // Like the web, only while the session itself executes; the event stream's list wins over the snapshot's.
+        progress: active.contains(session.id)
+          ? (progress[session.id] ?? entry.progress.map { SessionProgress(items: $0.todos) }).flatMap { $0.open ? $0 : nil }
+          : nil)
     }.sorted { left, right in
       if left.pinned != right.pinned { return left.pinned }
       if left.pinned, let a = pinnedIDs.firstIndex(of: left.id),

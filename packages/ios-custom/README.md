@@ -783,6 +783,51 @@ with one more and a real send, the comment sheet, and the keyboard suggestion, w
 test runner copies an image (its bar is outside the app's accessibility tree, so the test taps above the keys). The
 script then checks the sent messages' image parts on the server.
 
+### Progresso — 30 October
+
+**Alexandre, 30/10: option A on the Mac and the iPhone.** The agent's own list of steps (the Core `todowrite` tool,
+offered only while `experimental.todo` is on) is called **Progresso** in the interface ("Tarefas" already names
+background jobs). Contract and rules: [`plugin-app-custom/docs/progress.md`](../plugin-app-custom/docs/progress.md).
+
+- **Conversation:** a pill above the tray, `◔ 3/7 · current item ⌃` (`ConversationColumn/ConversationProgress.swift`,
+  shared). It opens the whole list: a sheet on the iPhone (medium and large detents, `Fechar`), a popover on the Mac,
+  with `Progresso · 3 de 7`, a bar with one segment per item and every item with its state (done ✓, in progress
+  ring, pending dashed circle, cancelled struck through). The Contexto column section is deferred.
+- **Sessões** (iPhone and Mac, `SessionRowView`): a working row reads `trabalhando · ◔ 3/7 current item…`; the item
+  truncates, the ring and the count stay.
+- **Live Activity and watch:** the session's `progress` is `unit: "todos"` with `current` instead of the subagent
+  count. Lock Screen: in the attention line's slot, only when nothing needs Alexandre, `● title · 3/7 · Agora: …`
+  (same fixed height). Expanded island: the row shows `Agora: …` instead of the project and a bare `3/7` as its
+  status. Smart Stack row and watch:
+  `3/7 · item`; the watch Painel adds an `Agora: …` line. Builds before this show `Trabalhando · 3/7`. The
+  complication and the push budget are unchanged.
+
+Rules, copied from upstream's web (`packages/app/src/session/composer/todos.ts`, `todo-pill.tsx`, `region.tsx`) in
+`OpenCodeKit/SessionProgress.swift`: the list is the input of the latest **completed** `todowrite` before the revert
+boundary (`SessionRevert.visible`); items need a non-empty `content`, an unknown status reads as pending; the number
+is completed/total (cancelled ones count in the total), the ring (completed + cancelled)/total; the current item is
+the first in progress, else the first pending, else the last completed; it shows only while `experimental.todo` is
+on (the last `/api/config` document that sets `experimental` decides, read when the conversation opens and again
+after `session.execution.started`), **the session itself** executes (`ConversationStore.executing`, not a parent
+waiting for subagents) and the list still has an open item. So it disappears when the work ends.
+
+Sources: the conversation reads its loaded messages; when the loaded tail does not reach the latest call it falls
+back to the Sessões row's list. Sessões takes `progress` from `custom.navigation/list` (the plugin folds the same
+events once for every Location) and, with the app open, folds `session.tool.input.started` → `called` → `success`
+itself (`SessionProgress.Tracker`), so a row moves without a navigation reload; the next snapshot replaces it.
+Successful `todowrite` calls stay out of Atividade and of the final-answer boundary: the pill represents them, and a
+dozen list updates per task would only split the activity groups. A failed call stays visible like any failed tool.
+
+Verification: `swift test` (`SessionProgressTests`: rules, revert, config gate, event tracker, row visibility, Live
+Activity labels and older backends); `AgentsActivityRenderTests` (`state-progress`, `state-progress-calm`, fixed
+heights); `test-mac-ajustes.sh progresso` (pill label, Sessões row, popover capture, then the run ends with the popover
+open and both leave); `script/test-progress.py` (`prepare` turns `experimental.todo` on only in the sandbox's fake
+repository and imports a session ending with a completed `todowrite`; `test` runs `SessionProgressUITests` on a
+fresh simulator: one tiny real Luna 6/low run checks the row, the pill, the sheet and that both leave at the end;
+`cleanup`). Captures: `AgentsActivityCaptureTests` with `OPENCODE_AGENTS_FIXTURE="state-progress-calm
+state-progress"`, `AgentsActivityRenderTests` with `TEST_RUNNER_OPENCODE_WATCH_DIR` (Smart Stack card) and
+`OPENCODE_WATCH_COMBO=progress script/capture-watch.sh … dashboard dashboard-end` (the Painel's rows with `Agora: …`).
+
 ### Composer editing stability — 23 October
 
 The live `UITextView.textStorage` owns editing. Native edits publish a lightweight content revision; SwiftUI only
@@ -931,7 +976,7 @@ search navigates to messages and reuses wave 6's position restoration).
 | 2. Acting                | Composer V2 with send and model/effort/agent selection; running tray with stop and background; queue with `Enviar agora`, edit, and remove; permission and question cards; agents list from the header capsule; context usage details. Model picker as in the web app (search over name, ID, and provider; favorites; default model; model and provider visibility); reusable toasts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 3. Advanced composer     | `@ / $ #` triggers with the suggestion panel and tokens; commands; snippets; attachments through `+`. Full-screen composer; drafts (with tokens and attachments) kept across app launches.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 4. Selection             | Native edit menu on responses; comments with quotes sent with the message; side question sheet. Copy a user message from its long-press menu.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 5. Session and reading   | Rename and archive from the `…` menu; session details sheet (project, worktree, branch, +/−, MCP/plugin/skill/LSP configuration); search in the conversation (loaded messages, then older pages on demand; there is no server-side search); incompatible-server and missing-directory notices. V2 removed `todowrite`: its historical parts remain suppressed. Native components, approved from real screenshots without mockups. |
+| 5. Session and reading   | Rename and archive from the `…` menu; session details sheet (project, worktree, branch, +/−, MCP/plugin/skill/LSP configuration); search in the conversation (loaded messages, then older pages on demand; there is no server-side search); incompatible-server and missing-directory notices. `todowrite` calls stay out of the activity; the list is the Progresso pill (rev. 2026-10-30, [Progresso](#progresso--30-october)). Native components, approved from real screenshots without mockups. |
 | 6. Reading continuity    | Final-answer divider with the web rule (`finish stop`, completed, no error or retry, after activity, prefers `final_answer`, possibly several per exchange). Reading position per server and session (follow the tail, or message ID plus offset), kept in memory and across launches, restored with cancellable paging and a fallback to the tail. Selecting text pauses following the tail. Expanded tools remembered per session (IDs only). "Ir às novas mensagens" when unread messages are above. Shift+Return sends and Return alone inserts a newline, on hardware keyboards (`UIKeyCommand`) and on the software keyboard through the private `UIKeyboardImpl` state (`isShifted` without `isAutoShifted` or `isShiftLocked`), isolated in one file and falling back to a newline; remove it if TestFlight processing rejects the build (`ITMS-90338`). Edge-swipe back keeps working. |
 | 7. Subagents and alerts  | Composer in child sessions, keeping the child's agent and with no notice; replies sent after the child delivered its result stay in the child (automatic delivery to the parent would need backend work and is out). In-app banner, tappable, when another session finishes, fails, or needs you, respecting mutes, ignoring child completions, deduplicated. Light haptics on explicit actions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
@@ -4957,8 +5002,9 @@ the backend owns interruption and cascading to descendants. Neither action retri
   Normal transcript/runtime publication stays atomic so restoration cannot lose concurrently prepended pages.
   Markdown parsing restarts explicitly when a recycled row reappears with unchanged text after releasing its blocks;
   the regression suite caught a blank-row case when returning from historical reading to the tail.
-- V2 **removed `todowrite`**, with no replacement. No task-list feature or model probe was added. All its historical
-  parts, including failures, are suppressed in rendering, step counts/kinds and final-answer activity projection.
+- `todowrite` came back in V2 behind `experimental.todo` (upstream PR #56947) and is the Progresso pill (rev.
+  2026-10-30, [Progresso](#progresso--30-october)). Its successful calls stay out of rendering, step counts/kinds and
+  final-answer projection; a failed call stays visible in the activity like any failed tool.
 - Missing/non-string `/api/info.version` produces the incompatible-server notice and retry, including on Sessões
   when a legacy server cannot open a conversation. No app/server semver equality is assumed. A missing directory is
   established only by `custom.worktrees/available == false` (queried in the default Location) or a matching typed
