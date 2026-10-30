@@ -253,12 +253,26 @@ singles one out as "the" session; `focus` is no longer rendered here (it stays i
 - Fixed metrics; the card must fit the 160 pt Lock Screen limit in every state without vertical `ViewThatFits`.
 
 **Attention first (rev. 2026-10-29, Option A of `.agent-artifacts/atencao/live-atencao.png`).** While `forYou`
-(question + permission + failed + unread) is above zero, the ring draws only those arcs (same colors, same order)
-with `forYou` / `para você` in the centre; the counters list them first and `N trabalhando` last in `textSecondary`,
+(question + permission + failed + unread) is above zero, `forYou` / `para você` is in the centre (the ring itself
+follows "State ring" below); the counters list them first and `N trabalhando` last in `textSecondary`,
 dropped first beyond four lines; the attention line shows the first `needs` item with its kind (`pergunta`,
 `permissão`, `erro`, `respondeu`) and `+K` = `forYou` − 1. Compact: `forYou` in a `primary` pill. Expanded: `forYou
 para você · N trabalhando` over the first two `needs`. Card taps open the first `needs` session. With `forYou` zero
 the rules below apply unchanged. Without `needs` (older backends) the app uses `attention`, then failed and idle rows.
+
+**State ring (rev. 2026-10-30, replaces the arc rules above and the Smart Stack's subagent ring).** One ring, the
+app's `AgentsStatusRing` drawn by `AgentsStatusRingView`, on the Lock Screen card, around the minimal island's mascot,
+on the Smart Stack card and in the watch app's complications and Painel. One segment per state with sessions,
+proportional to its count, clockwise from 12 o'clock (from the bottom opening on the watch) in this order and in the
+counters' colors: `question` (`accent`), `permission` (`warning`), `failed` (`error`), `unread` (`primary`),
+`working` (`success`; `textSecondary`, muted like its counter, while `forYou` > 0), and the `idle` fallback of older
+backends (`textSecondary`, dimmed). Small gaps between segments, one segment closes the circle, nothing at all leaves
+only the `border` track. Failures keep their own segment: they need Alexandre and count in `forYou`, but they are not
+a request, and the counters already show them apart. Each top-level session counts once, in the backend's precedence
+(question > permission > failed > working > unread: a session is unread only when it is not working and needs nothing
+else), so the segments add up to the sessions and the centre (`forYou`, or the working sessions as `N ativas` when it
+is zero) is exactly the segments other than `working`. Example: 2 unread and 2 working read `2 para você` over a ring
+half orange, half gray.
 
 **Dynamic Island** (from `opcao-3-painel-cotas.png`):
 
@@ -275,15 +289,14 @@ the rules below apply unchanged. Without `needs` (older backends) the app uses `
   1. `counts.failed > 0` → exclamation mark + `counts.failed`, in `error`;
   2. `counts.question > 0` → question mark + `counts.question`, in `accent`;
   3. `counts.permission > 0` → raised hand + `counts.permission`, in `warning`;
-  4. otherwise the mascot with a `success` ring.
+  4. otherwise the mascot inside the state ring (rev. 2026-10-30; it was a plain `success` ring).
 
 **Apple Watch Smart Stack** (`.small` supplemental family, rev. 2026-10-27; approved mock
 `.agent-artifacts/watch/smartstack-b3-anel-segmentado.png`). No watchOS app: declare
 `.supplementalActivityFamilies([.small])` and branch on `@Environment(\.activityFamily)` in the Lock Screen closure.
 
-- Left: the mascot inside a **segmented progress ring**. With `focus.progress`: `total` arcs with small gaps, the
-  first `done` in `success`, the rest in a dim track (`border`); above 8 subagents, one continuous arc filled
-  `done/total`. Working without progress: full `success` ring. Nothing working: track only.
+- Left: the mascot inside the **state ring** (rev. 2026-10-30; it used to be a subagent progress ring, whose
+  `done/total` remains in the working rows' status).
 - Badge overlapping the bottom of the ring, same priority as the minimal island: `!N` (`error`), `?N` (`accent`), hand
   + N (`warning`); none when there is no attention or failure.
 - Right: the first 2 `sessions` rows, separated by a hairline. Each row: bold title (one line, truncating) and a status

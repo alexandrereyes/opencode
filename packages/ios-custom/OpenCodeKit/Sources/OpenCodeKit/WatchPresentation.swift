@@ -1,57 +1,5 @@
 import Foundation
 
-// MARK: Ring
-
-/// The complication and dashboard ring: arcs proportional to the counts, in a fixed order, with a gap at the
-/// bottom for the mascot. While something needs Alexandre (Option A, 29/10) only those counts draw: questions,
-/// permissions, failures and unread sessions (orange `primary`), and the number is `forYou`. Otherwise working
-/// sessions draw in green; an older backend without `unread` adds its recently finished (`idle`) ones in gray. With
-/// no sessions at all the ring is fully gray.
-public struct WatchRing: Equatable, Sendable {
-  public struct Arc: Equatable, Sendable {
-    public let role: ThemeRole
-    /// Fractions of the drawable sweep (0…1), in drawing order.
-    public let start: Double
-    public let end: Double
-  }
-
-  public let arcs: [Arc]
-  /// The number in the centre, `forYou` or the active total; 0 shows the mascot alone.
-  public let number: Int
-  /// `primary` while it counts what needs Alexandre.
-  public let numberRole: ThemeRole
-  /// Degrees left open at the bottom for the mascot.
-  public static let gap: Double = 80
-
-  public init(counts: AgentsState.Counts?) {
-    let forYou = counts?.forYou ?? 0
-    number = forYou > 0 ? forYou : counts.map { $0.working + $0.question + $0.permission } ?? 0
-    numberRole = forYou > 0 ? .primary : .textStrong
-    let parts: [(ThemeRole, Int)] = counts.map {
-      forYou > 0
-        ? [(.accent, $0.question), (.warning, $0.permission), (.error, $0.failed), (.primary, $0.unread ?? 0)]
-        : [(.success, $0.working), (.accent, $0.question), (.warning, $0.permission), (.error, $0.failed),
-           ($0.finished.unread ? .primary : .border, $0.finished.count)]
-    } ?? []
-    let total = parts.reduce(0) { $0 + max($1.1, 0) }
-    guard total > 0 else {
-      arcs = [Arc(role: .border, start: 0, end: 1)]
-      return
-    }
-    var start = 0.0
-    var result: [Arc] = []
-    for (role, count) in parts where count > 0 {
-      let end = start + Double(count) / Double(total)
-      result.append(Arc(role: role, start: start, end: min(end, 1)))
-      start = end
-    }
-    arcs = result
-  }
-
-  /// Gray only: nothing working, waiting or failed (the mascot shows alone).
-  public var idle: Bool { arcs.allSatisfy { $0.role == .border } }
-}
-
 // MARK: Dashboard
 
 public enum WatchDashboardRow: Hashable, Sendable, Identifiable {

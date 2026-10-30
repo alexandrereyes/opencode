@@ -4114,8 +4114,20 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   the second bottom line of the card (it would pass 160 points), the thin outer work arc and Responder/Abrir buttons
   (the Live Activity has no intents). The Smart Stack card lists `needs` first too.
 - **Apple Watch:** the Lock Screen closure branches on `activityFamily`; `.supplementalActivityFamilies([.small])`
-  shows the mascot inside a segmented subagent ring (up to 8 segments, a continuous arc above), the minimal island's
+  shows the mascot inside the state ring (below; it was a subagent ring until 30/10), the minimal island's
   `!N`/`?N`/hand badge and the first two sessions, in fixed metrics for the smallest Smart Stack (152 × 69.5 points).
+- **State ring (rev. 30/10):** one ring for every summary, `AgentsStatusRing` (OpenCodeKit: segments, centre, arc
+  angles) drawn by `SharedUI/AgentsStatusRingView.swift` with the caller's colors (the theme snapshot in the Live
+  Activity, `WatchPalette` on the watch): the Lock Screen card, the minimal island's mascot, the Smart Stack card, the
+  watch complications (circular, corner, rectangular) and the Painel. A segment per state, proportional, in the
+  counters' colors and order (pergunta, permissão, com erro, não lida, trabalhando; working is gray while something
+  needs Alexandre, as its counter), with small gaps; nothing at all leaves only the track. The centre is unchanged:
+  `N para você` (questions + permissions + failures + unread, exactly the segments other than working), else
+  `N ativas`. Each session counts once by the backend's precedence (question > permission > failed > working >
+  unread), so the segments add up to the sessions. Until then, a ring with something for Alexandre drew only those
+  states: 2 unread + 2 working showed a ring all orange. Tests: `AgentsStatusRingTests`; captures of the
+  combinations: `AgentsActivityRenderTests.testStatusRingCombinations` (dark and light themes) and the watch fixture
+  `-OpenCodeWatchCombo` (`script/capture-watch.sh` with `OPENCODE_WATCH_COMBO`).
   The mascot is drawn as a vector shape in theme colors, so the extension needs no image asset.
 - **Driver:** `OpenCode/LiveActivity/AgentsActivityAgent.swift`. The main-actor agent forwards each event-stream
   connection (launch and every foreground) and `rpc.custom.live-activity.changed` (routed by `EventHub` like
@@ -4191,7 +4203,7 @@ watch's own Wi-Fi or cellular. The contract with the backend is
   mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
   state in the same Keychain group and reloads on WidgetKit push, when the app updates it, and otherwise every hour.
 - **Attention first (29/10, Option A of `.agent-artifacts/atencao/watch-atencao.png`):** while `counts.forYou` is
-  above zero, `WatchRing` draws only questions, permissions, failures and unread answers, with the orange number; the
+  above zero, the ring's number is that count in orange (the ring itself is the state ring since 30/10); the
   rectangular line reads `N para você` over a dimmed `1 pergunta · 2 não lidas · 6 trabalhando`; the corner shows the
   same number. Otherwise the green ring and `N trabalhando · nada para você`. The Painel lists `needs` first (requests
   still open Responder; failures and answers show their kind and time) and then a collapsed `Trabalhando N` that
@@ -4209,9 +4221,10 @@ watch's own Wi-Fi or cellular. The contract with the backend is
   `scheduleBackgroundRefresh` unless the application delegate implements `handle(_:)` (seen in the simulator: SwiftUI's
   `.backgroundTask` alone is not enough), so a `WKApplicationDelegateAdaptor` receives every background task, completing
   WatchConnectivity's only once nothing is pending. Every read sends `X-Watch-Client: app|background|widget`, which the gateway counts (`custom.watch` →
-  `stats`) and uses to skip pushes for a state the watch already read; the server pushes at once only for a new
-  question, permission or failure or for the active total reaching or leaving zero, folds the rest into one push per
-  30 minutes, and caps pushes at 40 a day ([`watch.md`](../plugin-app-custom/docs/watch.md), "Budget"). The
+  `stats`) and uses to skip pushes for a state the watch already read; the server pushes at once (at most one a minute,
+  priority 10) only for a new question, permission, failure or unread answer (rev. 30/10) or for the active total
+  reaching or leaving zero, folds the rest into one push per 30 minutes, and caps pushes at 50 a day
+  ([`watch.md`](../plugin-app-custom/docs/watch.md), "Budget"). The
   rectangular complication shows the age of the state next to `OpenCode` (`agora`, then `há N min.`; a second timeline
   entry makes the switch without a reload); the circular and corner families have no room. DEBUG builds accept
   `-OpenCodeWatchRefreshSeconds N` (a shorter refresh) and the `OpenCodeWatchPairing` default (base64 JSON pairing,

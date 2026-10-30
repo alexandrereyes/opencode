@@ -95,6 +95,54 @@ import XCTest
     }
   }
 
+  /// The state ring (rev. 30/10) in the combinations Alexandre checks, in the dark and light themes: the Lock Screen
+  /// card, the minimal island and the Apple Watch card. `OPENCODE_CAPTURE_DIR` keeps `ring-<theme>-<combo>-<view>.png`.
+  func testStatusRingCombinations() throws {
+    let now = Int((Date.now.timeIntervalSince1970 * 1000).rounded())
+    let work = #"""
+      {"sessionID":"s2","title":"Live Activity no iOS","project":"ios","directory":"/r/ios","status":"working"},
+      {"sessionID":"s3","title":"Deploy no Swarm","project":"infra","directory":"/r/infra","status":"working"}
+      """#
+    let unread = { (id: String, title: String) in
+      #"{"sessionID":"\#(id)","title":"\#(title)","project":"ios","directory":"/r/ios","kind":"unread","since":\#(now - 360_000)}"#
+    }
+    let question = #"""
+      {"sessionID":"s1","title":"Escolher banco do cache","project":"core","directory":"/r/core","kind":"question",
+       "since":\#(now - 180_000)}
+      """#
+    let combos: [(String, String, Int, String, String, String)] = [
+      ("working", #""working":3,"question":0,"permission":0,"failed":0,"idle":0,"unread":0"#, 3, "", "", work),
+      ("working-unread", #""working":2,"question":0,"permission":0,"failed":0,"idle":2,"unread":2"#, 2, "",
+       unread("s5", "Gravador de voz") + "," + unread("s6", "Anel do relógio"), work),
+      ("question-working-unread", #""working":2,"question":1,"permission":0,"failed":0,"idle":1,"unread":1"#, 3,
+       question, question + "," + unread("s5", "Gravador de voz"), work),
+      ("nothing", #""working":0,"question":0,"permission":0,"failed":0,"idle":0,"unread":0"#, 0, "", "", ""),
+    ]
+    for theme in ["openchamber-dark", "openchamber-light"] {
+      let attributes = AgentsActivityAttributes(serverKey: "mac-principal",
+        theme: AgentsTheme.snapshot(AppTheme.load(theme).value))
+      for (name, counts, active, attention, needs, sessions) in combos {
+        let json = """
+          {"v":1,"updatedAt":\(now),"host":"MacBook Pro","counts":{\(counts)},"activeTotal":\(active),
+           "attention":[\(attention)],"attentionTotal":\(attention.isEmpty ? 0 : 1),"needs":[\(needs)],
+           "sessions":[\(sessions)]}
+          """
+        let state = try JSONDecoder().decode(AgentsState.self, from: Data(json.utf8))
+        let ring = state.statusRing
+        XCTAssertEqual(ring.number, state.counts.forYou > 0 ? state.counts.forYou : state.counts.working, name)
+        let lock = AgentsLayout.lockHeight(state)
+        _ = try render(AgentsLockScreenView(attributes: attributes, state: state)
+          .background(attributes.color(.background)), size: CGSize(width: 374, height: lock),
+          name: "ring-\(theme)-\(name)-lock")
+        _ = try render(AgentsMinimalView(attributes: attributes, state: state).frame(width: 25, height: 25).padding(6)
+          .background(Circle().fill(.black)), size: CGSize(width: 37, height: 37), name: "ring-\(theme)-\(name)-minimal")
+        _ = try render(AgentsWatchView(attributes: attributes, state: state).padding(8)
+          .background(RoundedRectangle(cornerRadius: 18).fill(attributes.color(.surface))),
+          size: CGSize(width: 168, height: 85), name: "ring-\(theme)-\(name)-watch")
+      }
+    }
+  }
+
   func testServerKeysAreStablePerServerAndSeparateForLaunchOverrides() throws {
     let suite = "AgentsActivityRenderTests.\(UUID().uuidString)"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

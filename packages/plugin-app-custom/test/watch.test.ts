@@ -508,14 +508,15 @@ const widgetSetup = Effect.fn("test.widgetSetup")(function* () {
   return { devices, paired, sent, answer, stats, widget, run }
 })
 
-it.effect("WidgetKit pushes: urgent changes at once, the rest folded into one per window, the final state kept", () =>
+it.effect("WidgetKit pushes: urgent changes at once, at most one a minute, the rest folded per window", () =>
   Effect.gen(function* () {
     const { sent, run, stats, paired } = yield* widgetSetup()
     const window = widgetLimits.coalesceMs
+    const minute = widgetLimits.urgentSpacingMs
     // The first state after start is only recorded.
     yield* run(agents(1, 0, 0), T)
     expect(sent).toEqual([])
-    // Nothing pushed yet, so a routine change goes at once.
+    // Nothing pushed yet, so a routine change goes at once, at the power-saving priority.
     yield* run(agents(2, 0, 0), T + 1000)
     expect(sent).toEqual([
       {
@@ -531,89 +532,97 @@ it.effect("WidgetKit pushes: urgent changes at once, the rest folded into one pe
     // More or fewer sessions inside the window wait for it.
     expect(yield* run(agents(3, 0, 0), T + 2000)).toBe(T + 1000 + window)
     expect(sent).toHaveLength(1)
-    // A new question goes at once, whatever the window.
-    yield* run(agents(3, 1, 0), T + 3000)
+    // A new question goes as soon as a minute has passed since the last push.
+    yield* run(agents(3, 1, 0), T + 1000 + minute)
     expect(sent).toHaveLength(2)
-    // Answering it and a session ending are routine: they wait for one push a window after the last one.
-    expect(yield* run(agents(3, 0, 0), T + 4000)).toBe(T + 3000 + window)
-    expect(yield* run(agents(2, 0, 0), T + 5000)).toBe(T + 3000 + window)
+    // Another one inside that minute waits for its end and goes with the state then.
+    expect(yield* run(agents(3, 2, 0), T + 2000 + minute)).toBe(T + 1000 + 2 * minute)
     expect(sent).toHaveLength(2)
+    yield* run(agents(3, 2, 0), T + 1000 + 2 * minute)
+    expect(sent).toHaveLength(3)
+    // Answering them and a session ending are routine: they wait for one push a window after the last one.
+    const last = T + 1000 + 2 * minute
+    expect(yield* run(agents(3, 0, 0), last + 1000)).toBe(last + window)
+    expect(yield* run(agents(2, 0, 0), last + 2000)).toBe(last + window)
+    expect(sent).toHaveLength(3)
     // The wake-up delivers the final state, not each step.
-    yield* run(agents(2, 0, 0), T + 3000 + window)
-    expect(sent).toHaveLength(3)
-    yield* run(agents(2, 0, 0), T + 3000 + 2 * window)
-    expect(sent).toHaveLength(3)
-    // Reaching zero active sessions, and leaving zero, go at once.
-    yield* run(agents(0, 0, 0), T + 3000 + window + 1000)
+    yield* run(agents(2, 0, 0), last + window)
     expect(sent).toHaveLength(4)
-    yield* run(agents(1, 0, 0), T + 3000 + window + 2000)
-    expect(sent).toHaveLength(5)
-    // So does a new failure; its clearing waits.
-    yield* run(agents(1, 0, 1), T + 3000 + window + 3000)
-    expect(sent).toHaveLength(6)
-    yield* run(agents(1, 0, 0), T + 3000 + window + 4000)
-    expect(sent).toHaveLength(6)
-    expect(stats.snapshot(T + 3000 + window + 5000).devices).toEqual([
+    yield* run(agents(2, 0, 0), last + 2 * window)
+    expect(sent).toHaveLength(4)
+    // Reaching zero active sessions, leaving zero and a new failure go at once; clearing the failure waits.
+    yield* run(agents(0, 0, 0), last + window + minute)
+    yield* run(agents(1, 0, 0), last + window + 2 * minute)
+    yield* run(agents(1, 0, 1), last + window + 3 * minute)
+    yield* run(agents(1, 0, 0), last + window + 3 * minute + 1000)
+    expect(sent.map((push) => push.priority)).toEqual([5, 10, 10, 5, 10, 10, 10])
+    expect(stats.snapshot(last + window + 4 * minute).devices).toEqual([
       expect.objectContaining({
         deviceID: paired.deviceID,
-        day: expect.objectContaining({ pushes: { urgent: 4, coalesced: 2, failed: 0 }, capped: 0 }),
+        day: expect.objectContaining({ pushes: { urgent: 5, coalesced: 2, failed: 0 }, capped: 0 }),
       }),
     ])
   }),
 )
 
-it.effect(
-  "WidgetKit pushes: a change the ring shows is routine, and a state the watch already read is not pushed",
-  () =>
-    Effect.gen(function* () {
-      const { sent, run, widget, paired } = yield* widgetSetup()
-      const window = widgetLimits.coalesceMs
-      yield* run(agents(2, 0, 0), T)
-      yield* run(agents(2, 1, 0), T + 1000)
-      expect(sent).toHaveLength(1)
-      // A session that finishes unread moves the ring's arcs without changing the totals.
-      const unread = { ...agents(2, 1, 0), counts: { ...agents(2, 1, 0).counts, working: 0, unread: 1 } }
-      expect(yield* run(unread, T + 2000)).toBe(T + 1000 + window)
-      // The watch reads it (background refresh or the app) before the window ends: nothing left to push.
-      widget.seen(paired.deviceID, unread)
-      expect(yield* run(unread, T + 1000 + window)).toBeUndefined()
-      expect(sent).toHaveLength(1)
-      // What the watch read is also the base of the next urgent check: no rise, no urgent push.
-      widget.seen(paired.deviceID, agents(2, 2, 0))
-      yield* run(agents(2, 2, 0), T + 1000 + window + 1000)
-      expect(sent).toHaveLength(1)
-      yield* run(agents(2, 3, 0), T + 1000 + window + 2000)
-      expect(sent).toHaveLength(2)
-    }),
+it.effect("WidgetKit pushes: a new unread answer is urgent, and a state the watch already read is not pushed", () =>
+  Effect.gen(function* () {
+    const { sent, run, widget, paired } = yield* widgetSetup()
+    const window = widgetLimits.coalesceMs
+    const minute = widgetLimits.urgentSpacingMs
+    yield* run(agents(2, 0, 0), T)
+    yield* run(agents(2, 1, 0), T + 1000)
+    expect(sent).toHaveLength(1)
+    // A session that finishes unread: the active total stays, but it is what Alexandre wants to see.
+    const counts = agents(2, 1, 0).counts
+    const unread = { ...agents(2, 1, 0), counts: { ...counts, working: 0, unread: 1 } }
+    expect(yield* run(unread, T + 2000)).toBe(T + 1000 + minute)
+    yield* run(unread, T + 1000 + minute)
+    expect(sent.map((push) => push.priority)).toEqual([10, 10])
+    // Reading it is routine, and the watch reads it (background refresh or the app) before the window ends.
+    const viewed = { ...unread, counts: { ...unread.counts, unread: 0 } }
+    expect(yield* run(viewed, T + 2000 + minute)).toBe(T + 1000 + minute + window)
+    widget.seen(paired.deviceID, viewed)
+    expect(yield* run(viewed, T + 1000 + minute + window)).toBeUndefined()
+    expect(sent).toHaveLength(2)
+    // What the watch read is also the base of the next urgent check: no rise, no urgent push.
+    widget.seen(paired.deviceID, agents(2, 2, 0))
+    yield* run(agents(2, 2, 0), T + 1000 + minute + window + 1000)
+    expect(sent).toHaveLength(2)
+    yield* run(agents(2, 3, 0), T + 1000 + minute + window + 2000)
+    expect(sent).toHaveLength(3)
+  }),
 )
 
 it.effect(
-  "WidgetKit pushes: 40 a day, the last 10 kept for urgent changes, resumed when the day's first push leaves",
+  "WidgetKit pushes: 50 a day, the last 25 kept for urgent changes, resumed when the day's first push leaves",
   () =>
     Effect.gen(function* () {
       const { sent, run, stats } = yield* widgetSetup()
       const window = widgetLimits.coalesceMs
+      const minute = widgetLimits.urgentSpacingMs
       yield* run(agents(1, 0, 0), T)
-      // 30 routine pushes, one per window.
+      // 25 routine pushes, one per window.
       for (let index = 0; index < widgetLimits.coalescedCap; index++)
         yield* run(agents(2 + (index % 2), 0, 0), T + 1000 + index * window)
       expect(sent).toHaveLength(widgetLimits.coalescedCap)
       const first = T + 1000
       const after = first + widgetLimits.coalescedCap * window
-      // The 31st routine change waits for the day's first push to leave the window…
+      // The 26th routine change waits for the day's first push to leave the window…
       expect(yield* run(agents(1, 0, 0), after)).toBe(first + widgetLimits.dayMs)
       expect(sent).toHaveLength(widgetLimits.coalescedCap)
-      // …while urgent ones still go, up to 40.
-      for (let attention = 1; attention <= widgetLimits.dailyCap - widgetLimits.coalescedCap; attention++)
-        yield* run(agents(20, attention, 0), after + attention)
+      // …while urgent ones still go, one a minute, up to 50.
+      const urgent = widgetLimits.dailyCap - widgetLimits.coalescedCap
+      for (let attention = 1; attention <= urgent; attention++)
+        yield* run(agents(40, attention, 0), after + attention * minute)
       expect(sent).toHaveLength(widgetLimits.dailyCap)
-      expect(yield* run(agents(20, 11, 0), after + 100)).toBe(first + widgetLimits.dayMs)
-      yield* run(agents(20, 12, 0), after + 200)
+      expect(yield* run(agents(40, urgent + 1, 0), after + (urgent + 1) * minute)).toBe(first + widgetLimits.dayMs)
+      yield* run(agents(40, urgent + 2, 0), after + (urgent + 2) * minute)
       expect(sent).toHaveLength(widgetLimits.dailyCap)
       // Once the first push is a day old, the final state goes.
-      yield* run(agents(20, 12, 0), first + widgetLimits.dayMs)
+      yield* run(agents(40, urgent + 2, 0), first + widgetLimits.dayMs)
       expect(sent).toHaveLength(widgetLimits.dailyCap + 1)
-      expect(stats.snapshot(after + 300).devices[0]?.day.capped).toBe(2)
+      expect(stats.snapshot(after + (urgent + 3) * minute).devices[0]?.day.capped).toBe(2)
     }),
 )
 

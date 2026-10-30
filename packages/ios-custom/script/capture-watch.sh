@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Builds OpenCodeWatch for the watchOS simulator and captures its DEBUG fixture screens (no network, no
 # pairing). Usage: script/capture-watch.sh <simulator-udid> <output-dir> [fixture …]
+# OPENCODE_WATCH_COMBO=working|working-unread|question-working-unread|nothing picks the state ring's combination
+# (the files get it as a suffix).
 set -euo pipefail
 
 package="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,10 +18,12 @@ xcodebuild -quiet -project "$package/OpenCode.xcodeproj" -scheme OpenCodeWatch -
 xcrun simctl bootstatus "$simulator" -b >/dev/null
 xcrun simctl install "$simulator" "$derived/Build/Products/Debug-watchsimulator/OpenCodeWatch.app"
 mkdir -p "$output"
+combo=${OPENCODE_WATCH_COMBO:-}
 for fixture in "${fixtures[@]}"; do
+  name="real-$fixture${combo:+-$combo}.png"
   xcrun simctl launch --terminate-running-process "$simulator" br.com.alexandrem.opencode.watchkitapp \
-    -OpenCodeWatchFixture "$fixture" >/dev/null
+    -OpenCodeWatchFixture "$fixture" ${combo:+-OpenCodeWatchCombo "$combo"} >/dev/null
   sleep 4
-  xcrun simctl io "$simulator" screenshot "$output/real-$fixture.png" >/dev/null 2>&1
-  printf 'captured %s\n' "$output/real-$fixture.png"
+  xcrun simctl io "$simulator" screenshot "$output/$name" >/dev/null 2>&1
+  printf 'captured %s\n' "$output/$name"
 done

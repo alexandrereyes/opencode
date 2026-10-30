@@ -133,10 +133,12 @@ operation must keep the call. Ending the call from the system call UI ends it on
 
 ## Complication and widget push
 
-- Families: `accessoryCircular` (approved ring: arcs proportional to `counts.working` green, `question` lavender,
-  `permission` amber, `failed` red, `unread` orange (rev. 2026-10-28; gray `idle` only as fallback); big `activeTotal` in the centre; mascot in the gap; when
-  `activeTotal == 0`, the mascot alone with a gray ring), plus `accessoryCorner` and `accessoryRectangular`
-  (one line: `N ativas · M precisam de você`). Tap opens the app on the dashboard.
+- Families: `accessoryCircular` (the approved ring with the mascot in the bottom gap), `accessoryCorner` (the ring
+  closed around the number) and `accessoryRectangular` (the ring, `N para você` and its detail). All of them, the
+  Painel and the Live Activity draw the same **state ring** (rev. 2026-10-30, `docs/live-activity.md`, "State ring"):
+  one segment per state (`question` lavender, `permission` amber, `failed` red, `unread` orange, `working` green, or
+  gray while something needs Alexandre), `N para você` in orange in the centre, else the sessions working; with
+  nothing active, the mascot alone over the gray track. Tap opens the app on the dashboard.
 - Data: the widget timeline reads `/watch/v1/state` (high-level `URLSession`, allowed in widget extensions) and
   caches the last good state in the shared Keychain group; it refreshes when the app runs, on WidgetKit push, on the
   app's background refresh, and on its own timeline (rev. 2026-10-29: every 60 minutes, as a fallback).
@@ -146,32 +148,41 @@ operation must keep the call. Ending the call from the system call UI ends it on
   hour) on top of a 15-minute timeline, so WidgetKit ignored most of them and only opening the app updated the
   complication. The sources now split the budget:
   - **Urgent WidgetKit pushes, at once:** a new question or permission (`attentionTotal` rises), a new failure
-    (`counts.failed` rises), or `activeTotal` reaching or leaving 0. About 20–25 a day in the observed use.
+    (`counts.failed` rises), a **new unread answer** (`unread`, or `idle` from older backends, rises; rev.
+    2026-10-30: on 30/10 a session that finished unread waited up to 30 minutes for a folded push and Alexandre had to
+    open the app to see it), or `activeTotal` reaching or leaving 0. At most **one a minute** per device: sessions
+    that finish together go out as one push with the state at the end of that minute. They use `apns-priority` 10
+    (APNs may hold priority 5 and deliver it in bursts; Apple's widget push example omits the header, which means
+    10).
   - **Any other change of what the complication draws** (`activeTotal`, `attentionTotal`, the ring's counts
     `working`, `question`, `permission`, `failed` and `unread`, or `idle` from older backends): one folded push at
     most every **30 minutes** after the device's previous push, with the state current at that moment, so the
     final state is never lost. 30 minutes caps folded pushes at 2 an hour, about 28 over a 14-hour working day.
-  - **Daily cap:** at most **40 pushes per device in any 24 hours**; folded ones stop at **30**, keeping the last
-    10 for urgent changes. A held change goes out when a slot frees (the oldest push leaves the 24 hours); until
+  - **Daily cap (rev. 2026-10-30):** at most **50 pushes per device in any 24 hours**; folded ones stop at **25**,
+    keeping the other 25 for urgent changes (unread answers moved from folded to urgent, so the reserve grew; folded
+    pushes now only carry decreases and the working count). A held change goes out when a slot frees (the oldest push leaves the 24 hours); until
     then the watch's own refreshes cover it.
   - **Nothing for a state the watch already has:** every `/state` read (app, background refresh or widget) tells the
     server what the watch cached, and pushes compare against that, not against the last push.
   - **Watch side:** the background refresh (about every 30 minutes) fetches the state into the cache and reloads the
     complication only when what it draws changed; the timeline policy is 60 minutes; the app in front reloads freely
-    (not budgeted). Worst case on a busy day: about 25 urgent + 28 folded or refreshed + about 10 idle-time timeline
-    reloads, near 63, inside the 40–70; a quiet day stays far below.
+    (not budgeted). Worst case on a busy day: the 50 pushes (each one reload, which also refreshes the cache, so the
+    background refresh then finds nothing new) + about 10 idle-time timeline reloads, near 60, inside the 40–70; a
+    quiet day stays far below. On 29–30/10 the device read `/state` as `background` 1–2 times an hour all night and as
+    `widget` 1–9 times an hour, with 0–3 urgent pushes an hour.
 - **Data age (rev. 2026-10-29):** the rectangular complication and the Painel show how old the state is: `agora`
   during its first minute, then the live relative text (`há 3 min.`), from the cache's fetch time. The circular and
   corner families have no room for it.
 - **WidgetKit push (backend):** APNs `apns-push-type: widgets`, topic
-  `br.com.alexandrem.opencode.watchkitapp.push-type.widgets`, priority 5, body `{"aps":{"content-changed":true}}`,
+  `br.com.alexandrem.opencode.watchkitapp.push-type.widgets`, priority 10 when urgent and 5 when folded, body
+  `{"aps":{"content-changed":true}}`,
   reusing the existing APNs key (`OPENCODE_APNS_KEY_*`), following the rules above.
 
 ## Watch app (screens)
 
 All copy pt-BR, theme colors from `openchamber-dark` (no theme picker on the watch).
 
-1. **Painel** (root, `app-1-painel.png`): the ring with `activeTotal`, `N ativas` / `M precisam de você`; rows from
+1. **Painel** (root, `app-1-painel.png`): the state ring (rev. 2026-10-30) with `N para você`; rows from
    `attention` first (lavender question, amber permission), then `sessions` (status colors as in the Live Activity);
    a Liquid Glass microphone button bottom-right starts voice. Pull to refresh; refresh every 10 s while visible.
    Session rows have no navigation in v1 (no chevron); only attention rows open Responder. The microphone button
@@ -282,8 +293,8 @@ watch posts its token to `/widget-token`; pushes use the APNs client of the Live
 the Live Activity `changed` events and `/state` reads (rev. 2026-10-29, `widget.ts`): per device the planner keeps
 what the watch has (`known`, from its last push or its last `/state` read), the time of the last push and the push
 times of the last 24 hours. The first state after start is only recorded. A state equal to `known` sends nothing; an
-urgent one (see "Budget") goes at once while under 40 pushes in 24 hours; any other waits until 30 minutes after the
-last push and under 30 pushes in 24 hours, then sends the state current at that moment. Every push schedules a look
+urgent one (see "Budget") goes once a minute has passed since the last push and while under 50 pushes in 24 hours;
+any other waits until 30 minutes after the last push and under 25 pushes in 24 hours, then sends the state current at that moment. Every push schedules a look
 one window later, so a failed push (which neither counts nor changes `known`) is retried without a new change. An
 invalid token is dropped. The memo and counters are in memory: a restart starts them over and records the current
 state as known. WidgetKit still budgets these pushes, so the watch's background refresh and timeline remain.
@@ -291,6 +302,7 @@ state as known. WidgetKit still budgets these pushes, so the watch's background 
 **Diagnostics.** `/state` reads carry `X-Watch-Client` (`app` in front, `background` refresh, `widget` reload; older
 builds send none and count as `unknown`). `stats.ts` keeps counters per device and hour (48 hours) and logs each
 finished hour once, on the first count of the next one, as `Watch hourly usage` (`deviceID`, `hour`, the four
-readers, `urgent`, `coalesced`, `failed`, `capped`); pushes are logged as `Watch widget push sent` with `reason`, and
-the start of each wait for the cap as `Watch widget push capped`. To check the budget: the daily `widget` reads
+readers, `urgent`, `coalesced`, `failed`, `capped`); pushes are logged as `Watch widget push sent` with `reason`, the
+start of each wait for the cap as `Watch widget push capped`, and (rev. 2026-10-30) each `widget` and `background`
+read as `Watch state read` (`deviceID`, `reader`), a few dozen a day, to line reloads up with the pushes. To check the budget: the daily `widget` reads
 should stay within about 40–70, and pushes within the cap.
