@@ -8,7 +8,7 @@ import { PluginHost } from "@opencode/core/plugin/host"
 import { Provider } from "@opencode/core/provider"
 import { Rpc } from "@opencode/core/rpc"
 import { testEffect } from "./lib/effect"
-import { OfflinePluginTestLayer } from "./plugin/fixture"
+import { PluginTestLayer } from "./plugin/fixture"
 import { agentID, preferredModel, registerMaster } from "../../plugin-app-custom/src/master"
 
 const providerID = Provider.ID.make("llm-proxy")
@@ -18,7 +18,7 @@ const catalog = (id: string, variants: string[]) => ({
 })
 const luna = Model.Ref.make({ providerID, id: Model.ID.make("gpt-6-luna"), variant: Model.VariantID.make("low") })
 
-testEffect(OfflinePluginTestLayer).live(
+testEffect(PluginTestLayer).live(
   "Mestra info resolves providers registered after the plugin and follows real Mestra model selections",
   () =>
     Effect.gen(function* () {

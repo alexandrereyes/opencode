@@ -311,6 +311,8 @@ describe("input channel", () => {
     })
     expect(helper.inputAvailable()).toBe(true)
     expect(helper.inputGeneration()).toBe(1)
+    // connect resolves on admission; the config message that follows may arrive a tick later (Bun 1.4.4).
+    await until(() => helper.config() !== undefined)
     expect(helper.config()).toEqual(portrait)
     const changes: boolean[] = []
     helper.onInput((available) => changes.push(available))

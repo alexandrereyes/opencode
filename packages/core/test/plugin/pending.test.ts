@@ -5,6 +5,7 @@ import { Bus } from "@opencode/core/bus"
 import { KV } from "@opencode/core/kv"
 import { PersistentPty } from "@opencode/core/persistent-pty"
 import { SessionFamily } from "@opencode/core/session/family"
+import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { Worktree } from "@opencode/core/worktree"
 import { LayerNode } from "@opencode/util/effect/layer-node"
 import { Location } from "@opencode/core/location"
@@ -33,6 +34,7 @@ for (const failure of ["defect", "interrupt"] as const) {
           KV.node,
           Session.node,
           SessionFamily.node,
+          InstructionEntry.node,
           PersistentPty.node,
           Worktree.node,
         ]),

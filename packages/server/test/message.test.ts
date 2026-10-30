@@ -26,12 +26,12 @@ const messages: SessionMessageInfo[] = [
     status: "completed",
     reason: "manual",
     summary: "Conversation summary",
-    recent: "",
     time: { created: 700 },
   },
   { id: "msg_x", type: "user", text: "Third request", time: { created: 600 } },
   { id: "msg_system", type: "system", text: "Updated instructions", time: { created: 800 } },
   { id: "msg_a", type: "user", text: "Fourth request", time: { created: 500 } },
+  { id: "msg_idle", type: "idle", outcome: "succeeded", time: { created: 900 } },
 ]
 
 const setup = (inputMessages: SessionMessageInfo[] = messages) =>
@@ -51,7 +51,10 @@ const setup = (inputMessages: SessionMessageInfo[] = messages) =>
     })
     const session = yield* Effect.promise(async () => {
       const template = await api.session.create({ title: "Message filtering" })
-      return api.session.import({ info: { ...template, id: Session.ID.create() }, messages: inputMessages })
+      return api.experimental.session.import({
+        info: { ...template, id: Session.ID.create() },
+        messages: inputMessages,
+      })
     })
     return { api, handler, sessionID: session.id }
   })
@@ -84,6 +87,9 @@ it.live("filters message types before paginating in either direction through the
       expect(
         (await fixture.api.message.list({ sessionID: fixture.sessionID, type: "assistant", limit: 1 })).data,
       ).toEqual([messages[1]])
+      expect((await fixture.api.message.list({ sessionID: fixture.sessionID, type: "idle" })).data).toEqual([
+        messages[8],
+      ])
       expect((await fixture.api.message.list({ sessionID: fixture.sessionID, type: "shell" })).data).toEqual([])
     })
   }),

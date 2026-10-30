@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { AIError, HttpContext, RateLimitError, TransportError } from "@opencode/ai"
+import { AIError, HttpContext, RateLimitError, TransportError } from "@opencode/ai/effect"
 import { Agent } from "@opencode/schema/agent"
 import { Model } from "@opencode/schema/model"
 import { Provider } from "@opencode/schema/provider"
@@ -37,7 +37,12 @@ it.effect("retry exposes isolated HTTP metadata without changing the public erro
           expect(event.http?.headers).not.toBe(cause.reason.http?.headers)
           expect(Object.isFrozen(event.http)).toBe(true)
           expect(Object.isFrozen(event.http?.headers)).toBe(true)
-          expect(event.error).toEqual({ type: "provider.rate-limit", status: 429, message: "Rate limited" })
+          expect(event.error).toEqual({
+            type: "provider.rate-limit",
+            status: 429,
+            message: "Rate limited",
+            retryAfterMs: 18_000_000,
+          })
           expect(event.decision).toEqual({ retry: true, delay: 900_000 })
           seen.push(event.attempt)
           event.decision = { retry: true, delay: Number(event.http?.headers["x-private-reset"]) }

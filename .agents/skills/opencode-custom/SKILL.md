@@ -55,7 +55,7 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 ## 3. Implementar
 
 - Prefira pontos de extensão existentes quando reduzirem o trabalho de manutenção. Alterações diretas no backend são permitidas quando necessárias.
-- Preserve a estrutura do monorepo. Backend: `packages/core`, `server`, `protocol`, `schema`; plugin custom: `packages/plugin-app-custom`; apps iOS e Mac: `packages/ios-custom`; cliente: `packages/client`. `packages/app`, `ui`, `session-ui` e `storybook` permanecem idênticos à baseline upstream. O antigo web custom (`app-custom`, `ui-custom`, `session-ui-custom`) só existe na tag `web-custom-final`.
+- Preserve a estrutura do monorepo. Backend: `packages/core`, `server`, `protocol`, `schema`; plugin custom: `packages/plugin-app-custom`; apps iOS e Mac: `packages/ios-custom`; cliente: `packages/client`. `packages/app`, `ui`, `session-ui`, `gui-plugins` e `stories` permanecem idênticos à baseline upstream. O antigo web custom (`app-custom`, `ui-custom`, `session-ui-custom`) só existe na tag `web-custom-final`.
 - Mudou Protocol ou Server HttpApi público? Execute `bun run generate` em `packages/client`; nunca edite arquivos gerados manualmente.
 - Faça mudanças focadas, sem refatorações extensas não necessárias à feature.
 - Mudanças no fluxo de release (`packages/cli/script/custom-*.ts`, launchers, config gerada) ficam no fork e são documentadas em `docs/custom-macos.md`.

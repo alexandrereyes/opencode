@@ -44,7 +44,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && bun script/copy-assets.ts",
-    "typecheck": "tsgo --noEmit -p tsconfig.test.json",
+    "typecheck": "bun check --no-script -p tsconfig.test.json",
+    "typecheck:tsc": "tsc --noEmit -p tsconfig.test.json",
     "test": "bun test"
   },
   "dependencies": {
@@ -57,7 +58,7 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
-    "@typescript/native-preview": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "@typescript/native": "catalog:"
   }
 }

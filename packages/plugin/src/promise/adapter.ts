@@ -2,7 +2,8 @@ import { Tool } from "@opencode/schema/tool"
 import { SessionFamily } from "@opencode/schema/session-family"
 import { SessionScan } from "@opencode/schema/session-scan"
 import type { Rpc } from "@opencode/schema/rpc"
-import type { RpcCallOptions, RpcEventPayload } from "@opencode/client/promise/api"
+import type { OpenCodeEvent } from "@opencode/client"
+import type { RpcCallOptions, RpcEventPayload, SelectedEvent, SubscribeOptions } from "@opencode/client/promise/api"
 import { Effect, Schema, SchemaAST, Stream } from "effect"
 import type { Scope } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/http-api"
@@ -16,7 +17,6 @@ import type { RpcDomain, RpcHandlers } from "./rpc.js"
 type HostRegistration = { readonly dispose: Effect.Effect<void> }
 type Registration = { readonly dispose: () => Promise<void> }
 type PromiseContext = Parameters<Plugin["setup"]>[0]
-type PromiseEvent = ReturnType<PromiseContext["event"]["subscribe"]> extends AsyncIterable<infer Event> ? Event : never
 type HostRpc = Parameters<Parameters<typeof define>[0]["effect"]>[0]["rpc"]
 type StreamAdapter = <A, E>(
   stream: Stream.Stream<A, E>,
@@ -225,6 +225,7 @@ export function fromPromise(plugin: Plugin) {
         const [{ ClientApi }, { OpenCodeEvent }] = yield* Effect.promise(() =>
           Promise.all([import("@opencode/protocol/client"), import("@opencode/protocol/groups/event")]),
         )
+        const encodeOpenCodeEvent = Schema.encodeUnknownEffect(OpenCodeEvent)
         const AgentEndpoints = ClientApi.groups["server.agent"].endpoints
         const CommandEndpoints = ClientApi.groups["server.command"].endpoints
         const CredentialEndpoints = ClientApi.groups["server.credential"].endpoints
@@ -333,11 +334,13 @@ export function fromPromise(plugin: Plugin) {
             activate: adaptApiMethod(CredentialEndpoints["credential.activate"], host.credential.activate),
           },
           event: {
-            subscribe: (options) =>
+            subscribe: <Type extends Exclude<OpenCodeEvent["type"], "server.connected">>(
+              options?: SubscribeOptions<Type>,
+            ) =>
               streams(
-                host.event.subscribe().pipe(
-                  Stream.mapEffect((event) => Schema.encodeUnknownEffect(OpenCodeEvent)(event)),
-                  Stream.map((event) => event as unknown as PromiseEvent),
+                host.event.subscribe({ types: options?.types }).pipe(
+                  Stream.mapEffect((event) => encodeOpenCodeEvent(event)),
+                  Stream.map((event) => event as SelectedEvent<OpenCodeEvent, Type>),
                 ),
                 options,
               ),
@@ -345,6 +348,11 @@ export function fromPromise(plugin: Plugin) {
           experimental: {
             terminal: {
               read: adaptApiMethod(ExperimentalEndpoints["persistentPty.read"], host.experimental.terminal.read),
+            },
+            generate: {
+              text: adaptApiMethod(GenerateEndpoints["generate.text"], host.experimental.generate.text),
+              image: adaptApiMethod(GenerateEndpoints["generate.image"], host.experimental.generate.image),
+              decisions: adaptApiMethod(GenerateEndpoints["generate.decisions"], host.experimental.generate.decisions),
             },
           },
           generate: {
@@ -610,6 +618,7 @@ export function fromPromise(plugin: Plugin) {
               register(
                 host.session.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))), options),
               ),
+            list: adaptApiMethod(SessionEndpoints["session.list"], host.session.list),
             create: adaptApiMethod(SessionEndpoints["session.create"], host.session.create),
             get: adaptApiMethod(SessionEndpoints["session.get"], host.session.get),
             remove: adaptApiMethod(SessionEndpoints["session.remove"], host.session.remove),
@@ -652,6 +661,22 @@ export function fromPromise(plugin: Plugin) {
                 ),
               ),
             archive: (input) => run(host.session.archive(input)),
+            instructions: {
+              entry: {
+                list: adaptApiMethod(
+                  SessionEndpoints["session.instructions.entry.list"],
+                  host.session.instructions.entry.list,
+                ),
+                put: adaptApiMethod(
+                  SessionEndpoints["session.instructions.entry.put"],
+                  host.session.instructions.entry.put,
+                ),
+                remove: adaptApiMethod(
+                  SessionEndpoints["session.instructions.entry.remove"],
+                  host.session.instructions.entry.remove,
+                ),
+              },
+            },
           },
           shell: {
             hook: (name, callback) =>

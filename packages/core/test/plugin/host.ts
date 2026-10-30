@@ -11,8 +11,12 @@ import { AbsolutePath } from "@opencode/core/schema"
 import { WebSearch } from "@opencode/core/websearch"
 import { Effect, Stream } from "effect"
 
-type Overrides = Partial<Omit<Plugin.Context, "options" | "session">> & {
+type EventSource = ReturnType<Plugin.Context["event"]["subscribe"]>
+type Overrides = Partial<Omit<Plugin.Context, "options" | "session" | "event" | "storage">> & {
   readonly session?: Partial<Plugin.Context["session"]>
+  // Custom storage methods default to unused stubs, so upstream tests that pass only the native methods still type.
+  readonly storage?: Partial<Plugin.Context["storage"]>
+  readonly event?: { readonly subscribe: () => EventSource }
 }
 export function host(overrides: Overrides = {}): Plugin.Context {
   return {
@@ -65,12 +69,15 @@ export function host(overrides: Overrides = {}): Plugin.Context {
     credential: overrides.credential ?? {
       activate: () => Effect.die("unused credential.activate"),
     },
-    event: overrides.event ?? {
-      subscribe: () => Stream.empty,
-    },
+    event: { subscribe: events(overrides.event?.subscribe ?? (() => Stream.empty)) },
     experimental: overrides.experimental ?? {
       terminal: {
         read: () => Effect.die("unused experimental.terminal.read"),
+      },
+      generate: {
+        text: () => Effect.die("unused experimental.generate.text"),
+        image: () => Effect.die("unused experimental.generate.image"),
+        decisions: () => Effect.die("unused experimental.generate.decisions"),
       },
     },
     generate: overrides.generate ?? {
@@ -134,13 +141,14 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       transform: () => Effect.die("unused skill.transform"),
       reload: () => Effect.die("unused skill.reload"),
     },
-    storage: overrides.storage ?? {
+    storage: {
       get: () => Effect.die("unused storage.get"),
       set: () => Effect.die("unused storage.set"),
       remove: () => Effect.die("unused storage.remove"),
       scan: () => Effect.die("unused storage.scan"),
       update: () => Effect.die("unused storage.update"),
       adoptLegacy: () => Effect.die("unused storage.adoptLegacy"),
+      ...overrides.storage,
     },
     shell: overrides.shell ?? {
       hook: () => Effect.die("unused shell.hook"),
@@ -178,6 +186,7 @@ export function host(overrides: Overrides = {}): Plugin.Context {
     },
     session: {
       hook: overrides.session?.hook ?? (() => Effect.die("unused session.hook")),
+      list: overrides.session?.list ?? (() => Effect.die("unused session.list")),
       create: overrides.session?.create ?? (() => Effect.die("unused session.create")),
       get: overrides.session?.get ?? (() => Effect.die("unused session.get")),
       remove: overrides.session?.remove ?? (() => Effect.die("unused session.remove")),
@@ -200,6 +209,13 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       family: overrides.session?.family ?? (() => Effect.die("unused session.family")),
       scan: overrides.session?.scan ?? (() => Effect.die("unused session.scan")),
       archive: overrides.session?.archive ?? (() => Effect.die("unused session.archive")),
+      instructions: overrides.session?.instructions ?? {
+        entry: {
+          list: () => Effect.die("unused session.instructions.entry.list"),
+          put: () => Effect.die("unused session.instructions.entry.put"),
+          remove: () => Effect.die("unused session.instructions.entry.remove"),
+        },
+      },
     },
   }
 }
@@ -251,13 +267,15 @@ export function providerHost(providers: Provider.Interface): Plugin.Context["pro
   return {
     list: () => providers.available().pipe(Effect.map(located)),
     get: (input) =>
-      providers.get(Provider.ID.make(input.providerID)).pipe(
-        Effect.flatMap((provider) =>
-          provider === undefined
-            ? Effect.fail(new Error(`Provider not found: ${input.providerID}`))
-            : Effect.succeed(located(provider)),
+      providers
+        .get(Provider.ID.make(input.providerID))
+        .pipe(
+          Effect.flatMap((provider) =>
+            provider === undefined
+              ? Effect.fail(new Error(`Provider not found: ${input.providerID}`))
+              : Effect.succeed(located(provider)),
+          ),
         ),
-      ),
     reload: providers.reload,
     transform: (callback) =>
       providers.transform((editor) =>
@@ -522,4 +540,11 @@ function located<A>(data: A) {
     }),
     data,
   }
+}
+
+// Filter like the real host, so a fake source can emit any event type.
+function events(source: () => EventSource) {
+  const subscribe = (input?: { readonly types?: ReadonlyArray<string> }): EventSource =>
+    source().pipe(Stream.filter((event) => !input?.types?.length || input.types.includes(event.type)))
+  return subscribe as Plugin.Context["event"]["subscribe"]
 }

@@ -9,6 +9,7 @@ import { Config } from "../../config.js"
 import { Watcher } from "../../filesystem/watcher.js"
 import { Skill } from "../../skill.js"
 import { SkillFile } from "./skill-file.js"
+import { SkillScan } from "./skill-scan.js"
 
 export const Plugin = define({
   id: "opencode.config.compatibility",
@@ -20,6 +21,8 @@ export const Plugin = define({
     const changes = yield* PubSub.sliding<string>(1)
     const lock = Semaphore.makeUnsafe(1)
     const skills: Skill.Info[] = []
+    const compatibility = () =>
+      config.compatibility ? config.compatibility() : Effect.succeed({ claude: [], agents: [] })
 
     const watch = Effect.fn("ConfigCompatibilityPlugin.watch")(function* (
       target: string,
@@ -27,7 +30,9 @@ export const Plugin = define({
     ) {
       const key = `${type}:${target}`
       if (yield* FiberMap.has(watches, key)) return key
-      const updates = yield* watcher.subscribe({ path: target, type })
+      const updates = yield* watcher.subscribe(
+        type === "directory" ? { path: target, type, ignore: SkillScan.ignore } : { path: target, type },
+      )
       yield* FiberMap.run(
         watches,
         key,
@@ -39,7 +44,7 @@ export const Plugin = define({
 
     const refresh = Effect.fn("ConfigCompatibilityPlugin.refresh")(
       function* () {
-        const roots = config.compatibility ? yield* config.compatibility() : { claude: [], agents: [] }
+        const roots = yield* compatibility()
         const directories = [...roots.claude, ...roots.agents].map((root) => path.join(root, "skills"))
         const loaded = new Map<Skill.ID, Skill.Info>()
         const watched = new Set<string>()
@@ -48,10 +53,7 @@ export const Plugin = define({
           // Claude and agents roots may resolve to the same skills directory; scan it once.
           if (!resolved || watched.has(`directory:${resolved}`)) continue
           watched.add(yield* watch(resolved, "directory"))
-          const files = yield* fs
-            .scan("{*.md,**/SKILL.md}", { cwd: resolved, absolute: true, include: "file", symlink: true, dot: true })
-            .pipe(Effect.orElseSucceed(() => [] as string[]))
-          for (const filepath of files.toSorted()) {
+          for (const filepath of yield* SkillScan.scan(resolved)) {
             const content = yield* fs.readFileStringSafe(filepath).pipe(Effect.orElseSucceed(() => undefined))
             if (!content) continue
             const parsed = SkillFile.parse(resolved, filepath, content)
@@ -80,10 +82,10 @@ export const Plugin = define({
       Stream.runForEach(() => reload),
       Effect.forkScoped({ startImmediately: true }),
     )
-    // Config forwards every raw watcher event and each Location runs this plugin, so only root
-    // appearance or removal may rescan, and it shares the debounce above.
     yield* config.changes().pipe(
-      Stream.filter((update) => [".claude", ".agents"].includes(path.basename(update.path))),
+      Stream.filterEffect((update) =>
+        Effect.map(compatibility(), (roots) => isCompatibilitySource(roots, update.path)),
+      ),
       Stream.runForEach((update) => PubSub.publish(changes, update.path).pipe(Effect.asVoid)),
       Effect.forkScoped({ startImmediately: true }),
     )
@@ -93,3 +95,15 @@ export const Plugin = define({
     })
   }),
 })
+
+const sourceDirectories = [".claude", ".agents"] as const
+
+function isCompatibilitySource(
+  roots: { readonly claude: readonly string[]; readonly agents: readonly string[] },
+  file: string,
+) {
+  return (
+    sourceDirectories.some((name) => path.basename(file) === name) ||
+    [...roots.claude, ...roots.agents].some((root) => FSUtil.contains(root, file))
+  )
+}

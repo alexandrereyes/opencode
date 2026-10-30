@@ -175,7 +175,13 @@ export function world() {
     message: {
       list: ({ sessionID }) => Effect.sync(() => ({ data: messages.get(sessionID) ?? [], cursor: {} })),
     },
-    event: { subscribe: () => Stream.fromPubSub(bus) },
+    event: {
+      // The real domain narrows the stream to the requested types; the fixture filters the same way.
+      subscribe: ((input?: { readonly types?: ReadonlyArray<string> }) =>
+        Stream.fromPubSub(bus).pipe(
+          Stream.filter((event) => !input?.types?.length || input.types.includes(event.type)),
+        )) as WatchContext["event"]["subscribe"],
+    },
     ensureMaster: () =>
       Effect.sync(() => {
         masters.ensured += 1

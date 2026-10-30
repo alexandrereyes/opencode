@@ -47,6 +47,105 @@ The upstream-owned files that name the default branch (`AGENTS.md`,
 `AGENTS.md` conflict, keep the custom branch guidance and replace `v2` and
 `origin/v2` with `dev` and `upstream/dev`.
 
+## V2 integration — 2026-10-29
+
+### Baselines
+
+- Custom parent: `c5ca26def` (`chore: remove the custom web app`).
+- Integrated upstream: `79349e840ffe16c7bdad8cb86638c2ef929e0843` (`upstream/dev`, source of the published 2.2.1
+  `latest` release; 1,074 commits after `d4a6223d0`). `upstream/dev` had moved on to `b2bd02ee7` when the merge
+  started; those later commits are not integrated.
+- Local integration branch: `merge-upstream-221`.
+- Runtime: Bun 1.4.4 (#58087). Preparing a release from this revision needs Bun 1.4.4 as the `bun` that runs the
+  `custom:*` commands; see `docs/custom-macos.md`.
+
+The upstream-owned `packages/app`, `packages/ui`, `packages/session-ui`, `packages/gui-plugins` (formerly
+`gui-extensions`), `packages/stories` (formerly `storybook`), `packages/tui`, `packages/sdk` and `packages/ai` trees
+match the integrated upstream revision exactly. With the custom web app gone, no upstream UI work needs porting.
+
+The 374 blobs of the target tree that the `blob:none` clone lacked were fetched in one batch with
+`git fetch upstream --filter=blob:none --stdin` before merging.
+
+### Integration points
+
+- Root `package.json` is upstream's plus the `custom:*` scripts and the `@expo/serve-sim` patch. `script/publish.ts`
+  (#59046) and the committed `services/www` OpenAPI copies (#58593) are deleted, as upstream did.
+- Typechecking moved to `bun check` (TypeScript 7.1 through `@typescript/native`). `plugin-app-custom` follows
+  upstream's package pattern: `typecheck` runs `bun check --no-script -p tsconfig.test.json` and `typecheck:tsc` runs
+  `tsc`; `@typescript/native-preview` is replaced by `@typescript/native`. Its test config widens `rootDir` to `..`,
+  because the tests import core test helpers, and `declaration` is off: only the release bundle and the sandbox load
+  `dist`, as JavaScript, and `tsc` now rejects the non-portable inferred types of `master/inventory.ts` when emitting
+  declarations (TS2883). `custom-release.ts` stops preparation before building when the running Bun does not satisfy
+  the root `packageManager`.
+- Native session archiving (#53759) replaces the custom core archive. Upstream's `session.archived` event has the
+  same type, version and payload as the custom one, so stored custom events replay unchanged; the custom event
+  definition, projection, message-updater case, event-manifest entry, Solid client case and `Session.archive` are
+  removed. Upstream's projection sets `time_updated` to the archive time, where the custom one kept it. The plugin
+  host's `session.archive` keeps the custom contract (stop first): it interrupts the session, waits for idle and then
+  calls upstream's `Session.archive`. It no longer closes the model transport explicitly; the transport's idle timeout
+  closes it. The custom `Session.archive` cases of `session-remove.test.ts` are dropped in favor of upstream's
+  `session-archive.test.ts`, and `test/plugin/session-controls.test.ts` covers the stop-first host behavior.
+- `Session.list` is upstream's paginated list (#56205, default limit 50) plus the custom `scan`. The iOS app and the
+  custom plugin pass explicit limits or use `scan`.
+- `packages/core/src/location-activity.ts` takes upstream's version: #57274 keeps Locations with an active execution or
+  a running background job alive, which covers the custom `82615eb0f` (keep Locations alive while a question or
+  permission waits), so the custom check is removed and the four upstream `LocationActivity eviction` cases that
+  rejected it no longer apply to custom code.
+- `packages/core/src/config/plugin/compatibility.ts` and `packages/server/src/handlers/mcp.ts`: see their entries in
+  `docs/upstream-overrides.md`.
+- `packages/server/src/handlers/message.ts` takes upstream's handler, with its opt-in media references (#59103). The
+  custom `MessagePage.Cursor` stays in `packages/schema` for `custom.transcript`; the server test that pages with a
+  shared cursor keeps both encodings compatible.
+- `packages/core/src/session/runner/retry.ts` takes upstream's `ModelRetry` policy and keeps the custom frozen `http`
+  metadata in the `retry` hook event. `packages/core/src/aisdk.ts` and `packages/cli/test/service.test.ts` take
+  upstream's versions; their custom differences were merge residue or an equivalent isolation fix.
+- The plugin SDK picks `wait` and `instructions` from the experimental session API (#59072, #56550) next to the custom
+  `active`, `view`, `form.reply`, family, `scan` and `archive` members, in both the Effect and Promise domains and the
+  adapter. The Promise MCP editor uses Effect's `Types.DeepMutable`, as upstream.
+- Upstream split the plugin guide: the Promise reference moved from `build/plugins/index.mdx` to `server.mdx`. The
+  custom sections (session scan, live pending requests, archive, storage `update`/`adoptLegacy`, retry HTTP metadata,
+  the model-hook options type) move with it. The stale custom "Revert planning" section is not carried over: no
+  `revert.plan` hook exists in the code.
+- Core test fixtures: `makePluginTestLayer` takes upstream's signature (a `generate` layer, offline models always) with
+  the custom `SessionFamily` node, so the custom `OfflinePluginTestLayer` is gone and custom tests use
+  `PluginTestLayer`. The test host's storage defaults now merge partial overrides, so upstream tests that pass only the
+  native storage methods type-check. Custom tests add `InstructionEntry.node` (now required by the plugin host), the
+  MCP `attach` member, upstream's `retryAfterMs` in the retry error, and the moved `@opencode/ai/effect` and
+  `@opencode/ai/route` imports. Upstream's `permission.test.ts` JSON-encoding case expects the custom `created` field.
+- The custom watch fixture filters `event.subscribe` by type, as the plugin event domain now does (#58864).
+- Under Bun 1.4.4, serve-sim's config message can arrive one tick after `connect` resolves on admission; the iOS
+  simulator input-channel test waits for it. Production is unaffected: `relay` reads the current config and `stream`
+  subscribes to later ones.
+- Regenerating the Client from source restores the custom types; the Protocol OpenAPI document differs from
+  upstream's only by the custom `slash` and `created` fields.
+
+Shared implementation overlap against the fixed upstream baseline, measured with the command of the 2026-09-17 beta
+integration using `79349e840`: **42 modified upstream files, 639 added lines, 30 removed lines** (47, 732 and 59
+against `d4a6223d0` before this merge).
+
+### Validation
+
+- `bun.lock` is regenerated with Bun 1.4.4 from upstream's lockfile; frozen installation and root `bun run check` pass.
+- Suites ran per package in a clean environment (`env -i` with `HOME`, `TMPDIR`, `LC_ALL=C`, an empty
+  `AZURE_CONFIG_DIR` and no inherited `OPENCODE_*` or `XDG_*` from the live server). After the merge, with Bun 1.4.4:
+  Schema 93, Util 135, Protocol 10, Client 242, Plugin 39, SDK 39, CLI 400 (nine skipped) and CodeMode 1,473 pass;
+  custom plugin 287 (two skipped, one failure); Server 120 (one skipped, one failure); Core 7,033 (23 skipped,
+  12 failures). The custom parent `c5ca26def` with Bun 1.4.2 in the same environment: Schema 72, Util 95, Protocol 9,
+  Client 230, Plugin 11, custom plugin 288 (two skipped) and CodeMode 1,398 pass.
+- Failures not caused by the merge:
+  - Core GitLab OAuth (11): port 8080 is held by OrbStack. Core `Core test environment > isolates global home and XDG
+    roots`: fails identically on the parent.
+  - Server `serves custom app RPCs from the same Location plugin over HTTP` and the custom plugin's Chrome resource
+    case `a phone page shrinks frames while a finger scrolls…`: fail only in the full-suite run and pass alone on both
+    revisions.
+  - The first full runs of both revisions coincided with a load average of 250–650 on 16 cores; their extra failures
+    (Formatter, ShellTool, LocationServiceMap, watcher, Session.move and timeouts) passed when the 21 affected Core
+    files and the Server, CLI and custom plugin files were rerun one by one on a calm machine, except the cases above.
+- Two failures were caused by the merge and are fixed in it: upstream's `permission.test.ts` JSON-encoding case lacked
+  the custom `created` field, and the iOS simulator input-channel test assumed the config message arrives before
+  `connect` resolves, which Bun 1.4.4 no longer guarantees (the same test passes with Bun 1.4.2 on both revisions and
+  fails with Bun 1.4.4 on both before the fix).
+
 ## V2 integration — 2026-10-17
 
 ### Baselines

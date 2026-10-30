@@ -43,6 +43,7 @@ const mcp = (options?: {
           : []),
       ]),
     add: () => Effect.die("unused mcp.add"),
+    attach: () => Effect.die("unused mcp.attach"),
     connect: () => Effect.die("unused mcp.connect"),
     disconnect: () => Effect.die("unused mcp.disconnect"),
     remove: () => Effect.die("unused mcp.remove"),

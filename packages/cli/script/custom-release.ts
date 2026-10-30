@@ -117,7 +117,7 @@ export async function prepare(home: string, dryRun = false) {
   const commit = await command(["git", "rev-parse", "HEAD"])
   if (dryRun) {
     console.log(
-      `Prepare ${commit}: git archive, frozen install, package typechecks, custom web/plugin/CLI build; publish ${home}/releases/${commit}`,
+      `Prepare ${commit}: git archive, frozen install, package typechecks, plugin and CLI build (embedded upstream web app); publish ${home}/releases/${commit}`,
     )
     return commit
   }
@@ -125,6 +125,10 @@ export async function prepare(home: string, dryRun = false) {
     await publish(home, commit)
     return commit
   }
+  // The build scripts enforce the root packageManager's Bun, and the release embeds the Bun that runs this script.
+  const bun = (await Bun.file(path.join(repository, "package.json")).json()).packageManager.split("@")[1]
+  if (!Bun.semver.satisfies(Bun.version, `^${bun}`))
+    throw new Error(`Preparing this commit requires Bun ${bun} (root packageManager); this is Bun ${Bun.version}`)
   await mkdir(path.join(home, "releases"), { recursive: true })
   await mkdir(path.join(home, "builds"), { recursive: true })
   const work = await mkdtemp(path.join(home, "builds", "prepare-"))

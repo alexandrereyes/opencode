@@ -9,7 +9,7 @@ import { Rpc } from "@opencode/core/rpc"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/schema/session"
 import { testEffect } from "./lib/effect"
-import { OfflinePluginTestLayer } from "./plugin/fixture"
+import { PluginTestLayer } from "./plugin/fixture"
 import { Chats } from "../../plugin-app-custom/src/chats/rpc"
 import { agentID, registerMaster } from "../../plugin-app-custom/src/master"
 import { Master } from "../../plugin-app-custom/src/master/rpc"
@@ -18,7 +18,7 @@ import { registerPreferences } from "../../plugin-app-custom/src/preferences"
 const providerID = Provider.ID.make("llm-proxy")
 const luna = Model.Ref.make({ providerID, id: Model.ID.make("gpt-6-luna"), variant: Model.VariantID.make("low") })
 
-testEffect(OfflinePluginTestLayer).live(
+testEffect(PluginTestLayer).live(
   "Mestra ensure creates one session for concurrent callers and recreates a deleted or archived one",
   () =>
     Effect.gen(function* () {

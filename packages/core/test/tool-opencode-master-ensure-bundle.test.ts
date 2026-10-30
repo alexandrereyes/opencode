@@ -11,9 +11,9 @@ import { Session } from "@opencode/schema/session"
 import { Master } from "../../plugin-app-custom/src/master/rpc"
 import { testEffect } from "./lib/effect"
 import { tmpdirScoped } from "./fixture/tmpdir"
-import { OfflinePluginTestLayer } from "./plugin/fixture"
+import { PluginTestLayer } from "./plugin/fixture"
 
-const it = testEffect(OfflinePluginTestLayer)
+const it = testEffect(PluginTestLayer)
 // The pointer production kept after the web deleted its Mestra session.
 const deleted = Session.ID.make("ses_0318DBC98EA04683BEB8ACECD7EF3F7F")
 

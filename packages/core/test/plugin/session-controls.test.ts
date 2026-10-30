@@ -12,6 +12,7 @@ import { Plugin } from "@opencode/core/plugin"
 import { PluginHost } from "@opencode/core/plugin/host"
 import { Session } from "@opencode/core/session"
 import { SessionFamily } from "@opencode/core/session/family"
+import { InstructionEntry } from "@opencode/core/session/instruction-entry"
 import { SessionRunCoordinator } from "@opencode/core/session/run-coordinator"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Worktree } from "@opencode/core/worktree"
@@ -21,9 +22,9 @@ import { tempGlobalLayer } from "../fixture/global"
 import { offlineModels } from "../fixture/models"
 import { tmpdirScoped } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
-import { OfflinePluginTestLayer } from "./fixture"
+import { PluginTestLayer } from "./fixture"
 
-testEffect(OfflinePluginTestLayer).live(
+testEffect(PluginTestLayer).live(
   "plugin active snapshots map real coordinator ownership without starting execution",
   () =>
     Effect.gen(function* () {
@@ -50,6 +51,34 @@ testEffect(OfflinePluginTestLayer).live(
     }),
 )
 
+testEffect(PluginTestLayer).live("plugin archive interrupts active work and waits for it before archiving", () =>
+  Effect.gen(function* () {
+    const plugins = yield* Plugin.Service
+    const sessions = yield* Session.Service
+    const entered = yield* Deferred.make<void>()
+    const coordinator = yield* SessionRunCoordinator.make<Session.ID, never>({
+      drain: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+    })
+    const ctx = yield* PluginHost.make(plugins).pipe(
+      Effect.provideService(Session.Service, {
+        ...sessions,
+        active: coordinator.active,
+        interrupt: (sessionID) => coordinator.interrupt(sessionID),
+        wait: (sessionID) => sessions.get(sessionID).pipe(Effect.andThen(coordinator.awaitIdle(sessionID))),
+      }),
+    )
+    const session = yield* ctx.session.create({ title: "Archive while running" })
+    yield* coordinator.run(session.id).pipe(Effect.forkChild)
+    yield* Deferred.await(entered)
+    expect(yield* ctx.session.active()).toEqual({ [session.id]: { type: "running" } })
+
+    yield* ctx.session.archive({ sessionID: session.id })
+
+    expect(yield* ctx.session.active()).toEqual({})
+    expect((yield* sessions.get(session.id)).time.archived).toBeDefined()
+  }),
+)
+
 testEffect(Layer.empty).live(
   "plugin replies resolve the target Location and preserve native form and permission ownership",
   () =>
@@ -61,6 +90,7 @@ testEffect(Layer.empty).live(
           KV.node,
           Session.node,
           SessionFamily.node,
+          InstructionEntry.node,
           PersistentPty.node,
           Worktree.node,
         ]),

@@ -26,13 +26,13 @@ import { ReadOutput } from "../../plugin-app-custom/src/session-read"
 import { testEffect } from "./lib/effect"
 import { codeModeListings, executeTool, toolIdentity, waitForCodeModeTool } from "./lib/tool"
 import { tmpdirScoped } from "./fixture/tmpdir"
-import { OfflinePluginTestLayer } from "./plugin/fixture"
+import { PluginTestLayer } from "./plugin/fixture"
 
 const CodeModeOutput = Schema.Struct({ output: Schema.String })
 const decodeReadOutput = (value: unknown) =>
   Schema.decodeUnknownSync(Schema.fromJsonString(ReadOutput))(Schema.decodeUnknownSync(CodeModeOutput)(value).output)
 
-const it = testEffect(OfflinePluginTestLayer)
+const it = testEffect(PluginTestLayer)
 
 describe.each(["source", "bundle"])("custom session read tool (%s)", (distribution) => {
   it.live("loads, reads durable cross-project pages, and unloads through the plugin registry", () =>

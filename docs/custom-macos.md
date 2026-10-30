@@ -29,7 +29,11 @@ bun run custom:update           # prepare, then activate without database backup
 bun run custom:activate <full-40-character-sha>
 ```
 
-`OPENCODE_CUSTOM_HOME` defaults to `~/.local/share/opencode-custom-v2`. Preparation
+`OPENCODE_CUSTOM_HOME` defaults to `~/.local/share/opencode-custom-v2`. Run the `custom:*`
+commands with the Bun named by the root `packageManager` (currently 1.4.4): the release embeds
+the Bun that runs preparation, the upstream build scripts refuse an older one, and preparation
+stops before building when `bun --version` does not satisfy it. The first `bun` on the server's
+`PATH` is the runtime's private `<runtime>/bin/bun`, so agent-run updates use that one. Preparation
 uses `git archive HEAD`, installs frozen dependencies in the snapshot, typechecks
 CLI/TUI, the upstream web app (`packages/app`) and plugin-app-custom, builds the plugin and
 compiles the CLI with upstream's embedded web app, unchanged. CLI `--version` and `--help`

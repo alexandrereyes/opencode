@@ -8,11 +8,11 @@ import { SessionMessage } from "@opencode/schema/session-message"
 import { Session } from "@opencode/schema/session"
 import { testEffect } from "./lib/effect"
 import { codeModeListings } from "./lib/tool"
-import { OfflinePluginTestLayer } from "./plugin/fixture"
+import { PluginTestLayer } from "./plugin/fixture"
 import { agentID, controlNames, registerMaster } from "../../plugin-app-custom/src/master"
 import { registerSessionRead } from "../../plugin-app-custom/src/session-read"
 
-testEffect(OfflinePluginTestLayer).live(
+testEffect(PluginTestLayer).live(
   "only Mestra resolves master controls in Code Mode, including late configured agents and subagents",
   () =>
     Effect.gen(function* () {
