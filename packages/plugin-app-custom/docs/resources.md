@@ -102,6 +102,11 @@ hub's own `port` as `loopbackPort`, simulator names resolve through `GET /admin/
 a warning (`lockUnavailable`) instead of silently skipping the lock. Commands the agent prefixes with `mac` (which
 runs them on the Mac) are detected like local ones.
 
+Every shell command waits for `GET /admin/locks`, so administrative requests have a deadline (`adminTimeout`, 3 s;
+15 s for snapshots, control and `/admin/simulators`; the event long poll keeps its own). A hub that accepts
+connections but never answers counts as not answering: it is not retried at once, and the next request checks its
+health again.
+
 ### Stream protocol (`protocol.ts`)
 
 Text messages hub → client: `features { ack, auth, profiles }` (first; older hubs never send it),

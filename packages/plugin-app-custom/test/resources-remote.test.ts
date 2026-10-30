@@ -111,6 +111,8 @@ async function fakeHub() {
     shutdowns: 0,
     upserts: [] as unknown[],
     resources: [] as Resources.Resource[],
+    /** Routes the hub accepts but never answers, as a wedged hub does. */
+    hang: [] as string[],
   }
   const resource = (meta: Resources.Meta): Resources.Resource => ({
     id: `${meta.kind}:x`,
@@ -132,6 +134,7 @@ async function fakeHub() {
         if (request.headers.get("authorization") !== `Bearer ${state.secret}`)
           return new Response(null, { status: 401 })
         const route = new URL(request.url).pathname
+        if (state.hang.includes(route)) return new Promise<Response>(() => {})
         if (route === "/admin/health") return Response.json({ protocol: state.protocol, pid: 1 })
         if (route === "/admin/shutdown") {
           state.shutdowns++
@@ -225,6 +228,37 @@ describe("remote hub client", () => {
     await expect(client.list()).rejects.toBeInstanceOf(HubError)
     expect(hub.state.shutdowns).toBe(0)
     expect(await Bun.file(marker).exists()).toBe(false)
+  })
+
+  test("a hub that accepts but never answers leaves shells waiting only for the admin deadline", async () => {
+    const hub = await fakeHub()
+    const server = hub.serve()
+    servers.push(server)
+    await hub.announce(server.port!)
+    const client = makeHubClient({
+      state: path.join(hub.root, "local-state"),
+      remote: { info: hub.info, host: "localhost" },
+      timeout: 300,
+    })
+    expect(await client.locks()).toEqual([])
+
+    // Cached and healthy until now: the lock read is bounded and unanswered (`undefined` makes the shell warn).
+    hub.state.hang = ["/admin/locks", "/admin/resources"]
+    let started = Date.now()
+    expect(await client.locks()).toBeUndefined()
+    expect(Date.now() - started).toBeLessThan(1_500)
+    started = Date.now()
+    expect(await client.list(false).catch((error: unknown) => error)).toBeInstanceOf(HubError)
+    expect(Date.now() - started).toBeLessThan(1_500)
+
+    // A hub whose health check hangs too is dropped after the health deadline, never retried at once.
+    hub.state.hang.push("/admin/health")
+    started = Date.now()
+    expect(await client.locks()).toBeUndefined()
+    expect(Date.now() - started).toBeLessThan(2_500)
+
+    hub.state.hang = []
+    expect(await client.locks()).toEqual([])
   })
 })
 

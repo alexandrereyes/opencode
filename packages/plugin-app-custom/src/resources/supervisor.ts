@@ -68,7 +68,16 @@ export interface HubSettings {
    */
   readonly remote?: { readonly info: string; readonly host: string }
   readonly paths?: PathMap
+  /** Deadline, in milliseconds, of ordinary administrative requests (`adminTimeout` by default). */
+  readonly timeout?: number
 }
+
+/**
+ * Every shell command waits for `locks()`: a hub that accepts connections but never answers must not hold them.
+ * Slower requests (snapshots, `simctl`, control) get `slowTimeout`; the event long poll has its own deadline.
+ */
+export const adminTimeout = 3_000
+const slowTimeout = 15_000
 
 /**
  * Hub settings from the server environment. `OPENCODE_RESOURCES_HUB_REMOTE_INFO` (path of the remote hub's
@@ -96,6 +105,7 @@ export function makeHubClient(options: HubSettings) {
   const origin = (info: Info) => `http://${remote?.host ?? "127.0.0.1"}:${info.port}`
   const toHub = options.paths?.toHub ?? ((value: string) => value)
   const fromHub = options.paths?.fromHub ?? ((value: string) => value)
+  type Init = RequestInit & { readonly spawn?: boolean; readonly slow?: boolean }
   let cached: Info | undefined
   let starting: Promise<Info | undefined> | undefined
 
@@ -131,6 +141,7 @@ export function makeHubClient(options: HubSettings) {
       await fetch(`${origin(current)}/admin/shutdown`, {
         method: "POST",
         headers: { authorization: `Bearer ${current.secret}` },
+        signal: AbortSignal.timeout(adminTimeout),
       }).catch(() => undefined)
     const command = options.command ?? hubCommand()
     await fs.mkdir(options.state, { recursive: true, mode: 0o700 })
@@ -168,17 +179,25 @@ export function makeHubClient(options: HubSettings) {
     return cached
   }
 
-  const request = async (route: string, init: RequestInit & { readonly spawn?: boolean } = {}) => {
+  const request = async (route: string, init: Init = {}) => {
     const attempt = async (retry: boolean): Promise<Response | undefined> => {
       const info = await ensure(init.spawn ?? true)
       if (!info) return undefined
+      const { spawn: _, slow, ...rest } = init
+      let timedOut = false
       const response = await fetch(`${origin(info)}${route}`, {
-        ...init,
+        ...rest,
+        signal: init.signal ?? AbortSignal.timeout(slow ? slowTimeout : (options.timeout ?? adminTimeout)),
         headers: { ...init.headers, authorization: `Bearer ${info.secret}`, "content-type": "application/json" },
-      }).catch(() => undefined)
+      }).catch((error: unknown) => {
+        timedOut = error instanceof Error && error.name === "TimeoutError"
+        return undefined
+      })
       if (response && response.status !== 401) return response
+      // The next request checks the hub's health again (with its own short deadline) before trusting it.
       cached = undefined
-      return retry ? attempt(false) : undefined
+      // A hub that hangs is not retried at once: the caller would wait twice.
+      return retry && !timedOut ? attempt(false) : undefined
     }
     return attempt(true)
   }
@@ -201,7 +220,7 @@ export function makeHubClient(options: HubSettings) {
     meta: localMeta(resource.meta),
   })
 
-  const json = async <T>(route: string, init: RequestInit & { readonly spawn?: boolean } = {}): Promise<T> => {
+  const json = async <T>(route: string, init: Init = {}): Promise<T> => {
     const response = await request(route, init)
     if (!response) throw unavailable()
     if (response.status === 404) throw new HubError("not_found", "Resource not found")
@@ -232,17 +251,22 @@ export function makeHubClient(options: HubSettings) {
       json<{ resource: Resources.Resource; token?: string }>(`${resource(id)}/control`, {
         method: "POST",
         body: JSON.stringify({ action }),
+        slow: true,
       }).then((result) => ({ ...result, resource: local(result.resource) })),
     /** The iOS simulators of the hub's machine (`simctl` runs there). Never starts the hub. */
     simulators: () =>
-      json<{ simulators: Simulator[] }>("/admin/simulators", { spawn: false }).then((result) => result.simulators),
+      json<{ simulators: Simulator[] }>("/admin/simulators", { spawn: false, slow: true }).then(
+        (result) => result.simulators,
+      ),
     ticket: (id: string, capability: Resources.Capability) =>
       json<{ ticket: string; expiresAt: number }>("/admin/tickets", {
         method: "POST",
         body: JSON.stringify({ id, capability }),
       }),
     snapshot: async (id: string, maxWidth?: number) => {
-      const response = await request(`${resource(id)}/snapshot${maxWidth ? `?maxWidth=${maxWidth}` : ""}`)
+      const response = await request(`${resource(id)}/snapshot${maxWidth ? `?maxWidth=${maxWidth}` : ""}`, {
+        slow: true,
+      })
       if (!response) throw unavailable()
       if (response.status === 404) throw new HubError("not_found", "Resource not found")
       if (!response.ok) throw new HubError("failed", (await response.text()) || "Snapshot failed")
