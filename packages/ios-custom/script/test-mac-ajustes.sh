@@ -21,7 +21,7 @@ codesign --force --deep --sign - "$copy" 2>/dev/null
 trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$samples" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
 failed=0
 # Without arguments, every mode (zsh does not split `${@:-…}` into words).
-modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos servidores recursos)
+modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos servidores recursos snippets)
 (( $# )) && modes=("$@")
 for mode in $modes; do
   # Each mode starts from a fresh window: no restored window, reading place or Contexto width.
@@ -38,6 +38,8 @@ for mode in $modes; do
     divider) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
     arquivos) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     ampliar) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
+    # Ajustes ▸ Snippets opens off-screen at launch; the fixture's catalog starts empty.
+    snippets) extra=(-OpenCodeMacSettings snippets) ;;
     # Wide and narrow Contexto, its first line's worktree and branch (from the core's VCS, live on a checkout, "—"
     # on a detached HEAD), a subagent open over the root, its own subagent and the way back, in one launch.
     contexto) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;

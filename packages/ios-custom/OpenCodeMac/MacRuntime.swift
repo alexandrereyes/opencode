@@ -24,6 +24,8 @@ import SwiftUI
   var pendingNotification: (id: String, server: String?)?
   /// Ajustes ▸ Servidores opens Adicionar servidor… (the rail's server menu).
   var addingServer = false
+  /// Ajustes ▸ Snippets, which the conversation opens on a project or a new snippet (`MacSnippets`).
+  let snippetBoard = MacSnippetBoard()
   @ObservationIgnored var openMainWindow: (() -> Void)?
   @ObservationIgnored private var building: Task<Void, Never>?
   @ObservationIgnored private var events: Task<Void, Never>?
@@ -49,6 +51,7 @@ import SwiftUI
     windows.removeAll()
     front = nil
     await store?.stop()
+    snippetBoard.clear()
     initialSelection = nil
     do {
       #if DEBUG

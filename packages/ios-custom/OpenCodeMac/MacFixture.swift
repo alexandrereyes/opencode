@@ -174,7 +174,9 @@ struct MacFixtureServer: Sendable {
     case "custom.requests/permissions":
       attention ? #"[{"id":"per_mac_sidebar","sessionID":"ses_mac_sidebar","action":"shell","resources":["git push --force-with-lease"]}]"# : "[]"
     case "custom.worktrees/available": "true"
-    case "custom.snippets/list": #"{"items":[]}"#
+    case "custom.snippets/list": MacFixtureSnippets.shared.list()
+    case "custom.snippets/save": MacFixtureSnippets.shared.save(input)
+    case "custom.snippets/remove": MacFixtureSnippets.shared.remove(input)
     case "custom.chats/info": #"{"root":"\#(home)/Chats"}"#
     case "custom.master/info": #"{"version":1,"agent":"build","model":{"id":"opus-5.5","providerID":"llm-proxy"}}"#
     case "custom.directories/home": #"{"path":"\#(home)"}"#
@@ -665,6 +667,43 @@ final class MacResourcesScenario: @unchecked Sendable {
     guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
       let png = bitmap.representation(using: .png, properties: [:]) else { return "" }
     return png.base64EncodedString()
+  }
+}
+
+/// The fixture's `custom.snippets` catalog, in memory like the plugin's storage and empty at launch, as the fixture
+/// always answered (its rules run in the apps first; the plugin's refusals are covered by `SnippetsTests` and the
+/// plugin's own tests).
+final class MacFixtureSnippets: @unchecked Sendable {
+  static let shared = MacFixtureSnippets()
+  private let lock = NSLock()
+  private var items: [Snippet] = []
+
+  func list() -> String {
+    lock.withLock { #"{"items":\#(Self.json(items))}"# }
+  }
+
+  func save(_ input: [String: JSONValue]?) -> String? {
+    guard let input, let data = try? JSONEncoder().encode(JSONValue.object(input)),
+      let snippet = try? JSONDecoder().decode(Snippet.self, from: data) else { return nil }
+    lock.withLock { items = items.filter { $0.id != snippet.id } + [snippet] }
+    return Self.json(snippet)
+  }
+
+  func remove(_ input: [String: JSONValue]?) -> String {
+    let id = input?["id"]?.string
+    lock.withLock { items.removeAll { $0.id == id } }
+    return "{}"
+  }
+
+  /// Another client's save, which the app learns about only through `rpc.custom.snippets.updated`.
+  func insert(_ snippet: Snippet) {
+    lock.withLock { items.append(snippet) }
+  }
+
+  var all: [Snippet] { lock.withLock { items } }
+
+  private static func json(_ value: some Encodable) -> String {
+    String(decoding: (try? JSONEncoder().encode(value)) ?? Data("null".utf8), as: UTF8.self)
   }
 }
 #endif

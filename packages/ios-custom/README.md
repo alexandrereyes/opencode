@@ -3652,6 +3652,44 @@ and **Sobre** (version, commit, server). **Voz** adds the same next-call voice a
 adds the same model download, progress, retry, deletion and licenses. **Dados do Mac** is described below. Dados do
 iPhone and Apple Watch stay on iPhone.
 
+### Snippets — 30 October
+
+**Alexandre, 30/10: option A on both apps** (`.agent-artifacts/snippets-cadastro/`), with the shortcuts. Contract and
+rules: [`plugin-app-custom/docs/snippets.md`](../plugin-app-custom/docs/snippets.md).
+
+- **Shared base** (OpenCodeKit `Snippets.swift`): `Snippet` (the composer's `ComposerSnippet` is now an alias), the
+  client (`snippets()`, `saveSnippet`, `removeSnippet`; a refusal is a `SnippetSaveError` with the field and the
+  Portuguese message), `SnippetRules` (the plugin's rules for live validation: letters with accents, digits, `-` and
+  `_`; every name and alias unique in its scope, ignoring case; empty content), `SnippetLibrary` (sections Globais →
+  projects by name → "Projeto removido", the Todos / Globais / Projetos filter, folded search over name, aliases and
+  description, Duplicar with a free `-copia` name and no aliases, drafts named from the first words) and
+  `SnippetCatalog`. `SessionStore` owns one catalog per server: it reloads on `rpc.custom.snippets.updated` (without a
+  navigation reload) and after a reconnection, and every composer's `#` reads it, so an open conversation offers a
+  snippet saved anywhere at once. The `#` panel takes an optional footer, `ComposerSnippetActions` (Novo snippet…,
+  Gerenciar snippets…), that each app fills with its own screen.
+- **Mac, Ajustes ▸ Snippets** (`MacSnippetSettings`, tab after Modelos, a 900 × 640 window): on the left the search,
+  Todos / Globais / Projetos and the list grouped by scope (project avatar, count, aliases, "substitui o global"),
+  `+` and `⋯` (Duplicar, Apagar…); on the right the editor: Nome with `#` and its live message ("Disponível em
+  opencode2 · substitui #revisar global" or the error), Descrição, Atalhos as chips (Return, commas or spaces add),
+  Escopo (Global, the projects, "Projeto removido"), Conteúdo (plain text, monospaced) and Prévia, then Duplicar,
+  Apagar…, Reverter (Cancelar for an untouched new one) and Salvar (⌘S, disabled while anything is invalid). Empty
+  name or content only show once touched or after Salvar. Apagar always confirms; leaving unsaved changes asks too.
+  Empty catalog: "Nenhum snippet ainda" with Novo snippet. A new snippet in Ajustes is Global, or in the project
+  "Gerenciar snippets…" came from. The state (`MacSnippetBoard`) belongs to `MacRuntime`.
+- **Mac, shortcuts:** the `#` panel's footer and ⌘N while it is open (the editor sees key equivalents before the main
+  menu's Nova sessão) open Ajustes on a new snippet in the conversation's project; Gerenciar snippets… opens the list
+  on that project. "Salvar como snippet…" heads the composer's context menu over a selection (snippet tokens expanded;
+  the composer keeps its text) and a sent prompt's new right-click menu (Copiar, Copiar citação when it has quotes,
+  Redefinir para este ponto, Salvar como snippet…; the hover buttons stay), both opening the editor prefilled with
+  the text, the conversation's project and a name from its first words.
+
+Verification: `swift test` (`SnippetsTests`: rules and their Portuguese messages, scopes, grouping, filter, search,
+duplicate, drafts, the client's refusals and the catalog's reload on the event only), the plugin's tests, and
+`script/test-mac-ajustes.sh snippets`: one launch with the fixture's in-memory catalog starting empty (empty state,
+live validation, six snippets in three scopes, the override, an alias conflict, edit, Reverter, Duplicar, Apagar
+through its confirmation's own button, another client's save reaching the open conversation's `#` through the event,
+the panel and ⌘N, Gerenciar on the project, Salvar como snippet from a selection's context menu and from a prompt's).
+
 ### Dados do Mac — 29 October
 
 The Mac app reads Calendar, Reminders and Contacts for the agents' `mac_query`, the way the iPhone answers

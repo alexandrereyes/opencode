@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos|servidores|recursos`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos|servidores|recursos|snippets`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -68,6 +68,7 @@ import SwiftUI
       case "servidores": await MacServerChecks.run(window: window, theme: theme, folder: folder)
       case "recursos": try await recursos(window: window, runtime: runtime, shot: shot)
       case "recursos-ao-vivo": try await recursosAoVivo(window: window, runtime: runtime, shot: shot)
+      case "snippets": try await snippets(window: window, runtime: runtime, theme: theme, folder: folder, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -1749,6 +1750,176 @@ import SwiftUI
     }
     try await Task.sleep(for: .milliseconds(600))
     shot("fim")
+  }
+
+  // MARK: Snippets — Ajustes ▸ Snippets, the # panel and Salvar como snippet (rev. 2026-10-30)
+
+  /// One launch (`-OpenCodeMacSettings snippets` opens the tab off-screen): the empty catalog, live validation, five
+  /// snippets in three scopes, a project one that replaces a global one, edit, Reverter, Duplicar, Apagar through its
+  /// confirmation, another client's save reaching the open conversation's `#`, the panel with its two actions and
+  /// ⌘N, and Salvar como snippet from a composer selection and from a sent message.
+  private static func snippets(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String,
+    shot: (String) -> Void) async throws
+  {
+    let store = try require(runtime.store, "sessões")
+    let catalog = store.snippets
+    let board = MacRuntime.shared.snippetBoard
+    let project = "prj_opencode2"
+    let settings = try await wait("Ajustes ▸ Snippets", timeout: 12) {
+      NSApp.windows.first { $0.isVisible && $0.title == "Snippets" }
+    }
+    func capture(_ step: String) async {
+      try? await Task.sleep(for: .milliseconds(800))
+      MacCapture.shot(settings, theme: theme, to: folder + "/\(MacCapture.name)-\(step).png")
+    }
+    func check(_ condition: Bool, _ what: String) throws {
+      guard condition else { throw Failure(description: what) }
+    }
+    try await wait("catálogo carregado") { catalog.loaded ? true : nil }
+    try check(catalog.items.isEmpty, "o catálogo não começou vazio")
+    await capture("vazio")
+
+    // Live validation: a space in the name and an empty content block Salvar.
+    board.startNew()
+    try check(board.isNew && board.draft?.project == nil, "novo snippet em Ajustes não nasceu Global")
+    board.draft?.name = "revisar código"
+    board.edited(.name)
+    board.edited(.content)
+    try check(board.issues.map(\.message) == [SnippetRules.formatHint, "O conteúdo não pode ficar vazio."]
+      && !board.canSave, "validação: \(board.issues.map(\.message))")
+    await capture("erro")
+    board.revert()
+
+    func create(_ snippet: Snippet) async throws {
+      if board.dirty { board.revert() }
+      board.startNew()
+      board.draft = snippet
+      board.edited(.name)
+      board.edited(.content)
+      await board.save()
+      try check(board.selectedID == snippet.id && !board.dirty
+        && MacFixtureSnippets.shared.all.contains { $0.id == snippet.id }, "não salvou #\(snippet.name): \(board.issues)")
+    }
+    let revisar = Snippet(name: "revisar", aliases: ["review", "cr"], description: "Revisa o diff e aponta riscos",
+      content: "Revise o diff atual.\n- Aponte bugs e riscos de regressão.\n- Responda em pt-BR, em tópicos curtos.")
+    try await create(revisar)
+    try await create(Snippet(name: "resumo", description: "Resume o que foi feito na sessão",
+      content: "Resuma o que foi feito nesta sessão."))
+    try await create(Snippet(name: "commit-push-pr", description: "Commit, push e abre o PR",
+      content: "Faça o commit, o push e abra o PR."))
+    try await create(Snippet(name: "upstream-check", description: "Roda o custom:upstream-check",
+      content: "Rode bun run custom:upstream-check e corrija o que faltar.", project: project))
+    try await create(Snippet(name: "deploy-swarm", description: "Deploy no Swarm", content: "Faça o deploy no Swarm.",
+      project: "prj_abacato"))
+    let local = Snippet(name: "revisar", description: "Revisão com as regras do custom",
+      content: "Revise o diff seguindo docs/upstream-integrations.md.", project: project)
+    try await create(local)
+    try check(SnippetRules.overridden(local, in: catalog.items)?.id == revisar.id, "não substitui o global")
+    try check(board.sections.map(\.title) == ["Globais", "abacato-v2", "opencode2"],
+      "grupos: \(board.sections.map(\.title))")
+
+    // A handle another snippet of the scope has, as an alias, is refused while typing.
+    board.startNew()
+    board.draft?.name = "Review"
+    board.draft?.content = "x"
+    try check(board.issues.map(\.message) == ["“Review” já é atalho de #revisar nos globais."] && !board.canSave,
+      "conflito: \(board.issues.map(\.message))")
+    board.revert()
+    board.revert()
+    board.select(local.id)
+    await capture("lista")
+
+    // Edit, Reverter, then edit and Salvar.
+    board.draft?.description = "Rascunho"
+    try check(board.dirty, "edição não ficou pendente")
+    board.revert()
+    try check(!board.dirty && board.draft?.description == local.description, "Reverter")
+    board.draft?.content = "Revise o diff seguindo as regras do custom."
+    await board.save()
+    try check(MacFixtureSnippets.shared.all.first { $0.id == local.id }?.content
+      == "Revise o diff seguindo as regras do custom.", "edição não chegou ao servidor")
+
+    // Duplicar: a free name in the same scope, without the aliases.
+    board.select(revisar.id)
+    await board.duplicate()
+    let copy = try require(catalog.items.first { $0.name == "revisar-copia" }, "cópia")
+    try check(copy.aliases.isEmpty && copy.project == nil && board.selectedID == copy.id, "Duplicar: \(copy)")
+
+    // Apagar asks first; the confirmation's own button removes it.
+    board.askDelete()
+    let sheet = try await wait("confirmação de Apagar") { settings.attachedSheet }
+    await capture("apagar")
+    let button = try require(views(sheet).compactMap { $0 as? NSButton }.first { $0.title == "Apagar" }, "botão Apagar")
+    button.performClick(nil)
+    try await wait("apagado") {
+      !catalog.items.contains { $0.id == copy.id } && !MacFixtureSnippets.shared.all.contains { $0.id == copy.id }
+        && board.draft == nil ? true : nil
+    }
+
+    // Another client saves: the event reloads the catalog and the open conversation's # offers it.
+    let conversation = try require(store.liveConversation(MacFixture.rootID), "conversa")
+    MacFixtureSnippets.shared.insert(Snippet(id: "fx_ios", name: "ios-capturas", description: "Captura as telas",
+      content: "Capture as telas no simulador.", project: project))
+    store.hub.inject(.update(try JSONDecoder().decode(ConversationEvent.self,
+      from: Data(#"{"type":"rpc.custom.snippets.updated","data":{}}"#.utf8))))
+    try await wait("recarga pelo evento") { catalog.items.contains { $0.id == "fx_ios" } ? true : nil }
+    func offered(_ text: String) async throws -> [ComposerSuggestion] {
+      let trigger = try require(ComposerTrigger.detect(in: ComposerDocument(text: text), cursor: text.utf16.count), "#")
+      return try await conversation.suggestions(trigger)
+    }
+    try check(try await offered("#ios").map(\.title) == ["#ios-capturas"], "# não viu o snippet novo")
+    try check(try await offered("#revisar").first?.token.value == "Revise o diff seguindo as regras do custom.",
+      "# não usou o snippet do projeto")
+
+    // The # panel: its two actions; ⌘N while it is open makes a snippet in the conversation's project.
+    let draft = runtime.input(conversation).draft
+    let text = try await wait("editor") {
+      views(window).compactMap { $0 as? ComposerTextNSView }.first { $0.window != nil && $0.input?.representedDraft === draft }
+    }
+    func type(_ value: String, select: Bool = false) async throws {
+      draft.text = NSAttributedString(string: value)
+      draft.selection = NSRange(location: select ? 0 : value.utf16.count, length: select ? value.utf16.count : 0)
+      draft.focused = true
+      try await Task.sleep(for: .milliseconds(900))
+      window.makeFirstResponder(text)
+    }
+    try await type("#")
+    try await wait("painel do #") { text.newSnippet != nil ? true : nil }
+    shot("painel")
+    _ = window.performKeyEquivalent(with: key("n", code: 45, flags: [.command], window: window))
+    try check(board.isNew && board.draft?.project == project
+      && UserDefaults.standard.string(forKey: "OpenCodeMacSettingsTab") == MacSnippets.tab, "⌘N no painel")
+    board.revert()
+    MacSnippets.manage(project: project)
+    try check(board.focusProject == project && board.selectedID.flatMap { id in catalog.items.first { $0.id == id } }?
+      .project == project, "Gerenciar snippets… não abriu no projeto")
+
+    // Salvar como snippet on a selection: the editor with its text; the composer keeps it.
+    let sentence = "Revise o diff atual e aponte riscos de regressão."
+    try await type(sentence, select: true)
+    text.setSelectedRange(NSRange(location: 0, length: sentence.utf16.count))
+    let click = try require(NSEvent.mouseEvent(with: .rightMouseDown, location: text.convert(NSPoint(x: 20, y: 8), to: nil),
+      modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+      context: nil, eventNumber: 0, clickCount: 1, pressure: 1), "clique")
+    let menu = try require(text.menu(for: click), "menu do composer")
+    let item = try require(menu.items.firstIndex { $0.title == "Salvar como snippet…" }, "Salvar como snippet… no menu")
+    menu.performActionForItem(at: item)
+    try check(board.isNew && board.draft?.content == sentence && board.draft?.project == project
+      && board.draft?.name == "revise-o-diff" && text.string == sentence, "da seleção: \(String(describing: board.draft))")
+    await capture("da-selecao")
+    await board.save()
+    try check(MacFixtureSnippets.shared.all.contains { $0.name == "revise-o-diff" }, "salvar da seleção")
+
+    // Salvar como snippet… on a sent message, in its right-click menu.
+    let message = try require(conversation.messages.first { $0.id == "msg_root_4" }, "mensagem")
+    try check(MacPromptMenu.items(message, pending: false, child: false) == [.copy, .revert, .saveSnippet], "menu da mensagem")
+    MacPromptMenu.saveSnippet(message, store: conversation)
+    try check(board.isNew && board.draft?.content == MacPromptMenu.snippetText(message) && board.draft?.project == project,
+      "da mensagem: \(String(describing: board.draft))")
+    await capture("da-mensagem")
+    board.revert()
+    draft.text = NSAttributedString()
+    print("MacAjustes snippets: \(catalog.items.count) snippets, grupos \(board.sections.map(\.title))")
   }
 
   // MARK: Helpers

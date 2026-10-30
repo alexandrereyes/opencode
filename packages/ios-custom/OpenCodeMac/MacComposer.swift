@@ -59,7 +59,8 @@ struct MacComposer: View {
     #endif
     VStack(spacing: 7) {
       if let trigger {
-        ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn, highlight: highlight) {
+        ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn, highlight: highlight,
+          snippetActions: .init(new: newSnippet, manage: manageSnippets, shortcut: "⌘N")) {
           choose($0, replacing: trigger)
         }
       }
@@ -243,7 +244,32 @@ struct MacComposer: View {
       placeholder: placeholder ?? (store.isChild ? "Mensagem para o subagente…" : "Pergunte qualquer coisa…"),
       identifier: identifier, cancel: embedded?.cancel,
       firstSuggestion: firstSuggestion, moveSuggestion: { highlight.move($0) },
-      attach: features.attachments ? { items in MacAttachments.receive(items, store: store, draft: draft) } : nil)
+      attach: features.attachments ? { items in MacAttachments.receive(items, store: store, draft: draft) } : nil,
+      newSnippet: snippetShortcut, saveSnippet: { saveSnippet($0) })
+  }
+
+  /// ⌘N makes a snippet only while the `#` panel is open.
+  private var snippetShortcut: (() -> Void)? {
+    guard trigger?.character == "#" else { return nil }
+    return { newSnippet() }
+  }
+
+  // MARK: Snippets (Ajustes ▸ Snippets)
+
+  /// The `#` panel's "Novo snippet…" and ⌘N while it is open: a new snippet in this conversation's project.
+  private func newSnippet() {
+    draft.dismissSuggestions()
+    MacSnippets.new(Snippet(project: MacSnippets.project(of: store)))
+  }
+
+  private func manageSnippets() {
+    draft.dismissSuggestions()
+    MacSnippets.manage(project: MacSnippets.project(of: store))
+  }
+
+  /// "Salvar como snippet…" on a selection: the editor with its text; the composer keeps it as it is.
+  private func saveSnippet(_ text: String) {
+    MacSnippets.new(MacSnippets.draft(content: text, store: store))
   }
 
   private var attach: some View {
@@ -440,6 +466,10 @@ struct MacComposerEditor: NSViewRepresentable {
   var moveSuggestion: (Int) -> Bool = { _ in false }
   /// Pasted images and files; nil where the composer takes no attachments.
   let attach: (([NSPasteboardItem]) -> Bool)?
+  /// ⌘N while the `#` panel is open.
+  var newSnippet: (() -> Void)? = nil
+  /// "Salvar como snippet…" in a selection's context menu.
+  var saveSnippet: ((String) -> Void)? = nil
 
   func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -472,6 +502,8 @@ struct MacComposerEditor: NSViewRepresentable {
     text.querying = trigger != nil
     text.firstSuggestion = firstSuggestion
     text.moveSuggestion = moveSuggestion
+    text.newSnippet = newSnippet
+    text.saveSnippet = saveSnippet
     text.escape = { [weak draft] in draft?.dismissSuggestions() }
     text.cancel = cancel
     text.attach = attach

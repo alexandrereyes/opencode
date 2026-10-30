@@ -236,6 +236,10 @@ final class ComposerTextNSView: NSTextView {
   var firstSuggestion: (() -> (() -> Void)?)?
   /// Moves the panel's highlight by ±1; false while it has nothing to move through.
   var moveSuggestion: ((Int) -> Bool)?
+  /// ⌘N while the `#` panel is open: a new snippet instead of Nova sessão.
+  var newSnippet: (() -> Void)?
+  /// "Salvar como snippet…" in a selection's context menu, with the selected text (snippet tokens expanded).
+  var saveSnippet: ((String) -> Void)?
   var escape: (() -> Void)?
   var cancel: (() -> Void)?
   /// Image or file data pasted or dropped on the editor: the composer turns it into an attachment.
@@ -330,6 +334,35 @@ final class ComposerTextNSView: NSTextView {
       return
     }
     super.keyDown(with: event)
+  }
+
+  // The window's views see key equivalents before the main menu, so ⌘N reaches the editor first.
+  override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if let newSnippet, window?.firstResponder === self,
+      event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+      event.charactersIgnoringModifiers?.lowercased() == "n" {
+      newSnippet()
+      return true
+    }
+    return super.performKeyEquivalent(with: event)
+  }
+
+  override func menu(for event: NSEvent) -> NSMenu? {
+    let menu = super.menu(for: event)
+    guard let menu, saveSnippet != nil, selectedRange().length > 0 else { return menu }
+    let item = NSMenuItem(title: "Salvar como snippet…", action: #selector(saveSelectionAsSnippet), keyEquivalent: "")
+    item.target = self
+    menu.insertItem(item, at: 0)
+    menu.insertItem(.separator(), at: 1)
+    return menu
+  }
+
+  /// The selection as the composer would send it: snippet tokens become their text, the others keep theirs.
+  @objc func saveSelectionAsSnippet() {
+    guard let saveSnippet, selectedRange().length > 0, let storage = textStorage else { return }
+    let text = ComposerDocument(editor: storage.attributedSubstring(from: selectedRange())).expanded.text
+    guard !text.allSatisfy(\.isWhitespace) else { return }
+    saveSnippet(text)
   }
 
   override func becomeFirstResponder() -> Bool {

@@ -5,8 +5,8 @@ import SwiftUI
 
 /// The Mac's Ajustes (⌘,): the iPhone's Você in tabs. Servidores (saved servers, add, edit, remove, pair and switch),
 /// Aparência (the shared theme list), Leitura, Modelos (the shared "Gerenciar modelos"), Assinaturas (the LLM proxy
-/// summary), Voz, Transcrição, Dados do Mac (`MacDataSettings`) and Sobre. Dados do iPhone and Apple Watch stay on
-/// the iPhone.
+/// summary), Voz, Transcrição, Snippets (`MacSnippetSettings`), Dados do Mac (`MacDataSettings`) and Sobre. Dados do
+/// iPhone and Apple Watch stay on the iPhone.
 struct MacSettingsView: View {
   let runtime: MacRuntime
   /// The tab shown last; the window reopens on it.
@@ -25,6 +25,8 @@ struct MacSettingsView: View {
         .tabItem { Label("Transcrição", systemImage: "mic") }.tag("transcricao")
       MacModelSettings(runtime: runtime)
         .tabItem { Label("Modelos", systemImage: "cpu") }.tag("modelos")
+      MacSnippetSettings(runtime: runtime)
+        .tabItem { Label("Snippets", systemImage: "number") }.tag(MacSnippets.tab)
       MacSubscriptionSettings(runtime: runtime)
         .tabItem { Label("Assinaturas", systemImage: "gauge.with.dots.needle.67percent") }.tag("assinaturas")
       MacDataSettings(agent: .shared)
@@ -32,7 +34,8 @@ struct MacSettingsView: View {
       MacAboutSettings(runtime: runtime)
         .tabItem { Label("Sobre", systemImage: "info.circle") }.tag("sobre")
     }
-    .frame(width: 600, height: 540)
+    // The snippets' list and editor need a wider window than the forms.
+    .frame(width: tab == MacSnippets.tab ? 900 : 600, height: tab == MacSnippets.tab ? 640 : 540)
   }
 }
 

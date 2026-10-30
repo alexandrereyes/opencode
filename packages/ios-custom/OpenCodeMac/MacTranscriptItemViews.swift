@@ -241,8 +241,25 @@ private struct MacPromptRow: View {
     }
     .padding(.horizontal, context.inset).padding(.vertical, 8)
     .background(theme.color(.background))
+    .contextMenu { menu }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier(pending == nil ? "conversation-user-\(message.id)" : "pending-user-\(message.id)")
+  }
+
+  /// The right-click menu (rev. 2026-10-30): the hover actions (Redefinir, Copiar) and Salvar como snippet….
+  @ViewBuilder private var menu: some View {
+    ForEach(MacPromptMenu.items(message, pending: pending != nil, child: store.isChild), id: \.self) { item in
+      switch item {
+      case .copy: Button("Copiar", systemImage: "doc.on.doc") { MacPromptMenu.copy(message.copyText) }
+      case .copyQuotes: Button("Copiar citação", systemImage: "text.quote") { MacPromptMenu.copy(message.copyQuotes) }
+      case .revert:
+        Button("Redefinir para este ponto", systemImage: "arrow.uturn.backward") { context.revert(message) }
+          .disabled(store.reversion.pending)
+      case .saveSnippet:
+        Divider()
+        Button("Salvar como snippet…", systemImage: "number") { MacPromptMenu.saveSnippet(message, store: store) }
+      }
+    }
   }
 
   private var bubble: some View {
@@ -955,5 +972,30 @@ private struct MacActivityItem: View {
     .frame(maxHeight: 240)
     .fixedSize(horizontal: false, vertical: true)
     .background(theme.color(.codeSurface), in: RoundedRectangle(cornerRadius: 8))
+  }
+}
+
+/// What a sent prompt's right-click menu offers, in order; shared by the menu and the offline checks.
+enum MacPromptMenu: Hashable {
+  case copy, copyQuotes, revert, saveSnippet
+
+  static func items(_ message: ConversationMessage, pending: Bool, child: Bool) -> [Self] {
+    [.copy] + (message.quotes.isEmpty ? [] : [.copyQuotes]) + (pending || child ? [] : [.revert])
+      + (pending || snippetText(message).isEmpty ? [] : [.saveSnippet])
+  }
+
+  static func copy(_ text: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(text, forType: .string)
+  }
+
+  /// What the message sent: its text with snippets already expanded (the bubble may show them as typed).
+  static func snippetText(_ message: ConversationMessage) -> String {
+    let text = message.text ?? message.displayText
+    return text.allSatisfy(\.isWhitespace) ? "" : text
+  }
+
+  @MainActor static func saveSnippet(_ message: ConversationMessage, store: ConversationStore) {
+    MacSnippets.new(MacSnippets.draft(content: snippetText(message), store: store))
   }
 }

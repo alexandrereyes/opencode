@@ -132,7 +132,11 @@ struct MacWindow: View {
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
       runtime.app.syncShown()
     }
-    .onAppear { runtime.app.syncShown() }
+    .onAppear {
+      runtime.app.syncShown()
+      // Transcript rows are hosted outside the scene; they open Ajustes ▸ Snippets through this action.
+      MacSnippets.opener = openSettings
+    }
     #if DEBUG
     .task {
       if MacProxyLaunch.pane != nil, MacCapture.folder != nil { runtime.showProxy() }
