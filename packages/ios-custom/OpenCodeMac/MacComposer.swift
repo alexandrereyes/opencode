@@ -265,12 +265,15 @@ struct MacComposer: View {
   }
 
   @ViewBuilder private var action: some View {
+    // Without a send button the microphone stays whatever the field holds.
+    let sends = features.send && hasContent
     HStack(spacing: 0) {
-      DictationCompactMicrophone(recording: draft.recording, hasContent: hasContent, available: dictationAvailable)
+      DictationCompactMicrophone(recording: draft.recording, hasContent: sends, available: dictationAvailable)
         .help("Clique ou segure para ditar · ⌃⌥Espaço no editor")
-      DictationAction(recording: draft.recording, hasContent: hasContent, canSubmit: canSubmit,
+      DictationAction(recording: draft.recording, hasContent: sends, canSubmit: canSubmit,
         sending: draft.sending, available: dictationAvailable, submit: submit)
-        .help("Segure para ditar, arraste para cima para travar · Return envia · Shift+Return quebra a linha")
+        .help(features.send ? "Segure para ditar, arraste para cima para travar · Return envia · Shift+Return quebra a linha"
+          : "Clique ou segure para ditar, arraste para cima para travar · ⌃⌥Espaço no editor")
       .contextMenu {
         if hasContent, !draft.recording.visible, embedded == nil, store.executing {
           Button(store.preferences?.data.settings.followUpBehavior == .queue ? "Enviar agora" : "Adicionar à fila") {
@@ -574,6 +577,8 @@ struct MacComposerFeatures {
   var capsules = true
   /// Inside its host's own card (a question's answer): no card, the microphone beside the field.
   var bare = false
+  /// Its own send button (↑) once there is text. A question's answer has none: its form sends through Enviar.
+  var send = true
 
   static let chat = MacComposerFeatures()
   static let newSession = MacComposerFeatures(capsules: false)
@@ -582,7 +587,7 @@ struct MacComposerFeatures {
   /// Pergunta paralela: plain text, typed or dictated, in a card of its own.
   static let reply = MacComposerFeatures(triggers: [], attachments: false, capsules: false)
   /// A question's own answer or a form field, inside the question's card.
-  static let answer = MacComposerFeatures(triggers: [], attachments: false, capsules: false, bare: true)
+  static let answer = MacComposerFeatures(triggers: [], attachments: false, capsules: false, bare: true, send: false)
 }
 
 /// A plain answer bound to a string (Pergunta paralela, a question's own answer, a form field): the composer in a
@@ -591,6 +596,8 @@ struct MacReplyComposer: View {
   let store: ConversationStore
   @Binding var text: String
   let placeholder: String
+  /// The field takes the keyboard each time this goes up.
+  var focusRequest = 0
   var features = MacComposerFeatures.answer
   var canSubmit = true
   let submit: () -> Void
@@ -605,7 +612,12 @@ struct MacReplyComposer: View {
 
   var body: some View {
     MacComposer(store: store, draft: draft,
-      embedded: MacComposerEmbedding(canSubmit: canSubmit, submit: submit,
+      embedded: MacComposerEmbedding(canSubmit: canSubmit, submit: {
+        // The host's text follows the field after SwiftUI's next update; Return may come first.
+        let value = draft.document.text
+        if value != text { text = value }
+        submit()
+      },
         cancel: cancel ?? { [weak draft] in draft?.input?.window?.makeFirstResponder(nil) }),
       features: features, placeholder: placeholder, identifier: identifier, accessory: accessory,
       dictationTurns: dictationTurns)
@@ -621,6 +633,7 @@ struct MacReplyComposer: View {
         if value != text { text = value }
       }
       .onChange(of: text) { _, value in receive(value) }
+      .onChange(of: focusRequest) { draft.focused = true }
   }
 
   private static func scratch() -> ConversationDraft {

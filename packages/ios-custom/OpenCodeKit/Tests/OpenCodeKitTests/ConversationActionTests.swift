@@ -346,6 +346,45 @@ func modelSelectionKeepsServerDeduplicationAndVariant(_ variant: String?) async 
   #expect(value.object?["answer"] == .object(reply.answer))
 }
 
+@Test func returnInAnAnswerGoesToTheNextUnansweredQuestionThenSends() throws {
+  let form = try JSONDecoder().decode(
+    PendingForm.self,
+    from: Data(
+      #"""
+      {"id":"frm_return","sessionID":"ses_root","title":"Questions","fields":[
+        {"key":"voz","type":"string","options":[{"value":"marin","label":"marin"}],"custom":true},
+        {"key":"seguir","type":"string","options":[{"value":"sim","label":"Sim"},{"value":"nao","label":"Não"}]},
+        {"key":"nota","type":"string"},
+        {"key":"extra","type":"string","when":[{"key":"seguir","op":"eq","value":"nao"}]},
+        {"key":"itens","type":"multiselect","minItems":2,"options":[{"value":"a","label":"A"},{"value":"b","label":"B"}],"custom":true}
+      ]}
+      """#.utf8))
+  func reply(_ values: [String: JSONValue]) -> QuestionReply { QuestionReply(form: form, values: values) }
+  // The next unanswered question after this one, wrapping to the top; hidden ones (extra) do not count.
+  #expect(reply(["voz": .string("viola")]).onReturn(in: form, from: "voz") == .next("seguir"))
+  #expect(reply(["voz": .string("viola"), "seguir": .string("sim")]).onReturn(in: form, from: "voz") == .next("nota"))
+  #expect(reply(["nota": .string("ok"), "itens": .array([.string("a"), .string("b")])]).onReturn(in: form, from: "nota")
+    == .next("voz"))
+  // Shown once its condition holds.
+  #expect(reply(["voz": .string("viola"), "seguir": .string("nao"), "nota": .string("ok")]).onReturn(in: form, from: "nota")
+    == .next("extra"))
+  // This one is the only one left, still empty: nowhere to go.
+  #expect(reply(["seguir": .string("sim"), "nota": .string("ok"), "itens": .array([.string("a"), .string("b")])])
+    .onReturn(in: form, from: "voz") == .stay)
+  // Everything answered: Return is Enviar, unless an answer is invalid (Enviar is off).
+  let complete: [String: JSONValue] = ["voz": .string("viola"), "seguir": .string("sim"), "nota": .string("ok"),
+    "itens": .array([.string("a"), .string("b")])]
+  #expect(reply(complete).onReturn(in: form, from: "voz") == .send)
+  var short = complete
+  short["itens"] = .array([.string("a")])
+  #expect(reply(short).onReturn(in: form, from: "itens") == .stay)
+  // One free-text question alone: Return sends what was typed.
+  let single = try JSONDecoder().decode(PendingForm.self, from: Data(
+    #"{"id":"frm_one","sessionID":"ses_root","title":"Pergunta","fields":[{"key":"nome","type":"string"}]}"#.utf8))
+  #expect(QuestionReply(form: single, values: ["nome": .string("capturas")]).onReturn(in: single, from: "nome") == .send)
+  #expect(QuestionReply(form: single, values: [:]).onReturn(in: single, from: "nome") == .stay)
+}
+
 @Test func capturedQuestionAcceptsFreeTextWithoutTouchingPrompt() throws {
   let form = try #require(actionFixture("forms", DataResponse<[PendingForm]>.self).data.first)
   let reply = QuestionReply(form: form, values: ["q0": .string("Uma resposta livre")])

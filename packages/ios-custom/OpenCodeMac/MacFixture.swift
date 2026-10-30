@@ -356,10 +356,10 @@ private struct MacFixtureServer: Sendable {
     return #"{"version":1,"revision":1,"data":{"projects":{"local":{"projects":[{"worktree":"\#(home)/Dev/abacato-v2","expanded":true},{"worktree":"\#(home)/Dev/opencode2","expanded":true}\#(extra)],"chatsIndex":2}},"pinnedSessions":[],"mutedSessions":[],"settings":{"autoApprove":false},"models":{"user":[{"providerID":"llm-proxy","modelID":"opus-5.5","visibility":"show"}],"variant":{},"default":{"providerID":"llm-proxy","modelID":"opus-5.5","variant":"xhigh"}}}}"#
   }
 
-  /// `-OpenCodeMacAjustes question`: the root asks a question with options and its own answer.
+  /// `-OpenCodeMacAjustes question`: the root asks two questions, one with options and its own answer, one of text.
   private var rootQuestion: String {
     guard MacAjustesChecks.mode == "question" else { return "" }
-    return #"{"id":"frm_mac_root","sessionID":"ses_mac_root","title":"Questions","fields":[{"key":"modulo","type":"string","title":"Qual nome usar para o módulo de capturas?","options":[{"value":"capturas","label":"capturas"},{"value":"prints","label":"prints"}],"custom":true}],"metadata":{"kind":"question"}}"#
+    return #"{"id":"frm_mac_root","sessionID":"ses_mac_root","title":"Questions","fields":[{"key":"modulo","type":"string","title":"Qual nome usar para o módulo de capturas?","options":[{"value":"capturas","label":"capturas"},{"value":"prints","label":"prints"}],"custom":true},{"key":"pasta","type":"string","title":"Em que pasta salvar?"}],"metadata":{"kind":"question"}}"#
   }
 
   private var childPermission: String {

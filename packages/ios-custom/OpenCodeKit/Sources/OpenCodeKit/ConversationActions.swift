@@ -199,6 +199,26 @@ public struct QuestionReply: Codable, Sendable {
       return false
     }
   }
+
+  /// Return in a question's own answer. The form has one way to send, its Enviar: Return is the same once every
+  /// question shown is answered; before that it goes to the next unanswered one after this field (then from the top).
+  public func onReturn(in form: PendingForm, from key: String) -> QuestionReturn {
+    let fields = form.fields.filter { Self.visible($0, values: answer) }
+    let index = fields.firstIndex { $0.key == key }.map { $0 + 1 } ?? 0
+    if let next = (fields[index...] + fields[..<index]).first(where: { answer[$0.key] == nil }) {
+      return next.key == key ? .stay : .next(next.key)
+    }
+    return valid(for: form) ? .send : .stay
+  }
+}
+
+public enum QuestionReturn: Equatable, Sendable {
+  /// Every question is answered: the same as Enviar.
+  case send
+  /// The question to go to.
+  case next(String)
+  /// This question is the one left (still empty), or an answer is not valid yet (Enviar is off too).
+  case stay
 }
 
 extension OpenCodeClient: ConversationActions {

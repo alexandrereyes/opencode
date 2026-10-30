@@ -2895,7 +2895,7 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
 | `SessionSwitcherSheet.swift` | The iPhone sheet; still in the Mac target, but no longer presented there since the title's popover was removed (⌘K covers it) |
 | `AppTypography.swift` (`AppLayout.margin`) | 6 pt on macOS (16 on iOS; the Mac list adds about 8 pt): Sessões uses its width for titles and paths |
 | `ConversationReadAloud.swift` | `ConversationBottomControls(showsJump:)`, `true` by default: the Mac draws ↓ beside the reading column itself |
-| `ConversationRequests.swift` | On macOS the question's own answer is `MacReplyField` (Return sends, Shift+Return breaks the line, Esc leaves); iOS keeps its `TextField` |
+| `ConversationRequests.swift` | On macOS the question's own answer is `MacReplyComposer` in its `answer` mode (microphone only, Shift+Return breaks the line, Esc leaves); iOS keeps its `TextField`. Return follows `QuestionReply.onReturn` on both |
 | `ArchivedSessionsView.swift` | On macOS a search field at the top (⌘F); iOS lists every archived session as before |
 | `AddProjectPicker.swift` | iOS-only field and title modifiers behind `pathInput()` and `inlineNavigationTitle()` |
 | `NewSessionComponents.swift` (new) | `ProjectAvatar`, `ChatsAvatar`, `GitBranchIcon`, `MCPChip`, `MCPFlowLayout`, moved unchanged out of `NewSessionView.swift` |
@@ -3748,9 +3748,23 @@ project filter replacing the chips and the highlight of the open subagent.
   minimum (`DesktopWindowState.contextWidthRange`). Each window saves its width as before; the end of a drag also
   stores it as the default for windows without saved state, which covers macOS closing the windows on quit
   ("Fechar janelas ao encerrar um app").
-- **Questions (A3).** The question card's own answer is a native text view on the Mac (`MacReplyField`): a click
-  focuses it, Return sends (like Enviar, when the answer is complete), Shift+Return or Option+Return break the line,
-  Esc leaves the field. A multiple choice's own answer adds with Return.
+- **Questions (A3).** The question card's own answer is the composer in its `answer` mode on the Mac
+  (`MacReplyComposer`): a click focuses it, Shift+Return or Option+Return break the line, Esc leaves the field.
+  **No send button of its own (Alexandre, 30/10):** the field keeps only its microphone (dictation and its AI
+  review), whatever it holds (`MacComposerFeatures.send`), because an ↑ beside one answer did not say whether it sent
+  that answer or the form. The form sends only through **Enviar**, which every form has (one question or several,
+  text, options or multiple choice). **Return**, on the Mac and the iPhone (`QuestionReply.onReturn`): once every
+  question shown is answered and valid it is Enviar; otherwise it goes to the next unanswered question after this one
+  (then from the top), into its answer field, or out of the field when that question has options only. With this
+  question the only one left and still empty, or an invalid answer (Enviar off), it does nothing. In a multiple
+  choice's own answer, Return with text adds it (Adicionar) and keeps the field; empty, it follows the rule above. The
+  iPhone's field is one line, so its keyboard shows **Enviar** when Return sends and **Próximo** otherwise.
+  `MacReplyComposer` hands the field's text to its host before submitting: the binding follows the field one SwiftUI
+  update later, and a Return right after typing used to find the answer still empty. That was why
+  `test-mac-ajustes.sh question` failed ("Return enviou") whenever it pressed Return before such an update. Its form now
+  has two questions: Return in the first goes to the second without sending, no ↑ appears, and Return in the second
+  sends. `QuestionFormUITests` (iPhone, forms created through the sandbox API) covers several questions, two typed
+  answers and a multiple choice with its own answer, reading each answer back from the server.
 - **Title (A4, A9).** No popover and no `⌄`: the title is a label. The bar is the regular unified height, so the
   avatar and the two title lines center on the window buttons with room around them.
 - **Sessões (A5, A7).** Voice, Ajustes and Nova sessão sit at the column's right edge (a flexible space in the

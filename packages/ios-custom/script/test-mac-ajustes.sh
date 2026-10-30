@@ -28,6 +28,8 @@ for mode in $modes; do
   extra=()
   case $mode in
     quote) extra=(-OpenCodeMacDetailCase quotes) ;;
+    # The answers record with the fake microphone and the fixtures' reviewer.
+    question) extra=(-OpenCodeMacFakeDictation) ;;
     archived) extra=(-OpenCodeMacSearchFixture) ;;
     width) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     jump) extra=(-OpenCodeMacCaptureSize 1500x700) ;;

@@ -65,6 +65,12 @@ struct ConversationQuestionCard: View {
   let store: ConversationStore
   @State private var values: [String: JSONValue] = [:]
   @State private var custom: [String: String] = [:]
+  #if os(macOS)
+  /// Each answer field takes the keyboard when its count goes up (Return from the question before).
+  @State private var focusRequests: [String: Int] = [:]
+  #else
+  @FocusState private var focus: String?
+  #endif
   private var reply: QuestionReply { QuestionReply(form: form, values: values) }
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
@@ -109,6 +115,8 @@ struct ConversationQuestionCard: View {
             }.buttonStyle(.plain).accessibilityAddTraits(
               selected(option.value, field: field) ? .isSelected : [])
           }
+          // An answer field has no send button of its own: the form sends only through Enviar. Return answers there
+          // (`returned`).
           if field.type == .string && (field.custom == true || field.options == nil) {
             let text = Binding(
               get: {
@@ -116,13 +124,18 @@ struct ConversationQuestionCard: View {
                 return field.options?.contains { $0.value == text } == true ? "" : text
               }, set: { values[field.key] = .string($0) })
             #if os(macOS)
-            // The Mac composer's answer mode: dictation, Return sends, Shift+Return breaks the line, Esc leaves.
-            MacReplyComposer(store: store, text: text, placeholder: "Outra resposta…", submit: send)
+            // The Mac composer's answer mode: the microphone only, Shift+Return breaks the line, Esc leaves.
+            MacReplyComposer(store: store, text: text, placeholder: "Outra resposta…",
+              focusRequest: focusRequests[field.key] ?? 0, submit: { returned(field) })
               .padding(11).background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
             #else
             TextField("Outra resposta…", text: text)
+              .focused($focus, equals: field.key)
+              .submitLabel(reply.onReturn(in: form, from: field.key) == .send ? .send : .next)
+              .onSubmit { returned(field) }
               .appFont(.preview).padding(11).background(
                 theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
+              .accessibilityIdentifier("question-answer-\(field.key)")
             #endif
           }
           if field.type == .multiselect && field.custom == true {
@@ -141,24 +154,18 @@ struct ConversationQuestionCard: View {
               }
             }
             HStack {
+              let text = Binding(get: { custom[field.key] ?? "" }, set: { custom[field.key] = $0 })
               #if os(macOS)
-              MacReplyComposer(store: store,
-                text: Binding(get: { custom[field.key] ?? "" }, set: { custom[field.key] = $0 }),
-                placeholder: "Outra resposta…", submit: { addCustom(field) })
+              MacReplyComposer(store: store, text: text, placeholder: "Outra resposta…",
+                focusRequest: focusRequests[field.key] ?? 0, submit: { returned(field) })
               #else
-              TextField(
-                "Outra resposta…",
-                text: Binding(get: { custom[field.key] ?? "" }, set: { custom[field.key] = $0 }))
+              TextField("Outra resposta…", text: text)
+                .focused($focus, equals: field.key)
+                .submitLabel(.next)
+                .onSubmit { returned(field) }
+                .accessibilityIdentifier("question-answer-\(field.key)")
               #endif
-              Button("Adicionar") {
-                let text = (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return }
-                let selected = values[field.key]?.array ?? []
-                if !selected.contains(.string(text)) {
-                  values[field.key] = .array(selected + [.string(text)])
-                }
-                custom[field.key] = ""
-              }.disabled(
+              Button("Adicionar") { addCustom(field) }.disabled(
                 (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }.appFont(.preview).padding(11).background(
               theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
@@ -173,7 +180,7 @@ struct ConversationQuestionCard: View {
         Spacer()
         Button("Descartar") { Task { await store.dismiss(form) } }.buttonStyle(
           RequestButtonStyle(filled: false))
-        Button("Enviar") { Task { await store.reply(form, answer: reply) } }
+        Button("Enviar", action: send)
           .buttonStyle(RequestButtonStyle(filled: true)).disabled(
             reply.answer.isEmpty || !reply.valid(for: form))
       }
@@ -187,13 +194,34 @@ struct ConversationQuestionCard: View {
     }
     .disabled(store.acting.contains(form.id))
   }
-  #if os(macOS)
-  /// Return in the free answer: the same as Enviar, when the answer is complete.
   private func send() {
     guard !reply.answer.isEmpty, reply.valid(for: form), !store.acting.contains(form.id) else { return }
     Task { await store.reply(form, answer: reply) }
   }
-  /// Return in a multiple choice's own answer: the same as Adicionar.
+  /// Return in an answer field. A multiple choice's own answer with text adds it (Adicionar); otherwise Return sends
+  /// the form once every question shown is answered, or goes to the next unanswered one (`QuestionReply.onReturn`).
+  private func returned(_ field: PendingForm.Field) {
+    if field.type == .multiselect, !(custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      addCustom(field)
+      return focusAnswer(field.key)
+    }
+    switch reply.onReturn(in: form, from: field.key) {
+    case .send: send()
+    case .next(let key): focusAnswer(key)
+    case .stay: focusAnswer(field.key)
+    }
+  }
+  /// The keyboard goes to that question's answer field; a question with options only leaves it.
+  private func focusAnswer(_ key: String) {
+    let typed = form.fields.first { $0.key == key }.map { field in
+      field.type == .string ? field.custom == true || field.options == nil : field.type == .multiselect && field.custom == true
+    } ?? false
+    #if os(macOS)
+    if typed { focusRequests[key, default: 0] += 1 } else { NSApp.keyWindow?.makeFirstResponder(nil) }
+    #else
+    focus = typed ? key : nil
+    #endif
+  }
   private func addCustom(_ field: PendingForm.Field) {
     let text = (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
@@ -201,7 +229,6 @@ struct ConversationQuestionCard: View {
     if !selected.contains(.string(text)) { values[field.key] = .array(selected + [.string(text)]) }
     custom[field.key] = ""
   }
-  #endif
   private func selected(_ option: String, field: PendingForm.Field) -> Bool {
     field.type == .multiselect
       ? values[field.key]?.array?.contains(.string(option)) == true

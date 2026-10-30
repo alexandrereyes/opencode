@@ -138,24 +138,56 @@ import SwiftUI
       runtime.memory(MacFixture.rootID).active.flatMap { $0.revealed ? $0 : nil }
     }
     transcript.scrollToLatest(animated: false)
-    let field = try await wait("campo da pergunta") {
-      views(window).compactMap { $0 as? ComposerTextNSView }.first {
+    // The two questions' answer fields, top to bottom.
+    let fields = try await wait("campos das perguntas") {
+      let fields = views(window).compactMap { $0 as? ComposerTextNSView }.filter {
         $0.accessibilityIdentifier() == "question-reply" && $0.window != nil && $0.visibleRect.height > 4
-      }
+      }.sorted { $0.convert($0.bounds, to: nil).minY > $1.convert($1.bounds, to: nil).minY }
+      return fields.count == 2 ? fields : nil
     }
+    let field = fields[0]
     // A real click (down and up) on the field focuses it.
     click(field, in: window)
     try await Task.sleep(for: .milliseconds(300))
     guard window.firstResponder === field else { throw Failure(description: "clique não focou o campo") }
     field.insertText("Capturas do Mac", replacementRange: field.selectedRange())
-    // Shift+Return breaks the line; Return sends.
+    // Shift+Return breaks the line.
     window.sendEvent(key("\r", code: 36, flags: .shift, window: window))
     field.insertText("segunda linha", replacementRange: field.selectedRange())
     guard field.string == "Capturas do Mac\nsegunda linha" else {
       throw Failure(description: "Shift+Return: \(field.string.debugDescription)")
     }
+    // With text the field keeps only its microphone: the form sends through Enviar.
+    try await Task.sleep(for: .milliseconds(300))
+    guard accessible("composer-send", in: window) == nil else { throw Failure(description: "o campo mostrou ↑") }
     shot("digitado")
+    // Return with a question unanswered goes to it, without sending.
     let before = conversation.submitted
+    window.sendEvent(key("\r", code: 36, window: window))
+    try await wait("Return foi à próxima pergunta") { window.firstResponder === fields[1] ? true : nil }
+    guard conversation.submitted == before else { throw Failure(description: "Return enviou com pergunta sem resposta") }
+    // The second answer is dictated (right Option, tap and tap) and lands revised by the fixtures' reviewer.
+    let draft = try require(fields[1].input?.representedDraft, "rascunho da segunda resposta")
+    func tapOption() {
+      for down in [true, false] {
+        let flags = down ? NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | 0x40) : []
+        if let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
+          timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+          characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 61) {
+          NSApp.postEvent(event, atStart: false)
+        }
+      }
+    }
+    tapOption()
+    try await wait("ditado na resposta") { draft.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.2))
+    shot("ditando")
+    tapOption()
+    try await wait("ditado revisado na resposta", timeout: 20) {
+      fields[1].string == DictationFixtures.text ? true : nil
+    }
+    guard accessible("composer-send", in: window) == nil else { throw Failure(description: "o campo ditado mostrou ↑") }
+    // Everything answered: Return is Enviar.
     window.sendEvent(key("\r", code: 36, window: window))
     try await wait("Return enviou") { conversation.submitted > before ? true : nil }
     // Esc leaves the field.
