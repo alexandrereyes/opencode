@@ -169,11 +169,9 @@ export async function prepare(home: string, dryRun = false) {
   )
   const staging = path.join(work, "release")
   await mkdir(`${staging}/plugin`, { recursive: true })
-  await bundleRelease(
-    home,
-    staging,
-    path.join(source, `packages/cli/dist/cli-${process.platform}-${process.arch}/bin/opencode`),
-  )
+  const cli = path.join(source, `packages/cli/dist/cli-${process.platform}-${process.arch}/bin/opencode`)
+  if (process.platform === "darwin") await bundleRelease(home, staging, cli)
+  else await plainRelease(staging, cli)
   const reported = await command([`${staging}/bin/opencode`, "--version"], work, env)
   if (reported !== `opencode v${env.OPENCODE_VERSION}`) throw new Error(`Unexpected CLI version: ${reported}`)
   await command([`${staging}/bin/opencode`, "--help"], work, env)
@@ -201,6 +199,13 @@ export async function prepare(home: string, dryRun = false) {
   await rm(work, { recursive: true, force: true })
   console.log(`Prepared ${commit}`)
   return commit
+}
+
+/** Linux has no TCC grants to keep across releases: the release holds the plain executable, unsigned. */
+export async function plainRelease(staging: string, binary: string) {
+  await mkdir(path.join(staging, "bin"), { recursive: true })
+  await copyFile(binary, path.join(staging, "bin/opencode"))
+  await chmod(path.join(staging, "bin/opencode"), 0o755)
 }
 
 /**
@@ -584,6 +589,119 @@ export type Service = {
   pid: () => Promise<number | undefined>
   /** Installs the repository's 4096 proxy after a successful activation; absent for fixture services. */
   proxy?: () => Promise<string>
+  /** Writes the service definition before start; without it, activation writes the launchd plist into the runtime. */
+  install?: () => Promise<void>
+}
+
+export const unitName = `${label}.service`
+
+/**
+ * systemd user unit of the Linux runtime. The server starts with the login environment (/etc/profile and
+ * /etc/profile.d: PATH, SDKs), like a terminal; a unit has no shell of its own. Requires lingering
+ * (`loginctl enable-linger`) to run without a login session.
+ */
+export function unit(home: string) {
+  // systemd expands % specifiers everywhere and $ in command lines; arguments are double-quoted.
+  const value = (text: string) => text.replaceAll("%", "%%")
+  const argument = (text: string) =>
+    `"${value(text).replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("$", "$$$$")}"`
+  return `# Runtime ${home}
+[Unit]
+Description=OpenCode custom
+
+[Service]
+ExecStart=/bin/sh -c ". /etc/profile >/dev/null 2>&1; exec \\"$$0\\"" ${argument(`${home}/bin/serve`)}
+Restart=always
+RestartSec=2
+KillMode=mixed
+TimeoutStopSec=60
+StandardOutput=append:${value(`${home}/logs/server.log`)}
+StandardError=append:${value(`${home}/logs/server.log`)}
+
+[Install]
+WantedBy=default.target
+`
+}
+
+export async function systemctl(args: string[]) {
+  const child = Bun.spawn(["systemctl", "--user", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, LC_ALL: "C" },
+    timeout: 90_000,
+  })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  return { stdout, stderr, code }
+}
+
+export function systemd(
+  home: string,
+  host = {
+    run: systemctl,
+    directory: path.join(os.homedir(), ".config/systemd/user"),
+    async alive(pid: number) {
+      return Bun.file(`/proc/${pid}/stat`).exists()
+    },
+    now: Date.now,
+    sleep: (ms: number) => Bun.sleep(ms),
+  },
+): Service {
+  const file = path.join(host.directory, unitName)
+  const owned = async () => {
+    const content = await Bun.file(file)
+      .text()
+      .catch(() => undefined)
+    if (content === undefined) return false
+    if (content.split("\n")[0] !== `# Runtime ${home}`)
+      throw new Error(`${unitName} belongs to another runtime; refusing lifecycle operation`)
+    return true
+  }
+  const query = async () => {
+    if (!(await owned())) return
+    const result = await host.run(["show", unitName, "--property=ActiveState,MainPID"])
+    if (result.code !== 0) throw new Error(`systemctl show failed (${result.code}): ${result.stderr.trim()}`)
+    const state = result.stdout.match(/^ActiveState=(.*)$/m)?.[1]
+    if (state === "inactive" || state === "failed") return
+    return { pid: Number(result.stdout.match(/^MainPID=(\d+)$/m)?.[1]) || undefined }
+  }
+  return {
+    async install() {
+      await mkdir(host.directory, { recursive: true })
+      await Bun.write(file, unit(home))
+      const reload = await host.run(["daemon-reload"])
+      if (reload.code !== 0) throw new Error(`systemctl daemon-reload failed (${reload.code}): ${reload.stderr.trim()}`)
+    },
+    async pid() {
+      return (await query())?.pid
+    },
+    async stop() {
+      const running = await query()
+      if (!running) return
+      const result = await host.run(["stop", unitName])
+      if (result.code !== 0) throw new Error(`systemctl stop failed (${result.code}): ${result.stderr.trim()}`)
+      const deadline = host.now() + 65_000
+      while (running.pid && (await host.alive(running.pid))) {
+        if (host.now() >= deadline) throw new Error(`systemd stop timed out: previous process ${running.pid} alive`)
+        await host.sleep(250)
+      }
+    },
+    async start() {
+      if (!(await owned())) throw new Error(`${file} is missing; activate installs it`)
+      for (const args of [["enable", unitName], ["start", unitName]]) {
+        const result = await host.run(args)
+        if (result.code !== 0) throw new Error(`systemctl ${args[0]} failed (${result.code}): ${result.stderr.trim()}`)
+      }
+    },
+  }
+}
+
+/** Lifecycle backend of this host: launchd on macOS, a systemd user unit on Linux. */
+export function hostService(home: string): Service {
+  return process.platform === "linux" ? systemd(home) : launchd(home)
 }
 
 export const proxyLabel = "com.alexandrem.opencode2-ui"
@@ -743,7 +861,7 @@ export async function activate(
     skipBackup?: boolean
     report?: (phase: string) => Promise<void>
   },
-  service = launchd(home),
+  service = hostService(home),
 ) {
   const release = await manifest(home, commit)
   const config = await settings(home)
@@ -809,7 +927,8 @@ export async function activate(
   await Bun.write(`${home}/bin/opencode2`, wrappers.tui)
   await chmod(`${home}/bin/serve`, 0o700)
   await chmod(`${home}/bin/opencode2`, 0o700)
-  await Bun.write(`${home}/${label}.plist`, plist(home))
+  if (service.install) await service.install()
+  else await Bun.write(`${home}/${label}.plist`, plist(home))
   if (previous && previous !== commit) await point(home, "previous", previous)
   await point(home, "current", commit)
   try {
@@ -846,7 +965,7 @@ async function verifyProcess(service: Service, responding: number | undefined, p
   if (responding !== undefined && responding === owned) return
   throw new Error(
     `Healthcheck PID ${responding ?? "missing"} does not match ${label} PID ${owned ?? "missing"}. ` +
-      `Inspect with lsof -nP -iTCP:${port} -sTCP:LISTEN and launchctl print gui/${process.getuid!()}/${label} before retrying.`,
+      `Inspect with lsof -nP -iTCP:${port} -sTCP:LISTEN and ${process.platform === "linux" ? `systemctl --user status ${unitName}` : `launchctl print gui/${process.getuid!()}/${label}`} before retrying.`,
   )
 }
 
@@ -902,7 +1021,8 @@ async function main() {
     throw new Error(
       "Usage: custom:{prepare,activate,update,rollback,status,migrate,prune} [full-sha] [--dry-run]\nRollback: --database-compatible\nMigrate: --replace-launcher [--stop-beta]\nPrune: --keep=<count> (default 3)",
     )
-  if (process.platform !== "darwin") throw new Error("Manual custom deployment currently supports macOS only")
+  if (process.platform !== "darwin" && (process.platform !== "linux" || action === "migrate"))
+    throw new Error("Manual custom deployment supports macOS, and Linux (systemd user unit) except migrate")
   if (!dryRun) {
     await mkdir(home, { recursive: true })
     await mkdir(`${home}/.manual-lock`).catch(() => {

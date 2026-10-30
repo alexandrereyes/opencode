@@ -28,6 +28,9 @@ import {
   scripts,
   serviceCredential,
   settings,
+  systemd,
+  unit,
+  unitName,
 } from "../script/custom-release"
 
 const first = "a".repeat(40)
@@ -1223,4 +1226,62 @@ test("the 4096 proxy injects credentials for the server and forwards /resources 
     void upstream.stop(true)
     void hub.stop(true)
   }
+})
+
+function systemdHost(directory: string) {
+  const state = { active: true, alive: true, calls: [] as string[], time: 0 }
+  const host = {
+    directory,
+    async run(args: string[]) {
+      state.calls.push(args.join(" "))
+      if (args[0] === "show")
+        return {
+          code: 0,
+          stdout: `ActiveState=${state.active ? "active" : "inactive"}\nMainPID=${state.active ? 4242 : 0}\n`,
+          stderr: "",
+        }
+      if (args[0] === "stop") state.active = false
+      if (args[0] === "start") state.active = true
+      return { code: 0, stdout: "", stderr: "" }
+    },
+    async alive() {
+      return state.alive
+    },
+    now: () => state.time,
+    async sleep(ms: number) {
+      state.time += ms
+      if (state.time >= 1000) state.alive = false
+    },
+  }
+  return { state, host }
+}
+
+test("systemd unit runs serve with the login environment and quotes the runtime path", () => {
+  const text = unit("/home/u/odd $dir%x")
+  expect(text.split("\n")[0]).toBe("# Runtime /home/u/odd $dir%x")
+  expect(text).toContain('ExecStart=/bin/sh -c ". /etc/profile >/dev/null 2>&1; exec \\"$$0\\"" "/home/u/odd $$dir%%x/bin/serve"')
+  expect(text).toContain("Restart=always")
+  expect(text).toContain("StandardOutput=append:/home/u/odd $dir%%x/logs/server.log")
+})
+
+test("systemd installs, starts, waits for the previous process and refuses another runtime", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "systemd-"))
+  homes.push(directory)
+  const fixtureHost = systemdHost(directory)
+  const service = systemd("/runtime", fixtureHost.host)
+  await expect(service.start()).rejects.toThrow("is missing")
+  expect(await service.pid()).toBeUndefined()
+  await service.install!()
+  expect(await Bun.file(path.join(directory, unitName)).text()).toBe(unit("/runtime"))
+  await service.start()
+  expect(fixtureHost.state.calls).toEqual([
+    "daemon-reload",
+    `enable ${unitName}`,
+    `start ${unitName}`,
+  ])
+  expect(await service.pid()).toBe(4242)
+  await service.stop()
+  expect(fixtureHost.state.time).toBe(1000)
+  expect(await service.pid()).toBeUndefined()
+  await expect(systemd("/other", fixtureHost.host).stop()).rejects.toThrow("another runtime")
 })

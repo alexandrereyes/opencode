@@ -14,7 +14,7 @@ The editable file lives outside immutable releases and is not overwritten by `cu
 
 ### Release commands
 
-Run these commands from a clean, committed `custom` checkout on macOS:
+Run these commands from a clean, committed `custom` checkout on macOS (or Linux, see below):
 
 ```sh
 bun run custom:prepare          # builds only; production keeps running
@@ -421,6 +421,21 @@ to resolve the updated launcher. Migration and activation do not create that ext
 
 The retired periodic updater, maintenance API, admission barrier, controller and
 updater LaunchAgent are not part of this flow. Nothing polls Git or schedules updates.
+
+### Linux runtime (systemd)
+
+The same `custom:prepare|update|activate|rollback|status|prune` commands run on Linux (the
+OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/mac`). Differences:
+
+- The release is the plain `bin/opencode` executable for the host (`cli-linux-arm64`, glibc), with no
+  `OpenCode Custom.app`, signing or `serve-sim`: the iOS simulator stream needs macOS.
+- The service is the systemd **user** unit `~/.config/systemd/user/local.opencode.custom-manual.service`
+  (first line `# Runtime <home>`, which owns it), started with the login environment (`/etc/profile`),
+  `Restart=always`, log in `<home>/logs/server.log`. It needs lingering (`loginctl enable-linger`).
+  Inspect with `systemctl --user status local.opencode.custom-manual`.
+- The 4096 proxy stays on the Mac (`installProxy` is launchd-only): OrbStack forwards the machine's
+  `127.0.0.1:4178` and `:4179` to the Mac's loopback, where `proxy.mjs` already points.
+- `custom:migrate` is macOS-only. Moving the runtime from the Mac: `core-infra/mac/opencode-migrate.sh`.
 
 ### Isolated source development
 
