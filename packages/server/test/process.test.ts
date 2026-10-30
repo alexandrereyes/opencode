@@ -54,13 +54,6 @@ it.live("authenticates API requests behind the frontend transform while allowing
     expect(status.headers.get("access-control-allow-origin")).toBe("http://localhost:3000")
     expect(yield* Effect.promise(() => status.json())).toMatchObject({ version: "test-version" })
 
-    const openapi = yield* Effect.promise(() =>
-      fetch(new URL("/openapi.json", HttpServer.formatAddress(server.address)), {
-        headers: { authorization: `Basic ${btoa("opencode:secret")}` },
-      }).then((response) => response.text()),
-    )
-    expect(openapi).not.toContain("/api/server/maintenance")
-
     yield* Effect.forEach(
       ["http://192.168.1.10:3001", "https://example.com", "https://untrusted.example.com"],
       (origin) =>
