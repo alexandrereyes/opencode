@@ -3,17 +3,17 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { expect } from "bun:test"
 import { OpenCode } from "@opencode/client"
-import { Quotes } from "@opencode/plugin-app-custom/quotes/rpc"
+import { Quotes } from "../src/quotes/rpc"
 import { Effect } from "effect"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
-import { startServer } from "./fixture/server"
+import { startServer } from "../../server/test/fixture/server"
 
 it.live("stores pending chat quotes per session over plugin RPC with live updates", () =>
   Effect.gen(function* () {
     const tmp = yield* tmpdirScoped("opencode-quotes-")
     const project = path.join(tmp.path, "project")
-    const plugin = pathToFileURL(path.resolve(import.meta.dir, "../../plugin-app-custom/src/index.ts")).href
+    const plugin = pathToFileURL(path.resolve(import.meta.dir, "../src/index.ts")).href
     yield* Effect.promise(async () => {
       await fs.mkdir(path.join(project, ".opencode", "plugins"), { recursive: true })
       await fs.writeFile(

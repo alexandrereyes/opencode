@@ -40,7 +40,6 @@
     "@opencode-ai/pty": "0.3.1",
     "@opencode/client": "workspace:*",
     "@opencode/plugin": "workspace:*",
-    "@opencode/plugin-app-custom": "workspace:*",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
     "@typescript/native": "catalog:",

@@ -195,4 +195,4 @@ Plugin KV (`ctx.storage`, SQLite `kv`, namespaced by plugin): `quotes:session:<s
 ## Verification
 
 - `test/quotes.test.ts`: order and last-write-wins, sent tombstones against stale saves and imports, idempotent import by ID and content, limits without partial writes, content-addressed attachments and their collection, bounded dismissals.
-- `packages/server/test/plugin-quotes.test.ts`: real server with the plugin over HTTP (`{"input":…}` bodies), live `rpc.custom.quotes.updated` on `/api/event`, upload/list without bytes/download, import twice, `already_sent`, `session_not_found`, `rpc.invalid_input` for reversed anchors, `invalid_data`, `rpc.unavailable` for an unknown RPC, cleanup on Session deletion.
+- `packages/plugin-app-custom/test/server-quotes.test.ts`: real server with the plugin over HTTP (`{"input":…}` bodies), live `rpc.custom.quotes.updated` on `/api/event`, upload/list without bytes/download, import twice, `already_sent`, `session_not_found`, `rpc.invalid_input` for reversed anchors, `invalid_data`, `rpc.unavailable` for an unknown RPC, cleanup on Session deletion.

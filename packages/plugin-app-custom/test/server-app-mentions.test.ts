@@ -3,13 +3,13 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { expect } from "bun:test"
 import { OpenCode } from "@opencode/client"
-import { AppMentions } from "@opencode/plugin-app-custom/rpc"
-import { NativeApps } from "@opencode/plugin-app-custom/native-apps/rpc"
-import { Subscriptions } from "@opencode/plugin-app-custom/subscriptions/rpc"
+import { AppMentions } from "../src/rpc"
+import { NativeApps } from "../src/native-apps/rpc"
+import { Subscriptions } from "../src/subscriptions/rpc"
 import { Effect, Schedule } from "effect"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
-import { startServer } from "./fixture/server"
+import { startServer } from "../../server/test/fixture/server"
 
 it.live(
   "serves custom app RPCs from the same Location plugin over HTTP",
@@ -19,8 +19,8 @@ it.live(
       const first = path.join(tmp.path, "first")
       const second = path.join(tmp.path, "second")
       const config = path.join(tmp.path, "config")
-      const plugin = pathToFileURL(path.resolve(import.meta.dir, "../../plugin-app-custom/src/index.ts")).href
-      const fixture = path.resolve(import.meta.dir, "../../plugin-app-custom/test/fixture/mcp-server.ts")
+      const plugin = pathToFileURL(path.resolve(import.meta.dir, "../src/index.ts")).href
+      const fixture = path.resolve(import.meta.dir, "./fixture/mcp-server.ts")
       const proxy = Bun.serve({
         port: 0,
         fetch: (request) =>
@@ -210,7 +210,7 @@ it.live(
       const project = path.join(tmp.path, "project")
       const config = path.join(tmp.path, "config")
       const plugin = pathToFileURL(
-        path.resolve(import.meta.dir, "../../plugin-app-custom/test/fixture/native-apps-plugin.ts"),
+        path.resolve(import.meta.dir, "./fixture/native-apps-plugin.ts"),
       ).href
       yield* Effect.promise(async () => {
         await fs.mkdir(path.join(project, ".opencode", "plugins"), { recursive: true })

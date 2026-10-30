@@ -4,13 +4,13 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { OpenCode } from "@opencode/client"
-import { Worktrees } from "@opencode/plugin-app-custom/worktrees/rpc"
+import { Worktrees } from "../src/worktrees/rpc"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { Effect } from "effect"
 import { HttpServer } from "effect/http"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
-import { ServerProcess } from "../src/process"
+import { ServerProcess } from "@opencode/server/process"
 
 it.live("serves custom worktree deletion while preserving native routes", () =>
   Effect.gen(function* () {
@@ -20,7 +20,7 @@ it.live("serves custom worktree deletion while preserving native routes", () =>
     const destination = path.join(tmp.path, "created")
     const config = path.join(tmp.path, "config")
     const pluginPackage = path.join(tmp.path, "plugin")
-    const plugin = pathToFileURL(path.resolve(import.meta.dir, "../../plugin-app-custom/src/index.ts")).href
+    const plugin = pathToFileURL(path.resolve(import.meta.dir, "../src/index.ts")).href
     yield* Effect.promise(async () => {
       await Promise.all([project, config, pluginPackage].map((directory) => fs.mkdir(directory, { recursive: true })))
       await $`git init`.cwd(project).quiet()

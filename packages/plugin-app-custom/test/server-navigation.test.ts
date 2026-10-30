@@ -3,13 +3,13 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { expect } from "bun:test"
 import { OpenCode } from "@opencode/client"
-import { Navigation } from "@opencode/plugin-app-custom/navigation/rpc"
-import { Archive } from "@opencode/plugin-app-custom/archive/rpc"
+import { Navigation } from "../src/navigation/rpc"
+import { Archive } from "../src/archive/rpc"
 import { Session } from "@opencode/schema/session"
 import { Effect } from "effect"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
-import { startServer } from "./fixture/server"
+import { startServer } from "../../server/test/fixture/server"
 
 it.live("serves navigation through plugin RPC without reviving historical locations", () =>
   Effect.gen(function* () {
@@ -17,7 +17,7 @@ it.live("serves navigation through plugin RPC without reviving historical locati
     const first = path.join(tmp.path, "first")
     const historical = path.join(tmp.path, "historical")
     const config = path.join(tmp.path, "config")
-    const plugin = pathToFileURL(path.resolve(import.meta.dir, "../../plugin-app-custom/src/index.ts")).href
+    const plugin = pathToFileURL(path.resolve(import.meta.dir, "../src/index.ts")).href
     yield* Effect.promise(async () => {
       await Promise.all([fs.mkdir(path.join(first, ".opencode", "plugins"), { recursive: true }), fs.mkdir(historical)])
       await fs.writeFile(

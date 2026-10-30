@@ -4,13 +4,13 @@ import { pathToFileURL } from "node:url"
 import { Database } from "bun:sqlite"
 import { expect } from "bun:test"
 import { OpenCode } from "@opencode/client"
-import { Snippets } from "@opencode/plugin-app-custom/snippets/rpc"
+import { Snippets } from "../src/snippets/rpc"
 import { Project } from "@opencode/schema/project"
 import { Effect } from "effect"
 import { HttpServer } from "effect/http"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
-import { ServerProcess } from "../src/process"
+import { ServerProcess } from "@opencode/server/process"
 
 it.live("migrates and serves one persistent snippet catalog across Locations", () =>
   Effect.gen(function* () {
@@ -20,7 +20,7 @@ it.live("migrates and serves one persistent snippet catalog across Locations", (
     const first = path.join(tmp.path, "first")
     const second = path.join(tmp.path, "second")
     const pluginPackage = path.join(tmp.path, "plugin")
-    const plugin = pathToFileURL(path.resolve(import.meta.dir, "../../plugin-app-custom/src/index.ts")).href
+    const plugin = pathToFileURL(path.resolve(import.meta.dir, "../src/index.ts")).href
     yield* Effect.promise(async () => {
       await Promise.all(
         [config, first, second, pluginPackage].map((directory) => fs.mkdir(directory, { recursive: true })),
