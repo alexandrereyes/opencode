@@ -43,9 +43,9 @@ or guarantees; the plugin never calls the server's own HTTP API as a workaround.
 Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD`:
 
 - `packages/{core,server,protocol,schema,plugin,client,tui}/src`, `packages/cli/src` and `packages/cli/script`: **43 →
-  30 modified files, +698 → +494 lines, −30 → −22 lines**.
+  26 modified files, +698 → +448 lines, −30 → −22 lines**.
 - All shared paths outside `packages/plugin-app-custom`, `packages/ios-custom`, `docs`, `.agents` and `bun.lock`: **69 →
-  44 modified files, +1300 → +740 lines, −84 → −28 lines**.
+  39 modified files, +1300 → +691 lines, −84 → −28 lines**.
 
 ### Removed or moved by the offload
 
@@ -76,6 +76,13 @@ Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD`:
 - The stale `revert.plan` section of `services/www/.../build/plugins/effect.mdx`.
 - `packages/protocol/openapi.json` was stale at `2bf5bb098` (`check:generated` failed: it lacked
   `session.permissions.updated`); it is regenerated.
+- Replay-only durable event `session.permissions.updated` (definition and inventory entry in
+  `packages/schema/src/session-event.ts`, projector, message updater, `schema/test/event-manifest.test.ts`, Client types
+  and OpenAPI event enums): removed; those files are upstream's again. Read-only queries of the production database on
+  2026-10-30 (`~/.local/share/opencode/opencode.db`, the live server's `OPENCODE_DB`): the `event` table has 0 rows and
+  no type matching `%permission%` (`event_sequence` has 1,386 rows, which carry no event types). Nothing else feeds
+  durable events: `Bus.replay` has no caller outside tests, session import and export move `Session.Info` plus messages
+  (`core/src/session/transfer.ts`), and no V1 migration or sync path names the type.
 
 ### Remaining customizations
 
@@ -130,10 +137,6 @@ Other customizations:
   `packages/core/src/plugin/skill.ts`, OpenAPI and Client types). Consumer: the iOS and Mac composer, which lists skills
   with `slash: true` from `/api/skill` in its `/` menu (`OpenCodeKit/ComposerSources.swift`), and user skills that set
   it. The field must be in the public schema to be encoded. Exit: upstream skill slash flag.
-- Replay-only durable event `session.permissions.updated` (`packages/schema/src/session-event.ts`, projector, message
-  updater, Client types, OpenAPI event enums, `schema/test/event-manifest.test.ts`): stored events of custom releases
-  written before upstream's rename. Exit: a read-only count shows none in the production database, or a data migration
-  rewrites them.
 - `Plugin.awaitActivation` in `packages/server/src/handlers/mcp.ts` (#54191, see `docs/upstream-overrides.md`) and in
   `shell.create` of `packages/server/src/handlers/shell.ts` (plugin `shell` hooks on a cold Location, see
   `packages/plugin-app-custom/docs/resources.md`); tests `server/test/{mcp,shell}.test.ts`.
@@ -154,13 +157,16 @@ Other customizations:
   passes.
 - `bun run test` per package in a clean environment (`env -i` with `HOME`, `TMPDIR`, an empty `AZURE_CONFIG_DIR`, no
   `OPENCODE_*`/`XDG_*`), `2bf5bb098` → offload: Schema 93 → 92, Util 135, Protocol 10, Client 242 → 241, Plugin 39,
-  custom plugin 294 → 304 (two skipped, no failure), SDK 39, Server 120 + 1 failure → 112, CLI 400 (nine skipped),
+  custom plugin 294 → 305 (two skipped, no failure), SDK 39, Server 120 + 1 failure → 112, CLI 400 (nine skipped),
   CodeMode 1,473, Core 7,034 → 7,029 (23 skipped). The counts move with the removed and moved tests listed above (Server
   also drops the custom "defaults message pages to 50 entries" case of upstream behavior). The only failures left are
   Core's 11 GitLab OAuth cases (port 8080 held by OrbStack), on both revisions. The Server failure `serves custom app
   RPCs from the same Location plugin over HTTP`, now in the custom plugin, is fixed: Effect's default `ConfigProvider`
   snapshots `process.env` when first used in the process, so the test now provides a fresh one after setting
   `OPENCODE_LLM_PROXY_URL`.
+- After the legacy event removal and the Mestra ensure lock fix, root `bun run check` and the Schema, Protocol, Client,
+  Plugin, custom plugin, Server and Core suites were rerun with the same results (the custom plugin gains
+  `test/master-ensure.test.ts`, which fails with the former module-scope lock).
 - A bundled build of `src/storage.ts`, evaluated twice (two Effect copies, as the release bundle is per Location), keeps
   40 concurrent increments through the host's storage.
 - Isolated source sandbox (4177, own home, credentials copied read-only, production untouched): a permission request
