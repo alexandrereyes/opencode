@@ -83,7 +83,7 @@ test("Mestra agent is primary, hidden, keeps its rules and hides the native work
     "sessions.mark_read",
     "só quando ele pedir",
     "Nunca diga que não consegue ver telas",
-    "O app tentou anexar a tela, mas não conseguiu",
+    "se o pedido não for sobre ela, ignore-a",
     ...sessionToolNames.map((name) => `tools.sessions.${name}(`),
   ])
     expect(system).toContain(phrase)

@@ -274,7 +274,9 @@ function masterContext(ctx: VoiceContext) {
     if (!sessionID) return undefined
     const session = yield* ctx.session.get({ sessionID })
     if (session.agent !== "mestra") return undefined
+    // An idle master's last reply belongs to an earlier conversation; a new call started repeating it.
     const active = yield* ctx.session.active()
+    if (!active[sessionID]) return undefined
     const page = yield* ctx.message.list({ sessionID, type: "assistant", order: "desc", limit: 3 })
     const text =
       page.data
@@ -284,10 +286,7 @@ function masterContext(ctx: VoiceContext) {
             : "",
         )
         .find((text) => text.trim()) ?? ""
-    return {
-      state: active[sessionID] ? ("running" as const) : ("idle" as const),
-      text: clipTokens(text.slice(-500), 200),
-    }
+    return { state: "running" as const, text: clipTokens(text.slice(-500), 200) }
   })
 }
 

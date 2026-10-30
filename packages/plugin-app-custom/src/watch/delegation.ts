@@ -135,8 +135,9 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
       Effect.catch(() => ensure().pipe(Effect.flatMap((replacement) => prompt(replacement)))),
     )
     state.promptID = admitted.id
-    yield* say(
-      itemID,
+    // Admission is shown, not spoken: GPT Live already acknowledges the request and would announce it again.
+    yield* output.master(
+      "running",
       request.delivery === "queue" ? "Pedido na fila da Sessão mestra." : "Pedido enviado à Sessão mestra.",
     )
   })
@@ -186,9 +187,9 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
       return yield* say(itemID, "A mestra precisa da sua resposta. Abra a Sessão mestra para conferir.")
     const text = yield* progress(event)
     if (!text) return
-    // Tool activity is useful on screen, but is not news worth interrupting the conversation for.
-    if (event.type === "session.tool.called" || event.type === "session.tool.progress")
-      return yield* output.master("running", text)
+    // Tool activity and failures the Mestra recovers from are useful on screen, but are not news worth
+    // interrupting the conversation for; only its own text is.
+    if (event.type !== "session.text.ended") return yield* output.master("running", text)
     yield* say(itemID, text)
   })
 
@@ -196,7 +197,7 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
     if (event.type === "session.tool.failed") return "Uma ferramenta falhou. A mestra está verificando o resultado."
     if (event.type === "session.step.failed") return "Uma etapa da mestra falhou. Aguardando o resultado da execução."
     if (event.type === "session.text.ended")
-      return event.data.text.trim() ? "Atualização da mestra: " + event.data.text.slice(0, limits.textChars) : undefined
+      return event.data.text.trim() ? "Atualização: " + event.data.text.slice(0, limits.textChars) : undefined
     const call =
       event.type === "session.tool.called"
         ? { name: tools.get(event.data.id), input: event.data.input }

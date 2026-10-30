@@ -119,9 +119,10 @@ candidates; the answer must be ICE-lite with UDP candidates, otherwise `502 {cod
 - **Delegation (server-side):** the backend handles GPT Live delegation on the sideband with the same behaviour as
   the iPhone's `VoiceMaster` (`OpenCode/Voice/VoiceMaster.swift`): `delegation.created` → ensure the Sessão mestra
   (`custom.master`) and send the task to it (steer by default, queue when asked), stream its progress back with
-   `delegation.context.append` (`channel: speakable`, ≤ 500 UTF-8 bytes per part) and as `master` events. Routine
-   tool activity produces only visual `master` events; confirmations, text updates, blockers and results supply
-   voice context, with the prompt asking for relevant news rather than repetitive acknowledgements. Turns are
+   `delegation.context.append` (`channel: speakable`, ≤ 500 UTF-8 bytes per part) and as `master` events. The
+   admission confirmation, tool activity and tool or step failures produce only visual `master` events (GPT Live
+   acknowledges the request itself, and spoke "já encaminhei" for every admission); the Mestra's text updates,
+   blockers and results supply voice context, without naming the Mestra. Turns are
   appended to voice memory (`custom.voice.append`) so the watch and the iPhone share one memory. First verify on the
   Mac, with one short call, which `session.delegation` setting makes `delegation.created` arrive on the sideband and
   whether appends sent there are accepted; record the result in "Backend implementation notes".
@@ -270,7 +271,8 @@ events stay readable for 60 s. A new call ends the device's previous one (`reaso
 **Delegation.** Like `VoiceMaster`: `custom.master.ensure`, one replacement ensure when the prompt fails, prompt
 text only (`steer`, or `queue` for `{"text":…,"delivery":"queue"}`), duplicate delegation IDs ignored. Progress
 lines are the iPhone's pt-BR texts (tool names from `session.tool.input.started`, Code Mode `toolCalls`, text,
-failures, pending requests), at most one every 5 s keeping only the latest; results and failures skip the wait.
+failures, pending requests). Only text updates (`Atualização: …`), pending requests, results and execution failures
+are spoken, at most one every 5 s keeping only the latest; results and failures skip the wait.
 The result is the latest assistant text after the admitted prompt, read once the Mestra leaves the running set
 (`session.execution.succeeded` can arrive while the drain still lists it; it is checked again every second, up to
 15 times). Appends go to the latest delegation item in parts of at most 500 UTF-8 bytes; every line is also a

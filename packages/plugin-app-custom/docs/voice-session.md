@@ -75,8 +75,11 @@ authenticated normal plugin transport, for example
 - **`context({version:2, scope:"global"})`** returns `summary`, `turns`, their
   bounded `approxTokens`, `updatedAt`, `truncated`, and optional `master` status.
   Missing memory returns empty history without creating a record or calling a
-  model. The master is read only: running/idle and up to its last 500 text
-  characters, further byte-bounded; no reasoning/tool payloads are included.
+  model. The master is read only and present only while it runs: up to its
+  last 500 text characters, further byte-bounded; no reasoning/tool payloads
+  are included. An idle master's last reply belongs to an earlier conversation,
+  and a new call started by repeating it, so it is omitted (`state` stays in the
+  schema for older clients).
 - **`end({version:2, scope:"global"})`** triggers a compaction **check**, not an
   unconditional summary. It returns whether work was scheduled, not completion.
   Short calls incur no summary request. No call/Session ID is required.

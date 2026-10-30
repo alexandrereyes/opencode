@@ -91,11 +91,10 @@ test("voice instructions reload the editable Markdown and reject empty or unread
   await using dir = await tmpdir("opencode-voice-prompt-")
   const file = `${dir.path}/voice.md`
   const defaults = await Effect.runPromise(loadInstructions(file))
-  expect(defaults).toContain("Silêncio durante")
-  // Platform-specific screen rules are appended by each app, so the shared default names none of them.
-  expect(defaults).toContain("Você consegue ver a tela")
-  expect(defaults).toContain("Nunca diga")
-  expect(defaults).not.toContain(`"screen"`)
+  // The default documents the screen parameter in each app's form, so neither app prepends its own rules.
+  expect(defaults).toContain(`"screen":true`)
+  expect(defaults).toContain(`"screen_app"`)
+  expect(defaults.toLowerCase()).not.toContain("mestra")
   await Bun.write(file, "Primeiro prompt")
   expect(await Effect.runPromise(loadInstructions(file))).toBe("Primeiro prompt")
   await Bun.write(file, "Segundo prompt")
@@ -354,7 +353,7 @@ it.effect("context reads do not create storage or invoke inference when memory i
   }),
 )
 
-it.effect("master status is read-only data and excludes reasoning from startup history", () =>
+it.effect("master status is read-only data, sent only while it runs, and excludes reasoning from startup history", () =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope
     const f = fixture(record([turn("voice-user")]))
@@ -378,7 +377,8 @@ it.effect("master status is read-only data and excludes reasoning from startup h
       },
     })
     f.values.set("preferences:profile", Schema.encodeSync(Preferences.Profile)(profile))
-    const context = yield* makeVoice(
+    const active = { [sessionID]: { type: "running" as const } }
+    const voice = makeVoice(
       {
         ...f.ctx,
         session: {
@@ -395,7 +395,7 @@ it.effect("master status is read-only data and excludes reasoning from startup h
                 time: { created: 1, updated: 1 },
               }),
             ),
-          active: () => Effect.succeed({ [sessionID]: { type: "running" } }),
+          active: () => Effect.succeed(active),
         },
         message: {
           list: () =>
@@ -418,10 +418,16 @@ it.effect("master status is read-only data and excludes reasoning from startup h
         },
       },
       scope,
-    ).context("global")
+    )
+    const context = yield* voice.context("global")
     expect(context.master).toEqual({ state: "running", text: "Consultando as sessões." })
     expect(JSON.stringify(context)).not.toContain("PRIVATE")
     expect(context.turns).toEqual([turn("voice-user")])
+    // An idle master's last reply is from an earlier conversation, so a new call does not get it.
+    delete active[sessionID]
+    const idle = yield* voice.context("global")
+    expect(idle.master).toBeUndefined()
+    expect(idle.turns).toEqual([turn("voice-user")])
     expect(f.generated).toEqual([])
   }),
 )

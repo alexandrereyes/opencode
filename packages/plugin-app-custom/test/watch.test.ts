@@ -398,26 +398,27 @@ it.effect("delegations keep tool activity on screen and send only updates and re
     ])
     const appends = () =>
       (socket?.sent ?? []).map((text) => JSON.parse(text)).filter((event) => event.type === "delegation.context.append")
-    expect(appends()).toEqual([
-      {
-        type: "delegation.context.append",
-        delegation_item_id: "item_d1",
-        channel: "speakable",
-        content: [{ type: "input_text", text: "Pedido enviado à Sessão mestra." }],
-      },
-    ])
+    // Admission only reaches the screen: GPT Live acknowledges the request itself.
+    expect(appends()).toEqual([])
     // Routine tools update the screen, never the speech mailbox, even after its throttle expires.
     yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_master", "call_1", "sessions.list"))
     yield* PubSub.publish(server.bus, masterEvents.toolCalled("ses_master", "call_1", {}))
     yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_other", "call_x", "read"))
     yield* settled
-    expect(appends()).toHaveLength(1)
+    expect(appends()).toEqual([])
     yield* TestClock.adjust(delegationLimits.narrationMs)
     yield* settled
-    expect(appends()).toHaveLength(1)
+    expect(appends()).toEqual([])
     yield* PubSub.publish(server.bus, masterEvents.text("ses_master", "Uma sessão precisa da sua resposta."))
     yield* settled
-    expect(appends().at(-1)?.content[0].text).toBe("Atualização da mestra: Uma sessão precisa da sua resposta.")
+    expect(appends()).toEqual([
+      {
+        type: "delegation.context.append",
+        delegation_item_id: "item_d1",
+        channel: "speakable",
+        content: [{ type: "input_text", text: "Atualização: Uma sessão precisa da sua resposta." }],
+      },
+    ])
     // The result follows the prompt in the Mestra's transcript; it skips the wait and is chunked.
     const reply = "Há três sessões rodando: " + "á".repeat(400)
     server.messages.set("ses_master", [assistant("msg_reply", reply), assistant("msg_prompt1", "")])
@@ -425,11 +426,11 @@ it.effect("delegations keep tool activity on screen and send only updates and re
     server.active.add("ses_master")
     yield* PubSub.publish(server.bus, masterEvents.succeeded("ses_master"))
     yield* settled
-    expect(appends()).toHaveLength(2)
+    expect(appends()).toHaveLength(1)
     server.active.delete("ses_master")
     yield* TestClock.adjust(delegationLimits.settleMs)
     yield* settled
-    const final = appends().slice(2)
+    const final = appends().slice(1)
     expect(final.map((event) => event.content[0].text).join("")).toBe(reply)
     expect(final.every((event) => Buffer.byteLength(event.content[0].text) <= 500)).toBe(true)
     const page = yield* json("GET", `/voice/calls/${created.callID}/events?after=0`)
