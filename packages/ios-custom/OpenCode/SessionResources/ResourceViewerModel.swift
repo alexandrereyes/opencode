@@ -55,6 +55,20 @@ import ImageIO
   @ObservationIgnored var rawFrames: ((ResourceFrame) -> Void)?
   /// Closes the viewer by clearing its presentation (the X button).
   @ObservationIgnored var close: (() -> Void)?
+  /// A thumbnail (the Mac's Recursos): at most one frame per `pace`, acknowledged late so the hub holds the rest back
+  /// and only the newest decoded, and the `economy` profile. Nil streams every frame.
+  @ObservationIgnored var pace: Duration?
+  @ObservationIgnored private var pacer: Task<Void, Never>?
+  @ObservationIgnored private var pacedFrame: ResourceFrame?
+  @ObservationIgnored private var lastPaced = ContinuousClock.now.advanced(by: .seconds(-3600))
+  #if os(macOS)
+  /// The Mac's Recursos draw frames on a layer, outside SwiftUI (a SwiftUI image updated 30 times a second costs the
+  /// main thread a fifth of a core): each decoded frame, and the latest one for a layer created later.
+  @ObservationIgnored var onFrame: ((CGImage) -> Void)?
+  @ObservationIgnored private(set) var lastFrame: CGImage?
+  /// Decodes at most this many pixels on the long side (JPEG's scaled decoding): the stage is smaller than the frame.
+  @ObservationIgnored var decodeMaxPixels: Int?
+  #endif
 
   @ObservationIgnored let client: OpenCodeClient
   @ObservationIgnored private var socket: URLSessionWebSocketTask?
@@ -138,17 +152,28 @@ import ImageIO
       connection = Task { [weak self] in
         guard let self, let frame = await fixture(resource) else { return }
         image = frame
+        hello = ("png", Int(frame.size.width), Int(frame.size.height))
+        #if os(macOS)
+        if let still = frame.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+          lastFrame = still
+          onFrame?(still)
+        }
+        #endif
         connected = true
         latency = 12
       }
       return
     }
     #endif
-    path.pathUpdateHandler = { [weak self] update in
-      let economy = update.isConstrained || update.isExpensive
-      Task { @MainActor in self?.choose(economy ? "economy" : "standard") }
+    if pace != nil {
+      profile = "economy"
+    } else {
+      path.pathUpdateHandler = { [weak self] update in
+        let economy = update.isConstrained || update.isExpensive
+        Task { @MainActor in self?.choose(economy ? "economy" : "standard") }
+      }
+      path.start(queue: .main)
     }
-    path.start(queue: .main)
     connect(with: nil)
   }
 
@@ -253,6 +278,9 @@ import ImageIO
   private func disconnect() {
     generation += 1
     pinger?.cancel()
+    pacer?.cancel()
+    pacer = nil
+    pacedFrame = nil
     socket?.cancel(with: .goingAway, reason: nil)
     socket = nil
     connected = false
@@ -329,9 +357,14 @@ import ImageIO
         alive()
         worked()
         received += 1
-        if features?.ack == true { transmit(.ack(received), on: task) }
-        guard let frame = ResourceFrame(data) else { continue }
-        draw(frame)
+        guard let pace else {
+          if features?.ack == true { transmit(.ack(received), on: task) }
+          guard let frame = ResourceFrame(data) else { continue }
+          draw(frame)
+          continue
+        }
+        pacedFrame = ResourceFrame(data) ?? pacedFrame
+        paced(pace, on: task, generation: current)
       @unknown default: continue
       }
     }
@@ -423,13 +456,20 @@ import ImageIO
     decoding = true
     let current = generation
     let payload = frame.payload
+    #if os(macOS)
+    let maxPixels = decodeMaxPixels
+    #endif
     Task.detached(priority: .userInitiated) {
       #if os(iOS)
       let decoded = UIImage(data: payload)?.preparingForDisplay()
       #else
       // NSImage is not Sendable: the bitmap is decoded here and wrapped on the main actor.
-      let decoded = CGImageSourceCreateWithData(payload as CFData, nil)
-        .flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+      let decoded: CGImage? = CGImageSourceCreateWithData(payload as CFData, nil).flatMap { source in
+        guard let maxPixels else { return CGImageSourceCreateImageAtIndex(source, 0, nil) }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+          kCGImageSourceThumbnailMaxPixelSize: maxPixels, kCGImageSourceCreateThumbnailFromImageAlways: true,
+        ] as CFDictionary)
+      }
       #endif
       await MainActor.run { [weak self] in
         guard let self, self.generation == current else { return }
@@ -438,6 +478,12 @@ import ImageIO
         let image = decoded
         #else
         let image = decoded.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+        #endif
+        #if os(macOS)
+        if let decoded {
+          self.lastFrame = decoded
+          self.onFrame?(decoded)
+        }
         #endif
         if let image {
           self.image = image
@@ -449,6 +495,24 @@ import ImageIO
           self.pendingFrame = nil
           self.decode(next.frame, received: next.received)
         }
+      }
+    }
+  }
+
+  /// A thumbnail's frames: the newest is drawn and every frame so far acknowledged at most once per `pace`, so between
+  /// two the hub sends at most its in-flight allowance and Android and Chrome capture no more.
+  private func paced(_ pace: Duration, on task: URLSessionWebSocketTask, generation current: Int) {
+    guard pacer == nil else { return }
+    let wait = max(.zero, lastPaced + pace - ContinuousClock.now)
+    pacer = Task { [weak self] in
+      if wait > .zero { try? await Task.sleep(for: wait) }
+      guard let self, !Task.isCancelled, self.generation == current else { return }
+      self.pacer = nil
+      self.lastPaced = .now
+      if self.features?.ack == true { self.transmit(.ack(self.received), on: task) }
+      if let frame = self.pacedFrame {
+        self.pacedFrame = nil
+        self.draw(frame)
       }
     }
   }

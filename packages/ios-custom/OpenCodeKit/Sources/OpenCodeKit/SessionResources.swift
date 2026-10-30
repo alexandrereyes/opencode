@@ -124,6 +124,25 @@ public struct ResourceControl: Codable, Hashable, Sendable {
   public let expiresAt: Double
 }
 
+/// One agent shell command that named a resource (rev. 2026-10-30; `docs/resources.md` "Activity").
+public struct ResourceActivity: Codable, Hashable, Sendable {
+  /// When it started (or, for one first seen in its result, when it ended), epoch ms.
+  public let at: Double
+  /// The command, without leading assignments, on one line, at most 160 characters.
+  public let command: String
+  public let sessionID: String?
+  public let agent: String?
+  /// Still running: the resource stays "Agente usando" until it ends.
+  public let running: Bool?
+  public init(at: Double, command: String, sessionID: String? = nil, agent: String? = nil, running: Bool? = nil) {
+    self.at = at
+    self.command = command
+    self.sessionID = sessionID
+    self.agent = agent
+    self.running = running
+  }
+}
+
 public struct SessionResource: Codable, Identifiable, Hashable, Sendable {
   public let id: String
   public let kind: ResourceKind
@@ -137,6 +156,8 @@ public struct SessionResource: Codable, Identifiable, Hashable, Sendable {
   public let lastUsedAt: Double
   public let updatedAt: Double
   public let live: Live
+  /// The agents' latest commands on it, newest first; absent on older servers and until one names it.
+  public let activity: [ResourceActivity]?
   public struct Live: Codable, Hashable, Sendable {
     public let stream: Bool
     public let input: Bool
@@ -148,7 +169,8 @@ public struct SessionResource: Codable, Identifiable, Hashable, Sendable {
   public init(
     id: String, kind: ResourceKind, label: String, purpose: String? = nil, owner: ResourceOwner? = nil,
     state: ResourceState, control: ResourceControl? = nil, meta: ResourceMeta, discoveredAt: Double = 0,
-    lastUsedAt: Double = 0, updatedAt: Double = 0, live: Live = .init(stream: false, input: false)
+    lastUsedAt: Double = 0, updatedAt: Double = 0, live: Live = .init(stream: false, input: false),
+    activity: [ResourceActivity]? = nil
   ) {
     self.id = id
     self.kind = kind
@@ -162,6 +184,7 @@ public struct SessionResource: Codable, Identifiable, Hashable, Sendable {
     self.lastUsedAt = lastUsedAt
     self.updatedAt = updatedAt
     self.live = live
+    self.activity = activity
   }
   /// The subagent session that used it, when it is not the family's root.
   public var via: String? {

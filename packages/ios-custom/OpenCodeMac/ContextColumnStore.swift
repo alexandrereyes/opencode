@@ -27,6 +27,17 @@ import SwiftUI
   private(set) var loaded = false
   private(set) var error: String?
   private(set) var acting: Set<String> = []
+  /// Recursos' stage (`ResourceStage`): "Seguir o agente" puts the resource an agent uses now on it; choosing one by
+  /// hand turns following off until Alexandre turns it back on. `stageControlling` keeps the stage while he holds
+  /// control from it.
+  var stageFollowing = true
+  var stageChosen: String?
+  var stageCurrent: String?
+  var stageControlling = false
+  /// "Limpar parados" asks first.
+  var clearingStopped = false
+  /// `+N ›`: every stopped resource as a chip.
+  var stoppedExpanded = false
   /// Detalhes da sessão, read when that part of the column opens: loaded skills, plugins and the MCP servers.
   private(set) var services: SessionServices?
   var detailsOpen = false {
@@ -225,6 +236,39 @@ import SwiftUI
 
   func dismiss(_ resource: SessionResource) async {
     await act(resource.id) { try await self.client.dismissResource(resource.id) }
+  }
+
+  /// The resource on the stage now: following, the agent's; by hand, the chosen one; else the current or the first.
+  var stageID: String? {
+    ResourceStage.pick(ResourceStage.on(resources), following: stageFollowing, chosen: stageChosen,
+      current: stageCurrent, controlling: stageControlling)
+  }
+
+  /// A thumbnail clicked: it takes the stage and following stops.
+  func choose(_ resource: SessionResource) {
+    stageChosen = resource.id
+    stageFollowing = false
+  }
+
+  /// "Seguir o agente" back on: the agent's resource takes the stage again.
+  func follow(_ on: Bool) {
+    stageFollowing = on
+    if on { stageChosen = nil }
+  }
+
+  /// "Limpar parados": Encerrar on each stopped resource, then one reload.
+  func dismissStopped() async {
+    let stopped = ResourceStage.off(resources)
+    guard !stopped.isEmpty, acting.insert("stopped").inserted else { return }
+    defer { acting.remove("stopped") }
+    var failed = 0
+    for resource in stopped {
+      do { try await client.dismissResource(resource.id) } catch { failed += 1 }
+    }
+    await load()
+    if failed > 0 {
+      sessions.toast.show("Não foi possível limpar \(failed) de \(stopped.count) recursos parados.", kind: .error)
+    }
   }
 
   private func act(_ key: String, _ action: @escaping () async throws -> Void) async {

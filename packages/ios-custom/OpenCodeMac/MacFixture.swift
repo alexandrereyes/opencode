@@ -202,11 +202,13 @@ struct MacFixtureServer: Sendable {
         cursor: input?["cursor"]?.string)
     case "custom.transcript/skills":
       #"{"data":[{"id":"opencode-custom","name":"opencode-custom"},{"id":"mac-prints","name":"Capturas do app de Mac"},{"id":"swift-testing","name":"Swift Testing"}]}"#
-    case "custom.resources/list": #"{"resources":[\#(resources)]}"#
+    case "custom.resources/list": #"{"resources":[\#(currentResources.joined(separator: ","))]}"#
     case "custom.resources/get":
-      resourceList.first { $0.contains(#""id":"\#(input?["id"]?.string ?? "")""#) }
+      currentResources.first { $0.contains(#""id":"\#(input?["id"]?.string ?? "")""#) }
+    case "custom.resources/dismiss":
+      MacResourcesScenario.shared.remove(input?["id"]?.string ?? "").map { _ in "{}" }
     case "custom.resources/control":
-      resourceList.first { $0.contains(#""id":"\#(input?["id"]?.string ?? "")""#) }.map { resource in
+      currentResources.first { $0.contains(#""id":"\#(input?["id"]?.string ?? "")""#) }.map { resource in
         let ticket = input?["action"]?.string == "release" ? "null"
           : #"{"ticket":"fixture","expiresAt":\#(now + 120_000),"path":"/resources/fixture","loopbackPort":9}"#
         return #"{"resource":\#(resource),"ticket":\#(ticket)}"#
@@ -515,7 +517,19 @@ struct MacFixtureServer: Sendable {
         meta: #"{"kind":"android-emulator","avd":"Pixel_9"}"#, used: 8),
     ]
   }
-  private var resources: String { resourceList.joined(separator: ",") }
+
+  /// The scenario's resources while `MacResourcesScenario` holds one (the `recursos` check), else the fixed three.
+  private var currentResources: [String] {
+    guard let items = MacResourcesScenario.shared.current else { return resourceList }
+    func text(_ value: String) -> String { String(decoding: try! JSONEncoder().encode(value), as: UTF8.self) }
+    return items.map { item in
+      let used = now - item.usedSeconds * 1000
+      let activity = item.activity.map { step in
+        #"{"at":\#(now - step.seconds * 1000),"command":\#(text(step.command)),"sessionID":"ses_mac_c2","agent":"opushigh"\#(step.running ? #","running":true"# : "")}"#
+      }.joined(separator: ",")
+      return #"{"id":"\#(item.id)","kind":"\#(item.kind)","label":\#(text(item.label)),"owner":{"sessionID":"ses_mac_c2","rootSessionID":"ses_mac_root","agent":"opushigh"},"state":"\#(item.state)","meta":\#(item.meta),"discoveredAt":\#(used - 3_600_000),"lastUsedAt":\#(used),"updatedAt":\#(used),"live":{"stream":true,"input":true},"activity":[\#(activity)]}"#
+    }
+  }
 
   // MARK: Files
 
@@ -564,6 +578,39 @@ struct MacFixtureServer: Sendable {
   private struct RPC: Decodable { let input: [String: JSONValue]? }
 }
 
+/// `-OpenCodeMacAjustes recursos`: the resources the fixture serves, which the check changes as agents would (who is
+/// used, what is on, what was cleared). Nil serves the fixed three.
+final class MacResourcesScenario: @unchecked Sendable {
+  struct Step: Sendable {
+    let seconds: Double
+    let command: String
+    var running = false
+  }
+  struct Item: Sendable {
+    let id: String
+    let kind: String
+    let label: String
+    let state: String
+    let meta: String
+    let usedSeconds: Double
+    var activity: [Step] = []
+  }
+  static let shared = MacResourcesScenario()
+  private let lock = NSLock()
+  private var items: [Item]?
+
+  var current: [Item]? { lock.withLock { items } }
+  func set(_ items: [Item]?) { lock.withLock { self.items = items } }
+  /// Encerrar: nil when the scenario does not hold that resource.
+  func remove(_ id: String) -> Void? {
+    lock.withLock {
+      guard items?.contains(where: { $0.id == id }) == true else { return nil }
+      items?.removeAll { $0.id == id }
+      return ()
+    }
+  }
+}
+
 /// Synthetic live pictures for the fixture's resources, drawn once at launch.
 @MainActor enum MacFixturePictures {
   static func make() -> [String: String] {
@@ -571,11 +618,13 @@ struct MacFixtureServer: Sendable {
       "res_iphone": draw(portrait: true, title: "Sessões", accent: NSColor(red: 0.96, green: 0.5, blue: 0.2, alpha: 1)),
       "res_pixel": draw(portrait: true, title: "Android", accent: NSColor(red: 0.3, green: 0.75, blue: 0.5, alpha: 1)),
       "res_chrome": draw(portrait: false, title: "localhost:4177 · OpenCode", accent: NSColor(red: 0.96, green: 0.5, blue: 0.2, alpha: 1)),
+      "res_watch": draw(portrait: true, title: "3 sessões", accent: NSColor(red: 0.96, green: 0.5, blue: 0.2, alpha: 1),
+        size: NSSize(width: 410, height: 502)),
     ]
   }
 
-  private static func draw(portrait: Bool, title: String, accent: NSColor) -> String {
-    let size = portrait ? NSSize(width: 360, height: 720) : NSSize(width: 800, height: 500)
+  private static func draw(portrait: Bool, title: String, accent: NSColor, size given: NSSize? = nil) -> String {
+    let size = given ?? (portrait ? NSSize(width: 360, height: 720) : NSSize(width: 800, height: 500))
     let image = NSImage(size: size, flipped: true) { rect in
       NSColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 1).setFill()
       rect.fill()

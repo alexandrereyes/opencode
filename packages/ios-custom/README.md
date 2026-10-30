@@ -3226,9 +3226,8 @@ hit below 80% amber, and the amber `?` of a subagent asking for permission. Top 
 5. `TAREFAS N`: background shells, 12-pt lines with a monochrome icon (a hammer for builds and tests, play
    otherwise), the command without its port option plus `· :port`, the elapsed time; right-click Parar and Copiar
    comando.
-6. `RECURSOS N`: live thumbnails for the resources in use and compact rows with a small thumbnail for the
-   others, with the state in gray (`Agente usando`, `Você no controle`, `Livre`, `Parado há N min`); clicking opens
-   the resource's window (see [Adjustment round](#adjustment-round--28-october)).
+6. `RECURSOS N · K ligados`: a stage with one ligado resource's live video, the other ligados as thumbnails and
+   the stopped ones as chips; see [Recursos em palco](#recursos-em-palco--30-october).
 
 **Arquivos** (over the column; `Arquivos ›`, ⇧⌘F, or a file named in the chat), at the same level: `‹ Contexto`
 (Esc), the centered title, Ampliar (⇧⌘E) and the search across the session (`/api/fs/find`); the folder's absolute
@@ -3308,6 +3307,58 @@ Approved mocks: option B (`opcao-b.png`) and, without the gutter, B1 with the `?
   subagent with the path through the middle one, and the way back through the path's action and `backToParent`
   (⌘[ and the banner). The fixture's Backend da Live Activity has two subagents (one running) and Mapear apps Mac
   de agentes runs a model outside the catalog.
+
+### Recursos em palco — 30 October
+
+Approved mock: option B, `.agent-artifacts/recursos-ao-vivo/opcao-b-palco.png` of the main checkout. Logic in
+OpenCodeKit's `ResourceStage` (`ResourceStageTests`); the views in `OpenCodeMac/MacContextResources.swift`; the stage
+state (following, chosen, in control, Limpar parados) in `ContextColumnStore`.
+
+- **Ligados and parados.** Ligado is anything neither stopped nor gone, ordered in use now (Você no controle, then
+  Agente usando by latest use), Ao vivo, Livre. Stopped and gone resources are chips, `iPhone 17 Pro · 2 min`, the
+  most recent first, eight wide and five narrow, then `+N ›` (Mostrar menos) and **Limpar parados**, which asks
+  ("Limpar N recursos parados?") and then runs Encerrar on each with one reload. A chip opens the resource's window;
+  right-click has Encerrar. There is no Religar.
+- **The stage** is the resource window's own pieces (`ResourceViewerModel`, `ResourceTouchOverlay`) without its
+  floating shell: the video at its upright proportions (420 pt tall beside its details in a wide panel, 300 pt above
+  them when narrow or for a landscape page), the title, the state (`Agente usando · App Mac — Backend da Live
+  Activity`, the shown session then the subagent that used it; `Ao vivo · usado há 3 min`; `Livre`; `Você no
+  controle`), `agora: …` (a command still running, else the subagent's current tool) and the latest commands
+  (`há 20 s: agent-device fill …`, from the resource's `activity`, see the plugin's `docs/resources.md`
+  "Activity"), then Abrir janela, **Assumir controle** / Devolver controle, Captura and Encerrar (icons with their
+  names in the tooltip when narrow, control keeps its words). Assumir controle follows the window's rules: a click is
+  a touch, a drag moves it, the trackpad scrolls, the keyboard types (⌘V pastes) and the agent's commands on it wait;
+  closing the column, opening another session or the resource leaving the stage gives control back. In use now, the
+  title shimmers (`MacShimmerText`) and the video gets a 1.5-pt orange outline with a soft glow; in control too.
+- **Seguir o agente** (on by default, at the header's right): the stage shows the resource an agent uses now (one
+  whose command is still running first, else the latest use); otherwise it keeps what it shows. A click on a thumbnail
+  puts it on the stage and turns following off until Alexandre turns it back on. While he holds control from the
+  stage nothing replaces it. Whatever leaves (stopped, ended, Encerrar), the first ligado takes its place.
+- **Thumbnails**: the other ligados beside the stage in a 190-pt column (wide) or in a row below it (narrow), with
+  name and state; a click puts one on the stage.
+- **Cost.** Frames go to a layer (`MacResourceFrameLayer`, `ResourceViewerModel.onFrame`) instead of a SwiftUI image,
+  so a new frame re-renders nothing in SwiftUI; the stage decodes at most 1000 px on the long side, thumbnails 400 px
+  with the `economy` profile and at most one frame a second (`ResourceViewerModel.pace`: acknowledged late, so the
+  hub holds the rest back and Android and Chrome capture no more). Every stream suspends while the window is
+  minimized or fully covered (`NSWindow.occlusionState`) and ends with the column (Contexto hidden, Arquivos over it,
+  another session). Measured on 30/10 against an isolated sandbox with three of the check's own simulators (an iPhone
+  on the stage showing a page that repaints continuously, an iPhone 16e and an Apple Watch Ultra as thumbnails), with
+  the Mac's load average near 100 from other agents: stage 29.5 frames/s, thumbnails 1.0 and 0.5; the app's main
+  thread **4.3 %** (21 % while the frames still went through a SwiftUI image) and the whole app 27 % of a core (the
+  30 frames/s decode, off the main thread; a still screen sends nothing), the hub 1 %, the three serve-sim helpers
+  21 %. Window hidden: the app 0.1 %, the helpers 10.5 % (they stay up 2 minutes after the last viewer, by design);
+  Contexto closed: the app 0.2 %.
+- **Checks.** `ResourceStageTests` (order, chips and `+N`, the stage's choice: following, by hand, control held, a
+  ligado leaving; state and history lines; decoding `activity` and its absence). `script/test-mac-ajustes.sh recursos`,
+  one launch against the fixture (`MacResourcesScenario` changes its resources and announces them with the server's
+  own event): three ligados wide (order, thumbnails at one frame a second, eight chips and `+4`), following the agent
+  to Chrome, a thumbnail taking the stage (following off; the agent moving does not move it) and following again,
+  control taken on the stage holding it while the agent moves and released, every chip, narrow, one ligado, none, and
+  Limpar parados through its confirmation's own Limpar button. Captures `recursos-largo`, `-seguir`, `-controle`,
+  `-estreito`, `-um-ligado`, `-zero`, `-limpar`. `-OpenCodeMacAjustes recursos-ao-vivo` with
+  `-OpenCodeMacResourcesLive` (no notifications or saved state, like a fixture), `-OpenCodeServerURL` of a sandbox,
+  `-OpenCodeMacSession`, `-OpenCodeMacResourceProfile visible` and `-OpenCodeMacMeasure <pgrep patterns>` measures the
+  above, pauses and resumes the streams through the occlusion path and taps through Assumir controle on the stage.
 
 ### LLM proxy window (stage 2)
 
@@ -3979,10 +4030,11 @@ Esc; ⌘C in the viewer (the clipboard is restored afterwards) and the drag prov
 menu's ⌘1–⌘9 and ⌘2; Contexto at 60% of a 2400-pt window; the right Option key's tap, hold, left Option and
 modifier cases with the fake recorder (no microphone); ↓ in both places; the master's trash. Each writes captures.
 `MacStress` now activates the app first (the search panel hides while another app is in front) and drags Contexto
-to 1400 pt as well; `-OpenCodeMacResourceProfile visible|frozen|minimized` and the fixture's `MacResourceSnapshot`
-lines measure the previews. While someone uses the Mac, macOS may refuse to bring a test copy to the front: then
-the search panel check of `test-mac-window.sh` and the ⌘1–⌘9 check (menu commands follow the key window) can fail
-with the right geometry; failures now print whether the app and the window were in front. The base build
+to 1400 pt as well; `-OpenCodeMacResourceProfile visible` streams Recursos from an off-screen test window (see
+[Recursos em palco](#recursos-em-palco--30-october)) and the fixture's `MacResourceSnapshot` lines count snapshots.
+While someone uses the Mac, macOS may refuse to bring a test copy to the front: then the search panel check of
+`test-mac-window.sh` and the ⌘1–⌘9 check (menu commands follow the key window) can fail with the right geometry;
+failures now print whether the app and the window were in front. The base build
 (`fadcd1420a`) failed the same way in 2 of 3 runs under those conditions.
 
 ### Pergunta paralela — 29 October

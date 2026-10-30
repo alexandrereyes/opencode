@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos|servidores`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos|servidores|recursos`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -66,6 +66,8 @@ import SwiftUI
       case "contexto": try await contexto(window: window, runtime: runtime, shot: shot)
       case "caminhos": try await caminhos(window: window, runtime: runtime, shot: shot)
       case "servidores": await MacServerChecks.run(window: window, theme: theme, folder: folder)
+      case "recursos": try await recursos(window: window, runtime: runtime, shot: shot)
+      case "recursos-ao-vivo": try await recursosAoVivo(window: window, runtime: runtime, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -1269,7 +1271,10 @@ import SwiftUI
   }
 
   /// The window server's CPU time in seconds (`ps`), where Core Animation runs the band.
-  private static func windowServerCPU() -> Double? {
+  private static func windowServerCPU() -> Double? { cpuTime(["-x", "WindowServer"]) }
+
+  /// The CPU time in seconds (`ps`) of every process `pgrep` finds with `arguments`; nil when none runs.
+  private static func cpuTime(_ arguments: [String]) -> Double? {
     func run(_ path: String, _ arguments: [String]) -> String? {
       let process = Process()
       let pipe = Pipe()
@@ -1281,10 +1286,12 @@ import SwiftUI
       return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
         .trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    guard let pid = run("/usr/bin/pgrep", ["-x", "WindowServer"])?.split(separator: "\n").first,
-      let time = run("/bin/ps", ["-o", "cputime=", "-p", String(pid)]) else { return nil }
-    // `[[hh:]mm:]ss.cc`
-    return time.split(separator: ":").reduce(0.0) { $0 * 60 + (Double($1) ?? 0) }
+    let pids = run("/usr/bin/pgrep", arguments)?.split(separator: "\n").map(String.init) ?? []
+    guard !pids.isEmpty else { return nil }
+    // `[[hh:]mm:]ss.cc` per process.
+    return pids.compactMap { run("/bin/ps", ["-o", "cputime=", "-p", $0]) }.map { time in
+      time.split(separator: ":").reduce(0.0) { $0 * 60 + (Double($1) ?? 0) }
+    }.reduce(0, +)
   }
 
   /// A `todowrite` call that succeeds: one item done, one in hand, one pending.
@@ -1295,6 +1302,221 @@ import SwiftUI
       #"{"type":"session.tool.called","created":0,"data":{"sessionID":"\#(id)","id":"call_todo_\#(id)","name":"todowrite","input":{"todos":\#(todos)}}}"#,
       #"{"type":"session.tool.success","created":0,"data":{"sessionID":"\#(id)","id":"call_todo_\#(id)"}}"#,
     ].map { .update(try! JSONDecoder().decode(ConversationEvent.self, from: Data($0.utf8))) }
+  }
+
+  // MARK: Recursos — the stage
+
+  /// The stage with three, one and no ligados, wide and narrow; following the agent, a thumbnail taking the stage
+  /// (following off) and following again; control held on the stage keeping it; `+N ›`; Limpar parados through its
+  /// confirmation. The fixture's resources change through `MacResourcesScenario` as agents would, announced by the
+  /// same event the server sends.
+  private static func recursos(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
+    typealias Item = MacResourcesScenario.Item
+    let devices = ["iPhone 17 Pro", "Apple Watch Series 11 46mm", "Apple Watch Series 11 42mm", "Apple Watch Series 9 41mm",
+      "Apple Watch SE 3 40mm", "iPhone 17 Pro", "iPad Air", "Apple Watch Ultra 3 49mm", "iPhone 16e", "iPad mini",
+      "Apple Watch Series 10 46mm", "iPhone 17"]
+    let stopped = devices.enumerated().map { index, device in
+      Item(id: String(format: "res_s%02d", index + 1), kind: "ios-simulator", label: device, state: "stopped",
+        meta: #"{"kind":"ios-simulator","udid":"S-\#(index)","device":"\#(device)"}"#,
+        usedSeconds: index < 5 ? 120 : Double(index) * 2_700)
+    }
+    func iphone(_ state: String, used: Double, running: Bool) -> Item {
+      Item(id: "res_iphone", kind: "ios-simulator", label: "iPhone 17 Pro", state: state,
+        meta: #"{"kind":"ios-simulator","udid":"P-1","device":"iPhone 17 Pro"}"#, usedSeconds: used,
+        activity: [
+          .init(seconds: used, command: "agent-device --udid P-1 test flows/gravar.yaml", running: running),
+          .init(seconds: used + 20, command: #"agent-device --udid P-1 fill "Nome" "Alexandre""#),
+          .init(seconds: used + 41, command: "agent-device --udid P-1 open Gravação"),
+        ])
+    }
+    let watch = Item(id: "res_watch", kind: "ios-simulator", label: "watch-fullscreen", state: "live",
+      meta: #"{"kind":"ios-simulator","udid":"W-1","device":"Apple Watch Ultra 3 49mm","name":"watch-fullscreen"}"#,
+      usedSeconds: 180)
+    func chrome(_ state: String, used: Double, running: Bool = false) -> Item {
+      Item(id: "res_chrome", kind: "chrome", label: "localhost:4177", state: state,
+        meta: #"{"kind":"chrome","session":"login","url":"http://localhost:4177/","title":"OpenCode"}"#, usedSeconds: used,
+        activity: running ? [.init(seconds: used, command: "playwright-cli -s=login click e12", running: true)] : [])
+    }
+    let store = try await wait("Contexto da raiz") {
+      ContextColumnStore.shown.flatMap { $0.id == MacFixture.rootID && $0.loaded ? $0 : nil }
+    }
+    func announce(_ items: [Item]) async throws {
+      MacResourcesScenario.shared.set(items)
+      runtime.store?.hub.inject(.update(try JSONDecoder().decode(ConversationEvent.self, from: Data(
+        #"{"type":"\#(OpenCodeClient.resourcesChangedEvent)","created":\#(Date.now.timeIntervalSince1970 * 1000),"data":{}}"#.utf8))))
+      let states = Set(items.map { $0.id + ":" + $0.state })
+      try await wait("recursos recarregados") {
+        Set(store.resources.map { $0.id + ":" + $0.state.rawValue }) == states ? true : nil
+      }
+    }
+    func staged(_ id: String?, _ what: String) async throws {
+      try await wait(what) { MacResourcesProbe.stage == id && store.stageID == id ? true : nil }
+    }
+    /// The column scrolled to its end, where Recursos sits above Detalhes.
+    func reveal() async throws {
+      try await Task.sleep(for: .milliseconds(700))
+      let width = window.contentView?.bounds.width ?? 0
+      for scroll in views(window).compactMap({ $0 as? NSScrollView }) where scroll.window != nil
+        && scroll.convert(scroll.bounds, to: nil).minX > width - runtime.measuredContextWidth - 4 && scroll.bounds.height > 200 {
+        let clip = scroll.contentView
+        clip.scroll(to: clip.constrainBoundsRect(clip.bounds.offsetBy(dx: 0, dy: clip.isFlipped ? 100_000 : -100_000)).origin)
+        scroll.reflectScrolledClipView(clip)
+      }
+      try await Task.sleep(for: .milliseconds(700))
+    }
+
+    runtime.contextWidth = 1_000
+    try await announce([iphone("agent", used: 4, running: true), watch, chrome("idle", used: 2_400)] + stopped)
+    try await staged("res_iphone", "o iPhone em uso no palco")
+    try await wait("miniaturas e etiquetas") {
+      Set(MacResourcesProbe.thumbnails.keys) == ["res_watch", "res_chrome"] && MacResourcesProbe.chips.count == 8
+        && MacResourcesProbe.more == 4 && MacResourcesProbe.wide ? true : nil
+    }
+    guard ResourceStage.on(store.resources).map(\.id) == ["res_iphone", "res_watch", "res_chrome"] else {
+      throw Failure(description: "ordem dos ligados: \(ResourceStage.on(store.resources).map(\.id))")
+    }
+    guard MacResourcesProbe.thumbnails.values.allSatisfy({ $0.pace == .seconds(1) }), MacResourcesProbe.stageModel?.pace == nil
+    else { throw Failure(description: "miniaturas sem ritmo reduzido ou palco com ele") }
+    try await reveal()
+    shot("largo")
+
+    // Following: the agent moves to Chrome, which takes the stage.
+    try await announce([iphone("live", used: 30, running: false), watch, chrome("agent", used: 2, running: true)] + stopped)
+    try await staged("res_chrome", "o palco seguiu o agente")
+    try await reveal()
+    shot("seguir")
+
+    // A thumbnail clicked: it takes the stage and following stops; the agent moving elsewhere leaves it there.
+    store.choose(try require(store.resources.first { $0.id == "res_watch" }, "relógio"))
+    try await staged("res_watch", "a miniatura no palco")
+    guard !store.stageFollowing, !MacResourcesProbe.following else { throw Failure(description: "seguir continuou ligado") }
+    try await announce([iphone("agent", used: 1, running: true), watch, chrome("live", used: 60)] + stopped)
+    try await Task.sleep(for: .seconds(1))
+    guard MacResourcesProbe.stage == "res_watch" else { throw Failure(description: "o palco trocou com o seguir desligado") }
+    store.follow(true)
+    try await staged("res_iphone", "seguir de novo")
+
+    // Control taken on the stage keeps it there even as the agent moves.
+    let stage = try require(MacResourcesProbe.stageModel, "modelo do palco")
+    await stage.takeControl()
+    try await wait("no controle pelo palco") { stage.inControl && store.stageControlling ? true : nil }
+    try await announce([iphone("live", used: 40, running: false), watch, chrome("agent", used: 1, running: true)] + stopped)
+    try await Task.sleep(for: .seconds(1))
+    guard MacResourcesProbe.stage == "res_iphone" else { throw Failure(description: "o palco trocou durante o controle") }
+    try await reveal()
+    shot("controle")
+    await stage.giveBack()
+    try await staged("res_chrome", "devolver deixa o palco seguir")
+
+    // Every stopped resource as a chip.
+    store.stoppedExpanded = true
+    try await wait("todas as etiquetas") { MacResourcesProbe.chips.count == 12 && MacResourcesProbe.more == 0 ? true : nil }
+    store.stoppedExpanded = false
+
+    // Narrow: stage on top, thumbnails and chips below.
+    runtime.contextWidth = 400
+    try await wait("painel estreito") { !MacResourcesProbe.wide && MacResourcesProbe.chips.count == 5 ? true : nil }
+    try await reveal()
+    shot("estreito")
+
+    // One ligado, then none.
+    runtime.contextWidth = 1_000
+    try await announce([iphone("agent", used: 3, running: true)] + stopped)
+    try await staged("res_iphone", "um ligado")
+    try await wait("sem miniaturas") { MacResourcesProbe.thumbnails.isEmpty ? true : nil }
+    try await reveal()
+    shot("um-ligado")
+    try await announce(stopped)
+    try await staged(nil, "nenhum ligado")
+    try await reveal()
+    shot("zero")
+
+    // Limpar parados asks first; its Limpar ends every stopped resource.
+    store.clearingStopped = true
+    let sheet = try await wait("confirmação de Limpar parados") { window.attachedSheet }
+    try await Task.sleep(for: .milliseconds(500))
+    shot("limpar")
+    func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
+    let button = try require(sheet.contentView.flatMap { all($0).compactMap { $0 as? NSButton }.first { $0.title == "Limpar" } },
+      "botão Limpar")
+    button.performClick(nil)
+    try await wait("parados encerrados", timeout: 12) {
+      store.resources.isEmpty && MacResourcesScenario.shared.current?.isEmpty == true ? true : nil
+    }
+    try await wait("confirmação fechada") { window.attachedSheet == nil ? true : nil }
+  }
+
+  /// `-OpenCodeMacResourcesLive` against an isolated sandbox whose session used three simulators of the check's own:
+  /// the stage at full rate and the thumbnails at about a frame a second; the CPU of this app, the sandbox's hub and
+  /// serve-sim (`-OpenCodeMacMeasure <pgrep pattern>,…`) with the stage and two thumbnails, with the window hidden
+  /// (every stream paused) and with Contexto closed; control taken from the stage on the open socket and given back.
+  private static func recursosAoVivo(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
+    let patterns = MacFixture.value("-OpenCodeMacMeasure")?.split(separator: ",").map(String.init) ?? []
+    runtime.contextWidth = 1_000
+    let store = try await wait("recursos da sessão", timeout: 40) {
+      ContextColumnStore.shown.flatMap { $0.loaded && ResourceStage.on($0.resources).count >= 3 ? $0 : nil }
+    }
+    let stage = try await wait("vídeo do palco", timeout: 90) {
+      MacResourcesProbe.stageModel.flatMap { $0.connected && $0.image != nil ? $0 : nil }
+    }
+    func thumbnails() -> [ResourceViewerModel] { Array(MacResourcesProbe.thumbnails.values) }
+    try await wait("vídeo das miniaturas", timeout: 90) {
+      thumbnails().count == 2 && thumbnails().allSatisfy { $0.connected && $0.image != nil } ? true : nil
+    }
+    print("MacAjustes recursos-ao-vivo: palco \(MacResourcesProbe.stage ?? "-") · miniaturas \(MacResourcesProbe.thumbnails.keys.sorted())")
+    func measure(_ name: String) async -> (main: Double, app: Double) {
+      try? await Task.sleep(for: .seconds(3))
+      let wall = CACurrentMediaTime()
+      let main = MacPerf.mainCPU()
+      let app = processCPU()
+      let others = patterns.map { cpuTime(["-f", $0]) }
+      try? await Task.sleep(for: .seconds(15))
+      let seconds = CACurrentMediaTime() - wall
+      let result = (main: (MacPerf.mainCPU() - main) / seconds, app: (processCPU() - app) / seconds)
+      let helpers = zip(patterns, others).map { pattern, start in
+        let end = cpuTime(["-f", pattern])
+        let share = start.flatMap { start in end.map { ($0 - start) / seconds * 100 } }
+        return "\(pattern.split(separator: "/").last ?? "") " + (share.map { String(format: "%.1f%%", $0) } ?? "—")
+      }
+      let rates = String(format: "palco %.1f q/s · miniaturas %@", stage.connected ? stage.telemetry.framesPerSecond : 0,
+        thumbnails().map { String(format: "%.1f", $0.connected ? $0.telemetry.framesPerSecond : 0) }.joined(separator: " e "))
+      print(String(format: "MacAjustes recursos-ao-vivo cpu %@: app principal %.1f%% · app processo %.1f%% · %@ · %@", name,
+        result.main * 100, result.app * 100, helpers.joined(separator: " · "), rates))
+      fflush(stdout)
+      return result
+    }
+    try await Task.sleep(for: .seconds(2))
+    shot("ao-vivo")
+    let watching = await measure("palco e 2 miniaturas")
+
+    // A hidden window: every stream pauses, and comes back when it shows.
+    MacResourcesProbe.forcedVisible = false
+    NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+    try await wait("vídeos pausados") { !stage.connected && thumbnails().allSatisfy { !$0.connected } ? true : nil }
+    let hidden = await measure("janela escondida")
+    MacResourcesProbe.forcedVisible = true
+    NotificationCenter.default.post(name: NSWindow.didChangeOcclusionStateNotification, object: window)
+    try await wait("vídeos de volta", timeout: 30) {
+      stage.connected && thumbnails().allSatisfy(\.connected) ? true : nil
+    }
+
+    // Control from the stage, on the same socket: a tap reaches the simulator, then control goes back.
+    await stage.takeControl()
+    try await wait("controle no palco", timeout: 15) { stage.inControl && stage.inputAvailable ? true : nil }
+    stage.send([.touch(.began, x: 0.5, y: 0.08), .touch(.ended, x: 0.5, y: 0.08)])
+    try await Task.sleep(for: .seconds(1.5))
+    guard stage.inputAvailable, store.stageControlling else { throw Failure(description: "o toque no palco falhou") }
+    shot("controle")
+    await stage.giveBack()
+    try await wait("controle devolvido", timeout: 15) { !stage.inControl ? true : nil }
+
+    // Contexto closed: the section is gone, so are its streams.
+    runtime.contextVisible = false
+    let closed = await measure("Contexto fechado")
+    runtime.contextVisible = true
+    guard hidden.app < watching.app, closed.app < watching.app else {
+      throw Failure(description: "pausar não economizou: \(watching) · escondida \(hidden) · fechado \(closed)")
+    }
   }
 
   private static func event(_ type: String, _ id: String) -> ServerEvent {
