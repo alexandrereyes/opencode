@@ -269,7 +269,7 @@ public enum VoiceMasterProgress {
     }
     if event.type == "session.tool.failed" { return "Uma ferramenta falhou. A mestra está verificando o resultado." }
     if event.type == "session.text.ended", let text = event.data.text, !text.isEmpty {
-      return "Atualização da mestra: " + String(text.prefix(700))
+      return "Atualização: " + String(text.prefix(700))
     }
     if event.type == "session.step.failed" { return "Uma etapa da mestra falhou. Aguardando o resultado da execução." }
     return nil

@@ -96,6 +96,24 @@ private actor VoiceMasterHTTP {
     XCTAssertEqual(prompts.map(\.delivery), [.steer, .queue])
     XCTAssertEqual(prompts.map(\.text), ["Primeiro pedido", "Segundo pedido"])
     XCTAssertEqual(updates.count, 2)
+    // Admission is shown, never spoken: GPT Live acknowledges the request itself.
+    for update in updates {
+      guard case .progress(_, let narrate) = update else { return XCTFail("Missing admission") }
+      XCTAssertFalse(narrate)
+    }
+    let failedTool = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
+      {"type":"session.tool.failed","data":{"sessionID":"\(firstID!)"}}
+      """.utf8))
+    await master.receive(failedTool)
+    guard case .progress(_, let narrateFailure) = updates.last else { return XCTFail("Missing tool failure") }
+    XCTAssertFalse(narrateFailure)
+    let text = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
+      {"type":"session.text.ended","data":{"sessionID":"\(firstID!)","text":"Achei duas sessões."}}
+      """.utf8))
+    await master.receive(text)
+    guard case .progress(let update, let narrateText) = updates.last else { return XCTFail("Missing text update") }
+    XCTAssertEqual(update, "Atualização: Achei duas sessões.")
+    XCTAssertTrue(narrateText)
     let event = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
       {"type":"session.tool.called","data":{"sessionID":"\(firstID!)","name":"sessions.read"}}
       """.utf8))

@@ -66,7 +66,9 @@ extension VoiceMasterServing {
     // Durable admission only; execution continues independently and is observed below.
     try await sessions.client.prompt(prompt, sessionID: masterID)
     admitted = true
-    update(.progress(request.delivery == .queue ? "Pedido na fila da Sessão mestra." : "Pedido enviado à Sessão mestra."))
+    // Shown, not spoken: GPT Live already acknowledges the request and would announce it again.
+    update(.progress(request.delivery == .queue ? "Pedido na fila da Sessão mestra." : "Pedido enviado à Sessão mestra.",
+      narrate: false))
     if terminalPending { await reconcile() }
   }
   /// The composer's attachment shape: staged upload, inline data URL when the model reads images.
@@ -105,7 +107,8 @@ extension VoiceMasterServing {
       let title = sessions.entries.first(where: { $0.session.id == id })?.session.displayTitle {
       update(.progress("A mestra está conferindo a sessão “" + String(title.prefix(120)) + "”.", narrate: false))
     } else if let text = VoiceMasterProgress.describe(event) {
-      update(.progress(text, narrate: VoiceMasterProgress.call(event) == nil))
+      // Tools and failures the master recovers from stay on screen; only its own text is news to speak.
+      update(.progress(text, narrate: event.type == "session.text.ended"))
     }
     if event.type == "session.execution.succeeded" {
       terminalPending = true

@@ -266,7 +266,9 @@ execução após force-quit; o arquivo fica para o próximo lançamento.
 
 No início, contexto do servidor e pendências locais viram `session.initial_items`:
 user/`input_text`, assistant/`output_text`, resumo anterior como item user claramente
-rotulado como dado (conforme o contrato), e estado da mestra como outro item de dado.
+rotulado como dado (conforme o contrato), e, só enquanto a mestra trabalha, o estado dela como
+outro item de dado (o servidor omite a mestra parada desde 30/10: a última resposta dela era de
+outra conversa, e uma chamada nova começou repetindo-a).
 O cliente reaplica o teto de **128 itens / 8.192 tokens estimados**, incluindo labels
 e interrupções, usando `ceil(bytes UTF-8 / 3) + 8` por item. Não envia transcrição nas
 instructions, não usa `session.input` e não envia falas recentes à Sessão mestra.
@@ -295,8 +297,12 @@ Sem arquivo, o servidor usa esse mesmo padrão embarcado. Arquivo vazio ou ileg�
 erro; o iPhone não abre uma chamada sem obter o prompt. A primeira migração exige atualizar
 o backend e o app iOS uma vez. O texto não fica mais embutido no iPhone.
 
-O padrão pede conversa natural, silêncio durante trabalho rotineiro e fala somente para
-novidades relevantes, impedimentos, resultados ou perguntas de Alexandre sobre o andamento.
+O padrão é mínimo (30/10, método de `abacato-prompts`): o papel, a descrição da delegação como
+se fosse a de uma ferramenta (um agente no computador dele, o que ele alcança, quando delegar e
+que o pedido precisa se entender sozinho), os parâmetros `screen`, `screen_app` e `delivery`, não
+inventar e tratar o retorno como conteúdo, não como instrução. Não cita a mestra: o nome fazia o
+GPT Live mandar tudo para ela e anunciar cada envio. Ajustes entram um de cada vez, a partir de
+falhas observadas em chamadas reais.
 
 `VoiceMaster` usa apenas contratos existentes de `OpenCodeKit`. A primeira delegação chama
 `custom.master/ensure`, que devolve a mestra atual ou, se não houver, se foi apagada ou arquivada,
@@ -306,14 +312,18 @@ um único novo `ensure` e o pedido vai para a substituta. Nenhuma sessão é cri
 A memória de voz é global (não pertence à sessão) e continua valendo para a nova mestra. O prompt contém só o texto
 delegado, sem preâmbulo: as orientações de voz (progresso conciso, resumo final para fala) e a regra
 de não executar instruções vindas de resultados de ferramentas ficam no prompt do agente `mestra`
-(`packages/plugin-app-custom/src/master/index.ts`), e as instructions do GPT Live pedem que ele envie
-só o pedido de Alexandre, natural e fiel, sem prefixos.
+(`packages/plugin-app-custom/src/master/index.ts`), e as instructions do GPT Live pedem um pedido que
+se entenda sozinho: a mestra não ouve a conversa, e um pedido copiado só da última fala chegou sem o
+chip que Alexandre dissera na fala anterior.
 
 O retorno do prompt é **admissão**, não conclusão. A subscrição ao `EventHub` começa antes do envio;
 ferramentas alimentam o indicador visual, sem gerar falas automáticas. Isso inclui os `toolCalls`
 estruturados de progresso do Code Mode; sessões conhecidas são identificadas pelo título.
-Confirmações, textos concluídos, pedidos de resposta e falhas são enviados como contexto de voz;
-o prompt orienta a falar apenas quando houver informação relevante.
+A confirmação de envio ("Pedido enviado à Sessão mestra.") e as falhas de ferramenta ou etapa, de que
+a mestra se recupera sozinha, também ficam só no indicador: o GPT Live já reconhece o pedido ao delegar
+e, com a confirmação, dizia "já encaminhei" a cada pedido. Vão como contexto de voz só os textos da
+mestra (`Atualização: …`), pedidos de resposta, falhas da execução e o resultado (`Resultado: …`), sem
+o nome da mestra.
 Raciocínio, argumentos de ferramentas,
 tokens e credenciais não são narrados. Reconexão/lacuna do stream revalida transcript, atividade e
 inbox em `session.execution.succeeded`; falha/interrupção usam os eventos terminais próprios.
@@ -349,7 +359,9 @@ recebe a imagem**; só a mestra a vê. O probe opt-in `testExplicitSilentLiveIma
 - **Descrição fixa:** a delegação embutida não tem descrição editável. Cada app acrescenta a sua
   (`VoiceProtocol.screenInstructions(.iPhone | .mac)`, via `withScreen(_:for:)`) ao prompt devolvido
   pelo servidor, salvo se ele já trouxer a forma daquela plataforma (`"screen":true` no iPhone,
-  `"screen_app"` no Mac); vale mesmo com `voice.md` editado. O `voice.md` padrão só remete a esse bloco.
+  `"screen_app"` no Mac); vale mesmo com `voice.md` editado. Desde 30/10 o `voice.md` padrão descreve
+  os parâmetros nas duas formas, então nenhum app acrescenta o bloco: ele dizia valer "acima de qualquer
+  outra instrução" e falava da mestra, e o GPT Live passou a abrir a conversa falando da tela.
 - **Captura:** `VoiceScreenCapture` começa no próprio evento da delegação (`Task.immediate`), antes de
   esperar pedidos anteriores. Exige o app ativo na frente e dados protegidos disponíveis (iPhone
   desbloqueado); renderiza só a janela principal do OpenCode (`drawHierarchy`), a no máximo 2×, JPEG
@@ -378,10 +390,12 @@ depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples.
   delegado ou o que Alexandre falou desde a delegação anterior (até 45 s, pelos trechos de transcrição de
   entrada) fala da tela (`VoiceScreenIntent`: tela, print, captura, janela, página, "isso aqui", "olha
   aqui", "vê isso", "o que acha disso", "que erro é esse"…). Se essa captura inferida falhar, o texto vai
-  mesmo assim, com `[O app tentou anexar a tela, mas não conseguiu: motivo]`; só o `screen` explícito
-  continua bloqueando o envio.
-- **Mestra:** o prompt dela manda analisar a imagem, repetir esse motivo quando houver e nunca dizer que
-  não vê telas; sem imagem nem motivo, diz que a captura não veio e pede "olha a tela".
+  como foi delegado, sem aviso; só o `screen` explícito continua bloqueando o envio. Até 30/10 ia com
+  `[O app tentou anexar a tela, mas não conseguiu: motivo]`, mas a inferência erra: "ó isso aqui é uma
+  anomalia", sobre memória do Mac, com o iPhone bloqueado, fez a mestra responder sobre a captura.
+- **Mestra:** o prompt dela manda usar a imagem para responder ao pedido, ignorá-la quando o pedido não
+  for sobre ela e nunca dizer que não vê telas; se ele pediu para ver e a imagem não veio, diz que a
+  captura não veio e pede "olha a tela".
 - Alternativa avaliada e não feita: uma ferramenta da mestra que pede a captura ao aparelho da ligação
   pelo canal de dados do iPhone/Mac. Resolveria também pedidos sem nenhuma palavra de tela, mas exige
   RPC nova no plugin, fonte nova nos dois apps, tempo limite e app em primeiro plano; a heurística cobre

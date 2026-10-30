@@ -482,10 +482,10 @@ import UIKit
       if let capture = delegation.screen {
         switch await capture.value {
         case .success(let shot): screen = shot
-        case .failure(let refusal) where delegation.inferred:
-          // Not asked explicitly: the request still goes, and the master learns why there is no picture.
-          request = VoiceMasterRequest(text: request.text + "\n\n[O app tentou anexar a tela, mas não conseguiu: "
-            + refusal.reason + "]", delivery: request.delivery, screen: nil)
+        case .failure where delegation.inferred:
+          // Only a guess that he meant the screen ("isso aqui" is also a filler): the request goes as it was
+          // delegated, without a note about the capture that would turn the answer to the screen.
+          request = VoiceMasterRequest(text: request.text, delivery: request.delivery, screen: nil)
         case .failure(let refusal):
           guard epoch == token else { return }
           refuseScreen(refusal)
@@ -545,7 +545,7 @@ import UIKit
     case .finished(let text):
       state.masterWorking = false; detail = "A Sessão mestra concluiu"
       masterProgressLine = detail
-      finalNarration = true; narration.offer("Resultado da Sessão mestra: " + text)
+      finalNarration = true; narration.offer("Resultado: " + text)
     case .failed(let text): state.masterWorking = false; detail = text; masterProgressLine = text; finalNarration = true; narration.offer(text)
     case .disconnected:
       detail = "Sem atualizações da mestra. Reconectando ao OpenCode…"

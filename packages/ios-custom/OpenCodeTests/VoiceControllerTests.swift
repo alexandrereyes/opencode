@@ -511,7 +511,7 @@ private actor LiveMemoryHTTP {
     await controller.end()
   }
 
-  func testInferredCaptureThatFailsStillSendsTheTextWithTheReason() async throws {
+  func testInferredCaptureThatFailsStillSendsTheTextAsDelegated() async throws {
     let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
     let controller = screenController(transport, master, http) { _, _ throws(VoiceScreenRefusal) in throw .background }
     let answered = expectation(description: "answered")
@@ -522,8 +522,8 @@ private actor LiveMemoryHTTP {
     master.asked = { asked.fulfill() }
     transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"q4","content":[{"type":"input_text","text":"Tá conseguindo ver minha tela"}]}}"#.utf8)))
     await fulfillment(of: [asked], timeout: 3)
-    XCTAssertEqual(master.requests.first?.text,
-      "Tá conseguindo ver minha tela\n\n[O app tentou anexar a tela, mas não conseguiu: " + VoiceScreenRefusal.background.reason + "]")
+    // The capture was only a guess, which can be wrong: its failure adds no note about the screen.
+    XCTAssertEqual(master.requests.first?.text, "Tá conseguindo ver minha tela")
     XCTAssertNil(master.requests.first?.screen)
     XCTAssertNil(master.screens.first!)
     await controller.end()

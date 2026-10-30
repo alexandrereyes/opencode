@@ -69,9 +69,4 @@ struct VoiceScreenTests {
   func speechNotAboutTheScreen(_ text: String) {
     #expect(!VoiceScreenIntent.mentionsScreen(text))
   }
-
-  @Test func inferredFailureNoteDropsTheNothingSentTail() {
-    #expect(VoiceScreenRefusal.background.reason
-      == "Não consigo ver a tela: o OpenCode não está aberto na frente. Só vejo a tela do próprio OpenCode, nunca a de outros apps.")
-  }
 }

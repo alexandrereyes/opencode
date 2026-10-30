@@ -64,13 +64,6 @@ public enum VoiceScreenRefusal: Error, Equatable, Sendable, LocalizedError {
   }
 }
 
-extension VoiceScreenRefusal {
-  /// The reason alone, for a note to the master when an inferred capture failed and the text went anyway.
-  public var reason: String {
-    (errorDescription ?? "").replacingOccurrences(of: " Nada foi enviado à Sessão mestra.", with: "")
-  }
-}
-
 /// Whether Alexandre is talking about what is on screen, so a delegation GPT Live sent without `"screen"` still
 /// carries the capture. Speech since the previous delegation counts too: "Pergunta pra Mestra" right after
 /// "tá vendo minha tela?" is about the screen.
