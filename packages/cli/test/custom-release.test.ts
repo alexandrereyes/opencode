@@ -434,7 +434,7 @@ test.each([false, true])(
   "authenticated activation (skipBackup=%s) and rollback retain data and password",
   async (skipBackup) => {
     const home = await fixture()
-    const state = { version: `0.0.0-custom.${first}`, authorization: "", starts: 0, stops: 0 }
+    const state = { version: `0.0.0-custom.${first}`, authorization: "", starts: 0, stops: 0, hubs: [] as string[] }
     const serve = (port: number) =>
       Bun.serve({
         hostname: "127.0.0.1",
@@ -463,6 +463,11 @@ test.each([false, true])(
         state.starts++
         state.version = `0.0.0-custom.${await pointer(home, "current")}`
         stateServer.value = serve(port)
+      },
+      // A Mac that cannot take the hub is reported after the server is healthy, never undoing the activation.
+      async hub(release: { commit: string; directory: string }) {
+        state.hubs.push(`${release.commit}:${path.basename(release.directory)}`)
+        throw new Error("mac unreachable")
       },
     }
     const database = (await settings(home)).database
@@ -508,6 +513,7 @@ test.each([false, true])(
       expect(await pointer(home, "current")).toBe(first)
       expect(state.starts).toBe(2)
       expect(state.stops).toBe(2)
+      expect(state.hubs).toEqual([`${second}:${second}`, `${first}:${first}`])
       expect((await health(home, port)).ready).toBe(true)
       expect(await Bun.file(`${home}/password`).text()).toBe("fixture-secret\n")
       const db = new Database((await settings(home)).database, { readonly: true })
@@ -1259,7 +1265,9 @@ function systemdHost(directory: string) {
 test("systemd unit runs serve with the login environment and quotes the runtime path", () => {
   const text = unit("/home/u/odd $dir%x")
   expect(text.split("\n")[0]).toBe("# Runtime /home/u/odd $dir%x")
-  expect(text).toContain('ExecStart=/bin/sh -c ". /etc/profile >/dev/null 2>&1; exec \\"$$0\\"" "/home/u/odd $$dir%%x/bin/serve"')
+  expect(text).toContain(
+    'ExecStart=/bin/sh -c ". /etc/profile >/dev/null 2>&1; exec \\"$$0\\"" "/home/u/odd $$dir%%x/bin/serve"',
+  )
   expect(text).toContain("Restart=always")
   expect(text).toContain("StandardOutput=append:/home/u/odd $dir%%x/logs/server.log")
 })
@@ -1274,11 +1282,7 @@ test("systemd installs, starts, waits for the previous process and refuses anoth
   await service.install!()
   expect(await Bun.file(path.join(directory, unitName)).text()).toBe(unit("/runtime"))
   await service.start()
-  expect(fixtureHost.state.calls).toEqual([
-    "daemon-reload",
-    `enable ${unitName}`,
-    `start ${unitName}`,
-  ])
+  expect(fixtureHost.state.calls).toEqual(["daemon-reload", `enable ${unitName}`, `start ${unitName}`])
   expect(await service.pid()).toBe(4242)
   await service.stop()
   expect(fixtureHost.state.time).toBe(1000)

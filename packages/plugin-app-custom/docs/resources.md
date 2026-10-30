@@ -81,8 +81,26 @@ Admin (`authorization: Bearer <secret>` from `hub.json`; loopback only, never pr
 `GET|PUT /admin/resources` (PUT = upsert `{ kind, meta, name?, purpose?, owner?, used?, activity? }`, with
 `activity` = `{ call, command, running }`), `POST /admin/calls/<call>/end` (ends that tool call on every resource),
 `GET|DELETE /admin/resources/<id>`, `POST /admin/resources/<id>/control`, `GET /admin/resources/<id>/snapshot`,
-`POST /admin/tickets`, `GET /admin/locks`, `POST /admin/events?wait=<ms>` (long poll; each event goes to exactly one
-caller), `POST /admin/shutdown`.
+`POST /admin/tickets`, `GET /admin/locks`, `GET /admin/simulators` (`{ simulators: [{ udid, name, booted }] }` from the
+hub's `simctl`), `POST /admin/events?wait=<ms>` (long poll; each event goes to exactly one caller), `POST /admin/shutdown`.
+
+### Remote hub (server on Linux)
+
+When the server runs on the OrbStack Linux machine, the hub stays on the Mac as a LaunchAgent with no parent
+(`docs/custom-macos.md`, "Linux runtime"). The plugin then only reads it, configured by:
+
+| Variable                             | Meaning                                                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `OPENCODE_RESOURCES_HUB_REMOTE_INFO` | The Mac hub's `hub.json` as Linux reads it (`/Users/…`); turns remote mode on                             |
+| `OPENCODE_RESOURCES_HUB_REMOTE_HOST` | Host that reaches the Mac's loopback (`host.orb.internal`; default `127.0.0.1`)                           |
+| `OPENCODE_RESOURCES_HUB_PATH_MAP`    | `local=hub` prefix pairs separated by `:`, applied to `meta.workspace` both ways (Linux ↔ Mac directory) |
+
+In remote mode the plugin never starts, shuts down or inspects the hub's process; it reads `hub.json` again whenever a
+request cannot connect or gets 401 (a restarted hub has a new secret and maybe a new port), tickets announce the
+hub's own `port` as `loopbackPort`, simulator names resolve through `GET /admin/simulators` (falling back to a local
+`xcrun`) and, when `GET /admin/locks` does not answer, commands that drive resources still run but their result gains
+a warning (`lockUnavailable`) instead of silently skipping the lock. Commands the agent prefixes with `mac` (which
+runs them on the Mac) are detected like local ones.
 
 ### Stream protocol (`protocol.ts`)
 
@@ -297,7 +315,7 @@ that is behind (three unacknowledged frames) slows Chrome down instead of collec
 `economy` profile restarts the screencast at 800 × 1600, quality 55, acks after 300 ms (about 10 fps) and sharp
 stills at 1.5×. Chrome's sharp stills replace the hub-agnostic "send the same picture again once the screen stops"
 that Android does: there is no separate resend for Chrome. During a finger scroll, on the wheel or through
-touch emulation, the screencast restarts at half the *effective* viewport and quality 50 (a 393 px phone page goes to
+touch emulation, the screencast restarts at half the _effective_ viewport and quality 50 (a 393 px phone page goes to
 ~196 px) and returns to full size once the finger stops; the end of the movement gets a still at once.
 
 Screencasts ignore the emulated device scale, so a phone page streams at its CSS width (~400 px). Never capture with

@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { Option, Schema } from "effect"
+import type { Simulator } from "./discovery.js"
 import { protocol, type HubEvent, type Lock, type Upsert } from "./hub/hub.js"
 import { flag } from "./hub/main.js"
 import { Resources } from "./rpc.js"
@@ -34,11 +35,67 @@ export function hubCommand(module = fileURLToPath(import.meta.url), exec = proce
 }
 
 /**
+ * Translates directories between this server and a hub on another machine: `local=hub` prefix pairs separated by
+ * `:`, for example `/home/alexandremartins=/Users/alexandremartins/OrbStack/dev/home/alexandremartins`. Paths outside
+ * every prefix stay as they are.
+ */
+export function pathMap(spec: string | undefined) {
+  const trim = (value: string) => (value.length > 1 ? value.replace(/\/+$/, "") : value)
+  const pairs = (spec ?? "").split(":").flatMap((entry) => {
+    const split = entry.indexOf("=")
+    if (split <= 0 || split === entry.length - 1) return []
+    return [[trim(entry.slice(0, split)), trim(entry.slice(split + 1))] as const]
+  })
+  const swap = (value: string, from: string, to: string) =>
+    value === from ? to : value.startsWith(`${from}/`) ? `${to}${value.slice(from.length)}` : undefined
+  const apply = (value: string, toHub: boolean) => {
+    for (const [local, hub] of pairs) {
+      const result = toHub ? swap(value, local, hub) : swap(value, hub, local)
+      if (result !== undefined) return result
+    }
+    return value
+  }
+  return { toHub: (value: string) => apply(value, true), fromHub: (value: string) => apply(value, false) }
+}
+export type PathMap = ReturnType<typeof pathMap>
+
+export interface HubSettings {
+  readonly state: string
+  readonly command?: readonly string[]
+  /**
+   * A hub another machine runs (the Mac's LaunchAgent for a server on Linux): its `hub.json` as this machine reads it
+   * and the host that reaches its loopback port. The plugin never starts, stops or inspects that hub's process.
+   */
+  readonly remote?: { readonly info: string; readonly host: string }
+  readonly paths?: PathMap
+}
+
+/**
+ * Hub settings from the server environment. `OPENCODE_RESOURCES_HUB_REMOTE_INFO` (path of the remote hub's
+ * `hub.json`) turns on remote mode, with `OPENCODE_RESOURCES_HUB_REMOTE_HOST` (default `127.0.0.1`) and
+ * `OPENCODE_RESOURCES_HUB_PATH_MAP` (`pathMap`) for the working directories the hub sees.
+ */
+export function hubSettings(env: Record<string, string | undefined> = process.env): HubSettings {
+  const info = env.OPENCODE_RESOURCES_HUB_REMOTE_INFO
+  return {
+    state: stateDirectory(env),
+    ...(info ? { remote: { info, host: env.OPENCODE_RESOURCES_HUB_REMOTE_HOST || "127.0.0.1" } } : {}),
+    ...(env.OPENCODE_RESOURCES_HUB_PATH_MAP ? { paths: pathMap(env.OPENCODE_RESOURCES_HUB_PATH_MAP) } : {}),
+  }
+}
+
+/**
  * The plugin's view of the hub process. Every Location's plugin instance has one; they share the hub through
  * `hub.json`. `spawn: true` starts the hub when it is not running (the server PID is its parent: it exits with it).
+ * A remote hub is only read: it is never started or shut down here, and its `hub.json` is read again whenever a
+ * request cannot connect or is refused (a restarted hub has a new secret).
  */
-export function makeHubClient(options: { readonly state: string; readonly command?: readonly string[] }) {
-  const file = path.join(options.state, "hub.json")
+export function makeHubClient(options: HubSettings) {
+  const remote = options.remote
+  const file = remote?.info ?? path.join(options.state, "hub.json")
+  const origin = (info: Info) => `http://${remote?.host ?? "127.0.0.1"}:${info.port}`
+  const toHub = options.paths?.toHub ?? ((value: string) => value)
+  const fromHub = options.paths?.fromHub ?? ((value: string) => value)
   let cached: Info | undefined
   let starting: Promise<Info | undefined> | undefined
 
@@ -52,7 +109,7 @@ export function makeHubClient(options: { readonly state: string; readonly comman
     )
 
   const healthy = (info: Info) =>
-    fetch(`http://127.0.0.1:${info.port}/admin/health`, {
+    fetch(`${origin(info)}/admin/health`, {
       headers: { authorization: `Bearer ${info.secret}` },
       signal: AbortSignal.timeout(1_500),
     })
@@ -69,8 +126,9 @@ export function makeHubClient(options: { readonly state: string; readonly comman
     const current = await read()
     const health = current ? await healthy(current) : "down"
     if (current && health === "ok") return current
+    if (remote) return undefined
     if (current && health === "stale")
-      await fetch(`http://127.0.0.1:${current.port}/admin/shutdown`, {
+      await fetch(`${origin(current)}/admin/shutdown`, {
         method: "POST",
         headers: { authorization: `Bearer ${current.secret}` },
       }).catch(() => undefined)
@@ -100,7 +158,7 @@ export function makeHubClient(options: { readonly state: string; readonly comman
 
   const ensure = async (spawn: boolean) => {
     if (cached) return cached
-    if (!spawn) {
+    if (!spawn && !remote) {
       const current = await read()
       if (current && (await healthy(current)) === "ok") cached = current
       return cached
@@ -114,7 +172,7 @@ export function makeHubClient(options: { readonly state: string; readonly comman
     const attempt = async (retry: boolean): Promise<Response | undefined> => {
       const info = await ensure(init.spawn ?? true)
       if (!info) return undefined
-      const response = await fetch(`http://127.0.0.1:${info.port}${route}`, {
+      const response = await fetch(`${origin(info)}${route}`, {
         ...init,
         headers: { ...init.headers, authorization: `Bearer ${info.secret}`, "content-type": "application/json" },
       }).catch(() => undefined)
@@ -125,9 +183,27 @@ export function makeHubClient(options: { readonly state: string; readonly comman
     return attempt(true)
   }
 
+  const unavailable = () =>
+    new HubError(
+      "hub",
+      remote
+        ? `The resources hub at ${remote.host} (${remote.info}) is not reachable`
+        : "The resources hub is not running",
+    )
+
+  // The hub keeps working directories as its own machine sees them; this side works with local ones.
+  const localMeta = <M extends Resources.Meta>(meta: M): M =>
+    meta.kind === "chrome" && meta.workspace ? { ...meta, workspace: fromHub(meta.workspace) } : meta
+  const hubMeta = <M extends Resources.Meta>(meta: M): M =>
+    meta.kind === "chrome" && meta.workspace ? { ...meta, workspace: toHub(meta.workspace) } : meta
+  const local = <R extends { readonly meta: Resources.Meta }>(resource: R): R => ({
+    ...resource,
+    meta: localMeta(resource.meta),
+  })
+
   const json = async <T>(route: string, init: RequestInit & { readonly spawn?: boolean } = {}): Promise<T> => {
     const response = await request(route, init)
-    if (!response) throw new HubError("hub", "The resources hub is not running")
+    if (!response) throw unavailable()
     if (response.status === 404) throw new HubError("not_found", "Resource not found")
     if (!response.ok) throw new HubError("failed", (await response.text()) || `Hub answered ${response.status}`)
     return (await response.json()) as T
@@ -136,18 +212,30 @@ export function makeHubClient(options: { readonly state: string; readonly comman
   const resource = (id: string) => `/admin/resources/${encodeURIComponent(id)}`
 
   return {
+    /** Whether the hub runs on another machine (`HubSettings.remote`). */
+    remote: remote !== undefined,
+    /** The hub's loopback port as it announces it; clients on its machine connect there. */
     port: async () => (await ensure(true))?.port,
     /** `spawn: false` reads only a hub already running (no hub, no resources). */
-    list: (spawn = true) => json<{ resources: Resources.Resource[] }>("/admin/resources", { spawn }),
-    get: (id: string) => json<Resources.Resource>(resource(id)),
+    list: (spawn = true) =>
+      json<{ resources: Resources.Resource[] }>("/admin/resources", { spawn }).then((result) => ({
+        resources: result.resources.map(local),
+      })),
+    get: (id: string) => json<Resources.Resource>(resource(id)).then(local),
     upsert: (input: Upsert) =>
-      json<Resources.Resource>("/admin/resources", { method: "PUT", body: JSON.stringify(input) }),
+      json<Resources.Resource>("/admin/resources", {
+        method: "PUT",
+        body: JSON.stringify({ ...input, meta: hubMeta(input.meta) }),
+      }).then(local),
     remove: (id: string) => json<{}>(resource(id), { method: "DELETE" }),
     control: (id: string, action: "take" | "renew" | "release") =>
       json<{ resource: Resources.Resource; token?: string }>(`${resource(id)}/control`, {
         method: "POST",
         body: JSON.stringify({ action }),
-      }),
+      }).then((result) => ({ ...result, resource: local(result.resource) })),
+    /** The iOS simulators of the hub's machine (`simctl` runs there). Never starts the hub. */
+    simulators: () =>
+      json<{ simulators: Simulator[] }>("/admin/simulators", { spawn: false }).then((result) => result.simulators),
     ticket: (id: string, capability: Resources.Capability) =>
       json<{ ticket: string; expiresAt: number }>("/admin/tickets", {
         method: "POST",
@@ -155,7 +243,7 @@ export function makeHubClient(options: { readonly state: string; readonly comman
       }),
     snapshot: async (id: string, maxWidth?: number) => {
       const response = await request(`${resource(id)}/snapshot${maxWidth ? `?maxWidth=${maxWidth}` : ""}`)
-      if (!response) throw new HubError("hub", "The resources hub is not running")
+      if (!response) throw unavailable()
       if (response.status === 404) throw new HubError("not_found", "Resource not found")
       if (!response.ok) throw new HubError("failed", (await response.text()) || "Snapshot failed")
       const width = Number(response.headers.get("x-width") ?? 0)
@@ -173,11 +261,14 @@ export function makeHubClient(options: { readonly state: string; readonly comman
         () => undefined,
         () => undefined,
       ),
-    /** Never starts the hub: no hub means no locks. */
+    /**
+     * Never starts the hub: no hub means no locks. A remote hub should always answer; `undefined` says it did not, so
+     * nobody knows which resources Alexandre holds.
+     */
     locks: () =>
       json<{ locks: Lock[] }>("/admin/locks", { spawn: false }).then(
-        (result) => result.locks,
-        () => [] as Lock[],
+        (result): Lock[] | undefined => result.locks.map(local),
+        () => (remote ? undefined : []),
       ),
     /** Long-polls the hub's event queue; each event goes to exactly one plugin instance. Never starts the hub. */
     events: (wait: number) =>

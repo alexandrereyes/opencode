@@ -6,6 +6,7 @@ import { Option, Schema } from "effect"
 import { namespaceOf, sameNamespace } from "../adapters/chrome.js"
 import { jpeg, size } from "../adapters/process.js"
 import type { Adapter, Entry, Image, StoredActivity, StreamSink } from "../adapters/types.js"
+import type { Simulator } from "../discovery.js"
 import { ResourceProtocol } from "../protocol.js"
 import { Resources } from "../rpc.js"
 import { makeInputQueue } from "./input-queue.js"
@@ -23,6 +24,8 @@ export interface HubOptions {
   readonly probeMs?: number
   /** Width of fallback (snapshot polling) stream frames. */
   readonly fallbackWidth?: number
+  /** The Mac's iOS simulators (`GET /admin/simulators`), for plugins that cannot run `simctl` themselves. */
+  readonly simulators?: () => Promise<readonly Simulator[]>
 }
 
 export const Upsert = Schema.Struct({
@@ -755,6 +758,14 @@ export function createHub(options: HubOptions) {
           ]
         }),
       })
+    if (resource === "simulators" && request.method === "GET") {
+      if (!options.simulators) return status(404)
+      const listed = await options.simulators().then(
+        (simulators) => ({ simulators }),
+        (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+      )
+      return "error" in listed ? new Response(listed.error, { status: 502 }) : Response.json(listed)
+    }
     if (resource === "calls" && id && action === "end" && request.method === "POST") {
       end(decodeURIComponent(id))
       return Response.json({})

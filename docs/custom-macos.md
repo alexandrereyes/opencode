@@ -302,6 +302,12 @@ server, and a hub crash never takes the server down. Its state lives in `$XDG_ST
 (`hub.json` with its secret, `resources.json`, `hub.log`). Sandboxes leave the port unset, so their hub binds a free
 loopback port and clients on the Mac connect to it directly.
 
+The hub can also run on its own, with no server as its parent (the Mac LaunchAgent that serves the Linux runtime,
+below): `OPENCODE_RESOURCES_HUB_STATE=<dir> OPENCODE_RESOURCES_HUB_PORT=4179 bun <release>/plugin/index.js
+--opencode-resources-hub`. Without `OPENCODE_RESOURCES_HUB_PARENT` it only exits on `SIGTERM`. Besides `hub.json`
+it writes `<dir>/playwright-cli.json` (adds `--remote-debugging-port=0`), the file Mac shells must point
+`PLAYWRIGHT_MCP_CONFIG` to so the hub can mirror `playwright-cli` browsers.
+
 ### One-time migration from the old installation
 
 Preparation is safe while the old service runs. Run the explicit migration in a
@@ -425,17 +431,45 @@ updater LaunchAgent are not part of this flow. Nothing polls Git or schedules up
 ### Linux runtime (systemd)
 
 The same `custom:prepare|update|activate|rollback|status|prune` commands run on Linux (the
-OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/mac`). Differences:
+OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/opencode-mac`). Differences:
 
 - The release is the plain `bin/opencode` executable for the host (`cli-linux-arm64`, glibc), with no
-  `OpenCode Custom.app`, signing or `serve-sim`: the iOS simulator stream needs macOS.
+  `OpenCode Custom.app` or signing. It still carries `serve-sim/` (Mach-O files, never run on Linux) for the Mac's
+  hub.
 - The service is the systemd **user** unit `~/.config/systemd/user/local.opencode.custom-manual.service`
   (first line `# Runtime <home>`, which owns it), started with the login environment (`/etc/profile`),
   `Restart=always`, log in `<home>/logs/server.log`. It needs lingering (`loginctl enable-linger`).
   Inspect with `systemctl --user status local.opencode.custom-manual`.
 - The 4096 proxy stays on the Mac (`installProxy` is launchd-only): OrbStack forwards the machine's
   `127.0.0.1:4178` and `:4179` to the Mac's loopback, where `proxy.mjs` already points.
-- `custom:migrate` is macOS-only. Moving the runtime from the Mac: `core-infra/mac/opencode-migrate.sh`.
+- `custom:migrate` is macOS-only. Moving the runtime from the Mac: `core-infra/opencode-mac/opencode-migrate.sh`.
+
+#### Resources hub on the Mac
+
+Simulators, emulators and Chrome stay on the Mac, so the hub does too, as the LaunchAgent
+`local.opencode.resources-hub` (no parent, always running), and the Linux plugin runs in remote mode
+(`packages/plugin-app-custom/docs/resources.md`, "Remote hub"). Layout on the Mac, under
+`~/.local/share/opencode-resources-hub`: `releases/<commit>/{plugin,serve-sim}`, `current` (symlink), `state/`
+(`hub.json`, `resources.json`, `playwright-cli.json`) and `hub.log`.
+
+- **LaunchAgent.** `bun run custom:hub-plist` (or `resourcesHubPlist(macHome)` in `custom-release.ts`) prints it:
+  the Mac's `~/.local/share/opencode-custom-v2/bin/bun` runs `current/plugin/index.js --opencode-resources-hub`
+  with `OPENCODE_RESOURCES_HUB_STATE=<hub>/state`, `OPENCODE_RESOURCES_HUB_PORT=4179`,
+  `OPENCODE_SERVE_SIM=<hub>/current/serve-sim/…/serve-sim.js` and a Homebrew `PATH`; `RunAtLoad`, `KeepAlive`, log in
+  `<hub>/hub.log`. `core-infra/opencode-mac` installs it in `~/Library/LaunchAgents` (create `<hub>` first: launchd
+  does not create the log's directory).
+- **Publication.** After a successful Linux activation, if that plist exists (read through the mounted `/Users`),
+  activation copies the release's `plugin/` and `serve-sim/` to `<hub>/releases/<commit>`, points `current` at it
+  atomically, restarts the job with `mac launchctl kickstart -k gui/$(mac id -u)/local.opencode.resources-hub` and
+  keeps the three newest other copies. A failure is reported without undoing the activation; the already-active
+  shortcut does not publish.
+- **Server environment** (`manual.json` `environment` on Linux):
+  `OPENCODE_RESOURCES_HUB_REMOTE_INFO=/Users/<user>/.local/share/opencode-resources-hub/state/hub.json`,
+  `OPENCODE_RESOURCES_HUB_REMOTE_HOST=host.orb.internal`,
+  `OPENCODE_RESOURCES_HUB_PATH_MAP=/home/<user>/=/Users/<user>/OrbStack/dev/home/<user>/`.
+- **Mac shells.** `mac` does not pass Linux variables, so `~/.zshenv` on the Mac exports
+  `PLAYWRIGHT_MCP_CONFIG=~/.local/share/opencode-resources-hub/state/playwright-cli.json` for
+  `mac playwright-cli …`.
 
 ### Isolated source development
 

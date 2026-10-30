@@ -1,6 +1,18 @@
 #!/usr/bin/env bun
 
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readlink, realpath, rename, rm, symlink } from "node:fs/promises"
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+} from "node:fs/promises"
 import { Database } from "bun:sqlite"
 import { randomUUID } from "node:crypto"
 import os from "node:os"
@@ -210,10 +222,11 @@ export async function plainRelease(staging: string, binary: string) {
 
 /**
  * Copies Expo's serve-sim (Apache-2.0, prebuilt for Apple silicon) beside the plugin: the resources hub runs it with
- * the release binary (`BUN_BE_BUN`) to stream and drive iOS simulators. Its only runtime dependency is `ws`.
+ * the release binary (`BUN_BE_BUN`) to stream and drive iOS simulators. Its only runtime dependency is `ws`. A
+ * linux-arm64 release carries the same files only to publish them with the Mac's hub (`publishResourcesHub`).
  */
-export async function bundleServeSim(source: string, staging: string) {
-  if (process.platform !== "darwin" || process.arch !== "arm64") return
+export async function bundleServeSim(source: string, staging: string, platform: string = process.platform) {
+  if (process.arch !== "arm64" || (platform !== "darwin" && platform !== "linux")) return
   const pkg = await realpath(path.join(source, "packages/plugin-app-custom/node_modules/@expo/serve-sim"))
   const ws = path.dirname(Bun.resolveSync("ws/package.json", pkg))
   const modules = path.join(staging, "serve-sim/node_modules")
@@ -589,6 +602,8 @@ export type Service = {
   pid: () => Promise<number | undefined>
   /** Installs the repository's 4096 proxy after a successful activation; absent for fixture services. */
   proxy?: () => Promise<string>
+  /** Publishes the release's resources hub to the Mac after a successful Linux activation (`publishResourcesHub`). */
+  hub?: (release: { commit: string; directory: string }) => Promise<string>
   /** Writes the service definition before start; without it, activation writes the launchd plist into the runtime. */
   install?: () => Promise<void>
 }
@@ -649,6 +664,7 @@ export function systemd(
     now: Date.now,
     sleep: (ms: number) => Bun.sleep(ms),
   },
+  hub: Service["hub"] = (release) => publishResourcesHub(release),
 ): Service {
   const file = path.join(host.directory, unitName)
   const owned = async () => {
@@ -669,6 +685,7 @@ export function systemd(
     return { pid: Number(result.stdout.match(/^MainPID=(\d+)$/m)?.[1]) || undefined }
   }
   return {
+    hub,
     async install() {
       await mkdir(host.directory, { recursive: true })
       await Bun.write(file, unit(home))
@@ -691,7 +708,10 @@ export function systemd(
     },
     async start() {
       if (!(await owned())) throw new Error(`${file} is missing; activate installs it`)
-      for (const args of [["enable", unitName], ["start", unitName]]) {
+      for (const args of [
+        ["enable", unitName],
+        ["start", unitName],
+      ]) {
         const result = await host.run(args)
         if (result.code !== 0) throw new Error(`systemctl ${args[0]} failed (${result.code}): ${result.stderr.trim()}`)
       }
@@ -733,6 +753,123 @@ export async function installProxy(home: string, agents = path.join(os.homedir()
   const result = await launchctl(["kickstart", "-k", `gui/${process.getuid!()}/${proxyLabel}`])
   if (result.code !== 0) throw new Error(`Proxy installed but restart failed (${result.code}): ${result.stderr.trim()}`)
   return "proxy updated and restarted"
+}
+
+export const resourcesHubLabel = "local.opencode.resources-hub"
+
+/**
+ * The Mac's standalone resources hub (LaunchAgent `local.opencode.resources-hub`), which serves a server running on
+ * the Linux machine. Paths are under the Mac home `/Users/<user>`, which the Linux machine mounts at the same path.
+ */
+export function resourcesHubPaths(macHome: string) {
+  const root = path.join(macHome, ".local/share/opencode-resources-hub")
+  return {
+    root,
+    current: path.join(root, "current"),
+    state: path.join(root, "state"),
+    info: path.join(root, "state/hub.json"),
+    playwright: path.join(root, "state/playwright-cli.json"),
+    log: path.join(root, "hub.log"),
+    plist: path.join(macHome, "Library/LaunchAgents", `${resourcesHubLabel}.plist`),
+  }
+}
+
+/**
+ * The hub's LaunchAgent: the Mac's Bun runs `current/plugin/index.js --opencode-resources-hub` with no parent (it
+ * never exits on its own), the fixed loopback port the 4096 proxy forwards to and `current/serve-sim`.
+ */
+export function resourcesHubPlist(
+  macHome: string,
+  bun = path.join(macHome, ".local/share/opencode-custom-v2/bin/bun"),
+) {
+  const xml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+  const paths = resourcesHubPaths(macHome)
+  const environment = {
+    OPENCODE_RESOURCES_HUB_STATE: paths.state,
+    OPENCODE_RESOURCES_HUB_PORT: String(resourcesHubPort),
+    OPENCODE_SERVE_SIM: path.join(paths.current, "serve-sim/node_modules/@expo/serve-sim/dist/serve-sim.js"),
+    PATH: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>${resourcesHubLabel}</string>
+<key>ProgramArguments</key><array>${[bun, path.join(paths.current, "plugin/index.js"), "--opencode-resources-hub"].map((value) => `<string>${xml(value)}</string>`).join("")}</array>
+<key>EnvironmentVariables</key><dict>
+${Object.entries(environment)
+  .map(([key, value]) => `<key>${key}</key><string>${xml(value)}</string>`)
+  .join("\n")}
+</dict>
+<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
+<key>ProcessType</key><string>Interactive</string>
+<key>StandardOutPath</key><string>${xml(paths.log)}</string>
+<key>StandardErrorPath</key><string>${xml(paths.log)}</string>
+</dict></plist>\n`
+}
+
+/** Runs a command on the Mac from the OrbStack Linux machine (`mac`, with the Mac's login environment). */
+export async function onMac(args: string[]) {
+  const child = Bun.spawn([Bun.which("mac") ?? "/opt/orbstack-guest/bin/mac", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    timeout: 30_000,
+  })
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  return { stdout, stderr, code }
+}
+
+/**
+ * Publishes a Linux release's hub to the Mac, only when the hub's LaunchAgent is installed there: copies `plugin/` and
+ * `serve-sim/` to `<hub>/releases/<commit>` through the mounted `/Users`, points `current` at it atomically, restarts
+ * the job with `launchctl kickstart -k` and keeps the three newest hub releases besides `current`.
+ */
+export async function publishResourcesHub(
+  release: { commit: string; directory: string },
+  host = { home: `/Users/${os.userInfo().username}`, mac: onMac },
+) {
+  const paths = resourcesHubPaths(host.home)
+  if (!(await Bun.file(paths.plist).exists())) return `resources hub skipped (${paths.plist} not installed)`
+  const releases = path.join(paths.root, "releases")
+  const target = path.join(releases, release.commit)
+  if (!(await Bun.file(path.join(target, "plugin/index.js")).exists())) {
+    await mkdir(releases, { recursive: true })
+    const staging = path.join(releases, `.${release.commit}-${randomUUID()}`)
+    try {
+      await mkdir(staging)
+      for (const part of ["plugin", "serve-sim"]) {
+        const from = path.join(release.directory, part)
+        if ((await readdir(from).catch(() => undefined)) === undefined) continue
+        await command(["cp", "-R", from, path.join(staging, part)])
+      }
+      // The release is read-only; the hub's copy stays writable so pruning can remove it.
+      await command(["chmod", "-R", "u+w", staging])
+      await rename(staging, target)
+    } finally {
+      await rm(staging, { recursive: true, force: true })
+    }
+  }
+  await point(paths.root, "current", release.commit)
+  const uid = (await host.mac(["id", "-u"])).stdout.trim()
+  if (!/^\d+$/.test(uid)) throw new Error(`Cannot read the Mac user ID through mac: ${JSON.stringify(uid)}`)
+  const result = await host.mac(["launchctl", "kickstart", "-k", `gui/${uid}/${resourcesHubLabel}`])
+  if (result.code !== 0)
+    throw new Error(
+      `Hub ${release.commit} copied and current, but restart failed (${result.code}): ${result.stderr.trim()}`,
+    )
+  const others = (
+    await Promise.all(
+      (await readdir(releases))
+        .filter((name) => sha.test(name) && name !== release.commit)
+        .map(async (name) => ({ name, time: (await stat(path.join(releases, name))).mtimeMs })),
+    )
+  ).toSorted((a, b) => b.time - a.time)
+  for (const old of others.slice(3)) await rm(path.join(releases, old.name), { recursive: true, force: true })
+  return `resources hub ${release.commit} published and restarted`
 }
 
 export function portFree(port: number) {
@@ -873,7 +1010,7 @@ export async function activate(
     )
   if (options.dryRun) {
     console.log(
-      `Verify the service password in ${path.join(config.config, serviceConfigName)}; when switching from plain serve, discard its unreconciled restart-recovery markers; stop ${label}; ${options.skipBackup ? "skip database backup" : `back up ${config.database}`}; current ${previous ?? "none"} -> ${commit}; install ${home}/bin/opencode2; start serve --service; authenticated healthcheck; then install bin/proxy.mjs and restart ${proxyLabel} only if it changed. Failed boot stays stopped: no automatic database downgrade.`,
+      `Verify the service password in ${path.join(config.config, serviceConfigName)}; when switching from plain serve, discard its unreconciled restart-recovery markers; stop ${label}; ${options.skipBackup ? "skip database backup" : `back up ${config.database}`}; current ${previous ?? "none"} -> ${commit}; install ${home}/bin/opencode2; start serve --service; authenticated healthcheck; then install bin/proxy.mjs and restart ${proxyLabel} only if it changed${service.hub ? `; publish the resources hub to the Mac and restart ${resourcesHubLabel} if its LaunchAgent is installed` : ""}. Failed boot stays stopped: no automatic database downgrade.`,
     )
     return
   }
@@ -943,6 +1080,10 @@ export async function activate(
         // The server is already healthy; a proxy failure is reported without undoing the activation.
         if (service.proxy)
           await service.proxy().then(console.log, (error: unknown) => console.error(`Proxy: ${String(error)}`))
+        if (service.hub)
+          await service
+            .hub({ commit, directory: release.directory })
+            .then(console.log, (error: unknown) => console.error(`Resources hub: ${String(error)}`))
         return
       }
       await Bun.sleep(1000)
@@ -1017,9 +1158,14 @@ async function main() {
     )
     return
   }
+  if (action === "hub-plist") {
+    // Printed for the Mac's installer (core-infra/opencode-mac); runs on either machine: /Users/<user> is the same path.
+    process.stdout.write(resourcesHubPlist(`/Users/${os.userInfo().username}`))
+    return
+  }
   if (!["prepare", "activate", "update", "rollback", "migrate", "prune"].includes(action))
     throw new Error(
-      "Usage: custom:{prepare,activate,update,rollback,status,migrate,prune} [full-sha] [--dry-run]\nRollback: --database-compatible\nMigrate: --replace-launcher [--stop-beta]\nPrune: --keep=<count> (default 3)",
+      "Usage: custom:{prepare,activate,update,rollback,status,migrate,prune,hub-plist} [full-sha] [--dry-run]\nRollback: --database-compatible\nMigrate: --replace-launcher [--stop-beta]\nPrune: --keep=<count> (default 3)",
     )
   if (process.platform !== "darwin" && (process.platform !== "linux" || action === "migrate"))
     throw new Error("Manual custom deployment supports macOS, and Linux (systemd user unit) except migrate")
