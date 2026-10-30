@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test"
 import { $ } from "bun"
 import fs from "fs/promises"
 import path from "path"
-import { eq } from "drizzle-orm"
+import { and, eq, isNull } from "drizzle-orm"
 import { Context, Effect, Exit, Fiber, Layer, Queue, Scope, Stream } from "effect"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { LayerNode } from "@opencode/util/effect/layer-node"
@@ -109,15 +109,20 @@ function makeFixture() {
       Effect.promise(() => tmpdir()),
       (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
     )
-    yield* Effect.promise(async () => {
-      await initRepo(root.path)
-      await Bun.write(path.join(root.path, "fixture-id"), root.path)
-      await $`git add fixture-id`.cwd(root.path).quiet()
-      await $`git commit --amend --no-edit`.cwd(root.path).quiet()
-    })
+    yield* Effect.promise(() => initRepo(root.path))
     const sourceDirectory = abs(yield* Effect.promise(() => fs.realpath(root.path)))
-    const projectID = (yield* (yield* Project.Service).resolve(sourceDirectory)).id
+    const projectID = Project.ID.make("worktree-project")
     const { db } = yield* Database.Service
+    yield* db
+      .insert(ProjectTable)
+      .values({ id: projectID, worktree: sourceDirectory, sandboxes: [], time_created: 1, time_updated: 1 })
+      .run()
+      .pipe(Effect.orDie)
+    yield* db
+      .insert(WorktreeTable)
+      .values({ project_id: projectID, directory: sourceDirectory })
+      .run()
+      .pipe(Effect.orDie)
     return { root, sourceDirectory, projectID, db }
   })
 }
@@ -249,7 +254,7 @@ describe("Worktree", () => {
       const input = yield* setup()
       const worktree = yield* fixtureWorktree()
       const global = yield* Global.Service
-      const parent = path.join(global.data, "worktree", input.projectID.slice(0, 6))
+      const parent = path.join(global.data, "worktree", "worktr")
 
       const created = yield* worktree.create({
         from: input.sourceDirectory,
@@ -445,6 +450,12 @@ describe("Worktree", () => {
         directory: sourceParent,
         name: "source",
       })
+      yield* input.db
+        .delete(WorktreeTable)
+        .where(and(eq(WorktreeTable.project_id, input.projectID), isNull(WorktreeTable.strategy)))
+        .run()
+        .pipe(Effect.orDie)
+
       const created = yield* worktree.create({
         from: source.directory,
         directory: targetParent,
@@ -781,12 +792,7 @@ describe("Worktree", () => {
       const worktrees = yield* fixtureWorktree()
       const projects = yield* Project.Service
       const other = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir()))
-      yield* Effect.promise(async () => {
-        await initRepo(other.path)
-        await Bun.write(path.join(other.path, "different.txt"), "different project")
-        await $`git add different.txt`.cwd(other.path).quiet()
-        await $`git commit -m different`.cwd(other.path).quiet()
-      })
+      yield* Effect.promise(() => initRepo(other.path))
       const resolved = yield* projects.resolve(abs(other.path))
       expect(resolved.id).not.toBe(input.projectID)
       const error = yield* worktrees.create({ from: abs(other.path), name: "nope" }).pipe(Effect.flip)
