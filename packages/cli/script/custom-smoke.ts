@@ -1,10 +1,11 @@
 // Explicit integration check: only a fresh temporary database and an ephemeral
-// loopback port. Never discovers, registers, or controls an installed service.
+// loopback port. Runs `serve --service` like the launchd job, registering only in
+// its temporary state directory; never discovers or controls an installed service.
 import { mkdir, mkdtemp, readlink, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { serverConfig } from "./custom-config"
-import { artifacts, command, publish, seal } from "./custom-release"
+import { artifacts, command, publish, seal, serviceConfigName } from "./custom-release"
 import { bundle, bundleRelease } from "./custom-signing"
 import { verifyParser } from "./custom-parser-smoke"
 
@@ -56,14 +57,25 @@ await publish(work, commit)
 const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
 const port = listener.port
 listener.stop(true)
-const log = Bun.file(`${work}/server.log`)
-const child = Bun.spawn([`${release}/bin/opencode`, "serve", "--hostname", "127.0.0.1", "--port", String(port)], {
-  cwd: `${work}/home/project`,
-  env: { ...env, OPENCODE_CONFIG_CONTENT: await Bun.file(`${release}/server-config.json`).text() },
-  stdin: "ignore",
-  stdout: log,
-  stderr: log,
+await Bun.write(`${env.OPENCODE_CONFIG_DIR}/${serviceConfigName}`, JSON.stringify({ password: "isolated-fixture" }), {
+  mode: 0o600,
 })
+const log = Bun.file(`${work}/server.log`)
+const child = Bun.spawn(
+  [`${release}/bin/opencode`, "serve", "--service", "--hostname", "127.0.0.1", "--port", String(port)],
+  {
+    cwd: `${work}/home/project`,
+    env: {
+      ...env,
+      // Service mode answers with the managed-service password; a server that used this one would fail auth.
+      OPENCODE_PASSWORD: "ignored-by-service-mode",
+      OPENCODE_CONFIG_CONTENT: await Bun.file(`${release}/server-config.json`).text(),
+    },
+    stdin: "ignore",
+    stdout: log,
+    stderr: log,
+  },
+)
 const headers = {
   authorization: `Basic ${Buffer.from("opencode:isolated-fixture").toString("base64")}`,
   "content-type": "application/json",
@@ -78,6 +90,8 @@ try {
     if (response?.ok) {
       const body = await response.json()
       if (body.version !== version) throw new Error("Server/CLI version mismatch")
+      if (!(await Bun.file(`${work}/state/opencode/${serviceConfigName}`).exists()))
+        throw new Error("The server did not register as the managed service")
       break
     }
     await Bun.sleep(500)

@@ -26,6 +26,7 @@ import {
   publish,
   seal,
   scripts,
+  serviceCredential,
   settings,
 } from "../script/custom-release"
 
@@ -218,6 +219,9 @@ async function fixture() {
   await mkdir(`${home}/data/opencode`, { recursive: true })
   const db = new Database(`${home}/data/opencode/custom.db`)
   db.exec("CREATE TABLE facts (value TEXT); INSERT INTO facts VALUES ('preserved')")
+  // The restart-recovery markers that activation reconciles when it switches from plain `serve`.
+  db.exec("CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+  db.exec("CREATE TABLE session_v2 (id TEXT PRIMARY KEY, time_suspended INTEGER)")
   db.close()
   await point(home, "current", first)
   await point(home, "prepared", second)
@@ -458,12 +462,45 @@ test.each([false, true])(
         stateServer.value = serve(port)
       },
     }
+    const database = (await settings(home)).database
+    const markers = () => {
+      const db = new Database(database, { readonly: true })
+      const result = {
+        jobs: db.query("SELECT key FROM kv WHERE key LIKE 'job.background/%' ORDER BY key").all(),
+        suspended: db.query("SELECT id FROM session_v2 WHERE time_suspended IS NOT NULL ORDER BY id").all(),
+        other: db.query("SELECT key FROM kv WHERE key NOT LIKE 'job.background/%'").all(),
+      }
+      db.close()
+      return result
+    }
+    const mark = (suffix: string) => {
+      const db = new Database(database)
+      db.run("INSERT INTO kv VALUES (?, '{}')", [`job.background/msg_${suffix}`])
+      db.run("INSERT INTO session_v2 VALUES (?, 1)", [`ses_${suffix}`])
+      db.close()
+    }
+    mark("plain")
+    const unrelated = new Database(database)
+    unrelated.run("INSERT INTO kv VALUES ('custom.preferences', '{}')")
+    unrelated.close()
     try {
       await activate(home, second, { skipBackup }, service)
       expect(Array.from(new Bun.Glob("backups/*/database.sqlite").scanSync(home))).toHaveLength(skipBackup ? 0 : 1)
+      expect(await Bun.file(`${home}/config/opencode/service-custom.json`).json()).toEqual({
+        password: "fixture-secret",
+      })
+      // The first managed-service start must not resume what plain `serve` left behind; other keys stay.
+      expect(markers()).toEqual({ jobs: [], suspended: [], other: [{ key: "custom.preferences" }] })
+      mark("service")
       expect(await pointer(home, "current")).toBe(second)
       expect(await pointer(home, "previous")).toBe(first)
       await activate(home, first, { rollback: true, compatible: true }, service)
+      // Once the launcher runs service mode, restart continuity owns the markers.
+      expect(markers()).toEqual({
+        jobs: [{ key: "job.background/msg_service" }],
+        suspended: [{ id: "ses_service" }],
+        other: [{ key: "custom.preferences" }],
+      })
       expect(Array.from(new Bun.Glob("backups/*/database.sqlite").scanSync(home))).toHaveLength(skipBackup ? 1 : 2)
       expect(await pointer(home, "current")).toBe(first)
       expect(state.starts).toBe(2)
@@ -572,6 +609,47 @@ test.each(["waiting-port", "healthcheck"])("reporter failure at %s does not inte
   } finally {
     await state.server?.stop(true)
   }
+})
+
+test("a different managed-service password aborts activation before any lifecycle step", async () => {
+  const home = await fixture()
+  const socket = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } })
+  const port = socket.port
+  socket.stop(true)
+  await Bun.write(`${home}/manual.json`, JSON.stringify({ port }))
+  const file = `${home}/config/opencode/service-custom.json`
+  await Bun.write(file, JSON.stringify({ port, password: "other-secret" }))
+  const calls: string[] = []
+  await expect(
+    activate(
+      home,
+      second,
+      { skipBackup: true },
+      {
+        async pid() {
+          throw new Error("must not query PID")
+        },
+        async stop() {
+          calls.push("stop")
+        },
+        async start() {
+          calls.push("start")
+        },
+      },
+    ),
+  ).rejects.toThrow("different password")
+  expect(calls).toEqual([])
+  expect(await pointer(home, "current")).toBe(first)
+  expect(await Bun.file(file).json()).toEqual({ port, password: "other-secret" })
+})
+
+test("seeding the managed-service password keeps the other service settings private", async () => {
+  const home = await fixture()
+  const file = `${home}/config/opencode/service-custom.json`
+  await Bun.write(file, JSON.stringify({ hostname: "127.0.0.1", port: 4178 }))
+  await serviceCredential(home, await settings(home))
+  expect(await Bun.file(file).json()).toEqual({ hostname: "127.0.0.1", port: 4178, password: "fixture-secret" })
+  expect((await stat(file)).mode & 0o777).toBe(0o600)
 })
 
 test("cleanup failure retains the original startup cause", async () => {
@@ -805,7 +883,11 @@ test("launcher inserts the explicit server at the command boundary and preserves
       "",
     ])
   }
-  expect(fixture.output.server).toContain('exec "$release/bin/opencode" serve --hostname 127.0.0.1 --port 4178')
+  expect(fixture.output.server).toContain(
+    'exec "$release/bin/opencode" serve --service --hostname 127.0.0.1 --port 4178',
+  )
+  // Service mode ignores OPENCODE_PASSWORD; the credential lives in the managed-service config.
+  expect(fixture.output.server).not.toContain("OPENCODE_PASSWORD")
   expect(plist(fixture.home)).toContain("&amp;")
   expect(plist(fixture.home)).toContain("<key>ProcessType</key><string>Interactive</string>")
   expect(plist(fixture.home)).not.toContain("fixture-secret")

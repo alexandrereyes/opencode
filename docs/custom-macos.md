@@ -221,7 +221,8 @@ It still requires the existing database and password and verifies the authentica
 health response and exact running version after activation.
 
 Explicit `custom:activate`, rollback and one-time migration retain the backup step.
-Activation controls only `local.opencode.custom-manual`. It unloads that job, waits
+Activation controls only `local.opencode.custom-manual`. It first seeds or verifies the
+managed-service password (see "Managed-service mode under launchd"), then unloads that job, waits
 up to 65 seconds for launchd registration removal and the previous PID to exit, then
 up to 65 port checks for the port to close, takes a consistent SQLite `.backup` using the system `sqlite3`
 and checks it with `PRAGMA quick_check`. Missing database, password or sqlite3 aborts
@@ -323,9 +324,43 @@ The optional beta stop only accepts the exact `~/.opencode/bin/opencode2 serve -
 process listening on 4097; any unknown listener aborts migration. A retry reuses the
 same persistence and password and does not restart an already healthy target release.
 
-`serve` is intentionally foreground under launchd rather than `serve --service`: this
-keeps the legacy global configuration directory while using the preserved password
-without rewriting its managed-service configuration/registration or entering election.
+#### Managed-service mode under launchd
+
+`bin/serve` runs `serve --service` in the foreground, and launchd supervises it: the job starts it at
+login and restarts it when it exits. Only service mode starts upstream's scheduled-task loop and its
+restart continuity, which resumes Sessions, subagents and background jobs interrupted by a restart or
+crash. Plain `serve` starts neither: a schedule created there is stored but never fires. Enable
+`/schedule` with `"experimental": { "schedules": true }` in the user config once a release with this
+launcher is active.
+
+In service mode the server:
+
+- answers with the `password` of the managed-service config, `$OPENCODE_CONFIG_DIR/service-custom.json`,
+  and ignores `OPENCODE_PASSWORD`; when the key is missing it generates and saves a new one. Activation
+  therefore seeds the key from `<runtime>/password` when it is missing and aborts, before stopping
+  anything, when it differs. The launchers and the healthcheck read `<runtime>/password` and the 4096
+  proxy `<runtime>/config/opencode/service-custom.json`; keep the three equal;
+- takes `hostname` and `port` from the launcher flags. `cors`, `env` and `remote` in that config file
+  still apply, so leave them unset: `remote` would open upstream's public remote-access tunnel;
+- registers itself in `$XDG_STATE_HOME/opencode/service-custom.json` and rechecks that file every
+  5 seconds. If it is deleted or replaced, the server shuts down and launchd restarts it. A stale
+  registration left by a crash does not block the next start, and a graceful stop removes it;
+- changes its working directory to the home directory.
+
+The launcher keeps rejecting `serve` and the mutating `service` commands, so no other process of the
+custom channel contends for the port or replaces the registration.
+
+Releases activated before this change ran plain `serve`, which kept the server out of the
+managed-service registration and election of the beta service that then shared the configuration
+directory on 4097. Migration stops that service.
+
+Plain `serve` also never reconciled restart recovery: each restart left the interrupted executions
+claimed (`session_v2.time_suspended`) and their background jobs listed (`job.background/*` in `kv`).
+On 2026-10-30 that was 161 job entries since 2026-09-14, including 14 running subagents, and two
+claimed archived Sessions. The first managed-service boot would resume all of them and wake their
+parents. Activation therefore discards those markers, in one transaction and before stopping
+anything, whenever the installed `bin/serve` does not yet run `serve --service`; from then on restart
+continuity owns them. Executions interrupted by that one switching restart are not resumed, as before.
 
 The stable launcher resolves `current` once and disables automatic CLI updates. For the TUI,
 `run`, `mini`, `api`, `models`, `stats`, `reload`, and the supported `auth`/`session` subcommands,
@@ -344,8 +379,8 @@ The launcher provides read-only service adapters without native service discover
 - `service get port` / `service get hostname`: prints the configured port / `127.0.0.1`.
 - `service get`: prints hostname and port as JSON, omitting the password and environment.
 
-These adapters support `bun run dev:live` and `bun run dev:vite:live`. The installation still uses
-launchd supervision rather than the native managed-service registry.
+These adapters support `bun run dev:live` and `bun run dev:vite:live`. launchd, not native service
+discovery, starts and supervises the server; the adapters do not read its registration.
 
 `mcp add`, `plugin add`, `plugin remove`, and `debug paths` use only local configuration/files and
 pass through without `--server`, using the runtime's configured environment and persistence paths.

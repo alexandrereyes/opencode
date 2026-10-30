@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { chmod, copyFile, mkdir, mkdtemp, readdir, readlink, realpath, rename, rm, symlink } from "node:fs/promises"
+import { Database } from "bun:sqlite"
 import { randomUUID } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
@@ -10,6 +11,8 @@ import { verifyParser } from "./custom-parser-smoke"
 
 const repository = path.resolve(import.meta.dirname, "../../..")
 export const label = "local.opencode.custom-manual"
+// The managed-service config of the custom channel, read by `serve --service` from OPENCODE_CONFIG_DIR.
+export const serviceConfigName = "service-custom.json"
 const sha = /^[a-f0-9]{40}$/
 
 export function quote(value: string) {
@@ -293,6 +296,47 @@ export async function health(home: string, port: number) {
   )
 }
 
+/**
+ * `serve --service` ignores OPENCODE_PASSWORD and answers with the password of its managed-service config, generating
+ * one when it is missing. Seed that config from the runtime password, which the launchers, the 4096 proxy and the
+ * healthcheck use, and refuse to activate a server that would answer with another credential.
+ */
+export async function serviceCredential(home: string, config: Awaited<ReturnType<typeof settings>>) {
+  const password = (await Bun.file(`${home}/password`).text()).trim()
+  const file = path.join(config.config, serviceConfigName)
+  const existing: unknown = (await Bun.file(file).exists()) ? await Bun.file(file).json() : {}
+  if (typeof existing !== "object" || existing === null || Array.isArray(existing))
+    throw new Error(`Invalid managed-service config: ${file}`)
+  if ("password" in existing && existing.password !== undefined) {
+    if (existing.password === password) return
+    throw new Error(
+      `${file} holds a different password than ${home}/password. The server would reject every client; make them equal before activating. Nothing was stopped.`,
+    )
+  }
+  await mkdir(config.config, { recursive: true })
+  await Bun.write(file, JSON.stringify({ ...existing, password }, null, 2) + "\n", { mode: 0o600 })
+  await chmod(file, 0o600)
+}
+
+/**
+ * Only `serve --service` resumes, at boot, the Sessions and background jobs a restart interrupted. Plain `serve` never
+ * did, so its interrupted executions and background jobs (one entry per restart since the migration) were never
+ * reconciled. Discard them before the first managed-service start; otherwise that boot would resume weeks-old Sessions
+ * and subagents and wake their parents. Runs while the old server is still up, so a failure stops nothing.
+ */
+export function discardPlainServeRecovery(database: string) {
+  const db = new Database(database)
+  try {
+    db.run("PRAGMA busy_timeout = 10000")
+    db.transaction(() => {
+      db.run("DELETE FROM kv WHERE key LIKE 'job.background/%'")
+      db.run("UPDATE session_v2 SET time_suspended = NULL WHERE time_suspended IS NOT NULL")
+    })()
+  } finally {
+    db.close()
+  }
+}
+
 export function scripts(home: string, config: Awaited<ReturnType<typeof settings>>) {
   const environment = Object.entries({
     OPENCODE_RESOURCES_HUB_PORT: String(resourcesHubPort),
@@ -312,10 +356,9 @@ export function scripts(home: string, config: Awaited<ReturnType<typeof settings
 set -eu
 ${environment}
 release=$(cd ${quote(`${home}/current`)} && pwd -P)
-export OPENCODE_PASSWORD="$(cat ${quote(`${home}/password`)})"
 export OPENCODE_CONFIG_CONTENT="$(cat "$release/server-config.json")"
 cd ${quote(home)}
-exec "$release/bin/opencode" serve --hostname 127.0.0.1 --port ${config.port}
+exec "$release/bin/opencode" serve --service --hostname 127.0.0.1 --port ${config.port}
 `,
     tui: launcher(home, config.port, environment),
   }
@@ -712,7 +755,7 @@ export async function activate(
     )
   if (options.dryRun) {
     console.log(
-      `Stop ${label}; ${options.skipBackup ? "skip database backup" : `back up ${config.database}`}; current ${previous ?? "none"} -> ${commit}; install ${home}/bin/opencode2; start; authenticated healthcheck; then install bin/proxy.mjs and restart ${proxyLabel} only if it changed. Failed boot stays stopped: no automatic database downgrade.`,
+      `Verify the service password in ${path.join(config.config, serviceConfigName)}; when switching from plain serve, discard its unreconciled restart-recovery markers; stop ${label}; ${options.skipBackup ? "skip database backup" : `back up ${config.database}`}; current ${previous ?? "none"} -> ${commit}; install ${home}/bin/opencode2; start serve --service; authenticated healthcheck; then install bin/proxy.mjs and restart ${proxyLabel} only if it changed. Failed boot stays stopped: no automatic database downgrade.`,
     )
     return
   }
@@ -733,6 +776,10 @@ export async function activate(
   }
   if (!portFree(config.port) && (!previous || before.version !== `0.0.0-custom.${previous}`))
     throw new Error("Port is occupied by another release/service. Complete the documented one-time migration first.")
+  await serviceCredential(home, config)
+  const launcher = Bun.file(`${home}/bin/serve`)
+  if (!(await launcher.exists()) || !(await launcher.text()).includes(" serve --service "))
+    discardPlainServeRecovery(config.database)
   const save = options.skipBackup
     ? undefined
     : path.join(home, "backups", `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`)
