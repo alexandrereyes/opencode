@@ -6,7 +6,7 @@ import { OpenCode } from "@opencode/client"
 import { AppMentions } from "../src/rpc"
 import { NativeApps } from "../src/native-apps/rpc"
 import { Subscriptions } from "../src/subscriptions/rpc"
-import { Effect, Schedule } from "effect"
+import { ConfigProvider, Effect, Schedule } from "effect"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { startServer } from "../../server/test/fixture/server"
@@ -91,7 +91,10 @@ it.live(
         )
       })
 
-      const server = yield* startServer(config)
+      // The default ConfigProvider snapshots process.env when first used in this process, possibly by an earlier file.
+      const server = yield* startServer(config).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv()),
+      )
       const client = OpenCode.make({ baseUrl: server.base, headers: server.headers })
       const firstLocation = { directory: first }
       const secondLocation = { directory: second }
@@ -209,9 +212,7 @@ it.live(
       const tmp = yield* tmpdirScoped("opencode-native-apps-")
       const project = path.join(tmp.path, "project")
       const config = path.join(tmp.path, "config")
-      const plugin = pathToFileURL(
-        path.resolve(import.meta.dir, "./fixture/native-apps-plugin.ts"),
-      ).href
+      const plugin = pathToFileURL(path.resolve(import.meta.dir, "./fixture/native-apps-plugin.ts")).href
       yield* Effect.promise(async () => {
         await fs.mkdir(path.join(project, ".opencode", "plugins"), { recursive: true })
         await fs.writeFile(
