@@ -1,6 +1,7 @@
 import AVFAudio
 import CallKit
 import Foundation
+import OpenCodeKit
 
 /// Outgoing CallKit call. TN3135: watchOS allows low-level networking to a VoIP app only during a CallKit call
 /// (an `AVAudioSession` alone gets `ENETDOWN`), so audio and UDP start only after `didActivate`.
@@ -84,7 +85,11 @@ import Foundation
 
   nonisolated func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
     // Configure (do not activate) the session; the system activates it and calls didActivate.
-    try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat, options: [])
+    do {
+      try WatchCallAudio.configure()
+    } catch {
+      MainActor.assumeIsolated { log.append("category.failed: \(error.localizedDescription)") }
+    }
     provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: Date())
     let update = CXCallUpdate()
     update.localizedCallerName = "Sessão mestra"

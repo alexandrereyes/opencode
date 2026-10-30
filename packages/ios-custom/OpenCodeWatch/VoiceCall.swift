@@ -1,3 +1,4 @@
+import AVFAudio
 import Foundation
 import Observation
 import OpenCodeKit
@@ -25,6 +26,9 @@ import WatchKit
   @ObservationIgnored private var tasks: [Task<Void, Never>] = []
   @ObservationIgnored private var attempt = UUID()
   @ObservationIgnored private let fixture: Bool
+  /// Where the call's audio goes (AirPods or the watch's speaker), posted to the gateway when it changes.
+  @ObservationIgnored private var routeObserver: NSObjectProtocol?
+  @ObservationIgnored private var reportedRoute: String?
 
   init(fixture: Bool = false) {
     self.fixture = fixture
@@ -160,6 +164,12 @@ import WatchKit
       media?.setMuted(muted)
       callKit.connected()
       WKInterfaceDevice.current().play(.start)
+      reportRoute("connected")
+      routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification,
+        object: nil, queue: .main) { [weak self] note in
+        let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+        MainActor.assumeIsolated { self?.reportRoute("change:\(reason)") }
+      }
     case .inputLevel(let level): inputLevel = level
     case .outputLevel(let level): outputLevel = level
     case .ended(let failure):
@@ -201,6 +211,9 @@ import WatchKit
   /// Media and audio close first; then the gateway releases the call (and its lease).
   private func teardown() {
     attempt = UUID()
+    routeObserver.map(NotificationCenter.default.removeObserver)
+    routeObserver = nil
+    reportedRoute = nil
     tasks.forEach { $0.cancel() }
     tasks = []
     inputLevel = 0
@@ -216,12 +229,25 @@ import WatchKit
     }
   }
 
+  /// Diagnostics only: watchOS chooses the route by itself (no `setPreferredInput` for calls).
+  private func reportRoute(_ when: String) {
+    let route = WatchAudioRoute(AVAudioSession.sharedInstance().currentRoute)
+    guard let client, route.summary != reportedRoute else { return }
+    reportedRoute = route.summary
+    let event = ["type": "voice.route", "when": when, "route": route.summary, "bluetooth": route.bluetooth ? "yes" : "no",
+      "audio": WatchCallAudio.note(), "callkit": callKit.log.joined(separator: ",")]
+    Task { try? await client.diagnostics([event]) }
+  }
+
   private func reportDiagnostics(stage: String, message: String) {
     guard let client else { return }
     var events: [[String: String]] = [["type": "voice.failed", "stage": stage, "message": message]]
     let lines = media?.transportDiagnostics ?? []
     if !lines.isEmpty { events.append(["type": "voice.transport", "flows": lines.joined(separator: "; ")]) }
-    if let audio = media?.audioFlow { events.append(["type": "voice.audio", "plan": audio.categoryNote]) }
+    if let audio = media?.audioFlow {
+      events.append(["type": "voice.audio", "plan": audio.categoryNote, "callkit": callKit.log.joined(separator: ","),
+        "route": WatchAudioRoute(AVAudioSession.sharedInstance().currentRoute).summary])
+    }
     Task { try? await client.diagnostics(events) }
   }
 }

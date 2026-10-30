@@ -4657,6 +4657,16 @@ watch's own Wi-Fi or cellular. The contract with the backend is
   original IPv4 pair while the sockets carry the bytes (NAT64/CLAT on cellular). The gateway creates the call,
   owns the sideband and delegation; the watch sends a heartbeat every 5 s and long-polls caption, status and master
   events. Failures post transport diagnostics to `/watch/v1/diagnostics`.
+- **Headphones (rev. 30/10):** the call's category is `WatchCallAudio` (OpenCodeKit): `playAndRecord`, `voiceChat`
+  (voice processing keeps the echo cancellation), default route policy and **`allowBluetoothHFP` + `allowBluetoothA2DP`**,
+  set in `CXStartCallAction` before CallKit activates the session. It used to pass no options, and a call made with
+  AirPods connected to the watch played on the watch's speaker while Music kept playing in the AirPods. watchOS picks
+  the route itself (no `setPreferredInput`, no route picker outside long-form playback, and `longFormAudio` is for
+  `playback` only): HFP puts both microphone and sound on the AirPods, A2DP covers headphones that only play (the
+  watch's microphone records), and with neither the speaker plays. A route change rebuilds the audio graph on the new
+  route, retrying three times 250 ms apart before ending the call, so AirPods leaving mid-call fall back to the
+  speaker. On connect and on every route change the watch posts `voice.route` (`saída … · microfone …`, port types, the
+  category in force and the CallKit steps) to `/watch/v1/diagnostics`, which the server logs as `Watch diagnostics`.
 - **WebRTC engine:** `Vendor/OpenClawWatchRTC/` holds OpenClaw's `OpenClawWatchRTC` (Rust, `str0m` 0.24.1, commit
   `e5cc2d9`) and its watch transport/audio Swift with the spike's fixes, under their MIT notices (`Licenses/`, also
   bundled in the watch app). `script/setup-watch-rust.sh` installs the pinned nightly into

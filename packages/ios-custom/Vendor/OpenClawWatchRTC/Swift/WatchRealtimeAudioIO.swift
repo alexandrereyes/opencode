@@ -2,6 +2,7 @@
 // apps/ios/WatchApp/Sources/WatchRealtimeAudioIO.swift. Ver ../Licenses/OpenClaw.txt.
 import AVFAudio
 import Foundation
+import OpenCodeKit
 import Synchronization
 
 /// Graph mutations, conversion, codecs and playback have one queue owner. The tap only
@@ -198,14 +199,14 @@ final class WatchRealtimeAudioIO: @unchecked Sendable {
             switch self.plan {
             case .external:
                 // CallKit já configurou e ativou a sessão; só montar o grafo.
-                self.flow.withLock { $0.categoryNote = "callkit:\(session.category.rawValue)/\(session.mode.rawValue)" }
+                self.flow.withLock { $0.categoryNote = "callkit:" + WatchCallAudio.note(session) }
                 self.finishStart()
                 return
             case .duplex:
                 // Long-form routing is playback-only. Duplex voice uses the default policy;
                 // async activation must finish before any low-level Watch networking begins.
-                try session.setCategory(.playAndRecord, mode: .voiceChat, policy: .default, options: [])
-                self.flow.withLock { $0.categoryNote = "playAndRecord/voiceChat/default" }
+                try WatchCallAudio.configure(session)
+                self.flow.withLock { $0.categoryNote = WatchCallAudio.note(session) }
             }
             self.activating = true
             session.activate(options: []) { activated, error in
@@ -399,15 +400,7 @@ final class WatchRealtimeAudioIO: @unchecked Sendable {
             object: self.engine,
             queue: nil)
         { [weak self] _ in
-            guard let self else { return }
-            self.queue.async {
-                guard self.running, !self.gate.withLock({ $0.stopped }) else { return }
-                do {
-                    try self.configureGraph()
-                } catch {
-                    self.fail(error.localizedDescription)
-                }
-            }
+            self?.queue.async { self?.reconfigure(attempt: 0) }
         })
         #if os(watchOS)
         for name in [AVAudioSession.interruptionNotification, AVAudioSession.mediaServicesWereResetNotification] {
@@ -424,6 +417,19 @@ final class WatchRealtimeAudioIO: @unchecked Sendable {
             })
         }
         #endif
+    }
+
+    /// OpenCode: a route change (AirPods connected or gone) rebuilds the graph on the new route. Right after the change
+    /// the input can still report no format, so a few short retries come before ending the call.
+    private func reconfigure(attempt: Int) {
+        guard self.codec != nil, self.startContinuation == nil, !self.gate.withLock({ $0.stopped }) else { return }
+        do {
+            try self.configureGraph()
+        } catch where attempt < 3 {
+            self.queue.asyncAfter(deadline: .now() + 0.25) { self.reconfigure(attempt: attempt + 1) }
+        } catch {
+            self.fail(error.localizedDescription)
+        }
     }
 
     private func fail(_ message: String) {
