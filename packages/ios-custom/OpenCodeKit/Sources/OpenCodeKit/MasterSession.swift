@@ -52,10 +52,11 @@ extension OpenCodeClient {
     return try await rpc("custom.master", "info", input: Empty())
   }
   /// The server serializes this, so the screen, voice and other clients converge on one master.
-  /// `model` only applies when a new master has to be created.
-  public func ensureMaster(model: ModelReference? = nil) async throws -> EnsuredMaster {
-    struct Input: Encodable { let model: ModelReference? }
-    return try await rpc("custom.master", "ensure", input: Input(model: model))
+  /// `model` only applies when a new master has to be created. `voice` gives the master the voice-call note,
+  /// which the server takes away when the call's voice memory ends; older servers ignore it.
+  public func ensureMaster(model: ModelReference? = nil, voice: Bool = false) async throws -> EnsuredMaster {
+    struct Input: Encodable { let model: ModelReference?; let voice: Bool? }
+    return try await rpc("custom.master", "ensure", input: Input(model: model, voice: voice ? true : nil))
   }
   public func allocateChat() async throws -> ChatAllocation {
     try await rpc("custom.chats", "allocate", input: Empty())

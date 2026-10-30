@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import OpenCodeKit
@@ -73,9 +74,11 @@ import Testing
 }
 
 @Test func ensureMasterSendsTheCreationModelOnlyWhenGiven() async throws {
+  let voices = Mutex<[Bool?]>([])
   let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4179")!)) { request in
     #expect(request.url?.path == "/api/rpc/custom.master/ensure")
     let input = try JSONDecoder().decode(JSONValue.self, from: request.httpBody!).object?["input"]?.object
+    voices.withLock { $0.append(input?["voice"]?.bool) }
     let model = input?["model"]?.object
     #expect(model == nil || (model?["providerID"]?.string == "llm-proxy" && model?["variant"]?.string == "medium"))
     let body = """
@@ -91,4 +94,7 @@ import Testing
   #expect(created.created)
   #expect(created.sessionID == "ses_new" && created.directory == "/chats/owned")
   #expect(created.preferences.data.masterSessions?["local"] == "ses_new")
+  // Only a voice call asks for the voice-call note; other clients omit the key, which older servers ignore anyway.
+  _ = try await client.ensureMaster(voice: true)
+  #expect(voices.withLock { $0 } == [nil, nil, true])
 }

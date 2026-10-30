@@ -10,6 +10,7 @@ private actor VoiceMasterHTTP {
   var deleted: Set<String> = []
   var created = 0
   var uploads: [(URL, Data)] = []
+  var ensureVoice: [Bool?] = []
   let failsPrompt: Bool
   init(masterID: String? = nil, failsPrompt: Bool = false) { self.masterID = masterID; self.failsPrompt = failsPrompt }
   func delete(_ id: String) { deleted.insert(id) }
@@ -25,6 +26,7 @@ private actor VoiceMasterHTTP {
     case "/api/rpc/custom.preferences/get":
       value = .object(["output": preferences])
     case "/api/rpc/custom.master/ensure":
+      ensureVoice.append(input?.object?["input"]?.object?["voice"]?.bool)
       // Mirrors the plugin: keep a live pointer, otherwise create and point to a new master.
       let reused = masterID.map { !deleted.contains($0) } ?? false
       if !reused { created += 1; masterID = "ses_ensured\(created)" }
@@ -88,6 +90,9 @@ private actor VoiceMasterHTTP {
     XCTAssertEqual(sessions.masterID, firstID)
     let requests = await http.requests
     XCTAssertEqual(requests.filter { $0.url?.path == "/api/rpc/custom.master/ensure" }.count, 1)
+    // The call's first delegation turns on the master's voice-call note.
+    let voice = await http.ensureVoice
+    XCTAssertEqual(voice, [true])
     let created = await http.created
     XCTAssertEqual(created, 1)
     let prompts = try requests.filter { $0.url!.path.hasSuffix("/prompt") }.map {

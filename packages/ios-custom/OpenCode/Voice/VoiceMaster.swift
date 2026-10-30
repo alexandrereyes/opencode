@@ -46,7 +46,7 @@ extension VoiceMasterServing {
         ? try await sessions.client.defaultModel(directory: sessions.client.chatRoot()) : nil
       try Task.checkCancellation()
       let master = try await sessions.client.ensureMaster(
-        model: info.model ?? fallback.map { ModelReference(id: $0.id, providerID: $0.providerID) })
+        model: info.model ?? fallback.map { ModelReference(id: $0.id, providerID: $0.providerID) }, voice: true)
       sessions.adoptMaster(master.preferences)
       masterID = master.sessionID
     }

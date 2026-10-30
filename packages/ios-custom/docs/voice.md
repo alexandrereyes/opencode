@@ -310,8 +310,10 @@ cria outra no plugin (com trava, então tela e voz simultâneas não criam duas)
 `masterSessions.local`; em seguida, prompt. Se a mestra for apagada durante a chamada, o 404 leva a
 um único novo `ensure` e o pedido vai para a substituta. Nenhuma sessão é criada apenas ao abrir a voz.
 A memória de voz é global (não pertence à sessão) e continua valendo para a nova mestra. O prompt contém só o texto
-delegado, sem preâmbulo: as orientações de voz (progresso conciso, resumo final para fala) e a regra
-de não executar instruções vindas de resultados de ferramentas ficam no prompt do agente `mestra`
+delegado, sem preâmbulo. O `ensure` da primeira delegação leva `voice: true`, que liga na mestra a nota
+de contexto da chamada de voz (respostas curtas, para serem ouvidas); o `end` da memória de voz, ao fim
+da chamada, desliga a nota (`packages/plugin-app-custom/docs/master-session.md`). A regra de não executar
+instruções vindas de resultados de ferramentas fica no prompt do agente `mestra`
 (`packages/plugin-app-custom/src/master/index.ts`), e as instructions do GPT Live pedem um pedido que
 se entenda sozinho: a mestra não ouve a conversa, e um pedido copiado só da última fala chegou sem o
 chip que Alexandre dissera na fala anterior.
