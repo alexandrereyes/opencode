@@ -17,10 +17,13 @@ import type { PendingSnapshot } from "@opencode/plugin/effect/request"
 import { Preferences } from "../src/preferences/rpc"
 import {
   AnswerInput,
+  ArchiveInput,
   CreateInput,
   ListInput,
   MarkReadInput,
+  ProjectsInput,
   RequestsInput,
+  SearchInput,
   SendInput,
   Target,
   UpdateInput,
@@ -30,6 +33,7 @@ import {
   attention,
   configureAgent,
   controlNames,
+  instructions,
   modelRef,
   observeModel,
   origin,
@@ -67,6 +71,8 @@ const self = Session.ID.make("ses_master")
 const root = session("ses_root", { outcome: "succeeded", time: { created: 1, updated: 2, idle: now - 60_000 } })
 const child = session("ses_child", { parentID: root.id, title: "Subagente" })
 const master = session(self, { agent: agentID })
+const other = session("ses_other", { title: "Outra sessão", time: { created: 1, updated: 3 } })
+const worker = session("ses_worker", { parentID: other.id, title: "Subagente da outra", agent: "general" })
 
 test("all master input schemas reject invalid boundary values", () => {
   for (const [schema, input] of [
@@ -476,30 +482,94 @@ function fixture(
     },
     ctx,
   )
-  const effect = (name: string, value: unknown, agent: Agent.ID = agentID) => {
+  const effect = (name: string, value: unknown, as: { agent?: Agent.ID; sessionID?: Session.ID } = {}) => {
     const tool = tools.find((tool) => tool.name === name)
     if (!tool) throw new Error(name)
     return tool.execute(value, {
-      agent,
-      sessionID: self,
+      agent: as.agent ?? agentID,
+      sessionID: as.sessionID ?? self,
       messageID: SessionMessage.ID.make("msg_master"),
       id: Tool.CallID.make("call"),
       progress: () => Effect.void,
     })
   }
-  const run = (name: string, value: unknown, agent?: Agent.ID) =>
-    Effect.runPromise(effect(name, value, agent).pipe(Effect.provideService(Clock.Clock, fixedClock)))
+  const run = (name: string, value: unknown, as?: { agent?: Agent.ID; sessionID?: Session.ID }) =>
+    Effect.runPromise(effect(name, value, as).pipe(Effect.provideService(Clock.Clock, fixedClock)))
   return { calls, pending, run, tools, effect, ctx }
 }
 
-test("every tool is pinned, scoped to Mestra and rejects other agents even through a captured executor", async () => {
+test("every tool is an ordinary Code Mode tool of the mestra namespace", () => {
   const f = fixture()
   expect(f.tools.map((tool) => tool.name)).toEqual(controlNames)
-  expect(f.tools.map((tool) => tool.options?.agents)).toEqual(controlNames.map(() => [agentID]))
-  expect(f.tools.every((tool) => tool.options?.pinned === true)).toBe(true)
-  for (const tool of f.tools)
-    await expect(f.run(tool.name, {}, Agent.ID.make("build"))).rejects.toThrow("Only the Mestra")
-  expect(f.calls.prompts).toEqual([])
+  expect(f.tools.map((tool) => tool.options)).toEqual(controlNames.map(() => ({ namespace: "mestra", codemode: true })))
+})
+
+test("the Mestra instructions name every tool by its exact path with all of its input keys", () => {
+  const inputs: Record<(typeof controlNames)[number], readonly string[]> = {
+    sessions_list: Object.keys(ListInput.fields),
+    projects_list: Object.keys(ProjectsInput.fields),
+    session_status: Object.keys(Target.fields),
+    sessions_search: Object.keys(SearchInput.fields),
+    session_send: Object.keys(SendInput.fields),
+    session_create: Object.keys(CreateInput.fields),
+    session_update: Object.keys(UpdateInput.fields),
+    session_interrupt: Object.keys(Target.fields),
+    session_mark_read: Object.keys(MarkReadInput.fields),
+    session_archive: Object.keys(ArchiveInput.fields),
+    requests_list: Object.keys(RequestsInput.fields),
+    request_answer: AnswerInput.members.flatMap((member) => Object.keys(member.fields)),
+    session_wait: Object.keys(WaitInput.fields),
+  }
+  for (const name of controlNames) {
+    const start = instructions.indexOf(`tools.mestra.${name}(`)
+    expect(start).toBeGreaterThan(-1)
+    const signature = instructions.slice(start, instructions.indexOf(")", start))
+    for (const key of inputs[name]) expect(signature).toContain(key)
+  }
+})
+
+test("another agent's session controls everything but itself and the Mestra, and its messages name it", async () => {
+  const f = fixture({ rows: [master, root, child, other, worker] })
+  const build = { agent: Agent.ID.make("build"), sessionID: root.id }
+  const ids = async (as: typeof build) =>
+    ((await f.run("sessions_list", {}, as)).output as { sessions: Array<{ id: string }> }).sessions.map((row) => row.id)
+  // The caller is left out of its lists, as the Mestra is; Mestra sessions and subagents never appear.
+  expect(await ids(build)).toEqual([other.id])
+  await f.run("session_send", { sessionID: other.id, text: "Continue" }, build)
+  expect(f.calls.prompts[0]).toMatchObject({
+    sessionID: other.id,
+    metadata: { "custom.sender": { sessionID: root.id, agent: "build" } },
+  })
+  expect(f.calls.prompts[0]?.metadata).not.toHaveProperty("custom.master")
+  await expect(f.run("session_send", { sessionID: root.id, text: "x" }, build)).rejects.toThrow("calling session")
+  await expect(f.run("session_send", { sessionID: self, text: "x" }, build)).rejects.toThrow("Mestra session")
+  const chat = await f.run("session_create", { text: "Pesquise" }, build)
+  expect(chat.output).toMatchObject({ directory: "/chats/2026/session-1" })
+  expect(f.calls.prompts[1]).toMatchObject({ metadata: { "custom.sender": { sessionID: root.id, agent: "build" } } })
+
+  // A subagent acts for its top-level session: that whole family is the caller.
+  const subagent = { agent: Agent.ID.make("general"), sessionID: worker.id }
+  f.pending.push({
+    location: other.location,
+    permissions: [{ id: Permission.ID.make("per_own"), sessionID: worker.id, action: "edit", resources: ["/repo/b"] }],
+    forms: [],
+  })
+  const listed = await ids(subagent)
+  expect(listed).toContain(root.id)
+  expect(listed).not.toContain(other.id)
+  for (const name of ["session_interrupt", "session_wait", "session_status"])
+    await expect(f.run(name, { sessionID: other.id }, subagent)).rejects.toThrow("calling session")
+  expect((await f.run("session_archive", { sessionIDs: [other.id] }, subagent)).output).toMatchObject({
+    archived: [],
+    skipped: [{ sessionID: other.id, reason: expect.stringContaining("calling session") }],
+  })
+  await expect(
+    f.run("request_answer", { type: "permission", sessionID: worker.id, requestID: "per_own", allow: true }, subagent),
+  ).rejects.toThrow("calling session")
+  await f.run("request_answer", { type: "permission", sessionID: root.id, requestID: "per_1", allow: false }, subagent)
+  expect(f.calls.replies).toEqual([{ sessionID: root.id, requestID: "per_1", decision: "reject" }])
+  expect(f.calls.interrupted).toEqual([])
+  expect(f.calls.archived).toEqual([])
 })
 
 test("list aggregates subagent requests and work, unread, failed, marks and counts, and filters", async () => {
@@ -560,7 +630,7 @@ test("session list also enforces its serialized output budget", async () => {
   const rows = Array.from({ length: 50 }, (_, index) =>
     session(`ses_long_${index}`, { location: { directory: "/" + "x".repeat(1000) + index } }),
   )
-  const result = await fixture({ rows }).run("sessions_list", { limit: 50 })
+  const result = await fixture({ rows: [master, ...rows] }).run("sessions_list", { limit: 50 })
   expect(result.output).toMatchObject({ truncated: true })
   expect(String(result.content).length).toBeLessThan(20_300)
 })
@@ -684,8 +754,10 @@ test("send/create carry origin metadata, preserve queue, never create children a
     text: "Comece",
     model: { providerID: "llm-proxy", id: "llm-proxy/gpt-6-luna", variant: "high" },
   })
-  expect(f.calls.prompts[0]).toMatchObject({ delivery: "queue", metadata: origin(self) })
-  expect(f.calls.prompts[1]).toMatchObject({ text: "Comece", metadata: origin(self) })
+  const fromMestra = { "custom.master": { sessionID: self } }
+  expect(origin({ agent: agentID, sessionID: self })).toEqual(fromMestra)
+  expect(f.calls.prompts[0]).toMatchObject({ delivery: "queue", metadata: fromMestra })
+  expect(f.calls.prompts[1]).toMatchObject({ text: "Comece", metadata: fromMestra })
   expect(f.calls.creates[0]).not.toHaveProperty("parentID")
   expect(f.calls.creates[0]).toMatchObject({
     location: { directory: "/repo" },
@@ -780,7 +852,7 @@ test("mark read views unread or failed sessions at their idle time; archive goes
   })
   await expect(f.run("session_mark_read", {})).rejects.toThrow("either sessionIDs or all")
   expect((await f.run("session_mark_read", { sessionIDs: [self, read.id] })).output).toMatchObject({
-    skipped: [{ sessionID: self, reason: expect.stringContaining("Mestra") }, { sessionID: read.id }],
+    skipped: [{ sessionID: self, reason: expect.stringContaining("calling session") }, { sessionID: read.id }],
   })
   expect((await f.run("session_archive", { sessionIDs: [failed.id, self] })).output).toMatchObject({
     archived: [{ sessionID: failed.id, title: failed.id }],
@@ -793,9 +865,11 @@ test("mark read views unread or failed sessions at their idle time; archive goes
 
 test("control rejects children, self and archived sessions before side effects, with the reason", async () => {
   const archived = session("ses_archived", { time: { created: 1, updated: 2, archived: 3 } })
-  const f = fixture({ rows: [master, root, child, archived] })
+  const earlier = session("ses_earlier_master", { agent: agentID })
+  const f = fixture({ rows: [master, earlier, root, child, archived] })
   for (const name of ["session_status", "session_send", "session_interrupt", "session_wait", "session_update"]) {
-    await expect(f.run(name, { sessionID: self, text: "x" })).rejects.toThrow("Mestra session")
+    await expect(f.run(name, { sessionID: self, text: "x" })).rejects.toThrow("calling session")
+    await expect(f.run(name, { sessionID: earlier.id, text: "x" })).rejects.toThrow("Mestra session")
     await expect(f.run(name, { sessionID: child.id, text: "x" })).rejects.toThrow("subagent")
     await expect(f.run(name, { sessionID: archived.id, text: "x" })).rejects.toThrow("archived")
   }

@@ -407,7 +407,7 @@ it.effect("delegations keep tool activity on screen and send only updates and re
       },
     ])
     // Routine tools update the screen, never the speech mailbox, even after its throttle expires.
-    yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_master", "call_1", "opencode.sessions_list"))
+    yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_master", "call_1", "mestra.sessions_list"))
     yield* PubSub.publish(server.bus, masterEvents.toolCalled("ses_master", "call_1", {}))
     yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_other", "call_x", "read"))
     yield* settled
