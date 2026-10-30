@@ -779,7 +779,6 @@ export type Project = {
 
 export type PermissionRequest = {
   id: PermissionID
-  created?: number
   sessionID: SessionID
   action: string
   resources: Array<string>
@@ -1740,7 +1739,6 @@ export type PermissionAsked = {
   location?: LocationRef
   data: {
     id: PermissionID
-    created?: number
     sessionID: SessionID
     action: string
     resources: Array<string>
@@ -2601,21 +2599,13 @@ export type SessionMessageAssistant = {
   retry?: SessionMessageAssistantRetry
 }
 
-export type FormInfo = {
-  id: FormID
-  sessionID: string
-  title: string
-  metadata?: FormMetadata
-  created?: number
-  fields: FormFields
-}
+export type FormInfo = { id: FormID; sessionID: string; title: string; metadata?: FormMetadata; fields: FormFields }
 
 export type FormDetail = {
   id: FormID
   sessionID: string
   title: string
   metadata?: FormMetadata
-  created?: number
   fields: FormFields
   state: FormState
 }
@@ -2643,14 +2633,7 @@ export type SessionMessageAssistantContentEncoded =
 
 export type GenerateDecisionsResponse = { data: GenerateDecisionResult }
 
-export type FormInfo1 = {
-  id: FormID
-  sessionID: string
-  title: string
-  metadata?: FormMetadata1
-  created?: number
-  fields: FormFields2
-}
+export type FormInfo1 = { id: FormID; sessionID: string; title: string; metadata?: FormMetadata1; fields: FormFields2 }
 
 export type SessionMessageInfo =
   | SessionMessageAgentSelected

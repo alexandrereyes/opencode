@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode/plugin/effect"
+import type { PendingSnapshot, Requests } from "../request-times.js"
 import { Form } from "@opencode/schema/form"
-import type { Permission } from "@opencode/schema/permission"
 import { Session } from "@opencode/schema/session"
 import { Clock, Effect } from "effect"
 import { clip, limits, projectName } from "../live-activity/tracker.js"
@@ -8,14 +8,14 @@ import { fail } from "./failure.js"
 import type { Watch } from "./rpc.js"
 
 export type RequestsContext = {
-  request: Pick<Plugin.Context["request"], "pending">
+  request: Pick<Requests, "pending">
   session: Pick<Plugin.Context["session"], "get"> & { form: Pick<Plugin.Context["session"]["form"], "reply"> }
   permission: Pick<Plugin.Context["permission"], "reply">
 }
 
 type Pending =
-  | { readonly kind: "question"; readonly form: Form.Info }
-  | { readonly kind: "permission"; readonly request: Permission.Request }
+  | { readonly kind: "question"; readonly form: PendingSnapshot["forms"][number] }
+  | { readonly kind: "permission"; readonly request: PendingSnapshot["permissions"][number] }
 
 const recommended = /\s*\((?:recommended|recomendad[ao])\)\s*$/i
 

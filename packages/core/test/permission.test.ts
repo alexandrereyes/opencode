@@ -328,7 +328,6 @@ describe("Permission", () => {
             action: "glob",
             resources: ["/project"],
             metadata: { root: "/project" },
-            created: expect.any(Number),
           },
         ],
       })

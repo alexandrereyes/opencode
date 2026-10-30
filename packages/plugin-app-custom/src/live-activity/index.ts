@@ -1,4 +1,4 @@
-import type { Context } from "../storage.js"
+import type { Context } from "../context.js"
 import { Cause, Clock, Deferred, Effect, Exit, Queue, Scope, Semaphore, Stream } from "effect"
 import os from "node:os"
 import { load, type Client } from "./apns.js"

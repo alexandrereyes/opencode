@@ -375,8 +375,8 @@ session runs or a client calls an RPC.
 directory joined with the session `subpath`. `host`: macOS `ComputerName` (`scutil`), else the host name. Pending
 questions are forms with `metadata.kind` `question` or `websearch.provider`; `text` is the first field's description
 (the question), else its title, else the form title. Permission `text` is `<action> · <resources joined by space>`.
-Requests owned by subagent children count for their top-level session. `since` is the request's `created`, or when
-it was first seen. Pending requests are reread on every `form.*`, `permission.*` and `session.execution.*` event.
+Requests owned by subagent children count for their top-level session. `since` is the request's `created`: the time
+of its `permission.asked` or `form.created` event, recorded by `src/request-times.ts`, or when the plugin first read it. Pending requests are reread on every `form.*`, `permission.*` and `session.execution.*` event.
 `progress` is computed for every working row.
 
 **Push decisions.** The push-to-start alert is `OpenCode` / `N sessões trabalhando` (plus pending counts). A

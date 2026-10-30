@@ -1,5 +1,7 @@
 import { Plugin } from "@opencode/plugin/effect"
 import { Effect } from "effect"
+import type { Context } from "./context.js"
+import { timed, trackRequestTimes } from "./request-times.js"
 import { atomic } from "./storage.js"
 import { registerAppMentions } from "./app-mentions/index.js"
 import { registerNativeApps } from "./native-apps/index.js"
@@ -31,7 +33,8 @@ export default Plugin.define({
   id: "custom.app-mentions",
   effect: (host) =>
     Effect.gen(function* () {
-      const ctx = { ...host, storage: atomic(host.storage) }
+      yield* trackRequestTimes(host.event)
+      const ctx: Context = { ...host, storage: atomic(host.storage), request: timed(host.request) }
       yield* registerAppMentions(ctx)
       yield* registerNativeApps(ctx)
       yield* registerDirectories(ctx)

@@ -1,4 +1,4 @@
-import type { Context } from "../storage.js"
+import type { Context } from "../context.js"
 import { optional } from "@opencode/schema/schema"
 import { Effect, Option, Schema } from "effect"
 import type { Client, Push, Result } from "./apns.js"

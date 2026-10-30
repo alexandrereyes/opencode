@@ -10613,6 +10613,7 @@
                             "session.model.selected",
                             "session.moved",
                             "session.renamed",
+                            "session.permissions.updated",
                             "session.metadata.updated",
                             "session.permissions",
                             "session.viewed",
@@ -10722,6 +10723,7 @@
                               "session.model.selected",
                               "session.moved",
                               "session.renamed",
+                              "session.permissions.updated",
                               "session.metadata.updated",
                               "session.permissions",
                               "session.viewed",
@@ -17240,9 +17242,6 @@
           "metadata": {
             "$ref": "#/components/schemas/Form.Metadata"
           },
-          "created": {
-            "type": "number"
-          },
           "fields": {
             "$ref": "#/components/schemas/Form.Fields"
           },
@@ -17364,9 +17363,6 @@
           },
           "metadata": {
             "$ref": "#/components/schemas/Form.Metadata"
-          },
-          "created": {
-            "type": "number"
           },
           "fields": {
             "$ref": "#/components/schemas/Form.Fields"
@@ -19833,9 +19829,6 @@
         "properties": {
           "id": {
             "$ref": "#/components/schemas/Permission.ID"
-          },
-          "created": {
-            "type": "number"
           },
           "sessionID": {
             "$ref": "#/components/schemas/Session.ID"

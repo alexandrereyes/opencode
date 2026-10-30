@@ -1,4 +1,4 @@
-import type { Context } from "../storage.js"
+import type { Context } from "../context.js"
 import { optional } from "@opencode/schema/schema"
 import { Clock, Effect, Option, Schema } from "effect"
 import { createHash, randomBytes } from "node:crypto"

@@ -1,4 +1,4 @@
-import type { Context } from "../storage.js"
+import type { Context } from "../context.js"
 import { Config, Effect, Schema } from "effect"
 import os from "node:os"
 import path from "node:path"

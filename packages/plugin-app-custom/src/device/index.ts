@@ -1,4 +1,4 @@
-import type { Context } from "../storage.js"
+import type { Context } from "../context.js"
 import type { AgentEditor } from "@opencode/plugin/effect/agent"
 import type { ToolEditor } from "@opencode/plugin/effect/tool"
 import { optional } from "@opencode/schema/schema"

@@ -1,4 +1,5 @@
 import type { Plugin } from "@opencode/plugin/effect"
+import type { Requests } from "../request-times.js"
 import { Session } from "@opencode/schema/session"
 import type { SessionScan } from "@opencode/schema/session-scan"
 import { DateTime, Effect } from "effect"
@@ -157,7 +158,7 @@ export type TrackerContext = {
     readonly master?: string
   }>
   message: Pick<Plugin.Context["message"], "list">
-  request: Pick<Plugin.Context["request"], "pending">
+  request: Pick<Requests, "pending">
 }
 
 type Entry = {

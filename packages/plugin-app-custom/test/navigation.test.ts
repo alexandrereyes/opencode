@@ -7,7 +7,7 @@ import { Project } from "@opencode/schema/project"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { list } from "../src/navigation"
 import { Navigation } from "../src/navigation/rpc"
-import type { PendingSnapshot } from "@opencode/plugin/effect/request"
+import type { PendingSnapshot } from "../src/request-times"
 
 const decodeSession = Schema.decodeUnknownSync(Session.Info)
 

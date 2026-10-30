@@ -30,7 +30,6 @@ test("finds pending grandchildren absent from pages, shares ancestry reads and p
     id: Form.ID.create(id),
     sessionID: owner,
     title: "Question",
-    created: 1,
     fields: [{ key: "answer", type: "string" }],
     metadata: { kind },
   })

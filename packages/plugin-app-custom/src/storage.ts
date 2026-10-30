@@ -10,8 +10,6 @@ export type Storage = Plugin.Context["storage"] & {
   ) => Effect.Effect<A>
 }
 
-export type Context = Omit<Plugin.Context, "storage"> & { readonly storage: Storage }
-
 declare global {
   var opencodeCustomStorageLock: Semaphore.Semaphore | undefined
 }

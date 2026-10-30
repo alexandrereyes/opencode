@@ -1,4 +1,4 @@
-import type { Context } from "../storage.js"
+import type { Context } from "../context.js"
 import type { RpcRegistration } from "@opencode/plugin/effect/rpc"
 import { Effect, Schema } from "effect"
 import { Snippets } from "./rpc.js"

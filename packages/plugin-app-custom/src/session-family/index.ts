@@ -1,4 +1,6 @@
 import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../context.js"
+import type { Requests } from "../request-times.js"
 import { Session } from "@opencode/schema/session"
 import { SessionFamily } from "@opencode/schema/session-family"
 import { Form } from "@opencode/schema/form"
@@ -14,7 +16,7 @@ const encodePermission = Schema.encodeSync(Permission.Request)
 type FamilyContext = {
   readonly family: Plugin.Context["session"]["family"]
   readonly get: Plugin.Context["session"]["get"]
-  readonly pending: Plugin.Context["request"]["pending"]
+  readonly pending: Requests["pending"]
 }
 
 export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyContext, sessionID: Session.ID) {
@@ -58,7 +60,7 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
   }
 })
 
-export const registerFamily = Effect.fn("Family.register")(function* (ctx: Plugin.Context) {
+export const registerFamily = Effect.fn("Family.register")(function* (ctx: Context) {
   yield* ctx.rpc
     .register(Family.Definition, {
       revert: (input, context) =>

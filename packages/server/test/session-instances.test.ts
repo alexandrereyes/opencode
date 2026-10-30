@@ -253,13 +253,7 @@ it.live(
               action: "instance-test",
               resources: [config.tool],
             }
-            const beforePermission = Date.now()
             expect(yield* permissions.ask(permission)).toEqual({ id: permission.id, effect: "ask" })
-            const admittedPermission = yield* permissions.get(permission.id)
-            if (!admittedPermission) return yield* Effect.die(new Error(`Permission was not admitted: ${permission.id}`))
-            expect(admittedPermission).toEqual({ ...permission, message: config.tool, created: expect.any(Number) })
-            expect(admittedPermission.created).toBeGreaterThanOrEqual(beforePermission)
-            expect(admittedPermission.created).toBeLessThanOrEqual(Date.now())
             const foreignID = config.id === first.id ? second.id : first.id
             const foreignForm = yield* forms.create({
               sessionID: foreignID,
@@ -274,7 +268,7 @@ it.live(
             return {
               session,
               form,
-              permission: admittedPermission,
+              permission: { ...permission, message: config.tool },
               foreignForm,
               foreignPermission,
             }

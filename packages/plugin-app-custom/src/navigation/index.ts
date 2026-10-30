@@ -1,4 +1,6 @@
 import { Plugin } from "@opencode/plugin/effect"
+import type { Context } from "../context.js"
+import type { Requests } from "../request-times.js"
 import { DateTime, Effect, Schema } from "effect"
 import { Navigation } from "./rpc.js"
 import { Session } from "@opencode/schema/session"
@@ -7,11 +9,11 @@ const encodeSession = Schema.encodeSync(Session.Info)
 
 interface NavigationContext {
   readonly scan: Plugin.Context["session"]["scan"]
-  readonly pending: Plugin.Context["request"]["pending"]
+  readonly pending: Requests["pending"]
   readonly background: Plugin.Context["job"]["background"]
 }
 
-export const registerNavigation = Effect.fn("Navigation.register")(function* (ctx: Plugin.Context) {
+export const registerNavigation = Effect.fn("Navigation.register")(function* (ctx: Context) {
   const sessions = ctx.session
   const requests = ctx.request
   const jobs = ctx.job

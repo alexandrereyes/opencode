@@ -97,19 +97,20 @@ export function session(sessionID: string, extra: Record<string, unknown> = {}) 
   })
 }
 
-export function question(id: string, sessionID: string, at: number, text: string): Form.Info {
-  return Schema.decodeUnknownSync(Form.Info)({
+/** Pending requests as the plugin reads them, with the time `request-times.ts` recorded. */
+export function question(id: string, sessionID: string, at: number, text: string) {
+  const form = Schema.decodeUnknownSync(Form.Info)({
     id,
     sessionID,
     title: "Questions",
-    created: at,
     metadata: { kind: "question", tool: { messageID: "msg_1", id: "call_q" } },
     fields: [{ key: "q0", type: "string", title: "Pergunta", description: text, options: [], custom: true }],
   })
+  return { ...form, created: at }
 }
 
 export function permission(id: string, sessionID: string, at: number, action: string, resources: string[]) {
-  return Schema.decodeUnknownSync(Permission.Request)({ id, sessionID, created: at, action, resources })
+  return { ...Schema.decodeUnknownSync(Permission.Request)({ id, sessionID, action, resources }), created: at }
 }
 
 /** An in-memory server: sessions, the running set, pending requests and latest user messages. */

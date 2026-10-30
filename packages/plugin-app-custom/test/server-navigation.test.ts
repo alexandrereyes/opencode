@@ -60,6 +60,7 @@ it.live("serves navigation through plugin RPC without reviving historical locati
       }),
     )
     yield* Effect.promise(() => client.session.remove({ sessionID: template.id }))
+    const asked = Date.now()
     const form = yield* Effect.promise(() =>
       client.session.form.create({
         sessionID: session.id,
@@ -79,7 +80,9 @@ it.live("serves navigation through plugin RPC without reviving historical locati
     )
     const rows = [...firstPage.data, ...secondPage.data]
     expect(new Set(rows.map((row) => row.session.id))).toEqual(new Set([session.id, historicalSession.id]))
-    expect(rows.find((row) => row.session.id === session.id)?.questionAt).toBe(form.created)
+    const questionAt = rows.find((row) => row.session.id === session.id)?.questionAt
+    expect(questionAt).toBeGreaterThanOrEqual(asked)
+    expect(questionAt).toBeLessThanOrEqual(Date.now())
     expect(typeof rows[0].session.time.created).toBe("number")
     expect(
       (yield* Effect.promise(() => client.debug.location.list())).some((ref) => ref.directory === historical),

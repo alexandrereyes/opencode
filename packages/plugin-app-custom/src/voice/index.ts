@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin/effect"
-import type { Context } from "../storage.js"
+import type { Context } from "../context.js"
 import { Model } from "@opencode/schema/model"
 import { Clock, Effect, Schema, Scope } from "effect"
 import { Preferences } from "../preferences/rpc.js"

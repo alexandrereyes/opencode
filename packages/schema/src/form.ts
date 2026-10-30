@@ -135,7 +135,6 @@ const InfoBase = {
 
 export const Info = Schema.Struct({
   ...InfoBase,
-  created: Schema.Finite.pipe(optional),
   fields: Fields,
 }).annotate({ identifier: "Form.Info" })
 export interface Info extends Schema.Schema.Type<typeof Info> {}

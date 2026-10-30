@@ -46,19 +46,14 @@ export function session(id: string, extra: Record<string, unknown> = {}) {
   })
 }
 
+/** Pending requests as the plugin reads them, with the time `request-times.ts` recorded. */
 export function question(id: string, sessionID: string, fields: unknown[], kind = "question") {
-  return Schema.decodeUnknownSync(Form.Info)({
-    id,
-    sessionID,
-    title: "Questions",
-    created: T - 120_000,
-    metadata: { kind },
-    fields,
-  })
+  const form = Schema.decodeUnknownSync(Form.Info)({ id, sessionID, title: "Questions", metadata: { kind }, fields })
+  return { ...form, created: T - 120_000 }
 }
 
 export function permission(id: string, sessionID: string, action: string, resources: string[]) {
-  return Schema.decodeUnknownSync(Permission.Request)({ id, sessionID, created: T - 60_000, action, resources })
+  return { ...Schema.decodeUnknownSync(Permission.Request)({ id, sessionID, action, resources }), created: T - 60_000 }
 }
 
 const envelope = (sessionID: string, type: string, version = 1) => ({
