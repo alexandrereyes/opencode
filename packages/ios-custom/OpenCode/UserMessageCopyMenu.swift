@@ -6,6 +6,7 @@ import SwiftUI
 struct UserMessageCopyMenu: UIViewRepresentable {
   @Environment(\.userMessageRevert) private var reversion
   @Environment(\.userMessagePending) private var pending
+  @Environment(\.userMessageSnippet) private var snippet
   let message: ConversationMessage
   let toast: ToastCenter
   func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -62,6 +63,7 @@ struct UserMessageCopyMenu: UIViewRepresentable {
       let toast = parent.toast
       let reversion = parent.reversion
       let pending = parent.pending
+      let snippet = parent.snippet
       return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
         let copy = UIAction(title: "Copiar", image: UIImage(systemName: "doc.on.doc")) { _ in
           UIPasteboard.general.string = message.copyText
@@ -75,16 +77,27 @@ struct UserMessageCopyMenu: UIViewRepresentable {
           toast.show("Citação copiada")
         }
         var actions: [UIMenuElement] = message.quotes.isEmpty ? [copy] : [copy, quote]
+        // Opens the snippet editor with a copy of the text; the message and the draft stay as they are.
+        let text = message.copyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let save = snippet.flatMap { snippet in
+          text.isEmpty ? nil : UIAction(title: "Salvar como snippet", image: UIImage(systemName: "number")) { _ in
+            snippet.save(text)
+          }
+        }
         if let pending {
           let attributes: UIMenuElement.Attributes = pending.busy ? [.disabled] : []
           actions.append(UIAction(title: "Mover para a fila", image: UIImage(systemName: "arrow.down.to.line"),
             attributes: attributes) { _ in pending.queue() })
+          if let save { actions.append(save) }
           actions.append(UIAction(title: "Excluir", image: UIImage(systemName: "trash"),
             attributes: attributes.union(.destructive)) { _ in pending.remove() })
-        } else if let reversion {
+          return UIMenu(children: actions)
+        }
+        if let reversion {
           actions.append(UIAction(title: "Redefinir para este ponto", image: UIImage(systemName: "arrow.uturn.backward"),
             attributes: reversion.pending ? [.disabled] : []) { _ in reversion.revert(message.id) })
         }
+        if let save { actions.append(save) }
         return UIMenu(children: actions)
       }
     }

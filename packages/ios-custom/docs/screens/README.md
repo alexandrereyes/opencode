@@ -73,7 +73,11 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Seleção · confirmação | ⋯ → Excluir (1); somente capturar e Cancelar, sem confirmar exclusão ou arquivamento | [PNG](sessions-select-delete-confirmation-dark.png) | — |
 | Aviso ligado | Raiz; projeto sintético com sininho, sem alterar preferências no servidor | [PNG](sessions-notify-enabled-dark.png) | — |
 | Deslizar · aviso | Deslizar a linha para a esquerda; ação Avisar ao terminar com sino (não acionada) | [PNG](sessions-swipe-notify-dark.png) | — |
-| Você / Ajustes | Avatar AR → folha Você, assinaturas e aparência | [PNG](you-settings-default-dark.png) | [PNG](you-settings-default-light.png) |
+| Você / Ajustes | Avatar AR → folha Você, assinaturas, aparência e Composer ▸ Snippets | [PNG](you-settings-default-dark.png) | [PNG](you-settings-default-light.png) |
+| Snippets · lista | Folha Você → Snippets; busca, chips Todos/Globais/projetos, grupos por escopo e o selo "substitui o global" | [PNG](you-snippets-list-dark.png) | [PNG](you-snippets-list-light.png) |
+| Snippets · editor | Snippets → snippet do projeto que substitui o global; Gatilho, Descrição, Conteúdo, Prévia, Atalhos, Escopo e Apagar | [PNG](you-snippets-editor-dark.png) | [PNG](you-snippets-editor-light.png) |
+| Snippets · erro com teclado | Snippets → + → gatilho "revisar código"; borda e mensagem de erro, Salvar desativado | [PNG](you-snippets-error-keyboard-dark.png) | [PNG](you-snippets-error-keyboard-light.png) |
+| Snippets · vazio | Folha Você → Snippets sem nenhum snippet; Novo snippet | [PNG](you-snippets-empty-dark.png) | [PNG](you-snippets-empty-light.png) |
 | Temas | Folha Você → Tema | [PNG](you-themes-default-dark.png) | [PNG](you-themes-default-light.png) |
 | Dados do iPhone | Folha Você → Dados do iPhone; fontes e permissões do simulador | [PNG](you-iphone-data-default-dark.png) | [PNG](you-iphone-data-default-light.png) |
 | LLM proxy | Folha Você → Codex; contas e cotas sintéticas | [PNG](you-subscriptions-default-dark.png) | [PNG](you-subscriptions-default-light.png) |
@@ -97,6 +101,8 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Modelos | Conversa → Modelo Exemplo | [PNG](conversation-model-picker-dark.png) | [PNG](conversation-model-picker-light.png) |
 | Agente | Conversa → build, abaixo do composer | [PNG](conversation-agent-picker-dark.png) | — |
 | MCPs | Conversa → pílula de MCPs, ao lado do modelo | [PNG](conversation-mcp-picker-dark.png) | — |
+| Menu da mensagem | Conversa → segurar a mensagem enviada; Copiar, Redefinir para este ponto e Salvar como snippet | [PNG](conversation-user-menu-dark.png) | [PNG](conversation-user-menu-light.png) |
+| Salvar como snippet | Menu da mensagem → Salvar como snippet; editor em folha com o texto, um nome e o projeto da conversa | [PNG](conversation-save-snippet-dark.png) | [PNG](conversation-save-snippet-light.png) |
 | Detalhes da sessão | Conversa → ⋯ → Detalhes da sessão (também acessível pelo contexto/cache); uso, projeto e diretório | [PNG](session-details-default-dark.png) | [PNG](session-details-default-light.png) |
 | Agentes e recursos | Conversa → pílula no cabeçalho → Agentes (3); ativo antes dos encerrados, iOS/Android e Chrome aninhado | [PNG](session-agents-resources-dark.png) | — |
 | Agentes encerrados | Agentes (3) → rolar; encerrados pela última execução, não pela criação | [PNG](session-agents-finished-dark.png) | — |

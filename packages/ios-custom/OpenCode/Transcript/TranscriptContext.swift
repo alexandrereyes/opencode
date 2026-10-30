@@ -69,6 +69,9 @@ struct TranscriptEnvironment: ViewModifier {
       .environment(\.openImage, context.openImage)
       .environment(\.userMessageRevert, context.revert)
       .environment(\.userPromptJump, context.promptJump)
+      .environment(\.userMessageSnippet, UserMessageSnippetAction { [store = context.store] text in
+        store.snippetEditor = SnippetEditorLaunch(content: text)
+      })
       .environment(\.locale, Locale(identifier: "pt_BR"))
   }
 }

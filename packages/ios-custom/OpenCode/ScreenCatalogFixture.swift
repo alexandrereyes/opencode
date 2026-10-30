@@ -76,6 +76,28 @@ import UIKit
     return try! JSONDecoder().decode([InboxItem].self, from: Data(#"[{"id":"msg_catalog_pending","sessionID":"ses_scroll_0000","type":"user","delivery":"steer","payload":{"text":"Depois, confira também a navegação por teclado."},"time":{"created":1792576799000}}]"#.utf8))
   }()
 
+  /// Você ▸ Snippets: globals, a project's (one replacing a global) and another project's; `-OpenCodeCatalogNoSnippets`
+  /// shows the first-snippet state.
+  static let snippets: [Snippet] = ProcessInfo.processInfo.arguments.contains("-OpenCodeCatalogNoSnippets") ? [] : [
+    Snippet(id: "snp-commit", name: "commit-push-pr", aliases: ["cpp"], description: "Commit, push e abre o PR",
+      content: "Faça o commit das mudanças, envie a branch e abra o pull request."),
+    Snippet(id: "snp-ptbr", name: "ptbr", description: "Responde sempre em português",
+      content: "Responda sempre em português do Brasil."),
+    Snippet(id: "snp-resumo", name: "resumo", description: "Resume o que foi feito na sessão",
+      content: "Resuma o que foi feito nesta sessão, em tópicos curtos."),
+    Snippet(id: "snp-revisar", name: "revisar", aliases: ["review", "cr"], description: "Revisa o diff e aponta riscos",
+      content: "Revise o diff atual e aponte bugs e riscos de regressão."),
+    Snippet(id: "snp-capturas", name: "capturas", description: "Captura as telas no simulador",
+      content: "Gere as capturas das telas no simulador, nos temas claro e escuro.", project: "project_scroll_0"),
+    Snippet(id: "snp-revisar-projeto", name: "revisar", description: "Revisão com as regras do projeto",
+      content: "Revise o diff atual seguindo o guia do projeto.\n- Aponte bugs e riscos de regressão.\n- Responda em tópicos curtos.",
+      project: "project_scroll_0"),
+    Snippet(id: "snp-atualizacoes", name: "atualizacoes", description: "Verifica as atualizações das dependências",
+      content: "Verifique se há atualizações das dependências e resuma as mudanças.", project: "project_scroll_0"),
+    Snippet(id: "snp-testes", name: "testes", description: "Gera e executa os testes relevantes",
+      content: "Escreva e rode os testes relevantes para a mudança.", project: "project_scroll_2"),
+  ]
+
   static func snapshot(_ source: ScrollFixtureSnapshot) -> ScrollFixtureSnapshot {
     let encoded = String(decoding: try! JSONEncoder().encode(Array(source.entries.prefix(11))), as: UTF8.self)
       .replacingOccurrences(of: "\\/", with: "/")
@@ -191,6 +213,7 @@ import UIKit
       "/api/fs/read/theme.css": "body{margin:0;padding:32px 24px;background:#12202b;color:#f3f4f0;font:17px -apple-system,sans-serif}h1{font-size:42px;line-height:1.1;margin:24px 0}p{line-height:1.6;color:#bdcdd4}.badge{font-size:11px;letter-spacing:2px;color:#7ee0bf}section{margin-top:32px;padding:24px;border:1px solid #38515e;border-radius:20px;background:#1b303c}h2{margin-top:0;font-size:23px}.metric{color:#7ee0bf;font-size:46px;font-weight:700}small{display:block;color:#bdcdd4;font-size:14px;font-weight:400}footer{margin-top:28px;font-size:12px;color:#8da5b2}",
       "/api/rpc/custom.chats/info": #"{"output":{"root":"/Chats"}}"#,
       "/api/rpc/custom.master/info": #"{"output":{"version":1,"agent":"build","model":{"id":"modelo-exemplo","providerID":"fixture"}}}"#,
+      "/api/rpc/custom.snippets/list": "{\"output\":{\"items\":\(encode(snippets))}}",
     ]
     return .screenCatalog(configuration: configuration, responses: responses)
   }

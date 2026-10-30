@@ -69,6 +69,8 @@ struct NewSessionView: View {
           }
           FloatingVoiceHost(sessions: store.sessions)
           ConversationComposer(store: store.composer, draft: store.draft)
+            .environment(\.snippetEditorContext, SnippetEditorContext(catalog: store.sessions.snippets,
+              projects: store.sessions.projects, project: store.composer.composerProjectID))
         }.padding(.horizontal, AppLayout.composerMargin).padding(.top, 8).padding(.bottom, 6)
       } else if !store.initialized {
         ProgressView("Carregando projetos…").frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -63,6 +63,7 @@ struct ComposerSuggestions: View {
   private struct Load: Equatable {
     let trigger: ComposerTrigger
     let apps: Int
+    let snippets: Int
   }
   /// The highlighted row: the movable selection where there is one, else the first item (Return's pick).
   private var highlighted: String? { highlight?.selected(for: trigger)?.id ?? items.first?.id }
@@ -129,9 +130,11 @@ struct ComposerSuggestions: View {
         RoundedRectangle(cornerRadius: 18).strokeBorder(theme.color(.border), lineWidth: 0.7)
       }
       .task(
-        id: Load(trigger: trigger, apps: trigger.character == "@" ? ComposerAppMentions.shared.revision : 0)
+        id: Load(
+          trigger: trigger, apps: trigger.character == "@" ? ComposerAppMentions.shared.revision : 0,
+          snippets: trigger.character == "#" ? store.snippets?.revision ?? 0 : 0)
       ) {
-        // An app listing that arrives while the panel is open merges without re-debouncing or
+        // An app listing or a snippet change that arrives while the panel is open merges without re-debouncing or
         // dropping the item Return would choose.
         let arrival = shown == trigger
         shown = trigger

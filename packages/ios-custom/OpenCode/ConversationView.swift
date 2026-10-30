@@ -152,6 +152,8 @@ struct ConversationView: View {
       revert: { id in
         revertCandidate = conversation.messages.first { $0.id == id && $0.type == "user" }
       }))
+    .environment(\.snippetEditorContext, SnippetEditorContext(
+      catalog: sessions.snippets, projects: sessions.projects, project: conversation.session?.projectID))
     .revertConfirmation($revertCandidate) { message in
       Task {
         await conversation.reversion.perform(target: message, store: conversation,

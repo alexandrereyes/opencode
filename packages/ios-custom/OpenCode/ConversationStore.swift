@@ -66,6 +66,8 @@ import UniformTypeIdentifiers
   /// A tool to reveal once the conversation is visible again, set from the agents screen.
   var toolRequest: String?
   var sideQuestion: SideQuestionLaunch?
+  /// "Novo snippet" in the `#` panel and "Salvar como snippet": the snippet editor in a sheet over the conversation.
+  var snippetEditor: SnippetEditorLaunch?
   var readingRequest: ConversationReadingRequest?
   var expansionValues: [String: Bool] = [:] {
     didSet { expansionMemory?.set(expansionValues, sessionID: id) }
@@ -1247,4 +1249,11 @@ import UniformTypeIdentifiers
     }
     return output.output
   }
+}
+
+/// What the snippet editor over a conversation starts with: the `#` query as the name, or a message's text.
+struct SnippetEditorLaunch: Identifiable {
+  let id = UUID()
+  var name = ""
+  var content = ""
 }

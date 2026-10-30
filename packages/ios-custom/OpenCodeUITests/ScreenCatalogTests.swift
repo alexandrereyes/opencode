@@ -236,6 +236,66 @@ import XCTest
     shot("you-iphone-data-default")
   }
 
+  /// Você ▸ Snippets: the list by scope, the editor of a project snippet that replaces a global one, and a name error
+  /// with the keyboard up.
+  func testSnippets() {
+    let app = launch()
+    defer { app.terminate() }
+    app.openYou()
+    let row = app.buttons["settings-snippets"]
+    XCTAssertTrue(row.waitForExistence(timeout: 10))
+    XCTAssertTrue(row.label.contains("8") || (row.value as? String) == "8")
+    row.tap()
+    XCTAssertTrue(app.buttons["snippet-row-commit-push-pr"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.descendants(matching: .any)["snippets-section-Projeto Exemplo 0"].exists)
+    shot("you-snippets-list")
+    // The project's #revisar sits below the globals.
+    let replacing = app.buttons.matching(NSPredicate(format: "label CONTAINS 'substitui o global'")).firstMatch
+    let list = app.collectionViews.element(boundBy: max(0, app.collectionViews.count - 1))
+    for _ in 0..<4 where !(replacing.exists && replacing.isHittable) { list.swipeUp(velocity: .slow) }
+    XCTAssertTrue(replacing.waitForExistence(timeout: 5))
+    replacing.tap()
+    XCTAssertTrue(app.navigationBars["Editar snippet"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.descendants(matching: .any)["snippet-name-available"].firstMatch.label.contains("substitui o global"))
+    shot("you-snippets-editor")
+    tap("snippet-cancel", app)
+    tap("snippets-new", app)
+    XCTAssertTrue(app.navigationBars["Novo snippet"].waitForExistence(timeout: 10))
+    let name = app.textFields["snippet-name"]
+    XCTAssertTrue(name.waitForExistence(timeout: 5))
+    name.tap()
+    name.typeText("revisar código")
+    XCTAssertTrue(app.descendants(matching: .any)["snippet-name-problem"].firstMatch.waitForExistence(timeout: 5))
+    XCTAssertFalse(app.buttons["snippet-save"].isEnabled)
+    shot("you-snippets-error-keyboard")
+  }
+
+  func testSnippetsEmpty() {
+    let app = launch(["-OpenCodeCatalogNoSnippets"])
+    defer { app.terminate() }
+    app.openYou()
+    tap("settings-snippets", app)
+    XCTAssertTrue(app.descendants(matching: .any)["snippets-empty"].firstMatch.waitForExistence(timeout: 10))
+    shot("you-snippets-empty")
+  }
+
+  /// Holding a sent message offers Salvar como snippet, which opens the editor over the conversation, filled.
+  func testSaveAsSnippet() {
+    let app = launch(["-OpenCodeCatalogShort"])
+    defer { app.terminate() }
+    tap("session-row-ses_scroll_0000", app)
+    let prompt = app.descendants(matching: .any)["user-prompt-msg_catalog_user"].firstMatch
+    XCTAssertTrue(prompt.waitForExistence(timeout: 10))
+    prompt.press(forDuration: 1)
+    let save = app.buttons["Salvar como snippet"]
+    XCTAssertTrue(save.waitForExistence(timeout: 5))
+    shot("conversation-user-menu")
+    save.tap()
+    XCTAssertTrue(app.navigationBars["Novo snippet"].waitForExistence(timeout: 10))
+    XCTAssertEqual(app.textViews["snippet-content"].value as? String, "Como podemos simplificar a navegação?")
+    shot("conversation-save-snippet")
+  }
+
   func testNewSession() {
     let app = launch()
     defer { app.terminate() }

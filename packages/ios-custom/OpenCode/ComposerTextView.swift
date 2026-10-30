@@ -16,6 +16,8 @@ struct ComposerTextView: UIViewRepresentable {
   var firstSuggestion: (() -> (() -> Void)?)? = nil
   /// Imports pasted or dropped images as draft attachments; without it they are ignored.
   var importImages: (([NSItemProvider]) -> Void)? = nil
+  /// Adds "Salvar como snippet" to the selection's edit menu, with the selected text (snippets expanded).
+  var saveSnippet: ((String) -> Void)? = nil
   func makeCoordinator() -> Coordinator { Coordinator(self) }
   func makeUIView(context: Context) -> ComposerInputView {
     let view = ComposerInputView(frame: .zero, textContainer: nil)
@@ -157,6 +159,19 @@ struct ComposerTextView: UIViewRepresentable {
       guard view.deferredUpdate, view.markedTextRange == nil else { return }
       view.deferredUpdate = false
       parent.draft.refreshEditor()
+    }
+    func textView(
+      _ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+      guard let save = parent.saveSnippet, range.length > 0 else { return nil }
+      let selected = ComposerDocument(editor: textView.textStorage.attributedSubstring(from: range)).expanded.text
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !selected.isEmpty else { return nil }
+      // The draft keeps its text: the editor opens in a sheet with a copy of the selection.
+      let action = UIAction(title: "Salvar como snippet", image: UIImage(systemName: "number")) { _ in save(selected) }
+      // Right after the standard edit actions, like the responses' Comentar, so it shows without paging the menu.
+      return UIMenu(children: Array(suggestedActions.prefix(1)) + [UIMenu(options: .displayInline, children: [action])]
+        + suggestedActions.dropFirst())
     }
     func textView(
       _ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String

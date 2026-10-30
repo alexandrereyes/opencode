@@ -2132,6 +2132,50 @@ cases plus light-mode server/child repeats pass. Existing regressions also pass:
 continuity cases (one additional unread case correctly skips after viewed acknowledgement), four session/reading
 cases and six subagent/alert cases. The sandbox seed's permission and question remain pending; no seed reset was run.
 
+### Snippets (Você ▸ Composer) — 30 October
+
+Alexandre approved option A (mocks in `.agent-artifacts/snippets-cadastro/ios/` of the main checkout:
+`ios-opcao-a.png`, `ios-estados.png`, `ios-prancha.png`). The catalog, rules and wire contract are shared with the Mac
+in OpenCodeKit (`Snippets.swift`: `Snippet`, `SnippetRules`, `SnippetCatalog`, `SnippetLibrary`) and documented in
+[`plugin-app-custom/docs/snippets.md`](../plugin-app-custom/docs/snippets.md); the iPhone screens are in
+`OpenCode/Snippets/`.
+
+- **Entry:** Você ▸ **Composer** ▸ **Snippets** with the catalog's count (`settings-snippets`). `SessionStore.snippets`
+  is one `SnippetCatalog` per server, shared with every composer's `#`; it reloads on `rpc.custom.snippets.updated`
+  and after a reconnection once loaded.
+- **List:** search (name, aliases and description, folded), chips **Todos**, **Globais** and one per project that has
+  snippets (with the project's avatar), sections Globais → projects by name → **Projeto removido**. Rows show `#name`
+  in the snippet token color, the description, the aliases and the **substitui o global** badge
+  (`SnippetRules.overridden`). Tap edits; swipe (and the long press) offers **Duplicar**, which opens the copy
+  (`revisar-copia`, aliases dropped) in the editor so saving confirms it, and **Apagar**, always confirmed. While
+  filtering, a footer counts `N de M snippets`. An empty catalog shows **Nenhum snippet ainda** with **Novo snippet**.
+- **Editor** (full screen from the list, a sheet over a conversation): Cancelar and Salvar; **Gatilho** with the `#`
+  and the live result of `SnippetRules.issues` (format, name or alias taken in the scope: red border and message, or
+  `Disponível em opencode2 · substitui o global`); Descrição; Conteúdo (multi-line, plain text) with a token preview;
+  Atalhos as removable chips with a validated **+**; **Escopo** (Global or a project, `SnippetScopePicker`); and
+  **Apagar snippet** when editing. Salvar is enabled only without issues and, when editing, with a change; a refusal
+  from the server (`SnippetSaveError`) shows under its field. A swipe down never discards typed work.
+- **Shortcuts:** the `#` panel's shared footer (`ComposerSnippetActions`): **Novo snippet…** (the query becomes the
+  name) and **Gerenciar snippets…** (Você ▸ Snippets in a sheet over the conversation, on its project's chip, like
+  the Mac's); and **Salvar como snippet** in a sent message's long-press menu (`UserMessageSnippetAction`, after
+  Redefinir para este ponto) and in the composer selection's edit menu, right after Cortar and Copiar (in Nova sessão
+  too). They open the editor in a sheet over the conversation (`ConversationStore.snippetEditor`, presented by
+  `ComposerEditor` like the side question), already in the conversation's project (`SnippetEditorContext`; chats,
+  project `global`, and unknown projects start global), with the text and a name from its first words
+  (`SnippetLibrary.draft`). The composer's text stays as it was; from the composer, it regains focus after the sheet,
+  where `#` already lists the new snippet.
+- **Live `#`:** `ComposerSuggestions` reloads an open `#` panel when `SnippetCatalog.revision` changes, so a snippet
+  saved here, in Você or by another client shows without reopening the conversation.
+- **Later:** ordering by use, variables and mentions inside the content.
+
+Verification: `swift test` (`SnippetsTests`); `ScreenCatalogTests/testSnippets`, `testSnippetsEmpty` and
+`testSaveAsSnippet` (offline, both themes; `-OpenCodeCatalogNoSnippets` for the empty state); and, against an owned
+sandbox with the fake APNs, `script/test-snippets.py` (each phase on a simulator created for it and deleted afterwards;
+the catalog must start empty and ends empty; the server's catalog is checked after each phase):
+`SnippetsUITests/testLibraryCreateEditDuplicateDelete` and `testConversationShortcutsAndLiveHash`. On 30 October both
+passed in both themes (about five minutes per theme) on iPhone 17 Pro / iOS 27.0 simulators, against a sandbox on
+port 4195 started with `OPENCODE_APNS_ORIGIN` pointing at `script/fake-apns.ts` and no `OPENCODE_RESOURCES_HUB_PORT`.
+
 ## Troca rápida de sessão
 
 In a root conversation, the header's avatar and title (with a small `⌄`) open **Sessões**, a native large sheet

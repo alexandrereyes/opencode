@@ -20,6 +20,7 @@ struct ComposerEditor: View {
   @Environment(\.dynamicTypeSize) private var typeSize
   @Environment(\.voiceController) private var voice
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.snippetEditorContext) private var snippets
   @Bindable var store: ConversationStore
   @Bindable var draft: ConversationDraft
   let expanded: Bool
@@ -32,6 +33,8 @@ struct ComposerEditor: View {
   @State private var editorID = UUID()
   @State private var longText = false
   @State private var suggestionReturn = ComposerSuggestionReturn()
+  @State private var snippetRefocus = false
+  @State private var managingSnippets = false
   private var showExpand: Bool { comment == nil && !expanded && (longText || !draft.attachments.isEmpty) }
   private var hasContent: Bool {
     draft.hasText
@@ -41,6 +44,15 @@ struct ComposerEditor: View {
     guard comment == nil else { return hasContent && !draft.importing && !draft.recording.visible }
     return hasContent && !draft.sending && !draft.importing && !draft.recording.visible && store.ready
       && store.selectedModel(draft) != nil
+  }
+  /// Only the message composer of a conversation that knows its catalog opens the snippet editor.
+  private var canEditSnippets: Bool { comment == nil && snippets != nil }
+  /// From the composer (the `#` panel, a selection), it returns to the composer as it was, where `#` now lists the
+  /// new snippet.
+  private func openSnippetEditor(_ launch: SnippetEditorLaunch) {
+    snippetRefocus = true
+    draft.focused = false
+    store.snippetEditor = launch
   }
   private func submit() {
     guard canSubmit else { return }
@@ -77,7 +89,18 @@ struct ComposerEditor: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
       if let trigger = draft.trigger, comment == nil || trigger.character != "/" {
-        ComposerSuggestions(store: store, trigger: trigger, ready: suggestionReturn) { choose($0, replacing: trigger) }
+        ComposerSuggestions(
+          store: store, trigger: trigger, ready: suggestionReturn,
+          snippetActions: canEditSnippets
+            ? ComposerSnippetActions(
+              new: { openSnippetEditor(.init(name: SnippetRules.isHandle(trigger.query) ? trigger.query : "")) },
+              manage: {
+                snippetRefocus = true
+                draft.focused = false
+                managingSnippets = true
+              })
+            : nil
+        ) { choose($0, replacing: trigger) }
       }
       if draft.replacing != nil {
         HStack {
@@ -117,7 +140,8 @@ struct ComposerEditor: View {
           submit: submit, canSubmit: canSubmit, firstSuggestion: firstSuggestion,
           importImages: { providers in
             Task { await store.importImages(providers, draft: draft, reservedBytes: comment?.reservedBytes ?? 0) }
-          }
+          },
+          saveSnippet: canEditSnippets ? { openSnippetEditor(.init(content: $0)) } : nil
         )
         .overlay(alignment: .topLeading) {
           if draft.isEmpty {
@@ -173,6 +197,34 @@ struct ComposerEditor: View {
     // The message composer below the comment sheet presents the side question.
     .sheet(item: comment == nil ? $store.sideQuestion : .constant(nil)) { launch in
       SideQuestionSheet(store: store, launch: launch).sessionAlertOverlay()
+    }
+    // "Novo snippet" and "Salvar como snippet" leave the draft as it is; the new snippet reaches `#` through the
+    // catalog's reload.
+    .sheet(item: canEditSnippets ? $store.snippetEditor : .constant(nil), onDismiss: {
+      if snippetRefocus { draft.focused = true }
+      snippetRefocus = false
+    }) { launch in
+      if let snippets {
+        SnippetEditorView(catalog: snippets.catalog, projects: snippets.projects, route: snippets.route(launch))
+          .sessionAlertOverlay()
+      }
+    }
+    // Gerenciar snippets: Você ▸ Snippets over the conversation.
+    .sheet(isPresented: canEditSnippets ? $managingSnippets : .constant(false), onDismiss: {
+      if snippetRefocus { draft.focused = true }
+      snippetRefocus = false
+    }) {
+      if let snippets {
+        NavigationStack {
+          SnippetListView(catalog: snippets.catalog, projects: snippets.projects, project: snippets.project)
+            .toolbar {
+              ToolbarItem(placement: .cancellationAction) {
+                Button("Fechar", systemImage: "xmark") { managingSnippets = false }
+                  .accessibilityIdentifier("snippets-close")
+              }
+            }
+        }.tint(theme.color(.primary)).sessionAlertOverlay()
+      }
     }
     .photosPicker(
       isPresented: $photos, selection: $selectedPhotos, maxSelectionCount: 10, matching: .images
