@@ -244,8 +244,9 @@ import XCTest
       if text.isEmpty {
         XCTAssertTrue(app.staticTexts["Documento vazio"].waitForExistence(timeout: 20), name)
       } else {
-        // The 300 KB README highlights dozens of code blocks; a loaded Simulator can take over 20 s.
-        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS %@", text)).firstMatch.waitForExistence(timeout: 60), name)
+        // The 480 KB README highlights dozens of code blocks; parsing it alone took 100–190 s in a Debug build on a
+        // Mac busy with other simulators (30/10).
+        XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS %@", text)).firstMatch.waitForExistence(timeout: name == "b-readme.md" ? 240 : 60), name)
       }
       if label == "README" {
         // A long document scrolls to its end while only nearby slices are mounted.
@@ -323,7 +324,7 @@ import XCTest
     XCTAssertTrue(next.waitForExistence(timeout: 15))
     drag(app, dx: -220)
     title(app, "b-readme.md")
-    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'OpenCode iOS (custom)'")).firstMatch.waitForExistence(timeout: 60))
+    XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'OpenCode iOS (custom)'")).firstMatch.waitForExistence(timeout: 240))
     drag(app, dx: -220)
     title(app, "c-recursos.md")
     XCTAssertTrue(app.textViews.matching(NSPredicate(format: "value CONTAINS 'Recursos do visualizador'")).firstMatch.waitForExistence(timeout: 20))
@@ -710,6 +711,86 @@ import XCTest
     XCTAssertFalse(next.exists || previous.exists, "a single file")
     screenshot("hints-single-file")
     app.terminate()
+  }
+
+  /// Arquivos beside Fechar (approved mock "opção A"): the place above the file, the drawer with the linked file
+  /// marked in its folder, opening another file, Recentes, the filter, Alterados and the session-wide search.
+  func testFilesDrawer() throws {
+    let app = try launch("LINKS")
+    open("Abrir doc FORMATACAO", app: app)
+    title(app, "a-formatacao.md")
+    let position = app.staticTexts["file-position"]
+    XCTAssertTrue(position.waitForExistence(timeout: 20))
+    XCTAssertTrue(app.staticTexts["file-path-line"].label.contains("fixtures, docs"), app.staticTexts["file-path-line"].label)
+    // A link lands with its folder open and the file marked.
+    app.buttons["file-drawer"].tap()
+    // The drawer is open while its own close button is on screen.
+    let panel = app.buttons["file-drawer-close"]
+    XCTAssertTrue(panel.waitForExistence(timeout: 10))
+    let marked = app.buttons["file-drawer-row-a-formatacao.md"]
+    XCTAssertTrue(marked.waitForExistence(timeout: 20))
+    XCTAssertTrue(marked.isSelected)
+    XCTAssertTrue(app.buttons["file-drawer-row-docs"].label.hasSuffix("aberta"))
+    screenshot("drawer-link")
+    // Another file opens in the viewer, closes the drawer and counts in its folder.
+    app.buttons["file-drawer-row-j-video.mp4"].tap()
+    title(app, "j-video.mp4")
+    XCTAssertTrue(panel.waitForNonExistence(timeout: 5))
+    XCTAssertTrue(position.waitForExistence(timeout: 20))
+    expectLabel(position, "10 de 13")
+    drag(app, dx: -220)
+    title(app, "k-audio.wav")
+    expectLabel(position, "11 de 13")
+    // Recentes, newest first.
+    app.buttons["file-drawer"].tap()
+    let latest = app.buttons["file-drawer-recent-k-audio.wav"]
+    XCTAssertTrue(latest.waitForExistence(timeout: 10))
+    XCTAssertTrue(latest.isSelected)
+    let earlier = app.buttons["file-drawer-recent-a-formatacao.md"]
+    XCTAssertTrue(earlier.exists)
+    XCTAssertLessThan(latest.frame.minY, app.buttons["file-drawer-recent-j-video.mp4"].frame.minY)
+    XCTAssertLessThan(app.buttons["file-drawer-recent-j-video.mp4"].frame.minY, earlier.frame.minY)
+    screenshot("drawer-open")
+    // The filter keeps matching names and the folders leading to them.
+    let field = app.textFields["file-drawer-filter"]
+    field.tap()
+    field.typeText("formata")
+    XCTAssertTrue(app.buttons["file-drawer-row-a-formatacao.md"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.buttons["file-drawer-row-a-imagem.png"].exists)
+    app.buttons["Limpar"].firstMatch.tap()
+    // Alterados: the fixture's checkout changed f-notas.md only.
+    app.segmentedControls["file-drawer-changed"].buttons["Alterados"].tap()
+    let changed = app.buttons["file-drawer-row-f-notas.md"]
+    XCTAssertTrue(changed.waitForExistence(timeout: 20))
+    XCTAssertFalse(app.buttons["file-drawer-row-a-imagem.png"].exists)
+    screenshot("drawer-changed")
+    app.segmentedControls["file-drawer-changed"].buttons["Todos"].tap()
+    XCTAssertTrue(app.buttons["file-drawer-row-k-audio.wav"].waitForExistence(timeout: 10))
+    // The whole session, through the server's search.
+    app.buttons["file-drawer-search"].tap()
+    field.typeText("interna")
+    let result = app.buttons["file-drawer-result-interna.txt"]
+    XCTAssertTrue(result.waitForExistence(timeout: 20))
+    result.tap()
+    title(app, "interna.txt")
+    XCTAssertTrue(panel.waitForNonExistence(timeout: 5))
+    // Fechar Arquivos and a tap outside close it without changing the file.
+    app.buttons["file-drawer"].tap()
+    XCTAssertTrue(panel.waitForExistence(timeout: 10))
+    app.buttons["file-drawer-close"].tap()
+    XCTAssertTrue(panel.waitForNonExistence(timeout: 5))
+    app.buttons["file-drawer"].tap()
+    XCTAssertTrue(panel.waitForExistence(timeout: 10))
+    app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+    XCTAssertTrue(panel.waitForNonExistence(timeout: 5))
+    XCTAssertTrue(app.navigationBars["interna.txt"].exists)
+    screenshot("drawer-file")
+    app.terminate()
+  }
+
+  private func expectLabel(_ element: XCUIElement, _ label: String) {
+    let condition = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", label), object: element)
+    XCTAssertEqual(XCTWaiter.wait(for: [condition], timeout: 15), .completed, "\(element.label) ≠ \(label)")
   }
 
   func testFileKinds() throws {

@@ -103,7 +103,8 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Scripts · em execução | Agentes e tarefas → Scripts (1); comando sintético e ação Parar | [PNG](session-agents-scripts-dark.png) | — |
 | Scripts · vazio | Agentes e tarefas → Scripts (0); “Nenhum script em segundo plano.” | [PNG](session-agents-scripts-empty-dark.png) | — |
 | Explorador de arquivos | Detalhes → Diretório de trabalho | [PNG](files-explorer-default-dark.png) | — |
-| Arquivo Markdown | Explorador → README.md; player e chevron inferior para o próximo arquivo | [PNG](files-markdown-default-dark.png) | — |
+| Arquivo Markdown | Explorador → README.md; Fechar e Arquivos, pasta e "1 de 3" acima do texto, player e chevron inferior para o próximo arquivo | [PNG](files-markdown-default-dark.png) | — |
+| Gaveta Arquivos | No visualizador, o botão ao lado de Fechar: filtro, Todos/Alterados, Recentes, a pasta com o arquivo aberto marcado e Buscar em toda a sessão | [PNG](files-drawer-default-dark.png) | — |
 | Arquivo de imagem | Explorador → preview.png; imagem sintética e chevron inferior para o anterior | [PNG](files-image-default-dark.png) | — |
 | Prévia HTML offline | Explorador → index.html; página/CSS locais e chevrons inferiores dos dois vizinhos | [PNG](files-html-preview-dark.png) | — |
 | Sessão mestra | Faixa Sessão mestra; estado antes da primeira mensagem | [PNG](master-session-empty-dark.png) | — |

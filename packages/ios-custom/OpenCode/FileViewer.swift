@@ -308,6 +308,9 @@ struct FileViewer: View {
   /// The HTML preview starts on local files for every opened file; the internet is allowed per file.
   @State private var htmlInternet = false
   @State private var linkOwner = UUID()
+  /// Arquivos, the drawer beside Fechar; created with the first file so Recentes record every file shown.
+  @State private var drawer: FileDrawerStore?
+  @State private var drawerOpen = false
   init(source: String, context: ConversationImageContext, name: String? = nil, exact: Bool = false) {
     _store = State(initialValue: FileViewerStore(source: source, context: context, name: name, exact: exact))
   }
@@ -342,6 +345,11 @@ struct FileViewer: View {
     copied = false
     htmlInternet = false
     store.start()
+  }
+  /// A server file (not a feed's data or remote image) has a folder, siblings and Arquivos.
+  private var local: Bool {
+    guard store.path != nil, case .local = FeedImageReference(store.source) else { return false }
+    return true
   }
   var body: some View {
     NavigationStack {
@@ -400,14 +408,26 @@ struct FileViewer: View {
       }
       .accessibilityAction(named: "Arquivo anterior") { page(-1) }
       .accessibilityAction(named: "Próximo arquivo") { page(1) }
+      .safeAreaInset(edge: .top, spacing: 0) { if local, let path = store.path { place(path) } }
       .background(theme.color(.background)).foregroundStyle(theme.color(.text))
       .navigationTitle(store.name).navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItemGroup(placement: .topBarLeading) {
-          Button("Fechar") { dismiss() }
+          // An icon (approved mock): with Arquivos beside it, a text button left no room for the title.
+          Button("Fechar", systemImage: "xmark") { dismiss() }
+          if local {
+            Button("Arquivos", systemImage: "sidebar.left") { openDrawer() }
+              .accessibilityIdentifier("file-drawer")
+          }
           if !history.isEmpty {
             Button("Voltar", systemImage: "chevron.backward", action: back).accessibilityIdentifier("file-back")
           }
+        }
+        // Explicit, so the name keeps its place between two groups of buttons (the bar dropped the plain title once
+        // Arquivos joined Fechar).
+        ToolbarItem(placement: .principal) {
+          Text(store.name).font(.headline).lineLimit(1).truncationMode(.middle)
+            .accessibilityAddTraits(.isHeader)
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
           if store.markdown && store.text != nil || store.kind == .html && store.file != nil {
@@ -429,8 +449,34 @@ struct FileViewer: View {
       }
     }
     .tint(theme.color(.primary))
+    .overlay(alignment: .leading) {
+      if drawerOpen, let drawer {
+        ZStack(alignment: .leading) {
+          Color.black.opacity(0.4).ignoresSafeArea()
+            .onTapGesture { closeDrawer() }
+            .accessibilityHidden(true)
+          GeometryReader { geometry in
+            FileDrawer(drawer: drawer, current: store.path, open: { path in
+              closeDrawer()
+              if path != store.path { show(path) }
+            }, close: closeDrawer)
+            .frame(width: min(340, geometry.size.width - 48))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("file-drawer-panel")
+            .accessibilityAddTraits(.isModal)
+          }
+        }
+        .transition(.move(edge: .leading))
+      }
+    }
     .sheet(isPresented: $sharing) { if let file = store.file { FileShareSheet(file: file) } }
     .task { store.begin() }
+    .task(id: store.path) {
+      guard local, let path = store.path else { return }
+      if drawer == nil { drawer = FileDrawerStore(context: store.context) }
+      drawer?.record(path)
+      if drawerOpen { await drawer?.reveal(path) }
+    }
     .task(id: store.path) {
       // The opened file's directory defines the sequence; paging keeps it.
       guard siblings == nil, let path = store.path, case .local = FeedImageReference(store.source) else { return }
@@ -439,6 +485,38 @@ struct FileViewer: View {
       siblings = listed
     }
     .onDisappear { store.suspend() }
+  }
+  private func openDrawer() {
+    guard let drawer else { return }
+    withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .snappy(duration: 0.25)) { drawerOpen = true }
+    Task {
+      await drawer.reveal(store.path)
+      await drawer.loadChanges()
+    }
+  }
+  private func closeDrawer() {
+    withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .snappy(duration: 0.2)) { drawerOpen = false }
+  }
+  /// The file's folder from the session (`fixtures › docs`) and its place among the files the swipe pages through.
+  private func place(_ path: String) -> some View {
+    let root = store.context.directory
+    let folder = FileExplorer.parent(path) ?? "/"
+    let crumbs = folder == root || folder.hasPrefix(root + "/")
+      ? [URL(fileURLWithPath: root).lastPathComponent] + folder.dropFirst(root.count).split(separator: "/").map(String.init)
+      : [folder]
+    return HStack(spacing: 8) {
+      Text(crumbs.joined(separator: " › ")).lineLimit(1).truncationMode(.middle)
+        .accessibilityLabel("Pasta " + crumbs.joined(separator: ", "))
+        .accessibilityIdentifier("file-path-line")
+      Spacer(minLength: 8)
+      if let position, let count = siblings?.count {
+        Text("\(position + 1) de \(count)").monospacedDigit().fixedSize()
+          .accessibilityIdentifier("file-position")
+      }
+    }
+    .font(.caption.monospaced()).foregroundStyle(theme.color(.textSecondary))
+    .padding(.horizontal, 16).padding(.vertical, 6)
+    .background(theme.color(.background))
   }
   /// A small translucent chevron, never a touch target: touches reach the image, page or player beneath it.
   private func pageHint(_ step: Int, symbol: String, label: String, identifier: String) -> some View {

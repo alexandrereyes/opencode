@@ -1379,6 +1379,22 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
   call the action through the transcript context at tap time. `testLinksKeepOpeningAfterLeavingAndReturning`
   covers file, folder and image links after a round trip through Sessões, another session and Você.
 
+#### Arquivos drawer — 30 October
+
+- Approved mock "opção A": the button beside Fechar (`file-drawer`, server files only) slides Arquivos in from the
+  left over the viewer: the session folder's name, "Filtrar arquivos", `Todos | Alterados`, Recentes (four
+  shown), the tree with the open file marked in the primary color and "Buscar em toda a sessão" (`/api/fs/find`).
+  A file opens in the viewer and closes the drawer; the dimmed side and Fechar Arquivos close it too. It uses the
+  Mac's concepts and code: `FileTree` (filter, Alterados from the working-copy changes, the linked file's folders
+  opened) and `FileRecents` (the last 8 files under the session folder on this server, kept across launches and
+  shared by sessions in the same checkout; each device keeps its own).
+- Above the file: its folder from the session (`fixtures › docs`) and its place among the files the swipe pages
+  through (`N de M`, `FileSiblings`). Fechar, `</>`, copy, share, the swipe and its corner hints, Voltar for links,
+  the player and the tables' sideways scroll are unchanged; the iPhone stays in portrait.
+- `FileViewerNavigationTests.testFilesDrawer` covers a link opening with its folder open and the file marked,
+  opening another file, `N de M` while paging, Recentes' order, the filter, Alterados (the fixture's checkout
+  changes `f-notas.md` after its commit) and the session-wide search. The catalog adds `files-drawer-default`.
+
 #### Viewer arrows and video audio — 29 October
 
 - Paging is the horizontal swipe. A 20-pt translucent chevron in a lower corner (`FileSiblings.arrows`) only hints

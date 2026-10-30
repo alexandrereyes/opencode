@@ -407,6 +407,14 @@ fetch("../fora.png").then((r) => { document.getElementById("fora").textContent =
         "LINK_HTML_E": "[Abrir HTML_E](html/e-pagina.htm)", "LINK_LOCAL_INDEX": "[Abrir LOCAL_INDEX](html-local/index.html)",
         "LINK_LOCAL_VAZAMENTO": "[Abrir LOCAL_VAZAMENTO](html-local/vazamento.html)",
         "LINK_LIVE": "[Abrir LIVE](" + str(live / "index.html") + ")"})
+    # The session folder as a checkout with one changed file, for Alterados in the viewer's Arquivos drawer. Its
+    # own repository: one around the whole fixture would make Detalhes da sessão open the repository's top.
+    git = ["git", "-C", str(folder), "-c", "user.name=Visualizador", "-c", "user.email=visualizador@example.com", "-c", "commit.gpgsign=false"]
+    subprocess.run(git + ["init", "-q"], check=True)
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "fixture"], check=True)
+    with (folder / "f-notas.md").open("a", encoding="utf8") as notes:
+        notes.write("- Linha alterada depois do commit\n")
     messages = {**single, "LINKS": text, "DOCS": docs_text, "FEED": "Imagem incorporada:\n\n![Quadro](a-imagem.png)", "DATA": "Imagem embutida:\n\n![Embutida](" + data_uri + ")"}
     now = int(time.time() * 1000)
     for role, body in messages.items():
