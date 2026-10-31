@@ -227,7 +227,7 @@ it.effect("a call reserves the lease, creates the call with memory and attaches 
   Effect.gen(function* () {
     const { proxy, sidebands, server, json } = yield* setup()
     const created = yield* json("POST", "/voice/calls", { sdp: offerSDP, voiceID: "viola" })
-    expect(created).toMatchObject({ sdp: expect.stringContaining("a=ice-lite"), leaseSeconds: 15 })
+    expect(created).toMatchObject({ sdp: expect.stringContaining("a=ice-lite"), leaseSeconds: 30 })
     expect(
       proxy.log.map((entry) => `${entry.method} ${entry.path.split("?")[0]?.replace(/[0-9a-f-]{36}/, "<id>")}`),
     ).toEqual(["POST /_gpt-live/sessions/<id>", "POST /backend-api/codex/realtime/calls"])
@@ -281,7 +281,7 @@ it.effect("a call reserves the lease, creates the call with memory and attaches 
   }).pipe(Effect.map(() => undefined)),
 )
 
-it.effect("the lease is renewed only while heartbeats arrive; 15 s without one ends the call", () =>
+it.effect("the lease is renewed only while heartbeats arrive; 30 s without one ends the call", () =>
   Effect.gen(function* () {
     const { proxy, sidebands, server, json } = yield* setup()
     const created = yield* json("POST", "/voice/calls", { sdp: offerSDP })
@@ -294,12 +294,19 @@ it.effect("the lease is renewed only while heartbeats arrive; 15 s without one e
       })
     }
     expect(renewals()).toBe(6)
-    // The watch goes silent: one more renewal inside the window, then the call ends.
-    for (let tick = 0; tick < 4; tick++) {
+    // Two heartbeats lost in a blip keep the call.
+    for (let tick = 0; tick < 3; tick++) {
       yield* TestClock.adjust(voiceLimits.renewMs)
       yield* settled
     }
-    expect(renewals()).toBe(8)
+    expect(renewals()).toBe(9)
+    expect((yield* json("GET", `/voice/calls/${created.callID}/events?after=0`)).ended).toBe(false)
+    // The watch stays silent: renewals inside the window, then the call ends.
+    for (let tick = 3; tick < voiceLimits.livenessMs / voiceLimits.renewMs; tick++) {
+      yield* TestClock.adjust(voiceLimits.renewMs)
+      yield* settled
+    }
+    expect(renewals()).toBe(6 + voiceLimits.livenessMs / voiceLimits.renewMs - 1)
     expect(sidebands.opened[0]?.sent).toContain(JSON.stringify({ type: "session.close" }))
     expect(proxy.log.at(-1)).toMatchObject({ method: "DELETE" })
     expect(proxy.log.at(-1)?.path).toContain("?generation=")
@@ -307,6 +314,29 @@ it.effect("the lease is renewed only while heartbeats arrive; 15 s without one e
     expect(page.ended).toBe(true)
     expect(page.events.at(-1)).toMatchObject({ type: "status", status: "ended", reason: "heartbeat_timeout" })
     expect(server.memory.ended).toBe(1)
+  }).pipe(Effect.map(() => undefined)),
+)
+
+it.effect("a 5xx renewal is retried and an upstream error is reported without ending the call", () =>
+  Effect.gen(function* () {
+    const { proxy, sidebands, json } = yield* setup()
+    const created = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    const events = () => json("GET", `/voice/calls/${created.callID}/events?after=0`)
+    proxy.state.renewStatus = 500
+    yield* TestClock.adjust(voiceLimits.renewMs)
+    yield* settled
+    expect((yield* events()).ended).toBe(false)
+    proxy.state.renewStatus = 200
+    sidebands.opened[0]?.deliver({ type: "error", error: { type: "invalid_request_error", code: "unknown_event" } })
+    yield* settled
+    const page = yield* events()
+    expect(page.ended).toBe(false)
+    expect(page.events.at(-1)).toMatchObject({ type: "error", code: "voice_error" })
+    yield* json("POST", `/voice/calls/${created.callID}/heartbeat`, { sent: 1, received: 1 })
+    yield* TestClock.adjust(voiceLimits.renewMs)
+    yield* settled
+    expect((yield* events()).ended).toBe(false)
+    expect(proxy.log.filter((entry) => entry.method === "PUT")).toHaveLength(2)
   }).pipe(Effect.map(() => undefined)),
 )
 

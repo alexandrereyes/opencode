@@ -8,8 +8,11 @@ import { Watch } from "./rpc.js"
 export const limits = {
   /** Lease renewal cadence, also the watch's heartbeat cadence. */
   renewMs: 5_000,
-  /** Without a heartbeat for this long the call ends; returned to the watch as `leaseSeconds`. */
-  livenessMs: 15_000,
+  /**
+   * Without a heartbeat for this long the call ends; returned to the watch as `leaseSeconds`. The watch sends one
+   * every 5 s after the previous one settles (8 s timeout), so a network blip can hold two of them; 30 s rides it out.
+   */
+  livenessMs: 30_000,
   maxCallMs: 30 * 60_000,
   pollMs: 25_000,
   /** An ended call stays readable this long so the watch can read its last events. */
@@ -104,6 +107,12 @@ const SidebandEvent = Schema.Struct({
       transcript: Schema.optionalKey(Schema.String),
       status: Schema.optionalKey(Schema.String),
       interrupted: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+  error: Schema.optionalKey(
+    Schema.Struct({
+      type: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      code: Schema.optionalKey(Schema.NullOr(Schema.String)),
     }),
   ),
 })
@@ -288,7 +297,7 @@ export function makeVoice(input: {
         { body: JSON.stringify({ generation: call.generation }) },
         limits.httpMs,
       ).pipe(Effect.option)
-      const transient = Option.isNone(response) || [408, 429, 502, 503, 504].includes(response.value.status)
+      const transient = Option.isNone(response) || transientStatus(response.value.status)
       if (!transient && !(yield* confirm(call, response.value, now))) return yield* end(call, "lease_refused")
       if (transient && (yield* Clock.currentTimeMillis) >= call.leaseUntil) return yield* end(call, "lease_lost")
     })
@@ -332,7 +341,11 @@ export function makeVoice(input: {
         )
       }
       case "error":
-        yield* Effect.logWarning("Watch call upstream error")
+        // Most errors leave the session open; it ends when the service closes the sideband. Logged without the message.
+        yield* Effect.logWarning("Watch call upstream error", {
+          type: (event.error?.type ?? "").slice(0, 64),
+          code: (event.error?.code ?? "").slice(0, 64),
+        })
         return yield* emit(call, { type: "error", code: "voice_error", message: "O serviço de voz informou um erro." })
       case "session.closed":
         return yield* end(call, "session_closed")
@@ -492,6 +505,11 @@ const initialItems = (ctx: VoiceContext) =>
 
 function message(role: "user" | "assistant", text: string) {
   return { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] }
+}
+
+/** Same rule as the iPhone's `VoiceLeaseClock.isTransient`: 408, 429 and any 5xx are retried. */
+function transientStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500
 }
 
 function isUdpCandidate(line: string) {

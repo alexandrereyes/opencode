@@ -12,7 +12,8 @@ Local changes, all from the 27 October watch spike and marked `OpenCode:` in the
 - `Swift/WatchRealtimeTransport.swift`: system routing — one UDP flow per remote with no fixed local interface or
   port; the ICE engine sees the original IPv4 pair (a sentinel or mapped IPv4 local candidate) while the socket
   carries the bytes, which is what works through NAT64/CLAT on the watch's cellular path. Per-flow counters and
-  diagnostic lines.
+  diagnostic lines. ICE `Disconnected` ends the call only after 10 s without ICE connecting again (31 October):
+  str0m documents it as intermittent on weak networks, and it used to end the call at once.
 - `Swift/WatchRealtimeAudioIO.swift` / `WatchRealtimeMediaSession.swift`: activation plan (`external` after
   CallKit's `didActivate`; `duplex` only in the simulator), output level, packet counters, a short silence so the
   output renders before UDP opens.

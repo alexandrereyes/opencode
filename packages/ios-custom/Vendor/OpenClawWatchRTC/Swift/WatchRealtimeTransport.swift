@@ -129,6 +129,9 @@ final class WatchRealtimeTransport: @unchecked Sendable {
     private var started = false
     private var rtc: OpaquePointer?
     private var timer: DispatchSourceTimer?
+    /// OpenCode: armed at ICE Disconnected, cancelled when ICE connects again.
+    private var disconnectTimer: DispatchSourceTimer?
+    private static let disconnectGrace = DispatchTimeInterval.seconds(10)
     private var flows: [UUID: Flow] = [:]
     private var localCandidates: Set<NWEndpoint> = []
     private var remoteDestinations: Set<NWEndpoint> = []
@@ -142,6 +145,7 @@ final class WatchRealtimeTransport: @unchecked Sendable {
 
     deinit {
         self.timer?.cancel()
+        self.disconnectTimer?.cancel()
         self.flows.values.forEach { $0.connection.cancel() }
         if let rtc { openclaw_rtc_free(rtc) }
     }
@@ -534,15 +538,32 @@ final class WatchRealtimeTransport: @unchecked Sendable {
             case 6:
                 let names = ["new", "checking", "connected", "completed", "disconnected"]
                 self.diagnostics.add("ice \(output.time < 5 ? names[Int(output.time)] : "\(output.time)")")
+                if output.time == 2 || output.time == 3, let timer = self.disconnectTimer {
+                    timer.cancel()
+                    self.disconnectTimer = nil
+                    self.diagnostics.add("ice recovered")
+                }
             case 3:
                 self.diagnostics.count("rx.rtp-opus")
                 guard let bytes = output.bytes else { continue }
                 self.onEvent(.audio(Data(bytes: bytes, count: output.length), timestamp: output.time))
             case 4:
+                // OpenCode: str0m's Disconnected "may trigger intermittently and resolve just as spontaneously";
+                // the call ends only when it lasts the grace, not at the first one.
                 self.diagnostics.add("ice disconnected")
-                throw WatchRealtimeMediaFailure(
-                    kind: .network,
-                    message: String(localized: "Voice lost its network connection."))
+                if self.disconnectTimer == nil {
+                    let timer = DispatchSource.makeTimerSource(queue: self.queue)
+                    timer.schedule(deadline: .now() + Self.disconnectGrace)
+                    timer.setEventHandler { [weak self] in
+                        guard let self, self.disconnectTimer != nil else { return }
+                        self.disconnectTimer = nil
+                        self.fail(WatchRealtimeMediaFailure(
+                            kind: .network,
+                            message: String(localized: "Voice lost its network connection.")))
+                    }
+                    self.disconnectTimer = timer
+                    timer.resume()
+                }
             case 5: throw WatchRealtimeMediaFailure(kind: .sessionEnded, message: String(localized: "Voice ended."))
             default: break
             }
@@ -878,6 +899,8 @@ final class WatchRealtimeTransport: @unchecked Sendable {
         self.pendingAnswer = nil
         self.timer?.cancel()
         self.timer = nil
+        self.disconnectTimer?.cancel()
+        self.disconnectTimer = nil
         self.flows.values.forEach { $0.connection.cancel() }
         self.flows.removeAll()
         self.localCandidates.removeAll()

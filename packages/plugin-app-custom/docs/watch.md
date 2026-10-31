@@ -257,10 +257,13 @@ unsupported_form`). Option `id` is the form value; a trailing `(Recommended)`/`(
 `recommended: true` and leaves the label. Replies must use offered options or allowed text (`400 invalid_answer`);
 a request that is no longer pending is `409` (the backend cannot tell answered from unknown IDs).
 
-**Voice.** `leaseSeconds` in the call response is the liveness window, 15: the call ends when no heartbeat
-arrived for 15 s, checked at each 5 s renewal tick (renewals stop with the heartbeats). The llm-proxy lease is
-renewed with the iPhone's rules: 408/429/502/503/504 or network errors are retried until the confirmed lease (minus
-10 s) runs out; any other refusal ends the call. The offer must be SDP with `m=audio` and Opus 48 kHz (`400
+**Voice.** `leaseSeconds` in the call response is the liveness window, 30: the call ends when no heartbeat
+arrived for 30 s, checked at each 5 s renewal tick (renewals stop with the heartbeats). It was 15 s until 31/10: the
+watch sends the next heartbeat 5 s after the previous one settles, with an 8 s timeout, so a single stuck heartbeat
+could end a call whose audio was fine. The llm-proxy lease is renewed with the iPhone's rules: 408, 429, any 5xx or
+network errors are retried until the confirmed lease (minus 10 s) runs out; any other refusal ends the call. An
+upstream `error` is logged with its `type` and `code` (never the message) and passed to the watch as `voice_error`;
+it does not end the call, which ends when the service closes the sideband (`session_closed`, `sideband_closed`). The offer must be SDP with `m=audio` and Opus 48 kHz (`400
 invalid_offer`); the answer needs `a=ice-lite` and a UDP candidate (`502 unsupported_answer`). Voice IDs fall back
 to `rio` then `cove` only on an explicit voice rejection, as on the iPhone. `initial_items` come from
 `custom.voice.context` (2 s budget; without it the call starts without memory): summary and master state as labelled
