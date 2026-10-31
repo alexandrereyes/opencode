@@ -6,6 +6,8 @@ import { SessionFamily } from "@opencode/schema/session-family"
 import { Form } from "@opencode/schema/form"
 import { Permission } from "@opencode/schema/permission"
 import { Effect, Schema } from "effect"
+import { sharedHub } from "../live-activity/index.js"
+import type { SessionProgress } from "../live-activity/tracker.js"
 import { Family } from "./rpc.js"
 
 const encodeSession = Schema.encodeSync(Session.Info)
@@ -17,6 +19,8 @@ type FamilyContext = {
   readonly family: Plugin.Context["session"]["family"]
   readonly get: Plugin.Context["session"]["get"]
   readonly pending: Requests["pending"]
+  /** A session's Progresso while it shows; the Live Activity hub folds the same events for every Location. */
+  readonly progress?: (sessionID: string) => SessionProgress | undefined
 }
 
 export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyContext, sessionID: Session.ID) {
@@ -45,6 +49,11 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
   yield* Effect.forEach([...new Set([...permissions, ...forms].map((item) => item.sessionID))], depthOf)
   const order = (a: { sessionID: string; created?: number }, b: { sessionID: string; created?: number }) =>
     (members.get(a.sessionID) ?? -1) - (members.get(b.sessionID) ?? -1) || (a.created ?? 0) - (b.created ?? 0)
+  // A Progresso shows only while its session executes, so the active descendants are the ones to ask.
+  const progress = family.active.flatMap((item) => {
+    const value = ctx.progress?.(item.id)
+    return value ? [[item.id, value] as const] : []
+  })
   return {
     count: family.count,
     cost: family.cost,
@@ -57,6 +66,7 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
       .filter((request) => (members.get(request.sessionID) ?? -1) >= 0)
       .toSorted(order)
       .map((item) => encodePermission(item)),
+    ...(progress.length > 0 ? { progress: Object.fromEntries(progress) } : {}),
   }
 })
 
@@ -81,7 +91,12 @@ export const registerFamily = Effect.fn("Family.register")(function* (ctx: Conte
           ),
       snapshot: (input, context) =>
         snapshot(
-          { family: ctx.session.family, get: ctx.session.get, pending: ctx.request.pending },
+          {
+            family: ctx.session.family,
+            get: ctx.session.get,
+            pending: ctx.request.pending,
+            progress: (sessionID) => sharedHub().progress(sessionID),
+          },
           input.sessionID,
         ).pipe(
           Effect.mapError(() =>

@@ -70,6 +70,33 @@ test("finds pending grandchildren absent from pages, shares ancestry reads and p
   expect(Family.Definition.id).toBe("custom.session-family")
 })
 
+test("carries the Progresso of each active descendant showing one, and omits it when none does", async () => {
+  const root = session("ses_root")
+  const child = session("ses_child", root.id)
+  const grandchild = session("ses_grandchild", child.id)
+  const quiet = session("ses_quiet", root.id)
+  const todos = [
+    { content: "Ler o inventário", status: "completed" as const },
+    { content: "Comparar com o código", status: "in_progress" as const },
+    { content: "Escrever as notas", status: "pending" as const },
+  ]
+  const progress = { done: 1, finished: 1, total: 3, current: "Comparar com o código", todos }
+  const context = (active: Session.Info[]) => ({
+    family: () => Effect.succeed({ count: 3, cost: 0, data: [], active }),
+    get: () => Effect.fail(new Error("unused")),
+    pending: () => Effect.succeed([]),
+    progress: (sessionID: string) => (sessionID === grandchild.id ? progress : undefined),
+  })
+  const result = await Effect.runPromise(snapshot(context([child, grandchild, quiet]), root.id))
+  // Descendants at any depth, keyed by Session ID; the rows decode with the RPC's own schema.
+  expect(result.progress).toEqual({ [grandchild.id]: progress })
+  expect(Schema.decodeUnknownSync(Family.Snapshot)(result).progress?.[grandchild.id]?.current).toBe(
+    "Comparar com o código",
+  )
+  const none = await Effect.runPromise(snapshot(context([child, quiet]), root.id))
+  expect("progress" in none).toBe(false)
+})
+
 test("propagates missing root instead of returning an empty successful snapshot", async () => {
   const missing = new Error("Session.NotFoundError")
   const result = await Effect.runPromise(

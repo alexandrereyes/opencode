@@ -58,6 +58,12 @@ The apps take it on (re)load; with the app open they also fold the same three to
 without waiting for a navigation reload. The list lets a conversation whose loaded tail does not reach the latest
 `todowrite` still show the whole Progresso.
 
+**`custom.session-family/snapshot`** (rev. 2026-10-30): `progress?: Record<sessionID, Progress>`, the same shape as
+the Sessões row's, for every active descendant (any depth) that shows one. Only active descendants are asked: a
+Progresso shows only while its session executes. The hub folds a subagent's list from the events it saw, so after a
+server restart a subagent that was already running shows its list from its next `todowrite` call (only top-level
+sessions read their transcript on a rebuild or an execution start). Absent when no descendant shows one.
+
 **Mestra (`tools.sessions.*`)**: `list` rows get `progress?: { done, total, current }`; `status` gets
 `progress?: { done, total, current, items }` with every item and its status. Mestra's prompt says how to speak it
 ("concluiu 3 de 7; agora: …") when asked and in the running summary.
@@ -71,11 +77,14 @@ state from `/watch/v1/state`; the complication's key is unchanged.
 - The `todowrite` calls themselves stay out of the conversation's Atividade (and of the final-answer boundary): the
   pill is their representation, and a dozen list updates per task would only split the activity groups. A failed call
   stays visible, like any failed tool.
+- The subagent lists (the iPhone's "Agentes e tarefas" and the Mac's Contexto) show each subagent's `☑ 2/4` from
+  the family snapshot, with the list the app folded from live events winning, as it is newer; before, a list written
+  before the app opened (or, on the iPhone, while it was suspended) showed only from the subagent's next call.
 - Builds without the feature keep hiding the calls and show `Trabalhando · 3/7` on the Live Activity (an unknown unit
   is a bare `done/total`), with no `Agora: …`.
 
 ## Tests
 
 Plugin: `test/progress.test.ts` (rules, tracker, revert, rebuild, Location gate, push size and grouping),
-`test/navigation.test.ts`, `test/sessions.test.ts`, the normative `live-activity/state-progress.json`. Apps:
+`test/navigation.test.ts`, `test/sessions.test.ts`, `test/session-family.test.ts`, the normative `live-activity/state-progress.json`. Apps:
 `OpenCodeKitTests/SessionProgressTests.swift` and the Live Activity and UI tests listed in the iOS README.

@@ -6,6 +6,7 @@ import { Session } from "@opencode/schema/session"
 import { Form } from "@opencode/schema/form"
 import { Permission } from "@opencode/schema/permission"
 import { Schema } from "effect"
+import { Navigation } from "../navigation/rpc.js"
 
 export const Snapshot = Schema.Struct({
   count: SessionFamily.Info.fields.count,
@@ -13,6 +14,11 @@ export const Snapshot = Schema.Struct({
   active: Schema.toEncoded(SessionFamily.Info.fields.active),
   forms: Schema.Array(Schema.toEncoded(Form.Info)),
   permissions: Schema.Array(Schema.toEncoded(Permission.Request)),
+  /**
+   * The Progresso of each descendant showing one, by Session ID (rev. 2026-10-30, `docs/progress.md`): the same
+   * rule and source as the Sessões rows. Absent when none shows one, and on older servers.
+   */
+  progress: Schema.Record(Schema.String, Navigation.Progress).pipe(Schema.optional),
 })
 export type Snapshot = typeof Snapshot.Type
 
