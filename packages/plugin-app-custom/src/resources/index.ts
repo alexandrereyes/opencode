@@ -5,10 +5,10 @@ import { optional } from "@opencode/schema/schema"
 import { Effect, Option, Schedule, Schema } from "effect"
 import path from "node:path"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
-import { known, parseSimulators, references, resolveSimulators } from "./discovery.js"
+import { known, parseSimulators, references, resolveSimulators, touchesResources } from "./discovery.js"
 import { blocking, refusal, returned } from "./lock.js"
 import { Resources } from "./rpc.js"
-import { HubError, makeHubClient, stateDirectory, type HubClient } from "./supervisor.js"
+import { HubError, hubSettings, makeHubClient, stateDirectory, type HubClient } from "./supervisor.js"
 
 /**
  * Session resources: simulators, emulators and browsers that agents use on the Mac, shown and controlled from the
@@ -18,7 +18,7 @@ import { HubError, makeHubClient, stateDirectory, type HubClient } from "./super
  */
 export const registerResources = Effect.fn("Resources.register")(function* (
   ctx: Plugin.Context,
-  hub: HubClient = makeHubClient({ state: stateDirectory() }),
+  hub: HubClient = makeHubClient(hubSettings()),
 ) {
   // Chrome: agent shells open `playwright-cli` browsers with a loopback CDP port that the adapter attaches to.
   const playwrightConfig = path.join(stateDirectory(), "playwright-cli.json")
@@ -85,6 +85,8 @@ export const registerResources = Effect.fn("Resources.register")(function* (
   // session family, and its result gains an `opencode-resource:` link (once per session) and `metadata.resources`.
   const roots = new Map<string, { root: string; directory: string }>()
   const announced = new Set<string>()
+  // Calls that touched resources while a remote hub could not say whether Alexandre holds them.
+  const unchecked = new Set<string>()
   const family = (sessionID: string): Effect.Effect<{ root: string; directory: string }> =>
     Effect.gen(function* () {
       const cached = roots.get(sessionID)
@@ -101,7 +103,11 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       const command = shellCommand(event.tool, event.input)
       if (!command) return
       const locks = yield* Effect.promise(() => hub.locks())
-      const lock = blocking(command, locks, shellWorkdir(event.input))
+      if (locks === undefined && touchesResources(command)) {
+        unchecked.add(event.id)
+        yield* Effect.logWarning("resources hub unreachable; command runs without its lock check", { call: event.id })
+      }
+      const lock = blocking(command, locks ?? [], shellWorkdir(event.input))
       if (lock) return yield* new Tool.Error({ message: refusal(lock) })
       // In use from the start: a long command (a test run, a recording) keeps its resources `agent` until it ends, and
       // the history shows it while it runs. Only resources the hub already knows; the result registers new ones.
@@ -135,17 +141,21 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       if (!command) return
       // Whatever the outcome, the command no longer holds the resources it named.
       if (references(command).length > 0) yield* Effect.promise(() => hub.end(event.id))
+      const warn = unchecked.delete(event.id)
       if (event.status !== "completed") return
-      const content =
-        typeof event.result.content === "string"
+      const content = [
+        ...(typeof event.result.content === "string"
           ? [{ type: "text" as const, text: event.result.content }]
-          : (event.result.content ?? [])
+          : (event.result.content ?? [])),
+        ...(warn ? [{ type: "text" as const, text: lockUnavailable }] : []),
+      ]
+      if (warn) event.result = { ...event.result, content }
       const output = content.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n")
       const owner = yield* family(event.sessionID)
       const found = references(command, output, shellWorkdir(event.input) ?? (owner.directory || undefined))
       if (found.length === 0) return
       const simulators = found.some((item) => item.kind === "ios-simulator")
-        ? yield* Effect.promise(() => listSimulators())
+        ? yield* Effect.promise(() => (hub.remote ? hub.simulators().catch(() => listSimulators()) : listSimulators()))
         : []
       const metas = resolveSimulators(found, simulators)
       const registered = yield* Effect.forEach(metas, (meta) =>
@@ -249,6 +259,9 @@ export function links(resources: readonly Pick<Resources.Resource, "id" | "kind"
     )
     .join("\n")
 }
+
+export const lockUnavailable =
+  "Aviso: o hub de recursos no Mac não respondeu, então este comando rodou sem verificar se Alexandre está usando o recurso. Evite novos comandos nesse simulador, emulador ou navegador até o hub voltar, a menos que a tarefa não possa esperar."
 
 async function listSimulators() {
   const child = Bun.spawn(["xcrun", "simctl", "list", "devices", "-j"], { stdout: "pipe", stderr: "ignore" })

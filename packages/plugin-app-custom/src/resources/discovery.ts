@@ -19,6 +19,14 @@ const deviceCommands =
   "boot|bootstatus|spawn|launch|terminate|install|uninstall|io|openurl|addmedia|privacy|push|status_bar|ui|keychain|getenv|location|pbcopy|pbpaste|listapps|appinfo|get_app_container|clone|rename"
 const quoted = String.raw`("([^"]+)"|'([^']+)'|([^\s;&|)'"]+))`
 
+/**
+ * Whether a shell command runs a tool that drives simulators, emulators or Playwright browsers, named or not (also
+ * through the Linux machine's `mac` prefix, which runs it on the Mac).
+ */
+export function touchesResources(command: string) {
+  return simulatorTools.test(command) || emulatorTools.test(command) || /\bplaywright-cli\b/.test(command)
+}
+
 /** Resources named by a shell command (and, for `simctl create`, its output). Commands that end one are ignored. */
 export function references(command: string, output = "", workdir?: string): Reference[] {
   return dedupe([...simulators(command, output), ...emulators(command), ...browsers(command, workdir)])

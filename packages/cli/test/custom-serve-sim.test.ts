@@ -35,3 +35,17 @@ test.skipIf(process.platform !== "darwin" || process.arch !== "arm64")(
     expect(output).toContain("serve-sim")
   },
 )
+
+test.skipIf(process.arch !== "arm64")("a linux-arm64 release carries serve-sim's files for the Mac's hub", async () => {
+  const staging = await mkdtemp(path.join(os.tmpdir(), "opencode-serve-sim-linux-"))
+  directories.push(staging)
+  await bundleServeSim(path.resolve(import.meta.dirname, "../../.."), staging, "linux")
+  const modules = path.join(staging, "serve-sim/node_modules")
+  expect(await Bun.file(path.join(modules, "@expo/serve-sim/dist/serve-sim.js")).exists()).toBe(true)
+  expect(await Bun.file(path.join(modules, "ws/package.json")).exists()).toBe(true)
+  // Other platforms ship no serve-sim.
+  const other = await mkdtemp(path.join(os.tmpdir(), "opencode-serve-sim-win-"))
+  directories.push(other)
+  await bundleServeSim(path.resolve(import.meta.dirname, "../../.."), other, "win32")
+  expect(await Bun.file(path.join(other, "serve-sim/node_modules/ws/package.json")).exists()).toBe(false)
+})

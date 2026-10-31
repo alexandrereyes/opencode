@@ -283,11 +283,30 @@ correct the reported problem and rerun activation.
 ### 4096 proxy and session resources hub
 
 The loopback proxy on 4096 (`com.alexandrem.opencode2-ui`, Homebrew Node, `<runtime>/bin/proxy.mjs`) is the
-entry point of the Cloudflare One route (`10.203.96.2:80` → nginx → 4096) and of local browsers. Its source is
-`packages/cli/script/custom-proxy.mjs`. It injects the server credentials for every route except `/resources/*`,
-which it forwards, without any `authorization` header, to the session resources hub on `127.0.0.1:4179`
-(WebSocket upgrades included); the hub authorizes each request with its own short tickets
-(`packages/plugin-app-custom/docs/resources.md`).
+entry point of the Cloudflare One route (`10.203.96.2:80` → nginx → 4096), of the Mac app and of local browsers.
+Its source is `packages/cli/script/custom-proxy.mjs`. Every user and process of the Mac can reach the loopback (the
+pf rule per user is not relied on), so the proxy **requires the server's own credentials** and never adds any:
+
+- It accepts exactly what the server accepts (`packages/server/src/middleware/authorization.ts`): `Basic` for
+  `opencode:<password>` or `opencode:<session token>` (pairing links), the same pair in `?auth_token=` (which wins
+  over the header), or the web sign-in cookie `opencode_session_<port>` from the same origin. Pairing redemption
+  (`/auth/connect/<code>`) and ticketed PTY/MCP connects (`?ticket=`) pass through; the server validates them.
+- Anything else gets the server's `401` (`WWW-Authenticate: Basic` for non-browser clients and navigations), for
+  HTTP and WebSocket upgrades alike, before any upstream is contacted. Accepted requests go to the server unchanged,
+  which checks them again. The password is read on every request from `<runtime>/config/opencode/service-custom.json`;
+  a missing or empty password answers `503` (fail closed).
+- Paths are normalized (dot segments, `%2e`) before these checks and forwarded normalized, so `/resources/../…` or a
+  ticketed prefix cannot route elsewhere.
+- `/resources/*` goes to the session resources hub on `127.0.0.1:4179` (WebSocket upgrades included) without
+  `authorization` or `cookie`; the hub authorizes each request with its own short tickets
+  (`packages/plugin-app-custom/docs/resources.md`), which the authenticated server issues.
+- The Host/Origin guards (`localhost|127.0.0.1|[::1]:4096`) still answer `403` first.
+
+Clients: the native apps already send `Basic` from the Keychain on every request (`OpenCodeClient.request`), so the
+built-in server "Mac de Alexandre" needs its password once in each app (Ajustes ▸ Servidores ▸ Editar… ▸ Senha;
+iPhone: Servidores ▸ lápis ▸ Senha), the value of `password` in `service-custom.json`. Browsers get the Basic prompt or use
+the web app's sign-in. The Apple Watch does not use 4096 (its gateway on 4192 has device tokens). A Unix socket
+was considered and rejected: URLSession has no Unix-socket transport and nginx in Docker needs TCP.
 
 After a successful activation (`custom:activate`, `custom:update`, rollback), activation installs that file as
 `<runtime>/bin/proxy.mjs` and restarts the proxy job with `launchctl kickstart -k`, but only when the installed job
@@ -301,6 +320,12 @@ together with the proxy). The custom plugin starts the hub on demand as a separa
 server, and a hub crash never takes the server down. Its state lives in `$XDG_STATE_HOME/opencode/resources-hub`
 (`hub.json` with its secret, `resources.json`, `hub.log`). Sandboxes leave the port unset, so their hub binds a free
 loopback port and clients on the Mac connect to it directly.
+
+The hub can also run on its own, with no server as its parent (the Mac LaunchAgent that serves the Linux runtime,
+below): `OPENCODE_RESOURCES_HUB_STATE=<dir> OPENCODE_RESOURCES_HUB_PORT=4179 bun <release>/plugin/index.js
+--opencode-resources-hub`. Without `OPENCODE_RESOURCES_HUB_PARENT` it only exits on `SIGTERM`. Besides `hub.json`
+it writes `<dir>/playwright-cli.json` (adds `--remote-debugging-port=0`), the file Mac shells must point
+`PLAYWRIGHT_MCP_CONFIG` to so the hub can mirror `playwright-cli` browsers.
 
 ### One-time migration from the old installation
 
@@ -425,17 +450,58 @@ updater LaunchAgent are not part of this flow. Nothing polls Git or schedules up
 ### Linux runtime (systemd)
 
 The same `custom:prepare|update|activate|rollback|status|prune` commands run on Linux (the
-OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/mac`). Differences:
+OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/opencode-mac`). Differences:
 
 - The release is the plain `bin/opencode` executable for the host (`cli-linux-arm64`, glibc), with no
-  `OpenCode Custom.app`, signing or `serve-sim`: the iOS simulator stream needs macOS.
+  `OpenCode Custom.app` or signing. It still carries `serve-sim/` (Mach-O files, never run on Linux) for the Mac's
+  hub.
 - The service is the systemd **user** unit `~/.config/systemd/user/local.opencode.custom-manual.service`
   (first line `# Runtime <home>`, which owns it), started with the login environment (`/etc/profile`),
   `Restart=always`, log in `<home>/logs/server.log`. It needs lingering (`loginctl enable-linger`).
   Inspect with `systemctl --user status local.opencode.custom-manual`.
-- The 4096 proxy stays on the Mac (`installProxy` is launchd-only): OrbStack forwards the machine's
-  `127.0.0.1:4178` and `:4179` to the Mac's loopback, where `proxy.mjs` already points.
-- `custom:migrate` is macOS-only. Moving the runtime from the Mac: `core-infra/mac/opencode-migrate.sh`.
+- `KillMode=process`: a stop signals only the server, as launchd does on the Mac. Everything agents start from their
+  shells lives in the unit's cgroup (`custom:update` itself, tmux sessions, `nohup`/`setsid` processes, `mac` clients,
+  whose death ends their process on the Mac); with `mixed` or `control-group` the stop of an activation would kill
+  them, leaving the server stopped and `.manual-lock` behind. systemd logs "left-over process" for them at the next
+  start; that is expected. A stop first rewrites an outdated unit and runs `daemon-reload`, so the new `KillMode`
+  already applies to the stop that replaces an older unit.
+- The 4096 proxy stays on the Mac and reaches the server through OrbStack, which forwards the machine's
+  `127.0.0.1:4178` to the Mac's loopback; its `/resources/*` go to the Mac's hub on `127.0.0.1:4179` (below), not to
+  Linux. It checks credentials against the **Mac's** `~/.local/share/opencode-custom-v2/config/opencode/service-custom.json`
+  (`hostname`, `port`, `password`), so that file's `password` must equal the Linux server's. After a successful activation, `installMacProxy` does what `installProxy` does on macOS through the mounted
+  `/Users`: only when `~/Library/LaunchAgents/com.alexandrem.opencode2-ui.plist` exists and its `ProgramArguments`
+  (read with `mac plutil`) run the Mac runtime's `~/.local/share/opencode-custom-v2/bin/proxy.mjs`, and only when the
+  content changed, it replaces that file and restarts the job with
+  `mac launchctl kickstart -k gui/$(mac id -u)/com.alexandrem.opencode2-ui`. A failure is reported without undoing the
+  activation.
+- `custom:migrate` is macOS-only. Moving the runtime from the Mac: `core-infra/opencode-mac/opencode-migrate.sh`.
+
+#### Resources hub on the Mac
+
+Simulators, emulators and Chrome stay on the Mac, so the hub does too, as the LaunchAgent
+`local.opencode.resources-hub` (no parent, always running), and the Linux plugin runs in remote mode
+(`packages/plugin-app-custom/docs/resources.md`, "Remote hub"). Layout on the Mac, under
+`~/.local/share/opencode-resources-hub`: `releases/<commit>/{plugin,serve-sim}`, `current` (symlink), `state/`
+(`hub.json`, `resources.json`, `playwright-cli.json`) and `hub.log`.
+
+- **LaunchAgent.** `bun run custom:hub-plist` (or `resourcesHubPlist(macHome)` in `custom-release.ts`) prints it:
+  the Mac's `~/.local/share/opencode-custom-v2/bin/bun` runs `current/plugin/index.js --opencode-resources-hub`
+  with `OPENCODE_RESOURCES_HUB_STATE=<hub>/state`, `OPENCODE_RESOURCES_HUB_PORT=4179`,
+  `OPENCODE_SERVE_SIM=<hub>/current/serve-sim/…/serve-sim.js` and a Homebrew `PATH`; `RunAtLoad`, `KeepAlive`, log in
+  `<hub>/hub.log`. `core-infra/opencode-mac` installs it in `~/Library/LaunchAgents` (create `<hub>` first: launchd
+  does not create the log's directory).
+- **Publication.** After a successful Linux activation, if that plist exists (read through the mounted `/Users`),
+  activation copies the release's `plugin/` and `serve-sim/` to `<hub>/releases/<commit>`, points `current` at it
+  atomically, restarts the job with `mac launchctl kickstart -k gui/$(mac id -u)/local.opencode.resources-hub` and
+  keeps the three newest other copies. A failure is reported without undoing the activation; the already-active
+  shortcut does not publish.
+- **Server environment** (`manual.json` `environment` on Linux):
+  `OPENCODE_RESOURCES_HUB_REMOTE_INFO=/Users/<user>/.local/share/opencode-resources-hub/state/hub.json`,
+  `OPENCODE_RESOURCES_HUB_REMOTE_HOST=host.orb.internal`,
+  `OPENCODE_RESOURCES_HUB_PATH_MAP=/home/<user>/=/Users/<user>/OrbStack/dev/home/<user>/`.
+- **Mac shells.** `mac` does not pass Linux variables, so `~/.zshenv` on the Mac exports
+  `PLAYWRIGHT_MCP_CONFIG=~/.local/share/opencode-resources-hub/state/playwright-cli.json` for
+  `mac playwright-cli …`.
 
 ### Isolated source development
 

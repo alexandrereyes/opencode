@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
+import { writeConfig } from "../adapters/chrome.js"
 import { adapters } from "../adapters/index.js"
+import { text } from "../adapters/process.js"
+import { parseSimulators } from "../discovery.js"
 import { createHub, protocol } from "./hub.js"
 
 /** Argument that makes the bundled plugin (`plugin/index.js`) run the hub instead of exporting the plugin. */
@@ -10,7 +13,9 @@ export const flag = "--opencode-resources-hub"
 /**
  * Hub process entry. Environment: `OPENCODE_RESOURCES_HUB_STATE` (required directory),
  * `OPENCODE_RESOURCES_HUB_PORT` (0 or unset = any free port), `OPENCODE_RESOURCES_HUB_PARENT` (server PID; the hub
- * exits when it dies). Writes `hub.json` ({ protocol, pid, port, secret }, mode 0600) once it listens.
+ * exits when it dies; unset for a standalone hub, such as the Mac's LaunchAgent serving a remote server). Writes
+ * `hub.json` ({ protocol, pid, port, secret }, mode 0600) once it listens, and `playwright-cli.json`, the config Mac
+ * shells point `PLAYWRIGHT_MCP_CONFIG` to when the plugin cannot set it for them.
  */
 export async function main() {
   const state = process.env.OPENCODE_RESOURCES_HUB_STATE
@@ -22,7 +27,13 @@ export async function main() {
   if (!(await acquire(lock))) return
   await Promise.all(Object.values(adapters).map((adapter) => adapter.recover?.()))
   const secret = randomBytes(32).toString("base64url")
-  const hub = createHub({ adapters, secret, file: path.join(state, "resources.json") })
+  await writeConfig(path.join(state, "playwright-cli.json"))
+  const hub = createHub({
+    adapters,
+    secret,
+    file: path.join(state, "resources.json"),
+    simulators: async () => parseSimulators(JSON.parse(await text(["xcrun", "simctl", "list", "devices", "-j"]))),
+  })
   await hub.start()
   const server = Bun.serve({
     hostname: "127.0.0.1",
