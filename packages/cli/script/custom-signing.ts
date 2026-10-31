@@ -9,7 +9,7 @@ import { command } from "./custom-release"
 // certificate gives all releases the same designated requirement.
 export const bundle = "OpenCode Custom.app"
 export const bundleID = "local.opencode.custom"
-const subject = "OpenCode Custom Local Signing"
+export const signingSubject = "OpenCode Custom Local Signing"
 
 export async function bundleRelease(home: string, staging: string, binary: string) {
   const app = path.join(staging, bundle)
@@ -33,9 +33,9 @@ export async function signingIdentity(home: string) {
   // unattended updates free of Keychain prompts.
   await command(["/usr/bin/security", "unlock-keychain", "-p", "", keychain])
   const identity = (await command(["/usr/bin/security", "find-identity", "-p", "codesigning", keychain])).match(
-    new RegExp(`\\b([A-F0-9]{40}) "${subject}"`),
+    new RegExp(`\\b([A-F0-9]{40}) "${signingSubject}"`),
   )?.[1]
-  if (!identity) throw new Error(`Signing identity "${subject}" is missing from ${keychain}`)
+  if (!identity) throw new Error(`Signing identity "${signingSubject}" is missing from ${keychain}`)
   return { keychain, identity }
 }
 
@@ -56,7 +56,7 @@ async function createSigning(home: string, directory: string) {
       "-days",
       "36500",
       "-subj",
-      `/CN=${subject}`,
+      `/CN=${signingSubject}`,
       "-addext",
       "basicConstraints=critical,CA:false",
       "-addext",

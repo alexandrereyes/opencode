@@ -474,6 +474,17 @@ OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/opencode-mac`). Diffe
   content changed, it replaces that file and restarts the job with
   `mac launchctl kickstart -k gui/$(mac id -u)/com.alexandrem.opencode2-ui`. A failure is reported without undoing the
   activation.
+- **Signed Mac controller.** Commands started through `mac` descend, on the Mac, from OrbStack Helper rather than from
+  the signed server, so native helpers that only trust descendants of `local.opencode.custom` (MacLock, for Computer
+  Use while the Mac is locked) refuse them. After a successful activation, `installMacController`
+  (`custom-mac-controller.ts`) compiles `custom-mac-controller.c` with `mac clang` into the Mac runtime's
+  `bin/mac-controller` and signs it with the persistent local certificate as `local.opencode.custom`; it rebuilds only
+  when the source changes (`bin/mac-controller.sha256`) or the signature stops verifying, and skips without
+  `signing/signing.keychain-db`. The controller runs its arguments as a child sharing its stdio, forwards
+  HUP/INT/QUIT/TERM and exits with the child's status, e.g. as a local MCP command:
+  `["mac", "/Users/<user>/.local/share/opencode-custom-v2/bin/mac-controller", "node", "/Users/…/mcp-server.js"]`.
+  It grants nothing a process of the same user lacks (that user owns the signing keychain, which has an empty
+  password); other macOS users stay excluded by MacLock's UID check.
 - `custom:migrate` is macOS-only. Moving the runtime from the Mac: `core-infra/opencode-mac/opencode-migrate.sh`.
 
 #### Resources hub on the Mac

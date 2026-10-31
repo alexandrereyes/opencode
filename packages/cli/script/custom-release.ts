@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
 import { serverConfig } from "./custom-config"
+import { installMacController } from "./custom-mac-controller"
 import { bundleRelease } from "./custom-signing"
 import { verifyParser } from "./custom-parser-smoke"
 
@@ -592,6 +593,8 @@ export type Service = {
   proxy?: () => Promise<string>
   /** Publishes the release's resources hub to the Mac after a successful Linux activation (`publishResourcesHub`). */
   hub?: (release: { commit: string; directory: string }) => Promise<string>
+  /** Installs the Mac's signed `bin/mac-controller` after a successful Linux activation (`installMacController`). */
+  controller?: () => Promise<string>
   /** Writes the service definition before start; without it, activation writes the launchd plist into the runtime. */
   install?: () => Promise<void>
 }
@@ -656,6 +659,7 @@ export function systemd(
   },
   hub: Service["hub"] = (release) => publishResourcesHub(release),
   proxy: Service["proxy"] = () => installMacProxy(),
+  controller: Service["controller"] = () => installMacController(),
 ): Service {
   const file = path.join(host.directory, unitName)
   const owned = async () => {
@@ -684,6 +688,7 @@ export function systemd(
   return {
     hub,
     proxy,
+    controller,
     install,
     async pid() {
       return (await query())?.pid
@@ -1109,6 +1114,10 @@ export async function activate(
           await service
             .hub({ commit, directory: release.directory })
             .then(console.log, (error: unknown) => console.error(`Resources hub: ${String(error)}`))
+        if (service.controller)
+          await service
+            .controller()
+            .then(console.log, (error: unknown) => console.error(`Mac controller: ${String(error)}`))
         return
       }
       await Bun.sleep(1000)
