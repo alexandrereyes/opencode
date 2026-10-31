@@ -7,6 +7,7 @@ import { Effect, Option, Schema, Semaphore, Stream } from "effect"
 import { Chats } from "../chats/rpc.js"
 import { Preferences } from "../preferences/rpc.js"
 import { available } from "../sessions/index.js"
+import { VoiceWindow } from "../voice/window.js"
 import { Master } from "./rpc.js"
 
 export const agentID = Master.agentID
@@ -232,11 +233,32 @@ export const ensureMaster = Effect.fn("Master.ensure")(function* (
     }),
   )
   // Without the note the Mestra only answers in its typed format; the delegation itself must still go.
-  if (input.voice)
+  if (input.voice) {
     yield* ctx.session.instructions.entry
       .put({ sessionID: ensured.sessionID, key: voiceNote.key, value: voiceNote.text })
       .pipe(Effect.catchCause((cause) => Effect.logWarning("Mestra voice note could not be set", { cause })))
+    yield* VoiceWindow.open(ctx.storage, ensured.sessionID).pipe(
+      Effect.catchCause((cause) => Effect.logWarning("Voice window could not be opened", { cause })),
+    )
+  }
   return ensured
+})
+
+/**
+ * Boots the current Mestra's Location (kept for the life of the server) ahead of a voice call's first request: listing
+ * its MCP servers needs it, and creates, changes or prompts no session. A missing or archived Mestra is left to
+ * `ensureMaster`, which would replace it.
+ */
+export const warmMaster = Effect.fn("Master.warm")(function* (ctx: {
+  rpc: Plugin.Context["rpc"]
+  session: Pick<Plugin.Context["session"], "scan">
+  mcp: Pick<Plugin.Context["mcp"], "list">
+}) {
+  const sessionID = (yield* ctx.rpc(Preferences.Definition).get({})).data.masterSessions?.local
+  if (!sessionID) return
+  const session = (yield* ctx.session.scan({ sessionID, limit: 1 })).data[0]?.session
+  if (!session || session.time.archived) return
+  yield* ctx.mcp.list({ location: { directory: session.location.directory } })
 })
 
 /** The voice call ended: the current Mestra answers for reading again. */

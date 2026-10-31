@@ -47,12 +47,18 @@ const Label = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
 const Short = Schema.String.check(Schema.isMaxLength(120))
 /**
  * Why an app's GPT Live call failed, was lost or ended, without speech: a category, the error code or event type,
- * the names of the last events and the device's state. Logged by the server as `Voice diagnostics`.
+ * the provider's sanitized error message and param, the last command sent, the names of the last events and the
+ * device's state. Logged by the server as `Voice diagnostics`.
  */
 export const Diagnostic = Schema.Struct({
   kind: Schema.Literals(["failed", "lost", "interrupted", "ended", "tolerated"]),
   reason: Label,
   code: Schema.optionalKey(Short),
+  /** Sanitized by the app (`VoiceDiagnosticText`) and again by the server: no long quoted span, no control characters. */
+  detail: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(300))),
+  /** The type of the last command the app sent on the data channel, and how long before the report. */
+  lastSent: Schema.optionalKey(Label),
+  lastSentSeconds: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
   platform: Schema.Literals(["ios", "macos"]),
   build: Short,
   at: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),

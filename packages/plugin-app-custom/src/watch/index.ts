@@ -5,6 +5,7 @@ import path from "node:path"
 import { defaults, load } from "../live-activity/apns.js"
 import { sharedHub } from "../live-activity/index.js"
 import { makeGateway, type Gateway } from "./gateway.js"
+import { warmMaster } from "../master/index.js"
 import { Master } from "../master/rpc.js"
 import { Voice } from "../voice/rpc.js"
 import { Watch } from "./rpc.js"
@@ -81,6 +82,7 @@ export const registerWatch = Effect.fn("Watch.register")(function* (ctx: Context
           .rpc(Master.Definition)
           .ensure({ voice: true })
           .pipe(Effect.map((ensured) => ensured.sessionID)),
+      warmMaster: () => warmMaster(ctx),
       memory: {
         context: () => ctx.rpc(Voice.Definition).context({ version: Voice.version, scope: "global" }),
         append: (turns) => ctx.rpc(Voice.Definition).append({ version: Voice.version, scope: "global", turns }),

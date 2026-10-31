@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { Effect, Fiber, PubSub, Schema } from "effect"
+import { Deferred, Effect, Fiber, Logger, PubSub, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
@@ -8,9 +8,13 @@ import { devicesKey, makeDevices } from "../src/watch/devices"
 import { key, limits as widgetLimits, makeWidgetPush } from "../src/watch/widget"
 import { makeStats } from "../src/watch/stats"
 import { limits as gatewayLimits, redact } from "../src/watch/gateway"
-import { chunks, limits as voiceLimits, rejectsVoice } from "../src/watch/voice"
+import { chunks, limits as voiceLimits, rejectsVoice, upstreamError } from "../src/watch/voice"
+import { sanitize } from "../src/voice/sanitize"
 import { describeTool, limits as delegationLimits, parse } from "../src/watch/delegation"
 import { Watch } from "../src/watch/rpc"
+import { key as memoryKey, lateLabel, limits as memoryLimits, makeVoice } from "../src/voice"
+import { Voice } from "../src/voice/rpc"
+import { VoiceWindow } from "../src/voice/window"
 import {
   T,
   assistant,
@@ -22,6 +26,7 @@ import {
   request,
   session,
   storage,
+  user,
   world,
 } from "./fixture/watch"
 
@@ -29,6 +34,20 @@ const settle = Effect.promise(() => new Promise((resolve) => setTimeout(resolve,
 const settled = Effect.gen(function* () {
   for (let round = 0; round < 5; round++) yield* settle
 })
+
+/** Collects log lines as their message and fields; `provide` installs it around a test. */
+const logCollector = () => {
+  const lines: { message: unknown; fields: unknown }[] = []
+  const logger = Logger.make((entry) => {
+    const [message, fields] = Array.isArray(entry.message) ? entry.message : [entry.message]
+    lines.push({ message, fields })
+  })
+  return {
+    lines,
+    named: (message: string) => lines.filter((line) => line.message === message).map((line) => line.fields),
+    provide: Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
+  }
+}
 
 /** Starts a gateway with one Location member and one paired watch. */
 const setup = (input: { proxy?: Parameters<typeof gateway>[0]["proxy"] } = {}) =>
@@ -483,6 +502,255 @@ it.effect("delegations keep tool activity on screen and send only updates and re
   }).pipe(Effect.map(() => undefined)),
 )
 
+const delegate = (socket: { deliver: (event: object) => void } | undefined, id: string, text: string) =>
+  socket?.deliver({
+    type: "delegation.created",
+    item: { id, type: "delegation", target: "client", content: [{ type: "input_text", text }] },
+  })
+
+it.effect("an upstream error is logged with its fields, nested or top level, sanitized and correlated", () => {
+  const logs = logCollector()
+  return Effect.gen(function* () {
+    const { sidebands, server, json } = yield* setup()
+    const created = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    const socket = sidebands.opened[0]
+    socket?.deliver({ type: "session.started" })
+    yield* TestClock.adjust(2_000)
+    socket?.deliver({
+      type: "error",
+      error: {
+        type: "invalid_request_error",
+        code: "invalid_value",
+        param: "item.content[0].text",
+        message: 'Invalid value: "Alexandre pediu para pesquisar o preço do voo amanhã".\nRetry\u0007 later.',
+        event_id: "evt_42",
+      },
+    })
+    yield* settled
+    delegate(socket, "item_d1", "Quais sessões estão rodando?")
+    yield* settled
+    yield* PubSub.publish(server.bus, masterEvents.text("ses_master", "Duas sessões estão rodando."))
+    yield* settled
+    yield* TestClock.adjust(1_500)
+    // The same fields at the top level; the event's own `type` is not the error type.
+    socket?.deliver({ type: "error", code: "server_error", message: "The server had an error.", param: null })
+    yield* settled
+    expect(logs.named("Watch call upstream error")).toEqual([
+      {
+        call: created.callID,
+        type: "invalid_request_error",
+        code: "invalid_value",
+        param: "item.content[0].text",
+        // Control characters and a long quoted span (possibly speech) never reach the log.
+        message: 'Invalid value: "…". Retry later.',
+        eventID: "evt_42",
+        elapsedMs: 2_000,
+        lastSent: "none",
+        recent: "session.started,error",
+      },
+      {
+        call: created.callID,
+        code: "server_error",
+        message: "The server had an error.",
+        elapsedMs: 3_500,
+        lastSent: "delegation.context.append",
+        lastSentAgoMs: 1_500,
+        recent: "session.started,error,delegation.created,error",
+      },
+    ])
+    // The watch only gets the generic notice, and the call goes on.
+    const page = yield* json("GET", `/voice/calls/${created.callID}/events?after=0`)
+    expect(page.ended).toBe(false)
+    expect(page.events.filter((event: Watch.VoiceEvent) => event.type === "error")).toHaveLength(2)
+  }).pipe(
+    logs.provide,
+    Effect.map(() => undefined),
+  )
+})
+
+it.effect("a sideband close is logged with its code, reason and side, and ends the call with its reason", () => {
+  const logs = logCollector()
+  return Effect.gen(function* () {
+    const { sidebands, json } = yield* setup()
+    const events = (callID: string) => json("GET", `/voice/calls/${callID}/events?after=0`)
+    // The service closes abnormally: no session.close of ours, and the watch learns why.
+    const first = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    sidebands.opened[0]?.deliver({ type: "session.started" })
+    yield* TestClock.adjust(7_000)
+    sidebands.opened[0]?.remoteClose({ code: 1011, reason: "Internal error\nkeepalive" })
+    yield* settled
+    expect((yield* events(first.callID)).events.at(-1)).toMatchObject({ status: "ended", reason: "sideband_closed" })
+    expect(sidebands.opened[0]?.sent).not.toContain(JSON.stringify({ type: "session.close" }))
+    // A transport failure before the close is flagged.
+    const second = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    sidebands.opened[1]?.remoteClose({ code: 1006, transportError: true })
+    yield* settled
+    expect((yield* events(second.callID)).events.at(-1)).toMatchObject({ reason: "sideband_closed" })
+    // Our own end closes normally.
+    const third = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    yield* TestClock.adjust(1_000)
+    yield* json("DELETE", `/voice/calls/${third.callID}`)
+    expect(logs.named("Watch call sideband closed")).toEqual([
+      {
+        call: first.callID,
+        by: "remote",
+        code: 1011,
+        reason: "Internal error keepalive",
+        clean: false,
+        elapsedMs: 7_000,
+        lastSent: "none",
+        recent: "session.started,sideband.closed",
+      },
+      {
+        call: second.callID,
+        by: "remote",
+        code: 1006,
+        reason: "",
+        clean: false,
+        transportError: true,
+        elapsedMs: 0,
+        lastSent: "none",
+        recent: "sideband.closed",
+      },
+      {
+        call: third.callID,
+        by: "local",
+        code: 1000,
+        reason: "",
+        clean: true,
+        elapsedMs: 1_000,
+        lastSent: "session.close",
+        lastSentAgoMs: 0,
+        recent: "",
+      },
+    ])
+    expect(logs.named("Watch call ended")).toMatchObject([
+      { call: first.callID, reason: "sideband_closed", elapsedMs: 7_000 },
+      { call: second.callID, reason: "sideband_closed", elapsedMs: 0 },
+      { call: third.callID, reason: "client_end", elapsedMs: 1_000 },
+    ])
+  }).pipe(
+    logs.provide,
+    Effect.map(() => undefined),
+  )
+})
+
+it.effect("a cold Mestra never holds the sideband reader; admissions and memory keep their order, once each", () =>
+  Effect.gen(function* () {
+    const { sidebands, server, json } = yield* setup()
+    const gate = yield* Deferred.make<void>()
+    server.masters.gate = gate
+    const created = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    yield* settled
+    // Warmed at the start of the call, without ensuring (creating) a Mestra.
+    expect(server.masters).toMatchObject({ warmed: 1, ensured: 0 })
+    const socket = sidebands.opened[0]
+    socket?.deliver({ type: "session.started" })
+    delegate(socket, "item_a", "Quais sessões estão rodando?")
+    socket?.deliver({ type: "turn.done", turn: { id: "turn_1", role: "user", transcript: "Quais sessões rodam?" } })
+    delegate(socket, "item_b", "E quais precisam de mim?")
+    delegate(socket, "item_a", "Quais sessões estão rodando?")
+    socket?.deliver({ type: "error", error: { type: "server_error", code: "internal" } })
+    socket?.deliver({ type: "turn.done", turn: { id: "turn_2", role: "assistant", transcript: "Já pedi à mestra." } })
+    yield* settled
+    // The Mestra is still waking up, but the reader went on: the error and both turns are through.
+    expect(server.prompts).toEqual([])
+    const page = yield* json("GET", `/voice/calls/${created.callID}/events?after=0`)
+    expect(page.events.map((event: Watch.VoiceEvent) => event.type)).toEqual([
+      "status",
+      "status",
+      "caption",
+      "error",
+      "caption",
+    ])
+    expect(server.memory.appended.map((turn) => turn.id)).toEqual([
+      `${created.callID}:turn_1`,
+      `${created.callID}:turn_2`,
+    ])
+    yield* Deferred.succeed(gate, undefined)
+    yield* settled
+    expect(server.prompts.map((prompt) => prompt.text)).toEqual([
+      "Quais sessões estão rodando?",
+      "E quais precisam de mim?",
+    ])
+    expect(server.masters.ensured).toBe(1)
+    // A call that ends while the Mestra wakes still hands over its request, then ends its memory.
+    const next = yield* Deferred.make<void>()
+    server.masters.gate = next
+    const second = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    delegate(sidebands.opened[1], "item_c", "Pesquisa o preço do voo.")
+    sidebands.opened[1]?.remoteClose()
+    yield* settled
+    expect((yield* json("GET", `/voice/calls/${second.callID}/events?after=0`)).events.at(-1)).toMatchObject({
+      reason: "sideband_closed",
+    })
+    const endedBefore = server.memory.ended
+    yield* Deferred.succeed(next, undefined)
+    yield* settled
+    expect(server.prompts.at(-1)?.text).toBe("Pesquisa o preço do voo.")
+    expect(server.memory.ended).toBe(endedBefore + 1)
+  }).pipe(Effect.map(() => undefined)),
+)
+
+it.effect("a Mestra reply that arrives after the call ends reaches voice memory once and is not asked again", () =>
+  Effect.gen(function* () {
+    const { sidebands, server, proxy, json } = yield* setup()
+    const voice = makeVoice(
+      {
+        storage: server.shared,
+        generate: { text: () => Effect.fail(new Error("no compaction here")) },
+        session: server.ctx.session,
+        message: server.ctx.message,
+      },
+      yield* Effect.scope,
+    )
+    // Real voice memory, and the window `custom.master/ensure` opens for a voice request.
+    server.ctx.memory = {
+      context: () => voice.context("global"),
+      append: (turns) => voice.append({ version: Voice.version, scope: "global", turns }),
+      end: () => voice.settle(),
+    }
+    server.ctx.ensureMaster = () =>
+      VoiceWindow.open(server.shared, server.masters.id).pipe(Effect.as(server.masters.id))
+    const first = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    const socket = sidebands.opened[0]
+    delegate(socket, "item_web", "Pesquisa na web o preço do voo.")
+    socket?.deliver({ type: "turn.done", turn: { id: "turn_1", role: "user", transcript: "Pesquisa o voo." } })
+    socket?.deliver({ type: "turn.done", turn: { id: "turn_2", role: "assistant", transcript: "Pedi à mestra." } })
+    yield* settled
+    server.active.add("ses_master")
+    yield* TestClock.adjust(10_000)
+    // The service drops the call while the Mestra still works on the request.
+    socket?.remoteClose()
+    yield* settled
+    expect((yield* json("GET", `/voice/calls/${first.callID}/events?after=0`)).ended).toBe(true)
+    expect(server.shared.values.get(VoiceWindow.key)).toBeNull()
+    yield* TestClock.adjust(10_000)
+    server.messages.set("ses_master", [
+      assistant("msg_reply", "O voo mais barato custa R$ 820.", T + 20_000),
+      user("msg_prompt1", "Pesquisa na web o preço do voo.", T),
+    ])
+    server.active.delete("ses_master")
+    yield* TestClock.adjust(memoryLimits.latePollMs)
+    yield* settled
+    const late = {
+      id: "agent:msg_reply",
+      role: "user",
+      text: lateLabel + "Pedido: Pesquisa na web o preço do voo.\nResposta: O voo mais barato custa R$ 820.",
+    }
+    const stored = () => Schema.decodeUnknownSync(Voice.Record)(server.shared.values.get(memoryKey("global")))
+    expect(stored().turns.at(-1)).toMatchObject(late)
+    // The next call starts knowing the answer, and ending it adds nothing.
+    const second = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    expect(JSON.stringify(proxy.log.at(-1)?.body)).toContain("O voo mais barato custa R$ 820.")
+    yield* json("DELETE", `/voice/calls/${second.callID}`)
+    yield* TestClock.adjust(memoryLimits.latePollMs)
+    yield* settled
+    expect(yield* voice.recordLate({ sessionID: "ses_master", since: T }, T + 10_000)).toBe(0)
+    expect(stored().turns.filter((turn) => turn.id === late.id)).toHaveLength(1)
+  }).pipe(Effect.map(() => undefined)),
+)
+
 it.effect("delegation narration knows the session tools by their current and former names", () =>
   Effect.sync(() => {
     for (const name of ["sessions.read", "sessions_read", "opencode.session_read", "session_read", "sessions.status"])
@@ -521,6 +789,16 @@ it.effect("helpers: delegation parsing, append chunks, voice rejection and diagn
         JSON.stringify({ detail: [{ loc: ["body", "session", "audio", "output", "voice"], type: "enum" }] }),
       ),
     ).toBe(true)
+    // Error fields: a string `error` is the message; objects and empty values are left out; everything is bounded.
+    expect(upstreamError({ error: "Something failed" })).toEqual({ message: "Something failed" })
+    expect(upstreamError({ error: { type: "", code: 4001, param: { a: 1 } }, message: "Top" })).toEqual({
+      code: "4001",
+      message: "Top",
+    })
+    expect(sanitize("x".repeat(300), 240)).toBe("x".repeat(239) + "…")
+    expect(sanitize("Fala: “uma frase longa que alguém disse durante a chamada” e 'outra'", 240)).toBe(
+      "Fala: \"…\" e 'outra'",
+    )
     expect(redact({ deviceToken: "abc", nested: { sdp: "v=0", ok: "x".repeat(600) }, list: [1, 2] })).toEqual({
       deviceToken: "[redacted]",
       nested: { sdp: "[redacted]", ok: "x".repeat(500) + "…" },

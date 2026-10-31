@@ -9,6 +9,7 @@ import {
   boundedContext,
   estimateTokens,
   key,
+  lateLabel,
   limits,
   logDiagnostics,
   makeVoice,
@@ -22,6 +23,7 @@ import type { VoiceContext } from "../src/voice"
 import { Preferences } from "../src/preferences/rpc"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { loadInstructions } from "../src/voice/instructions"
+import { VoiceWindow } from "../src/voice/window"
 
 const decode = Schema.decodeUnknownSync(Voice.Record)
 const encode = Schema.encodeSync(Voice.Record)
@@ -433,6 +435,117 @@ it.effect("master status is read-only data, sent only while it runs, and exclude
   }),
 )
 
+const settled = Effect.forEach(
+  Array.from({ length: 5 }),
+  () => Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 1))),
+  { discard: true },
+)
+
+const mestraUser = (id: string, text: string, created: number) =>
+  Schema.decodeUnknownSync(SessionMessage.Info)({ type: "user", id, text, time: { created } })
+const mestraReply = (id: string, text: string, completed?: number) =>
+  Schema.decodeUnknownSync(SessionMessage.Info)({
+    type: "assistant",
+    id,
+    agent: "mestra",
+    model: summaryModel,
+    time: { created: completed ?? 9_600, ...(completed === undefined ? {} : { completed }) },
+    content: text ? [{ type: "text", text }] : [],
+  })
+
+/** A Mestra transcript (newest first, as `order: "desc"` returns it) behind real voice memory. */
+function lateFixture(initial: Voice.Record, messages: SessionMessage.Info[]) {
+  const f = fixture(initial)
+  const active: Record<string, { type: "running" }> = {}
+  const ctx: VoiceContext = {
+    ...f.ctx,
+    session: { ...f.ctx.session, active: () => Effect.sync(() => ({ ...active })) },
+    message: { list: () => Effect.succeed({ data: messages, cursor: {} }) },
+  }
+  return { ...f, ctx, active }
+}
+
+it.effect("late replies: requests inside the call, replies no spoken turn followed, each once", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = lateFixture(record([{ ...turn("spoken", "A resposta A é sim.", "assistant"), at: 3_600 }]), [
+      mestraUser("msg_after", "Pedido de outra conversa", 10_000),
+      mestraReply("msg_running", "", undefined),
+      mestraReply("msg_tools", "", 9_500),
+      mestraReply("msg_b", "Resposta B", 9_000),
+      mestraUser("msg_req_b", "Pedido B", 4_000),
+      mestraReply("msg_a_final", "Resposta A final", 3_500),
+      mestraReply("msg_a_partial", "Resposta A parcial", 3_000),
+      mestraUser("msg_req_a", "Pedido A", 2_000),
+      mestraReply("msg_old", "Resposta antiga", 600),
+      mestraUser("msg_req_old", "Pedido antigo", 500),
+    ])
+    const voice = makeVoice(f.ctx, scope)
+    const window = { sessionID: "ses_m", since: 1_000 }
+    // A was voiced (a spoken turn at 3600 follows its reply at 3500); B was not; the rest lie outside the call.
+    expect(yield* voice.recordLate(window, 5_000)).toBe(1)
+    expect(f.read().turns.at(-1)).toMatchObject({
+      id: "agent:msg_b",
+      role: "user",
+      text: lateLabel + "Pedido: Pedido B\nResposta: Resposta B",
+    })
+    expect(yield* voice.recordLate(window, 5_000)).toBe(0)
+    expect(f.read().turns).toHaveLength(2)
+  }),
+)
+
+it.effect("the call's end takes its window once and records after the Mestra goes idle, for at most lateMs", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const messages = [mestraReply("msg_reply", "Pronto.", 50_000), mestraUser("msg_req", "Faça isso.", 0)]
+    const f = lateFixture(record([]), messages)
+    const voice = makeVoice(f.ctx, scope)
+    const open = () => Effect.sync(() => f.values.set(VoiceWindow.key, { sessionID: "ses_m", since: 0 }))
+    yield* open()
+    f.active["ses_m"] = { type: "running" }
+    yield* voice.settle()
+    yield* voice.settle()
+    expect(f.values.get(VoiceWindow.key)).toBeNull()
+    yield* TestClock.adjust(limits.latePollMs)
+    expect(f.read().turns).toEqual([])
+    delete f.active["ses_m"]
+    yield* TestClock.adjust(limits.latePollMs)
+    yield* settled
+    expect(f.read().turns.map((item) => item.id)).toEqual(["agent:msg_reply"])
+    // A Mestra still busy after `lateMs` is left alone.
+    const busy = lateFixture(record([]), messages)
+    const late = makeVoice(busy.ctx, scope)
+    busy.values.set(VoiceWindow.key, { sessionID: "ses_m", since: 0 })
+    busy.active["ses_m"] = { type: "running" }
+    yield* late.settle()
+    yield* TestClock.adjust(limits.lateMs + limits.latePollMs)
+    delete busy.active["ses_m"]
+    yield* TestClock.adjust(limits.latePollMs)
+    yield* settled
+    expect(busy.read().turns).toEqual([])
+  }),
+)
+
+it.effect("the voice window keeps a call's start, and restarts for a replaced Mestra or a stale window", () =>
+  Effect.gen(function* () {
+    const values = new Map<string, Schema.Json>()
+    const storage = {
+      get: (key: string) => Effect.sync(() => values.get(key)),
+      set: (key: string, value: Schema.Json) => Effect.sync(() => void values.set(key, value)),
+    }
+    yield* TestClock.setTime(10_000)
+    yield* VoiceWindow.open(storage, "ses_m")
+    yield* TestClock.adjust(60_000)
+    yield* VoiceWindow.open(storage, "ses_m")
+    expect(values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_m", since: 10_000 })
+    yield* VoiceWindow.open(storage, "ses_new")
+    expect(values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_new", since: 70_000 })
+    yield* TestClock.adjust(VoiceWindow.staleMs)
+    yield* VoiceWindow.open(storage, "ses_new")
+    expect(values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_new", since: 70_000 + VoiceWindow.staleMs })
+  }),
+)
+
 const diagnostic = {
   kind: "failed",
   reason: "service_error",
@@ -457,8 +570,10 @@ test("voice diagnostics carry categories and names only and log one line each", 
     Array.from({ length: 21 }, () => diagnostic),
     [{ ...diagnostic, kind: "crashed" }],
     [{ ...diagnostic, reason: "" }],
-    // Free text does not fit: speech or an error message cannot ride along.
+    // Free text does not fit in names; only `detail` carries an error message, bounded and sanitized.
     [{ ...diagnostic, code: "x".repeat(121) }],
+    [{ ...diagnostic, detail: "x".repeat(301) }],
+    [{ ...diagnostic, lastSent: "tipo com espaço".repeat(5) }],
     [{ ...diagnostic, events: [...diagnostic.events, "y".repeat(65)] }],
     [{ ...diagnostic, events: Array.from({ length: 25 }, () => "error") }],
     [{ ...diagnostic, app: { state: "suspended", locked: true } }],
@@ -466,7 +581,20 @@ test("voice diagnostics carry categories and names only and log one line each", 
     expect(() => decodeDiagnostics({ events })).toThrow()
   const logged: { message: unknown }[] = []
   const result = await Effect.runPromise(
-    logDiagnostics(decodeDiagnostics({ events: [diagnostic, { ...diagnostic, kind: "ended", reason: "user_end" }] })).pipe(
+    logDiagnostics(
+      decodeDiagnostics({
+        events: [
+          {
+            ...diagnostic,
+            // An app that did not sanitize still cannot put a quoted span or control characters in the log.
+            detail: "Unknown event 'x'.\n\"Alexandre disse uma frase bem longa aqui na chamada\"",
+            lastSent: "delegation.context.append",
+            lastSentSeconds: 1.26,
+          },
+          { ...diagnostic, kind: "ended", reason: "user_end" },
+        ],
+      }),
+    ).pipe(
       Effect.provideService(Logger.CurrentLoggers, new Set([Logger.make((entry) => logged.push({ message: entry.message }))])),
     ),
   )
@@ -488,6 +616,9 @@ test("voice diagnostics carry categories and names only and log one line each", 
     audio: "PlayAndRecord/VoiceChat",
     route: "out=Speaker in=MicrophoneBuiltIn",
     network: "wifi",
+    detail: "Unknown event 'x'. \"…\"",
+    lastSent: "delegation.context.append",
+    lastSentAgoSeconds: 1.3,
     events: "delegation.created,transport.connected,error",
   })
 })

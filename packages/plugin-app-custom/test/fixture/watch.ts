@@ -1,4 +1,4 @@
-import { Effect, PubSub, Schema, Stream } from "effect"
+import { Deferred, Effect, PubSub, Schema, Stream } from "effect"
 import type { Plugin } from "@opencode/plugin/effect"
 import { Form } from "@opencode/schema/form"
 import { Permission } from "@opencode/schema/permission"
@@ -9,7 +9,7 @@ import { SessionInbox } from "@opencode/schema/session-inbox"
 import { SessionMessage } from "@opencode/schema/session-message"
 import type { LiveActivity } from "../../src/live-activity/rpc"
 import { makeGateway, type GatewayOptions, type WatchContext } from "../../src/watch/gateway"
-import type { Sideband, SidebandFactory } from "../../src/watch/voice"
+import type { Sideband, SidebandClose, SidebandFactory } from "../../src/watch/voice"
 import type { Voice } from "../../src/voice/rpc"
 
 export const T = 1793104860000
@@ -23,6 +23,7 @@ export function storage() {
   return {
     values,
     get: (key: string) => Effect.sync(() => values.get(key)),
+    set: (key: string, value: Schema.Json) => Effect.sync(() => void values.set(key, value)),
     update: <A>(key: string, update: (current: Schema.Json | undefined) => readonly [Schema.Json, A]) =>
       Effect.sync(() => {
         const [next, result] = update(values.get(key))
@@ -111,7 +112,8 @@ export function world() {
       truncated: false,
     },
   }
-  const masters = { ensured: 0, id: "ses_master" }
+  /** `gate`, when set, holds `ensureMaster` until it completes: a cold Mestra. */
+  const masters = { ensured: 0, warmed: 0, id: "ses_master", gate: undefined as Deferred.Deferred<void> | undefined }
   const voice = { instructions: "Prompt de voz do servidor de teste." }
   const bus = Effect.runSync(PubSub.unbounded<ServerEvent>())
   const ctx: WatchContext = {
@@ -178,9 +180,15 @@ export function world() {
         )) as WatchContext["event"]["subscribe"],
     },
     ensureMaster: () =>
+      Effect.suspend(() => (masters.gate ? Deferred.await(masters.gate) : Effect.void)).pipe(
+        Effect.map(() => {
+          masters.ensured += 1
+          return masters.id
+        }),
+      ),
+    warmMaster: () =>
       Effect.sync(() => {
-        masters.ensured += 1
-        return masters.id
+        masters.warmed += 1
       }),
     memory: {
       context: () => Effect.succeed(memory.context),
@@ -206,15 +214,19 @@ export function world() {
   }
 }
 
-export function assistant(id: string, text: string) {
+export function assistant(id: string, text: string, completed = T) {
   return Schema.decodeUnknownSync(SessionMessage.Assistant)({
     id,
     type: "assistant",
     agent: "mestra",
     model: { providerID: "llm-proxy", id: "gpt-6.1-sol-ultrafast" },
-    time: { created: T, completed: T },
+    time: { created: Math.min(T, completed), completed },
     content: [{ type: "text", text }],
   })
+}
+
+export function user(id: string, text: string, created = T) {
+  return Schema.decodeUnknownSync(SessionMessage.User)({ id, type: "user", text, time: { created } })
 }
 
 export const answerSDP = [
@@ -276,13 +288,15 @@ export function proxy() {
   }
 }
 
-/** Fake sidebands: what the gateway sent and a way to deliver GPT Live events. */
+/** Fake sidebands: what the gateway sent and a way to deliver GPT Live events or close from the service's side. */
 export function sidebands() {
   const opened: {
     url: string
     headers: Record<string, string>
     sent: string[]
     deliver: (event: object) => void
+    /** The service closes the socket, by default abnormally (1011). */
+    remoteClose: (close?: Partial<SidebandClose>) => void
     closed: boolean
   }[] = []
   const factory: SidebandFactory = (url, headers, handlers) => {
@@ -292,6 +306,10 @@ export function sidebands() {
       sent: [] as string[],
       closed: false,
       deliver: (event: object) => handlers.message(JSON.stringify(event)),
+      remoteClose: (close: Partial<SidebandClose> = {}) => {
+        entry.closed = true
+        handlers.closed({ code: 1011, reason: "", clean: false, transportError: false, ...close })
+      },
     }
     opened.push(entry)
     const socket: Sideband = {
@@ -300,7 +318,7 @@ export function sidebands() {
         // The real service answers session.close with session.closed and closes the socket.
         if (text.includes('"session.close"')) {
           entry.closed = true
-          handlers.closed()
+          handlers.closed({ code: 1000, reason: "", clean: true, transportError: false })
         }
       },
       close: () => {

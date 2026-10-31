@@ -195,7 +195,8 @@ All copy pt-BR, theme colors from `openchamber-dark` (no theme picker on the wat
    option (recommended first, orange), "Responder por voz" dictation for `allowText`; permissions show the summary
    and Negar / Permitir uma vez / Sempre permitir. Success returns to the dashboard with haptic feedback.
 3. **Voz** (`app-2-voz-mestra.png`): CallKit call; mascot with live audio levels, `Sessão mestra` status line from
-   `master` events, the last two captions, timer, Mute and End buttons; errors in pt-BR with a retry.
+   `master` events, the last two captions, timer, Mute and End buttons; errors in pt-BR with a retry. A call the
+   service or the server ended shows `Encerrada` and why (rev. 2026-10-31), with the same retry.
 
 ## Packaging (iOS side)
 
@@ -262,8 +263,8 @@ arrived for 30 s, checked at each 5 s renewal tick (renewals stop with the heart
 watch sends the next heartbeat 5 s after the previous one settles, with an 8 s timeout, so a single stuck heartbeat
 could end a call whose audio was fine. The llm-proxy lease is renewed with the iPhone's rules: 408, 429, any 5xx or
 network errors are retried until the confirmed lease (minus 10 s) runs out; any other refusal ends the call. An
-upstream `error` is logged with its `type` and `code` (never the message) and passed to the watch as `voice_error`;
-it does not end the call, which ends when the service closes the sideband (`session_closed`, `sideband_closed`). The offer must be SDP with `m=audio` and Opus 48 kHz (`400
+upstream `error` is passed to the watch as `voice_error`; it does not end the call, which ends when the service
+closes the sideband (`session_closed`, `sideband_closed`). The offer must be SDP with `m=audio` and Opus 48 kHz (`400
 invalid_offer`); the answer needs `a=ice-lite` and a UDP candidate (`502 unsupported_answer`). Voice IDs fall back
 to `rio` then `cove` only on an explicit voice rejection, as on the iPhone. `initial_items` come from
 `custom.voice.context` (2 s budget; without it the call starts without memory): summary and master state as labelled
@@ -272,7 +273,32 @@ user data items, turns with the interruption annotation. Captions accumulate `in
 true` and appends it to memory as `<callID>:<turnID>`; `custom.voice.end` runs when the call ends. An ended call's
 events stay readable for 60 s. A new call ends the device's previous one (`reason: "replaced"`). Other end reasons:
 `client_end`, `heartbeat_timeout`, `lease_refused`, `lease_lost`, `max_duration`, `session_closed`,
-`sideband_closed`, `shutdown`.
+`sideband_closed`, `shutdown`. The watch shows every reason but its own `client_end` and `replaced` as a notice
+(`WatchVoiceEnd`, for example "A conversa foi encerrada pelo serviço de voz." for `sideband_closed`) with Fechar and
+Tentar de novo, and reports it in its diagnostics as `voice.failed` with `stage: ended`. When the media ends first
+(`sessionEnded`), it waits 3 s for that reason before showing the generic service notice.
+
+**Voice diagnostics (rev. 2026-10-31).** Three log lines, never a transcript or speech; every service text goes
+through `sanitize` (`src/voice/sanitize.ts`: control characters out, quoted spans over 32 characters as `"…"`,
+whitespace collapsed, bounded), since an error message can quote the request it rejects:
+
+- `Watch call upstream error`: `call`, then the error's `type`, `code`, `param` (120), `message` (240) and `eventID`,
+  read from `error.*` or else the event's top level (a string `error` is the message; empty or non-scalar values are
+  left out); then the correlation: `elapsedMs` since the call started, `lastSent` (the type of the last command this
+  server sent on the sideband, or `none`) with `lastSentAgoMs`, and `recent`, the last 12 event types received.
+- `Watch call sideband closed`: `call`, `by` (`local` when this server sent `session.close` first, `remote`
+  otherwise), the WebSocket `code`, `reason` (120) and `clean`, `transportError: true` when the socket failed before
+  closing, and the same correlation.
+- `Watch call ended`: `deviceID`, `call`, `reason`, `released` (the lease `DELETE` status) and `elapsedMs`.
+
+**Reader lanes and warm-up (rev. 2026-10-31).** The sideband reader never waits: memory appends go to a memory
+lane and delegation admissions (where a cold Mestra took ~6 s to wake its Location) to a delegation lane. Each lane
+runs its jobs one after another, in arrival order, in the gateway scope; the delegator still drops repeated item IDs.
+An error or a close is therefore read and logged the moment it arrives. When a call ends, it waits for the delegation
+lane (at most 20 s), so a request it received reaches the Mestra, and for the memory lane (at most 2 s) before
+`custom.voice.end`. At the start of a call the server warms the current Mestra (`warmMaster`): it reads the pointer,
+skips a missing or archived session and lists the MCP servers of the session's Location, which boots that Location
+(kept for the server's life) without creating, changing or prompting a session.
 
 **Delegation.** Like `VoiceMaster`: `custom.master.ensure` with `voice: true` (the Mestra's voice-call note, removed by
 the call's memory `end`), one replacement ensure when the prompt fails, prompt
@@ -283,7 +309,8 @@ are spoken, at most one every 5 s keeping only the latest; results and failures 
 The result is the latest assistant text after the admitted prompt, read once the Mestra leaves the running set
 (`session.execution.succeeded` can arrive while the drain still lists it; it is checked again every second, up to
 15 times). Appends go to the latest delegation item in parts of at most 500 UTF-8 bytes; every line is also a
-`master` event (`running`, or `idle` for results and failures). Ending the call stops narration, never the Mestra.
+`master` event (`running`, or `idle` for results and failures). Ending the call stops narration, never the Mestra; a
+reply that arrives after the end reaches voice memory as described in `voice-session.md` (late Mestra replies).
 
 **Sideband verification (2026-10-27, Mac, spike macOS client, audio-only offer without a data channel).**
 `session.delegation = {type: "client"}`, the iPhone's setting, delivers `delegation.created` on the sideband

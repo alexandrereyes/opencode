@@ -1,6 +1,7 @@
-import { Clock, Deferred, Effect, Exit, Option, Queue, Schema, Scope } from "effect"
+import { Clock, Deferred, Effect, Exit, Fiber, Option, Queue, Schema, Scope } from "effect"
 import { Voice } from "../voice/rpc.js"
 import { masterLabel, summaryLabel, turnText } from "../voice/index.js"
+import { sanitize } from "../voice/sanitize.js"
 import { makeDelegator, type DelegationContext } from "./delegation.js"
 import { fail } from "./failure.js"
 import { Watch } from "./rpc.js"
@@ -22,6 +23,10 @@ export const limits = {
   createMs: 25_000,
   memoryMs: 2_000,
   closeMs: 4_000,
+  /** An ending call still lets delegations it received reach the Mestra (a cold Mestra took ~6 s), at most this long. */
+  admissionMs: 20_000,
+  /** Event types kept, newest last, to correlate an upstream error or close with what led to it. */
+  recentEvents: 12,
   /** Lease margin from the iPhone contract: a lease is considered lost this long before it expires. */
   leaseMarginMs: 10_000,
   appendBytes: 500,
@@ -39,10 +44,17 @@ export type Proxy = {
 
 /** The GPT Live sideband (`/v1/live/<call>`), a WebSocket in production. */
 export type Sideband = { readonly send: (text: string) => void; readonly close: () => void }
+/** How the sideband closed: the WebSocket close code and reason, and whether a transport error preceded it. */
+export type SidebandClose = {
+  readonly code: number
+  readonly reason: string
+  readonly clean: boolean
+  readonly transportError: boolean
+}
 export type SidebandFactory = (
   url: string,
   headers: Record<string, string>,
-  handlers: { readonly message: (text: string) => void; readonly closed: () => void },
+  handlers: { readonly message: (text: string) => void; readonly closed: (close: SidebandClose) => void },
 ) => Sideband
 
 /** Voice memory (`custom.voice`, scope `global`), shared with the iPhone. */
@@ -55,6 +67,8 @@ export type Memory = {
 export type VoiceContext = DelegationContext & {
   memory: Memory
   instructions: () => Effect.Effect<string, unknown>
+  /** Boots an existing Mestra's Location before the first delegation needs it; never creates a session. */
+  warmMaster?: () => Effect.Effect<void, unknown>
 }
 
 type Call = {
@@ -77,6 +91,15 @@ type Call = {
   captions: { user: string; assistant: string }
   ending?: Deferred.Deferred<void>
   ended?: string
+  /** Serial work off the sideband reader, in order: memory appends and delegation admissions. */
+  memoryTail?: Fiber.Fiber<void>
+  delegationTail?: Fiber.Fiber<void>
+  /** Correlation for diagnostics: the last command sent (type only) and the latest received event types. */
+  lastSent?: { readonly type: string; readonly at: number }
+  recent: string[]
+  /** Set when this server asked the sideband to close; a close without it came from the other side. */
+  closingAt?: number
+  sidebandClose?: SidebandClose & { readonly by: "local" | "remote" }
 }
 
 const Lease = Schema.Struct({
@@ -109,14 +132,15 @@ const SidebandEvent = Schema.Struct({
       interrupted: Schema.optionalKey(Schema.Boolean),
     }),
   ),
-  error: Schema.optionalKey(
-    Schema.Struct({
-      type: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      code: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    }),
-  ),
+  // Free-form on purpose: an error's fields must reach the log whatever their shape, nested or at the top level.
+  error: Schema.optionalKey(Schema.Unknown),
+  code: Schema.optionalKey(Schema.Unknown),
+  message: Schema.optionalKey(Schema.Unknown),
+  param: Schema.optionalKey(Schema.Unknown),
+  event_id: Schema.optionalKey(Schema.Unknown),
 })
 const decodeEvent = Schema.decodeUnknownOption(Schema.fromJsonString(SidebandEvent))
+const decodeType = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({ type: Schema.String })))
 
 /**
  * GPT Live calls for paired watches: the gateway reserves the llm-proxy lease, creates the call, attaches the
@@ -178,6 +202,7 @@ export function makeVoice(input: {
       seq: 0,
       changed: Deferred.makeUnsafe<void>(),
       captions: { user: "", assistant: "" },
+      recent: [],
     }
     calls.set(call.id, call)
     active.set(deviceID, call.id)
@@ -221,12 +246,19 @@ export function makeVoice(input: {
       codexHeaders,
       {
         message: (text) => Queue.offerUnsafe(call.inbox, text),
-        closed: () => {
+        closed: (close) => {
+          call.sidebandClose = { ...close, by: call.closingAt === undefined ? "remote" : "local" }
           Deferred.doneUnsafe(call.sidebandClosed, Effect.void)
           if (!call.ending) Queue.offerUnsafe(call.inbox, JSON.stringify({ type: "sideband.closed" }))
         },
       },
     )
+    // A cold Mestra took ~6 s to take the first delegation; booting it now overlaps the greeting.
+    if (ctx.warmMaster)
+      yield* ctx.warmMaster().pipe(
+        Effect.catchCause((cause) => Effect.logWarning("Watch call could not warm the Mestra", { cause })),
+        Effect.forkIn(call.scope),
+      )
     yield* Effect.sleep(limits.renewMs).pipe(Effect.andThen(renew(call)), Effect.forever, Effect.forkIn(call.scope))
     yield* Effect.sleep(limits.maxCallMs).pipe(
       Effect.andThen(Effect.suspend(() => end(call, "max_duration"))),
@@ -302,8 +334,14 @@ export function makeVoice(input: {
       if (transient && (yield* Clock.currentTimeMillis) >= call.leaseUntil) return yield* end(call, "lease_lost")
     })
 
+  /**
+   * The sideband reader. It never waits for slow work: memory appends and Mestra admissions go to the call's lanes,
+   * so an error or a close is read (and logged) the moment it arrives, even while a cold Mestra wakes up.
+   */
   const receive = Effect.fn("Watch.sideband")(function* (call: Call, text: string) {
     const event = Option.getOrUndefined(decodeEvent(text))
+    call.recent.push(event?.type ?? Option.getOrUndefined(decodeType(text))?.type ?? "unreadable")
+    if (call.recent.length > limits.recentEvents) call.recent.splice(0, call.recent.length - limits.recentEvents)
     if (!event || call.ended) return
     switch (event.type) {
       case "session.started":
@@ -321,38 +359,79 @@ export function makeVoice(input: {
         call.captions[role] = ""
         if (!spoken) return
         yield* emit(call, { type: "caption", role, text: spoken, final: true })
-        return yield* remember(call, {
-          id: `${call.id}:${event.turn?.id ?? call.seq}`,
-          role,
-          text: spoken,
-          interrupted:
-            event.turn?.interrupted === true || ["interrupted", "cancelled"].includes(event.turn?.status ?? ""),
-        })
+        return yield* lane(
+          call,
+          "memoryTail",
+          remember(call, {
+            id: `${call.id}:${event.turn?.id ?? call.seq}`,
+            role,
+            text: spoken,
+            interrupted:
+              event.turn?.interrupted === true || ["interrupted", "cancelled"].includes(event.turn?.status ?? ""),
+          }),
+        )
       }
       case "delegation.created": {
         const item = event.item
         if (item?.target !== "client" || item.type !== "delegation" || !item.id) return
+        const id = item.id
         const request = (item.content ?? [])
           .flatMap((part) => (part.type === "input_text" && part.text ? [part.text] : []))
           .join("")
         if (!request.trim()) return
-        return yield* delegator(call).pipe(
-          Effect.flatMap((delegate) => (delegate ? delegate.ask(item.id ?? "", request) : Effect.void)),
+        // Admissions stay in order and each item once (the delegator remembers item IDs).
+        return yield* lane(
+          call,
+          "delegationTail",
+          delegator(call).pipe(Effect.flatMap((delegate) => (delegate ? delegate.ask(id, request) : Effect.void))),
         )
       }
-      case "error":
-        // Most errors leave the session open; it ends when the service closes the sideband. Logged without the message.
+      case "error": {
+        // Most errors leave the session open; it ends when the service closes the sideband.
         yield* Effect.logWarning("Watch call upstream error", {
-          type: (event.error?.type ?? "").slice(0, 64),
-          code: (event.error?.code ?? "").slice(0, 64),
+          call: call.id,
+          ...upstreamError(event),
+          ...(yield* correlation(call)),
         })
         return yield* emit(call, { type: "error", code: "voice_error", message: "O serviço de voz informou um erro." })
+      }
       case "session.closed":
         return yield* end(call, "session_closed")
       case "sideband.closed":
         return yield* end(call, "sideband_closed")
     }
   })
+
+  /** Runs `work` after the lane's previous job, in the gateway scope: ending the call never cuts it midway. */
+  const lane = (call: Call, name: "memoryTail" | "delegationTail", work: Effect.Effect<void>) =>
+    Effect.gen(function* () {
+      const previous = call[name]
+      call[name] = yield* (previous ? Fiber.await(previous) : Effect.void).pipe(
+        Effect.andThen(work),
+        Effect.forkIn(input.scope, { startImmediately: true }),
+      )
+    })
+
+  const settleLane = (fiber: Fiber.Fiber<void> | undefined, ms: number) =>
+    fiber ? Fiber.await(fiber).pipe(Effect.timeoutOption(ms), Effect.asVoid) : Effect.void
+
+  /** Sends one command on the sideband and remembers its type for the next diagnostic. */
+  const send = (call: Call, command: { readonly type: string } & Record<string, unknown>) =>
+    Effect.gen(function* () {
+      call.lastSent = { type: command.type, at: yield* Clock.currentTimeMillis }
+      call.sideband?.send(JSON.stringify(command))
+    })
+
+  /** When in the call it happened, and what preceded it: the last command sent and the latest events received. */
+  const correlation = (call: Call) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.map((now) => ({
+        elapsedMs: now - call.startedAt,
+        lastSent: call.lastSent?.type ?? "none",
+        ...(call.lastSent ? { lastSentAgoMs: now - call.lastSent.at } : {}),
+        recent: call.recent.join(","),
+      })),
+    )
 
   const delegators = new WeakMap<Call, ReturnType<typeof makeDelegator>>()
   const delegator = (call: Call) =>
@@ -365,17 +444,17 @@ export function makeVoice(input: {
         ctx,
         {
           append: (itemID, text) =>
-            Effect.sync(() => {
-              for (const chunk of chunks(text))
-                call.sideband?.send(
-                  JSON.stringify({
-                    type: "delegation.context.append",
-                    delegation_item_id: itemID,
-                    channel: "speakable",
-                    content: [{ type: "input_text", text: chunk }],
-                  }),
-                )
-            }),
+            Effect.forEach(
+              chunks(text),
+              (chunk) =>
+                send(call, {
+                  type: "delegation.context.append",
+                  delegation_item_id: itemID,
+                  channel: "speakable",
+                  content: [{ type: "input_text", text: chunk }],
+                }),
+              { discard: true },
+            ),
           master: (state, text) => emit(call, { type: "master", state, text }),
         },
         call.scope,
@@ -403,11 +482,26 @@ export function makeVoice(input: {
       const ending = Deferred.makeUnsafe<void>()
       call.ending = ending
       const teardown = Effect.gen(function* () {
-        if (call.sideband) {
-          call.sideband.send(JSON.stringify({ type: "session.close" }))
+        if (call.sideband && !call.sidebandClose) {
+          call.closingAt = yield* Clock.currentTimeMillis
+          yield* send(call, { type: "session.close" })
           yield* Deferred.await(call.sidebandClosed).pipe(Effect.timeoutOption(limits.closeMs))
           call.sideband.close()
         }
+        if (call.sideband)
+          yield* Effect.logInfo("Watch call sideband closed", {
+            call: call.id,
+            by: call.sidebandClose?.by ?? "local",
+            ...(call.sidebandClose
+              ? {
+                  code: call.sidebandClose.code,
+                  reason: sanitize(call.sidebandClose.reason, 120),
+                  clean: call.sidebandClose.clean,
+                  ...(call.sidebandClose.transportError ? { transportError: true } : {}),
+                }
+              : { code: "none" }),
+            ...(yield* correlation(call)),
+          })
         const released = yield* http(
           "DELETE",
           `/_gpt-live/sessions/${call.sessionId}?generation=${call.generation}`,
@@ -419,9 +513,14 @@ export function makeVoice(input: {
         call.ended = reason
         yield* Effect.logInfo("Watch call ended", {
           deviceID: call.deviceID,
+          call: call.id,
           reason,
           released: Option.isSome(released) ? released.value.status : 0,
+          elapsedMs: (yield* Clock.currentTimeMillis) - call.startedAt,
         })
+        // The memory `end` looks for Mestra replies to this call's requests: they and its turns go in first.
+        yield* settleLane(call.delegationTail, limits.admissionMs)
+        yield* settleLane(call.memoryTail, limits.memoryMs)
         const ctx = input.ctx()
         if (ctx)
           yield* ctx.memory.end().pipe(
@@ -507,6 +606,37 @@ function message(role: "user" | "assistant", text: string) {
   return { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] }
 }
 
+const ErrorFields = Schema.Struct({
+  type: Schema.optionalKey(Schema.Unknown),
+  code: Schema.optionalKey(Schema.Unknown),
+  message: Schema.optionalKey(Schema.Unknown),
+  param: Schema.optionalKey(Schema.Unknown),
+  event_id: Schema.optionalKey(Schema.Unknown),
+})
+const decodeErrorFields = Schema.decodeUnknownOption(ErrorFields)
+
+/**
+ * An upstream `error` event's fields for the log, from `error.*` or else the top level (a string `error` is its
+ * message). Every value is sanitized and bounded; the message may quote a request, never a transcript.
+ */
+export function upstreamError(event: typeof ErrorFields.Type & { readonly error?: unknown }) {
+  const nested = Option.getOrUndefined(decodeErrorFields(event.error))
+  const field = (name: keyof typeof ErrorFields.Type, max: number) => {
+    const value = nested?.[name] ?? (name === "type" ? undefined : event[name])
+    return typeof value === "string" || typeof value === "number" ? sanitize(String(value), max) : undefined
+  }
+  const message = field("message", 240) ?? (typeof event.error === "string" ? sanitize(event.error, 240) : undefined)
+  return Object.fromEntries(
+    Object.entries({
+      type: field("type", 64),
+      code: field("code", 64),
+      param: field("param", 120),
+      message,
+      eventID: field("event_id", 64),
+    }).filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== ""),
+  )
+}
+
 /** Same rule as the iPhone's `VoiceLeaseClock.isTransient`: 408, 429 and any 5xx are retried. */
 function transientStatus(status: number) {
   return status === 408 || status === 429 || status >= 500
@@ -570,9 +700,20 @@ export const bunSideband: SidebandFactory = (url, headers, handlers) => {
   socket.addEventListener("open", () => {
     for (const text of queued.splice(0)) socket.send(text)
   })
+  const failed = { transport: false }
   socket.addEventListener("message", (event) => handlers.message(String(event.data)))
-  socket.addEventListener("close", () => handlers.closed())
-  socket.addEventListener("error", () => socket.close())
+  socket.addEventListener("close", (event) =>
+    handlers.closed({
+      code: event.code,
+      reason: event.reason,
+      clean: event.wasClean,
+      transportError: failed.transport,
+    }),
+  )
+  socket.addEventListener("error", () => {
+    failed.transport = true
+    socket.close()
+  })
   return {
     send: (text) => (socket.readyState === WebSocket.OPEN ? socket.send(text) : queued.push(text)),
     close: () => socket.close(),
