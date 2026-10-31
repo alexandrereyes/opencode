@@ -807,7 +807,11 @@ test("already-active shortcut verifies the launchd PID before claiming success",
     expect(failure.message).toContain("no service, launcher or release pointer was changed")
     expect(failure.message).toContain("Healthcheck PID")
     expect(failure.message).toContain(`lsof -nP -iTCP:${server.port} -sTCP:LISTEN`)
-    expect(failure.message).toContain(`launchctl print gui/${process.getuid!()}/${label}`)
+    expect(failure.message).toContain(
+      process.platform === "linux"
+        ? `systemctl --user status ${label}.service`
+        : `launchctl print gui/${process.getuid!()}/${label}`,
+    )
     service.pid = async () => process.pid
     await activate(home, first, { skipBackup: true }, service)
     expect(await pointer(home, "current")).toBe(first)
@@ -1127,26 +1131,30 @@ test("the launcher pins the resources hub port the 4096 proxy forwards to", asyn
   expect(custom.server).toContain("export OPENCODE_RESOURCES_HUB_PORT='4300'")
 })
 
-test("proxy installation only touches the job that runs this runtime's proxy", async () => {
-  const home = await fixture()
-  const agents = path.join(home, "agents")
-  await mkdir(`${home}/bin`, { recursive: true })
-  await mkdir(agents)
-  expect(await installProxy(home, agents)).toContain("skipped")
-  const job = (program: string) =>
-    Bun.write(
-      `${agents}/${proxyLabel}.plist`,
-      `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>${proxyLabel}</string><key>ProgramArguments</key><array><string>/opt/homebrew/bin/node</string><string>${program.replaceAll("&", "&amp;")}</string></array></dict></plist>`,
+// The Mac runtime reads its LaunchAgent with /usr/bin/plutil; on Linux, installMacProxy (below) covers the proxy.
+test.skipIf(process.platform !== "darwin")(
+  "proxy installation only touches the job that runs this runtime's proxy",
+  async () => {
+    const home = await fixture()
+    const agents = path.join(home, "agents")
+    await mkdir(`${home}/bin`, { recursive: true })
+    await mkdir(agents)
+    expect(await installProxy(home, agents)).toContain("skipped")
+    const job = (program: string) =>
+      Bun.write(
+        `${agents}/${proxyLabel}.plist`,
+        `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>${proxyLabel}</string><key>ProgramArguments</key><array><string>/opt/homebrew/bin/node</string><string>${program.replaceAll("&", "&amp;")}</string></array></dict></plist>`,
+      )
+    await job("/elsewhere/bin/proxy.mjs")
+    expect(await installProxy(home, agents)).toContain("skipped")
+    await job(`${home}/bin/proxy.mjs`)
+    await Bun.write(
+      `${home}/bin/proxy.mjs`,
+      await Bun.file(path.join(import.meta.dir, "../script/custom-proxy.mjs")).text(),
     )
-  await job("/elsewhere/bin/proxy.mjs")
-  expect(await installProxy(home, agents)).toContain("skipped")
-  await job(`${home}/bin/proxy.mjs`)
-  await Bun.write(
-    `${home}/bin/proxy.mjs`,
-    await Bun.file(path.join(import.meta.dir, "../script/custom-proxy.mjs")).text(),
-  )
-  expect(await installProxy(home, agents)).toBe("proxy unchanged")
-})
+    expect(await installProxy(home, agents)).toBe("proxy unchanged")
+  },
+)
 
 /** Runs `custom-proxy.mjs` on a free port against fake server and hub listeners that record what they receive. */
 async function proxyFixture(config: Record<string, unknown> = { password: "pw" }) {
@@ -1500,7 +1508,10 @@ async function macProxyFixture(options: { program?: string; installed?: boolean;
     home,
     async mac(args: string[]) {
       calls.push(args)
-      if (args[0] === "/usr/bin/plutil")
+      // Like the real `mac`: an absolute program outside /Users becomes a Linux path the Mac cannot run.
+      if (args[0]?.startsWith("/") && !args[0].startsWith("/Users/"))
+        return { code: 1, stdout: "", stderr: "posix_spawn: no such file or directory" }
+      if (args[0] === "plutil")
         return {
           code: 0,
           stdout: JSON.stringify({ ProgramArguments: ["/opt/homebrew/bin/node", program] }),
@@ -1519,7 +1530,7 @@ test("a Linux activation updates the Mac's 4096 proxy through /Users and restart
   expect(await installMacProxy(mac.host)).toBe("proxy updated and restarted")
   expect(await Bun.file(mac.target).text()).toBe(source)
   expect(mac.calls).toEqual([
-    ["/usr/bin/plutil", "-convert", "json", "-o", "-", mac.plist],
+    ["plutil", "-convert", "json", "-o", "-", mac.plist],
     ["id", "-u"],
     ["launchctl", "kickstart", "-k", `gui/501/${proxyLabel}`],
   ])
