@@ -1159,13 +1159,20 @@ test.skipIf(process.platform !== "darwin")(
 /** Runs `custom-proxy.mjs` on a free port against fake server and hub listeners that record what they receive. */
 async function proxyFixture(config: Record<string, unknown> = { password: "pw" }) {
   const home = await fixture()
-  const seen: { target: string; path: string; authorization: string | null; cookie: string | null }[] = []
+  const seen: {
+    target: string
+    path: string
+    authorization: string | null
+    cookie: string | null
+    directory: string | null
+  }[] = []
   const record = (target: string, request: Request) =>
     seen.push({
       target,
       path: new URL(request.url).pathname + new URL(request.url).search,
       authorization: request.headers.get("authorization"),
       cookie: request.headers.get("cookie"),
+      directory: request.headers.get("x-opencode-directory"),
     })
   const echo = {
     message: (socket: { send(value: string): unknown }, message: string | Buffer) =>
@@ -1221,6 +1228,7 @@ async function proxyFixture(config: Record<string, unknown> = { password: "pw" }
     await Bun.sleep(50)
   seen.length = 0
   return {
+    home,
     port,
     base,
     seen,
@@ -1351,6 +1359,37 @@ test("the 4096 proxy refuses requests without the server's credentials and never
   }
 })
 
+test("the 4096 proxy maps directories of an old layout (location-aliases.json) for authorized requests only", async () => {
+  if (!Bun.which("node")) return
+  const proxy = await proxyFixture()
+  try {
+    // Clients that kept a directory open across a move (Linux -> Mac) still send the old path.
+    await Bun.write(`${proxy.home}/location-aliases.json`, JSON.stringify([{ from: "/home/u", to: "/Users/u" }]))
+    const send = (directory: string, header: string) =>
+      fetch(`${proxy.base}/api/session?${new URLSearchParams({ "location[directory]": directory, limit: "5" })}`, {
+        headers: { authorization: basic("pw"), "x-opencode-directory": encodeURIComponent(header) },
+      })
+    expect((await send("/home/u/Dev/app", "/home/u/Dev/app/sub")).status).toBe(200)
+    expect((await send("/home/u2/x", "/home/u")).status).toBe(200)
+    const forwarded = proxy.seen.map((entry) => ({
+      directory: new URL(entry.path, "http://x").searchParams.get("location[directory]"),
+      limit: new URL(entry.path, "http://x").searchParams.get("limit"),
+      header: entry.directory === null ? null : decodeURIComponent(entry.directory),
+    }))
+    expect(forwarded).toEqual([
+      { directory: "/Users/u/Dev/app", limit: "5", header: "/Users/u/Dev/app/sub" },
+      // Only whole path components match: /home/u2 is not under /home/u.
+      { directory: "/home/u2/x", limit: "5", header: "/Users/u" },
+    ])
+    proxy.seen.length = 0
+    const refused = await fetch(`${proxy.base}/api/session?location%5Bdirectory%5D=%2Fhome%2Fu`)
+    expect(refused.status).toBe(401)
+    expect(proxy.seen).toEqual([])
+  } finally {
+    await proxy.close()
+  }
+})
+
 test("the 4096 proxy refuses WebSocket upgrades without credentials and relays authorized ones", async () => {
   if (!Bun.which("node")) return
   const proxy = await proxyFixture()
@@ -1389,8 +1428,8 @@ test("the 4096 proxy forwards /resources to the hub with its ticket only, never 
       await echoed(`ws://127.0.0.1:${proxy.port}/resources/x/stream?ticket=t`, { authorization: basic("pw") }),
     ).toBe("echo:ping")
     expect(proxy.seen).toEqual([
-      { target: "hub", path: "/resources/x/snapshot?ticket=t", authorization: null, cookie: null },
-      { target: "hub", path: "/resources/x/stream?ticket=t", authorization: null, cookie: null },
+      { target: "hub", path: "/resources/x/snapshot?ticket=t", authorization: null, cookie: null, directory: null },
+      { target: "hub", path: "/resources/x/stream?ticket=t", authorization: null, cookie: null, directory: null },
     ])
     expect(
       (await fetch(`${proxy.base}/resources/x/snapshot?ticket=t`, { headers: { origin: "https://evil.example" } }))
