@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, rm, stat } from "node:fs/promises"
+import { mkdtemp, readdir, readlink, rm, stat } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { installMacController } from "../script/custom-mac-controller"
+import { installMacController, macControllerBundle } from "../script/custom-mac-controller"
 import { systemd } from "../script/custom-release"
 
 const directories: string[] = []
@@ -20,6 +20,7 @@ async function fixture(options: { keychain?: boolean; verify?: number } = {}) {
   const runtime = path.join(home, ".local/share/opencode-custom-v2")
   const keychain = path.join(runtime, "signing/signing.keychain-db")
   if (options.keychain ?? true) await Bun.write(keychain, "keychain")
+  const app = path.join(runtime, "mac-controller", macControllerBundle)
   const calls: string[][] = []
   const state = { verify: options.verify ?? 0 }
   const host = {
@@ -29,41 +30,46 @@ async function fixture(options: { keychain?: boolean; verify?: number } = {}) {
       // Like the real `mac`: an absolute program outside /Users becomes a Linux path the Mac cannot run.
       if (args[0]?.startsWith("/") && !args[0].startsWith("/Users/"))
         return { code: 1, stdout: "", stderr: "posix_spawn: no such file or directory" }
+      // Like clang under `mac`, which runs without a umask.
       if (args[0] === "clang") await Bun.write(args[args.indexOf("-o") + 1], "mach-o", { mode: 0o777 })
       if (args[0] === "security" && args[1] === "find-identity")
         return { code: 0, stdout: `  1) ${identity} "OpenCode Custom Local Signing"\n`, stderr: "" }
-      if (args[0] === "codesign" && args[1] === "--verify" && args.at(-1) === path.join(runtime, "bin/mac-controller"))
+      if (args[0] === "codesign" && args[1] === "--verify" && args.at(-1) === app)
         return { code: state.verify, stdout: "", stderr: state.verify ? "invalid signature" : "" }
       return { code: 0, stdout: "", stderr: "" }
     },
   }
-  return { host, calls, state, keychain, target: path.join(runtime, "bin/mac-controller") }
+  return { host, calls, state, keychain, runtime, app, link: path.join(runtime, "bin/mac-controller") }
 }
 
-test("a Linux activation compiles and signs the Mac controller once, through mac, as local.opencode.custom", async () => {
+test("a Linux activation compiles and signs the Mac controller app once, through mac, as local.opencode.custom", async () => {
   const mac = await fixture()
+  // The bare binary of the first version is replaced by the link.
+  await Bun.write(mac.link, "old bare controller")
+  await Bun.write(`${mac.link}.sha256`, "old stamp")
   expect(await installMacController(mac.host)).toBe("mac controller installed")
-  expect(await Bun.file(mac.target).text()).toBe("mach-o")
-  expect((await stat(mac.target)).mode & 0o777).toBe(0o755)
-  expect((await stat(`${mac.target}.sha256`)).mode & 0o777).toBe(0o644)
+  const executable = path.join(mac.app, "Contents/MacOS/mac-controller")
+  expect(await Bun.file(executable).text()).toBe("mach-o")
+  expect(await Bun.file(path.join(mac.app, "Contents/Info.plist")).text()).toContain(
+    "<key>CFBundleIdentifier</key><string>local.opencode.custom</string>",
+  )
+  expect(await readlink(mac.link)).toBe(`../mac-controller/${macControllerBundle}/Contents/MacOS/mac-controller`)
+  expect(await Bun.file(mac.link).text()).toBe("mach-o")
+  expect(await Bun.file(`${mac.link}.sha256`).exists()).toBe(false)
+  for (const file of [mac.app, path.join(mac.app, "Contents"), path.dirname(executable), executable])
+    expect((await stat(file)).mode & 0o777).toBe(0o755)
+  expect((await stat(path.join(mac.app, "Contents/Info.plist"))).mode & 0o777).toBe(0o644)
   expect(mac.calls.map((args) => args[0])).toEqual(["clang", "security", "security", "codesign", "codesign"])
-  expect(mac.calls[3]).toEqual(
-    expect.arrayContaining(["--sign", identity, "--identifier", "local.opencode.custom", "--keychain", mac.keychain]),
-  )
   expect(mac.calls[1]).toEqual(["security", "unlock-keychain", "-p", "", mac.keychain])
-  // The work directory is gone; only the controller and its source stamp remain.
-  expect(await Array.fromAsync(new Bun.Glob("*").scan(path.dirname(mac.target)))).toEqual(
-    expect.arrayContaining(["mac-controller", "mac-controller.sha256"]),
-  )
-  expect(
-    await Array.fromAsync(
-      new Bun.Glob(".mac-controller-*").scan({ cwd: path.dirname(path.dirname(mac.target)), onlyFiles: false }),
-    ),
-  ).toEqual([])
+  expect(mac.calls[3]).toEqual(expect.arrayContaining(["--sign", identity, "--keychain", mac.keychain]))
+  expect(mac.calls[3]!.at(-1)).toEndWith(`/${macControllerBundle}`)
+  // Only the app and its source stamp remain; the work directory and the C source are gone.
+  expect((await readdir(path.dirname(mac.app))).toSorted()).toEqual([macControllerBundle, "source.sha256"])
+  expect((await readdir(mac.runtime)).filter((name) => name.startsWith(".mac-controller-"))).toEqual([])
 
   mac.calls.length = 0
   expect(await installMacController(mac.host)).toBe("mac controller unchanged")
-  expect(mac.calls).toEqual([["codesign", "--verify", "--strict", mac.target]])
+  expect(mac.calls).toEqual([["codesign", "--verify", "--strict", mac.app]])
 })
 
 test("the Mac controller is rebuilt when its signature stops verifying, and skipped without the signing keychain", async () => {
@@ -73,6 +79,7 @@ test("the Mac controller is rebuilt when its signature stops verifying, and skip
   mac.calls.length = 0
   expect(await installMacController(mac.host)).toBe("mac controller installed")
   expect(mac.calls.map((args) => args[0])).toContain("clang")
+  expect(await Bun.file(path.join(mac.app, "Contents/MacOS/mac-controller")).text()).toBe("mach-o")
   const bare = await fixture({ keychain: false })
   expect(await installMacController(bare.host)).toContain("skipped")
   expect(bare.calls).toEqual([])
