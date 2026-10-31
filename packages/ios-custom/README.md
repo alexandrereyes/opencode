@@ -4082,6 +4082,24 @@ project filter replacing the chips and the highlight of the open subagent.
   dismissal); and a question's field that takes the keyboard is scrolled into view (`revealAnswerField`). The Mac,
   without an on-screen keyboard, is unchanged (`leaveAnswerField` does nothing there). `QuestionFormUITests` covers
   option, card tap, Return to options only, Return to a hidden field, dragging and the composer afterwards.
+  **Question drafts (Alexandre, 31/10):** the card's answers are no longer view state. They live in a
+  `QuestionDraftSync` per form (`OpenCodeKit/QuestionDrafts.swift`), kept by the server's `QuestionDrafts` for the
+  app's lifetime, saved on this device (Application Support `OpenCode/QuestionDrafts/<server hash>/`, one file per form,
+  older than 14 days removed) and on the server through `custom.question-drafts`
+  (`packages/plugin-app-custom/docs/question-drafts.md`). So the answers survive another session, closing the app, and
+  move between the iPhone and the Mac. A marked option (or a removed or added item) is saved at once; typed or dictated
+  text 0.6 s after the last change. The card loads the server's draft when it appears; an `updated` event from another
+  device reloads it. **Sync rule:** another device's change replaces every question except the one whose field has
+  the keyboard (or the caret) here and those changed here and not yet stored on the server, so what is being typed is
+  never overwritten; once this device's edit is stored, the next change from elsewhere applies (last stored write wins
+  per question; the server merges by question, so two devices answering different questions keep both). Offline,
+  edits stay pending on this device and go out on the next edit or when the event stream reconnects. Answering clears
+  the draft here and on the server (which also clears it on `form.replied`/`form.cancelled`, archive and delete), and a
+  form that is no longer pending in the session's snapshot drops its draft. A server without the RPC
+  (`rpc.unavailable`) keeps the draft on this device only. The Mac's answer field reports its caret through
+  `MacReplyComposer.focusChanged`; dictation (with the AI review) types into the same draft. `QuestionDraftTests`
+  (`swift test`) and `QuestionFormUITests` (another session and back, reopening, a draft saved through the API showing
+  up, answering clearing it) cover it.
 - **Title (A4, A9).** No popover and no `⌄`: the title is a label. The bar is the regular unified height, so the
   avatar and the two title lines center on the window buttons with room around them.
 - **Sessões (A5, A7).** Voice, Ajustes and Nova sessão sit at the column's right edge (a flexible space in the

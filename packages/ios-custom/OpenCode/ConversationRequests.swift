@@ -63,8 +63,11 @@ struct ConversationQuestionCard: View {
   @Environment(\.appTheme) private var theme
   let form: PendingForm
   let store: ConversationStore
-  @State private var values: [String: JSONValue] = [:]
-  @State private var custom: [String: String] = [:]
+  /// The answers live in the draft, not in the view: they survive another session, the app closing, and come from
+  /// (and go to) the server's `custom.question-drafts` (`QuestionDraftSync`).
+  private var draft: QuestionDraftSync { store.questionDrafts.sync(form) }
+  private var values: [String: JSONValue] { draft.state.values }
+  private var custom: [String: String] { draft.state.custom }
   #if os(macOS)
   /// Each answer field takes the keyboard when its count goes up (Return from the question before).
   @State private var focusRequests: [String: Int] = [:]
@@ -89,12 +92,12 @@ struct ConversationQuestionCard: View {
               leaveAnswerField()
               if field.type == .multiselect {
                 let selected = values[field.key]?.array ?? []
-                values[field.key] = .array(
+                draft.choose(field.key, .array(
                   selected.contains(.string(option.value))
                     ? selected.filter { $0 != .string(option.value) }
-                    : selected + [.string(option.value)])
+                    : selected + [.string(option.value)]))
               } else {
-                values[field.key] = .string(option.value)
+                draft.choose(field.key, .string(option.value))
               }
             } label: {
               HStack(spacing: 10) {
@@ -124,11 +127,12 @@ struct ConversationQuestionCard: View {
               get: {
                 let text = values[field.key]?.string ?? ""
                 return field.options?.contains { $0.value == text } == true ? "" : text
-              }, set: { values[field.key] = .string($0) })
+              }, set: { draft.type(field.key, $0) })
             #if os(macOS)
             // The Mac composer's answer mode: the microphone only, Shift+Return breaks the line, Esc leaves.
             MacReplyComposer(store: store, text: text, placeholder: "Outra resposta…",
-              focusRequest: focusRequests[field.key] ?? 0, submit: { returned(field) })
+              focusRequest: focusRequests[field.key] ?? 0, submit: { returned(field) },
+              focusChanged: { focused(field.key, $0) })
               .padding(11).background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
             #else
             TextField("Outra resposta…", text: text)
@@ -150,16 +154,16 @@ struct ConversationQuestionCard: View {
                 Text(value).appFont(.preview)
                 Spacer()
                 Button("Remover", systemImage: "xmark") {
-                  values[field.key] = .array(
-                    (values[field.key]?.array ?? []).filter { $0 != .string(value) })
+                  draft.choose(field.key, .array((values[field.key]?.array ?? []).filter { $0 != .string(value) }))
                 }.labelStyle(.iconOnly)
               }
             }
             HStack {
-              let text = Binding(get: { custom[field.key] ?? "" }, set: { custom[field.key] = $0 })
+              let text = Binding(get: { custom[field.key] ?? "" }, set: { draft.typeCustom(field.key, $0) })
               #if os(macOS)
               MacReplyComposer(store: store, text: text, placeholder: "Outra resposta…",
-                focusRequest: focusRequests[field.key] ?? 0, submit: { returned(field) })
+                focusRequest: focusRequests[field.key] ?? 0, submit: { returned(field) },
+                focusChanged: { focused(field.key, $0) })
               #else
               TextField("Outra resposta…", text: text)
                 .focused($focus, equals: field.key)
@@ -195,7 +199,16 @@ struct ConversationQuestionCard: View {
         theme.color(.info).opacity(0.4), lineWidth: 0.7)
     }
     .disabled(store.acting.contains(form.id))
+    .task(id: form.id) { await draft.load() }
+    #if os(iOS)
+    .onChange(of: focus) { _, key in draft.focused = key }
+    #endif
   }
+  #if os(macOS)
+  private func focused(_ key: String, _ focused: Bool) {
+    if focused { draft.focused = key } else if draft.focused == key { draft.focused = nil }
+  }
+  #endif
   private func send() {
     guard !reply.answer.isEmpty, reply.valid(for: form), !store.acting.contains(form.id) else { return }
     Task { await store.reply(form, answer: reply) }
@@ -234,8 +247,8 @@ struct ConversationQuestionCard: View {
     let text = (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
     let selected = values[field.key]?.array ?? []
-    if !selected.contains(.string(text)) { values[field.key] = .array(selected + [.string(text)]) }
-    custom[field.key] = ""
+    draft.set(field.key, value: selected.contains(.string(text)) ? values[field.key] : .array(selected + [.string(text)]),
+      custom: nil)
   }
   private func selected(_ option: String, field: PendingForm.Field) -> Bool {
     field.type == .multiselect

@@ -183,6 +183,115 @@ import XCTest
     XCTAssertTrue((composer.value as? String ?? "").contains("Rascunho"))
   }
 
+  // MARK: Drafts (`custom.question-drafts`)
+
+  private func draftFields(_ session: String, _ form: String) async throws -> [String: [String: Value]]? {
+    struct Field: Decodable { let selected: [String]; let text: String; let added: [String] }
+    struct Draft: Decodable { let fields: [String: Field] }
+    struct Output: Decodable { struct Inner: Decodable { let draft: Draft? }; let output: Inner }
+    let output: Output = try await request("POST", "/api/rpc/custom.question-drafts/get",
+      ["input": ["sessionID": session, "requestID": form]])
+    return output.output.draft?.fields.mapValues {
+      ["selected": .array($0.selected), "text": .string($0.text), "added": .array($0.added)]
+    }
+  }
+  private func waitDraft(_ session: String, _ form: String, _ check: ([String: [String: Value]]?) -> Bool)
+    async throws -> Bool
+  {
+    for _ in 0..<40 {
+      if check(try await draftFields(session, form)) { return true }
+      try await Task.sleep(for: .milliseconds(250))
+    }
+    return false
+  }
+  private func draftForm() async throws -> (String, String) {
+    try await create([
+      ["key": "voz", "type": "string", "title": "Voz do Abacato",
+       "options": [["value": "marin", "label": "marin"], ["value": "cedar", "label": "cedar"]], "custom": true],
+      ["key": "nota", "type": "string", "title": "Algo mais?"],
+    ])
+  }
+  private func selected(_ label: String) -> Bool {
+    app.buttons[label].firstMatch.isSelected
+  }
+
+  /// The main case: part of the answers, another session in the app and back; then the app closed and reopened.
+  func testAnswersSurviveAnotherSessionAndTheAppClosing() async throws {
+    let (session, form) = try await draftForm()
+    // Another session waiting for an answer too, so the list shows it among the newest ones.
+    let other = try await create([["key": "x", "type": "string", "title": "Outra pergunta"]])
+    try open(session)
+    let nota = app.textFields["question-answer-nota"]
+    XCTAssertTrue(nota.waitForExistence(timeout: 30), app.debugDescription)
+    app.buttons["cedar"].tap()
+    nota.tap()
+    nota.typeText("rascunho")
+    app.staticTexts["Algo mais?"].tap()
+    let saved = try await waitDraft(session, form) {
+      $0?["voz"]?["selected"] == .array(["cedar"]) && $0?["nota"]?["text"] == .string("rascunho")
+    }
+    XCTAssertTrue(saved, "o rascunho chegou ao servidor")
+    // Another session, inside the app, and back.
+    app.showSessions()
+    let otherRow = app.buttons["session-row-\(other.0)"]
+    XCTAssertTrue(otherRow.waitForExistence(timeout: 20), app.debugDescription)
+    otherRow.tap()
+    XCTAssertTrue(app.staticTexts["conversation-header-title"].waitForExistence(timeout: 20))
+    app.showSessions()
+    let row = app.buttons["session-row-\(session)"]
+    XCTAssertTrue(row.waitForExistence(timeout: 20), app.debugDescription)
+    row.tap()
+    XCTAssertTrue(nota.waitForExistence(timeout: 30), app.debugDescription)
+    XCTAssertEqual(nota.value as? String, "rascunho")
+    XCTAssertTrue(selected("cedar"))
+    capture("rascunho-voltou")
+    // Closed and reopened.
+    app.terminate()
+    try open(session)
+    XCTAssertTrue(nota.waitForExistence(timeout: 30), app.debugDescription)
+    XCTAssertEqual(nota.value as? String, "rascunho")
+    XCTAssertTrue(selected("cedar"))
+  }
+
+  /// What another device saved shows here, when the form opens and while it is on screen.
+  func testADraftFromAnotherDeviceAppears() async throws {
+    let (session, form) = try await draftForm()
+    let _: JSONObject = try await request("POST", "/api/rpc/custom.question-drafts/save", ["input": [
+      "sessionID": session, "requestID": form, "client": "mac",
+      "fields": ["voz": ["selected": [], "text": "viola", "added": []]]]])
+    try open(session)
+    let voz = app.textFields["question-answer-voz"]
+    XCTAssertTrue(voz.waitForExistence(timeout: 30), app.debugDescription)
+    let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'viola'"), object: voz)
+    XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed, String(describing: voz.value))
+    let _: JSONObject = try await request("POST", "/api/rpc/custom.question-drafts/save", ["input": [
+      "sessionID": session, "requestID": form, "client": "mac",
+      "fields": ["nota": ["selected": [], "text": "do Mac", "added": []]]]])
+    let nota = app.textFields["question-answer-nota"]
+    let live = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'do Mac'"), object: nota)
+    XCTAssertEqual(XCTWaiter.wait(for: [live], timeout: 10), .completed, String(describing: nota.value))
+    capture("rascunho-outro-aparelho")
+  }
+
+  /// Sending the answers leaves no draft behind.
+  func testAnsweringClearsTheDraft() async throws {
+    let (session, form) = try await draftForm()
+    try open(session)
+    let nota = app.textFields["question-answer-nota"]
+    XCTAssertTrue(nota.waitForExistence(timeout: 30), app.debugDescription)
+    app.buttons["marin"].tap()
+    nota.tap()
+    nota.typeText("ok")
+    app.staticTexts["Algo mais?"].tap()
+    let saved = try await waitDraft(session, form) { $0?["nota"]?["text"] == .string("ok") }
+    XCTAssertTrue(saved)
+    app.buttons["Enviar"].tap()
+    let answered = try await waitAnswered(session, form)
+    XCTAssertEqual(answered, ["voz": .string("marin"), "nota": .string("ok")])
+    let cleared = try await waitDraft(session, form) { $0 == nil }
+    XCTAssertTrue(cleared, "responder limpa o rascunho")
+  }
+
   // MARK: Helpers
 
   private func open(_ session: String) throws {
@@ -216,6 +325,7 @@ import XCTest
   }
   struct State: Decodable { let status: String; let answer: [String: Value]? }
 
+  struct JSONObject: Decodable {}
   /// A session in the test directory with one pending question form.
   private func create(_ fields: [[String: Any]]) async throws -> (String, String) {
     let directory = try XCTUnwrap(environment["OPENCODE_TEST_DIRECTORY"])

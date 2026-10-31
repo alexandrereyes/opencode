@@ -640,6 +640,8 @@ struct MacReplyComposer: View {
   var identifier = "question-reply"
   var accessory: AnyView? = nil
   var dictationTurns: (@MainActor () -> [DictationReview.Turn])? = nil
+  /// The field took or left the caret (a question's draft keeps another device's change out of it meanwhile).
+  var focusChanged: ((Bool) -> Void)? = nil
   @State private var draft = Self.scratch()
 
   var body: some View {
@@ -666,6 +668,7 @@ struct MacReplyComposer: View {
       }
       .onChange(of: text) { _, value in receive(value) }
       .onChange(of: focusRequest) { draft.focused = true }
+      .onChange(of: draft.focused) { _, focused in focusChanged?(focused) }
   }
 
   private static func scratch() -> ConversationDraft {

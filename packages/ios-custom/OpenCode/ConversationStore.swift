@@ -30,7 +30,19 @@ import UniformTypeIdentifiers
   let readAloud = ConversationReadAloud()
   let mcps: ConversationMCPStore
   let reversion: ConversationRevert
-  private(set) var family: FamilySnapshot?
+  private(set) var family: FamilySnapshot? {
+    didSet {
+      // Drafts of forms no longer pending (answered, dismissed, expired) go.
+      guard let family else { return }
+      for sessionID in Set([id] + children.map(\.id) + family.forms.map(\.sessionID)) {
+        questionDrafts.retain(sessionID: sessionID,
+          pending: Set(family.forms.filter { $0.sessionID == sessionID }.map(\.id)))
+      }
+    }
+  }
+  /// The question forms' unsent answers, shared with the server's `custom.question-drafts` and this server's other
+  /// conversations.
+  @ObservationIgnored let questionDrafts: QuestionDrafts
   /// This session's descendants at any depth (`custom.session-family/page`): a subagent lists its own.
   private(set) var children: [Session] = []
   /// A subagent's ancestors, the top-level session first (one read each, when its parent changes): the header's
@@ -146,6 +158,7 @@ import UniformTypeIdentifiers
     self.id = id
     self.snippets = snippets
     self.client = client
+    questionDrafts = QuestionDrafts.shared(for: client)
     self.reversion = reversion ?? ConversationRevert(client: client)
     mcps = ConversationMCPStore(client: client, toast: toast)
     self.hub = hub
@@ -694,6 +707,7 @@ import UniformTypeIdentifiers
     await act(form.id, success: "Resposta enviada", feedback: .success) {
       submitted += 1
       try await client.reply(form, answer: answer)
+      await questionDrafts.sync(form).clear()
     }
   }
   func dismiss(_ form: PendingForm) async {
@@ -788,7 +802,13 @@ import UniformTypeIdentifiers
         scheduleRefresh()
         scheduleResources()
         syncQuotes()
+        Task { await questionDrafts.reconnected(sessionID: id) }
       case .disconnected: streamBroken = true
+      case .update(let event) where event.type == QuestionDraftEvent.updated:
+        if let sessionID = event.data.sessionID, let requestID = event.data.requestID {
+          await questionDrafts.updated(sessionID: sessionID, requestID: requestID, cleared: event.data.cleared == true,
+            client: event.data.client)
+        }
       case .update(let event) where event.type == QuoteServer.updated:
         // Quote edits are per Session and revision: never a transcript refresh, and never another Session's.
         if event.data.sessionID == id, let revision = event.data.revision { quotes.updated(revision: revision) }
