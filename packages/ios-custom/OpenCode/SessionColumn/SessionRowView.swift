@@ -175,6 +175,41 @@ extension SessionAttention.Reason {
   }
 }
 
+/// The face of a session's avatar, shared by the Sessões rows and the in-app alert banner: beside repository
+/// sessions every chat shares one avatar (a conversation symbol on the theme's chat color); under the Chats filter
+/// chats keep their monograms; a project's own icon (`project.icon`) replaces its monogram, else its color.
+struct SessionProjectFace: View {
+  @Environment(\.appTheme) private var theme
+  let project: Project?
+  let name: String
+  let fallback: String
+  let chat: Bool
+  let sharedChat: Bool
+  let size: CGFloat
+
+  var body: some View {
+    if sharedChat {
+      ZStack {
+        Circle().fill(theme.color(.chatAvatar))
+        Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: size * 0.38, weight: .semibold))
+          .foregroundStyle(theme.color(.chatAvatarSymbol))
+      }
+      .frame(width: size, height: size)
+    } else if !chat, let icon = ProjectIcon.of(project) {
+      ProjectIconAvatar(icon: icon, size: size)
+    } else {
+      let colors = theme.avatar(SessionList.avatarColor(project, fallback: fallback))
+      ZStack {
+        Circle().fill(colors.background)
+        Text(SessionList.monogram(name)).appFont(.message, weight: .medium)
+          .minimumScaleFactor(0.6).lineLimit(1)
+          .foregroundStyle(colors.text)
+      }
+      .frame(width: size, height: size)
+    }
+  }
+}
+
 struct SessionAvatar: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.displayScale) private var displayScale
@@ -183,23 +218,10 @@ struct SessionAvatar: View {
   let size: CGFloat
 
   var body: some View {
-    let colors = theme.avatar(SessionList.avatarColor(row.project, fallback: row.session.projectID))
     ZStack {
-      // Beside repository sessions every chat shares one avatar: a conversation symbol on the theme's chat color.
-      // Under the Chats filter chats keep their monograms; a project's own icon replaces its monogram. All keep the
-      // same arc and badges.
-      if row.sharesChatAvatar(mixed: mixChats) {
-        Circle().fill(theme.color(.chatAvatar))
-        Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: size * 0.38, weight: .semibold))
-          .foregroundStyle(theme.color(.chatAvatarSymbol))
-      } else if !row.chat, let icon = ProjectIcon.of(row.project) {
-        ProjectIconAvatar(icon: icon, size: size)
-      } else {
-        Circle().fill(colors.background)
-        Text(SessionList.monogram(row.projectName)).appFont(.message, weight: .medium)
-          .minimumScaleFactor(0.6).lineLimit(1)
-          .foregroundStyle(colors.text)
-      }
+      SessionProjectFace(
+        project: row.project, name: row.projectName, fallback: row.session.projectID, chat: row.chat,
+        sharedChat: row.sharesChatAvatar(mixed: mixChats), size: size)
       if row.state == .running { RunningArc(size: size + 5).allowsHitTesting(false) }
     }
     .frame(width: size, height: size)

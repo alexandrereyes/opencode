@@ -170,7 +170,7 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   own icon (see Project icons) shows it instead, cropped to the circle over a neutral `surfaceRaised` disc with a
   hairline `border`, in the rows, the session switcher, the conversation header (inside the context ring) and the Nova
   sessão project selector (`ProjectAvatar`). The running arc, `+N` subagents, state badge and unread dot stay on top;
-  Chats rows, the Sessão mestra and the in-app alert banner keep their current avatars. `ProjectIcon.of` resolves each
+  Chats rows and the Sessão mestra keep their current avatars. The in-app alert banner draws the same face as the rows (`SessionProjectFace`: project icon, else monogram and color; a chat, the shared chat avatar; 31/10). `ProjectIcon.of` resolves each
   icon source once, so row re-renders never decode it again.
 - **Components:** native iOS components themed by tokens: no tab bar (see [No tab bar](#no-tab-bar-28-october-option-a)),
   a bottom glass bar for the "Sessão mestra" pill, `swipeActions`, `contextMenu` for long presses, and the shared column header in a

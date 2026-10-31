@@ -7,6 +7,8 @@ import SwiftUI
     let id = UUID()
     let session: Session
     let project: Project?
+    /// A managed chat: the banner shows the shared chat avatar, as Sessões does beside repository sessions.
+    let chat: Bool
     let content: SessionAlertContent
   }
   private(set) var message: Message?
@@ -62,8 +64,9 @@ import SwiftUI
       sequence += 1
       let order = sequence
       let project = store.projects.first { $0.id == root.projectID }
+      let chat = store.chatRoot.map { root.location.directory.hasPrefix($0 + "/") } ?? false
       guard signal.kind == .succeeded else {
-        present(Message(session: root, project: project, content: SessionAlertContent(kind: signal.kind)))
+        present(Message(session: root, project: project, chat: chat, content: SessionAlertContent(kind: signal.kind)))
         return
       }
       // The root's execution ended; read what of its family still runs at this instant, from
@@ -78,7 +81,7 @@ import SwiftUI
         guard let self, !Task.isCancelled, self.sequence == order, store.hub.connected,
           store.hub.connection == connection, !store.deletedIDs.contains(target.id)
         else { return }
-        self.present(Message(session: target, project: project, content: content))
+        self.present(Message(session: target, project: project, chat: chat, content: content))
       }
     } catch {
       // A missing session/ancestry or failed preferences read cannot safely produce an alert.
@@ -198,15 +201,13 @@ struct SessionAlertBanner: View {
             open(message.session.id)
           } label: {
             HStack(spacing: 12) {
-              let colors = theme.avatar(
-                SessionList.avatarColor(message.project, fallback: message.session.projectID))
-              Text(
-                SessionList.monogram(
-                  message.project?.vcs != nil ? message.project?.displayName ?? message.session.displayTitle
-                    : message.session.displayTitle)
-              )
-              .font(.system(size: 13, weight: .medium)).foregroundStyle(colors.text)
-              .frame(width: 38, height: 38).background(colors.background, in: Circle())
+              // The rows' avatar: the project's own icon, else its monogram and color; a chat, the chat avatar.
+              SessionProjectFace(
+                project: message.project,
+                name: message.chat || message.project?.vcs == nil
+                  ? message.session.displayTitle : message.project?.displayName ?? message.session.displayTitle,
+                fallback: message.session.projectID, chat: message.chat, sharedChat: message.chat, size: 38)
+              .accessibilityHidden(true)
               VStack(alignment: .leading, spacing: 3) {
                 Text(message.session.displayTitle).font(.subheadline.weight(.semibold))
                   .foregroundStyle(theme.color(.textStrong)).lineLimit(1)
