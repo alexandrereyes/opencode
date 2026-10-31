@@ -10,12 +10,25 @@ import XCTest
   var frames: [Data] = []
   var answered: (() -> Void)?
   var connects = true
+  /// The data channel refuses to send, as when it stalls during a network loss.
+  var sendFails = false
   func offer() async throws -> String { "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n" }
   func answer(_ sdp: String) async throws {
     guard connects else { answered?(); return }
     event?(.connected); event?(.data(Data(#"{"type":"session.started"}"#.utf8))); answered?()
   }
-  func send(_ data: Data) async throws { frames.append(data) }
+  func send(_ data: Data) async throws {
+    if sendFails { throw VoiceWireError.invalidEvent }
+    frames.append(data)
+  }
+  /// The text of every frame of one type sent on this call, joined.
+  func sent(_ type: String, item: String? = nil) -> String {
+    frames.compactMap { frame -> String? in
+      let object = (try? JSONDecoder().decode(JSONValue.self, from: frame))?.object
+      guard object?["type"]?.string == type, item == nil || object?["delegation_item_id"]?.string == item else { return nil }
+      return object?["content"]?.array?.first?.object?["text"]?.string
+    }.joined()
+  }
   func mute(_ muted: Bool) { self.muted = muted }
   func resume() { event?(.resumed) }
   func close() async { closed = true }
@@ -97,8 +110,12 @@ private actor VoiceFlakyHTTP {
   var renewalErrors: Int
   let renewalStatus: Int?
   let reservations: Int
-  init(lease: TimeInterval = 60, renewalErrors: Int = 0, renewalStatus: Int? = nil, reservations: Int = .max) {
+  /// Renewals answered 500 before they go through again, like the proxy losing its Redis for a moment.
+  var renewalOutages: Int
+  init(lease: TimeInterval = 60, renewalErrors: Int = 0, renewalStatus: Int? = nil, reservations: Int = .max,
+    renewalOutages: Int = 0) {
     self.lease = lease; self.renewalErrors = renewalErrors; self.renewalStatus = renewalStatus; self.reservations = reservations
+    self.renewalOutages = renewalOutages
   }
   func count(_ method: String, calls: Bool = false) -> Int {
     requests.filter { $0.httpMethod == method && ($0.url?.path.hasSuffix("/calls") == true) == calls }.count
@@ -113,6 +130,10 @@ private actor VoiceFlakyHTTP {
     }
     if request.httpMethod == "PUT" {
       if renewalErrors > 0 { renewalErrors -= 1; throw URLError(.timedOut) }
+      if renewalOutages > 0 {
+        renewalOutages -= 1
+        return (Data(#"{"error":"gpt_live_lease_unavailable"}"#.utf8), HTTPURLResponse(url: url, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+      }
       if let renewalStatus {
         return (Data(), HTTPURLResponse(url: url, statusCode: renewalStatus, httpVersion: nil, headerFields: nil)!)
       }
@@ -434,7 +455,8 @@ private actor LiveMemoryHTTP {
 
   // MARK: Screen for the master
 
-  /// The report of a failed call names the category, GPT Live's error code and the last events, never what was said.
+  /// A report names the category, GPT Live's error code and the last events, never what was said. A GPT Live error
+  /// is tolerated: the call goes on and the report says so.
   func testFailureReportCarriesTheCategoryCodeAndEventNamesOnly() async throws {
     let outbox = VoiceDiagnosticsOutbox(url: FileManager.default.temporaryDirectory.appending(path: "voice-diagnostics-\(UUID()).json"))
     let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
@@ -447,23 +469,22 @@ private actor LiveMemoryHTTP {
     await fulfillment(of: [answered], timeout: 3)
     transport.event?(.data(Data(#"{"type":"output_transcript.added","item":{"id":"o1","text":"Frase falada jabuticaba"}}"#.utf8)))
     transport.event?(.data(Data(#"{"type":"error","error":{"type":"invalid_request_error","code":"unknown_event","message":"Mensagem do provedor"}}"#.utf8)))
-    let failed = await until { controller.state.phase == .failed }
-    XCTAssertTrue(failed)
     let reported = await until { await outbox.pending().count == 1 }
     XCTAssertTrue(reported)
+    XCTAssertEqual(controller.state.phase, .speaking, "the call goes on")
     let pending = await outbox.pending()
     let report = try XCTUnwrap(pending.first)
-    XCTAssertEqual(report.kind, .failed)
+    XCTAssertEqual(report.kind, .tolerated)
     XCTAssertEqual(report.reason, "service_error")
     XCTAssertEqual(report.code, "invalid_request_error/unknown_event")
     XCTAssertEqual(report.platform, "ios")
     XCTAssertEqual(Array(report.events.suffix(2)), ["output_transcript.added", "error"])
     let json = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
     XCTAssertFalse(json.contains("jabuticaba") || json.contains("Mensagem"))
-    // Closing the failed call is not a second report.
     await controller.end()
-    let count = await outbox.pending().count
-    XCTAssertEqual(count, 1)
+    let ended = await until { await outbox.pending().last?.reason == "user_end" }
+    XCTAssertTrue(ended)
+    XCTAssertTrue(transport.closed)
   }
 
   private func screenController(_ transport: VoiceTestTransport, _ master: VoiceTestMaster, _ http: VoiceTestHTTP,
@@ -749,7 +770,7 @@ private actor LiveMemoryHTTP {
     let http = VoiceFlakyHTTP()
     let pool = VoiceTransportPool(), path = VoiceTestPath(), cues = VoiceTestCues()
     let controller = recoveringController(http: http, pool: pool, path: path, cues: cues,
-      policy: .init(renewal: 5, mediaGrace: 5, backoff: [0.05]), memory: memory)
+      policy: .init(renewal: 5, mediaGrace: 5, handoverGrace: 0.05, backoff: [0.05]), memory: memory)
     controller.start(sessions: SessionStore(configuration: configuration))
     let ready = await until { controller.state.phase == .listening }
     XCTAssertTrue(ready)
@@ -818,6 +839,260 @@ private actor LiveMemoryHTTP {
     XCTAssertEqual(cues.played, [])
     XCTAssertNil(controller.alert)
     await controller.end()
+  }
+
+  // MARK: Resilience (31/10)
+
+  private struct Resilient {
+    let controller: VoiceController
+    let pool: VoiceTransportPool
+    let master: VoiceTestMaster
+    let http: VoiceFlakyHTTP
+    let path: VoiceTestPath
+    let outbox: VoiceDiagnosticsOutbox
+    func reports(_ reason: String) async -> [VoiceDiagnostic] { await outbox.pending().filter { $0.reason == reason } }
+    func offers() async throws -> [[String: JSONValue]] {
+      try await http.requests.filter { $0.url?.path.hasSuffix("/calls") == true }.map {
+        try XCTUnwrap(JSONDecoder().decode(JSONValue.self, from: XCTUnwrap($0.httpBody)).object?["session"]?.object)
+      }
+    }
+  }
+  private func resilient(_ policy: VoiceRecoveryPolicy = .init(backoff: [0.05]), http: VoiceFlakyHTTP = VoiceFlakyHTTP()) async -> Resilient {
+    let pool = VoiceTransportPool(), path = VoiceTestPath(), master = VoiceTestMaster()
+    let outbox = VoiceDiagnosticsOutbox(url: FileManager.default.temporaryDirectory.appending(path: "voice-diagnostics-\(UUID()).json"))
+    let controller = VoiceController(testing: .init(transport: { pool.make($0) },
+      master: { update in master.update = update; return master }, request: { try await http.respond($0) },
+      policy: policy, network: path, cues: VoiceTestCues(), diagnostics: outbox))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    _ = await until { controller.state.phase == .listening }
+    return Resilient(controller: controller, pool: pool, master: master, http: http, path: path, outbox: outbox)
+  }
+  private func delegation(_ id: String, _ text: String) -> VoiceTransportEvent {
+    .data(try! JSONEncoder().encode(JSONValue.object(["type": .string("delegation.created"), "item": .object([
+      "type": .string("delegation"), "target": .string("client"), "id": .string(id),
+      "content": .array([.object(["type": .string("input_text"), "text": .string(text)])])])])))
+  }
+
+  /// GPT Live errors and events the app cannot read are logged; the call, its transport and the master go on.
+  func testServiceErrorsAndUnreadableEventsKeepTheCall() async throws {
+    let call = await resilient()
+    XCTAssertEqual(call.controller.state.phase, .listening)
+    let transport = try XCTUnwrap(call.pool.transports.first)
+    for json in [
+      #"{"type":"error","error":{"type":"server_error","code":"internal","message":"x"}}"#,
+      #"{"type":"error","error":{"type":"invalid_request_error","code":"conversation_already_has_active_response"}}"#,
+      #"{"type":"error"}"#,
+      "{não é json",
+      #"{"sem":"tipo"}"#,
+      #"{"type":"turn.done","turn":{}}"#,
+      #"{"type":"input_transcript.added","item":{}}"#,
+      #"{"type":"delegation.created","item":{"type":"delegation","target":"client"}}"#,
+    ] { transport.event?(.data(Data(json.utf8))) }
+    // A delegation whose request cannot be read is answered on its own item, so GPT Live asks again.
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"vazio","content":[]}}"#.utf8)))
+    let answered = await until { !transport.sent("delegation.context.append", item: "vazio").isEmpty }
+    XCTAssertTrue(answered)
+    XCTAssertEqual(transport.sent("delegation.context.append", item: "vazio"), "Não consegui ler esse pedido. Peça para Alexandre repetir.")
+    let logged = await until { await call.reports("invalid_event").count == 6 }
+    XCTAssertTrue(logged)
+    let errors = await call.reports("service_error")
+    XCTAssertEqual(errors.map(\.code), ["server_error/internal", "invalid_request_error/conversation_already_has_active_response", nil])
+    XCTAssertTrue(errors.allSatisfy { $0.kind == .tolerated })
+    XCTAssertEqual(call.controller.state.phase, .listening)
+    XCTAssertEqual(call.pool.transports.count, 1)
+    XCTAssertFalse(transport.closed)
+    XCTAssertTrue(call.master.requests.isEmpty)
+    // The call still delegates.
+    let asked = expectation(description: "asked")
+    call.master.asked = { asked.fulfill() }
+    transport.event?(delegation("depois", "Confira as sessões"))
+    await fulfillment(of: [asked], timeout: 3)
+    await call.controller.end()
+  }
+
+  /// Too many requests waiting for the master: the new one is refused on its own item; nothing ends.
+  func testDelegationOverflowRefusesOnlyTheNewRequest() async throws {
+    let call = await resilient()
+    let transport = try XCTUnwrap(call.pool.transports.first)
+    // Delivered together, before the master takes the first one: eight fit in the queue.
+    for index in 0..<10 { transport.event?(delegation("q\(index)", "Pedido \(index)")) }
+    let refused = await until { !transport.sent("delegation.context.append", item: "q9").isEmpty }
+    XCTAssertTrue(refused)
+    XCTAssertTrue(transport.sent("delegation.context.append", item: "q8").hasPrefix("Há pedidos demais"))
+    let delivered = await until { call.master.requests.count == 8 }
+    XCTAssertTrue(delivered)
+    XCTAssertEqual(call.master.requests.map(\.text), (0..<8).map { "Pedido \($0)" })
+    XCTAssertEqual(call.controller.state.phase, .listening)
+    let overflow = await call.reports("delegation_overflow")
+    XCTAssertEqual(overflow.map(\.kind), [.tolerated, .tolerated])
+    await call.controller.end()
+  }
+
+  /// `session_expired` ends GPT Live's session: the call is rebuilt at once instead of failing.
+  func testExpiredSessionRebuildsTheCall() async throws {
+    let call = await resilient()
+    call.pool.transports[0].event?(.data(Data(#"{"type":"error","error":{"type":"invalid_request_error","code":"session_expired"}}"#.utf8)))
+    let rebuilt = await until { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    XCTAssertTrue(call.pool.transports[0].closed)
+    let lost = await call.reports("service_error")
+    XCTAssertEqual(lost.map(\.kind), [.lost])
+    XCTAssertEqual(lost.first?.code, "invalid_request_error/session_expired")
+    let reconnected = await until { await call.reports("reconnected").first?.code == "attempts_1" }
+    XCTAssertTrue(reconnected)
+    // session.closed rebuilds too.
+    call.pool.transports[1].event?(.data(Data(#"{"type":"session.closed"}"#.utf8)))
+    let again = await until { call.pool.transports.count == 3 && call.controller.state.phase == .listening }
+    XCTAssertTrue(again)
+    await call.controller.end()
+  }
+
+  /// A failed send rebuilds the call; the result that was not heard reaches the new call once, as call context, and
+  /// the master is not asked again.
+  func testSendFailureRebuildsAndTheResultReachesTheNewCall() async throws {
+    let call = await resilient()
+    let asked = expectation(description: "asked")
+    call.master.asked = { asked.fulfill() }
+    call.pool.transports[0].event?(delegation("a", "Pesquise na web o preço do Mac Studio"))
+    await fulfillment(of: [asked], timeout: 3)
+    call.pool.transports[0].sendFails = true
+    call.master.update?(.finished("Custa 10 mil reais."))
+    let rebuilt = await until(5) { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    let heard = await until(3) { call.pool.transports[1].sent("session.context.append").contains("Resultado: Custa 10 mil reais.") }
+    XCTAssertTrue(heard)
+    XCTAssertTrue(call.pool.transports[0].frames.isEmpty)
+    XCTAssertEqual(call.master.requests.count, 1)
+    let lost = await call.reports("send_failed")
+    XCTAssertEqual(lost.map(\.kind), [.lost])
+    let context = await until { await !call.reports("context_append").isEmpty }
+    XCTAssertTrue(context)
+    // Said once: the next delegation does not repeat it.
+    let next = expectation(description: "next")
+    call.master.asked = { next.fulfill() }
+    call.pool.transports[1].event?(delegation("b", "Outra coisa"))
+    await fulfillment(of: [next], timeout: 3)
+    try await Task.sleep(for: .milliseconds(700))
+    XCTAssertFalse(call.pool.transports[1].sent("delegation.context.append", item: "b").contains("Custa 10 mil"))
+    await call.controller.end()
+  }
+
+  /// When the service refuses the result as call context, it waits for the next delegation of the new call.
+  func testRejectedContextWaitsForTheNextDelegation() async throws {
+    let call = await resilient()
+    let asked = expectation(description: "asked")
+    call.master.asked = { asked.fulfill() }
+    call.pool.transports[0].event?(delegation("a", "Confira a sessão"))
+    await fulfillment(of: [asked], timeout: 3)
+    call.pool.transports[0].event?(.failed(.iceFailed))
+    let rebuilt = await until { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    call.master.update?(.finished("Está tudo certo."))
+    let sent = await until(3) { !call.pool.transports[1].sent("session.context.append").isEmpty }
+    XCTAssertTrue(sent)
+    call.pool.transports[1].event?(.data(Data(#"{"type":"error","error":{"type":"invalid_request_error","code":"unknown_parameter"}}"#.utf8)))
+    let next = expectation(description: "next")
+    call.master.asked = { next.fulfill() }
+    call.pool.transports[1].event?(delegation("b", "E agora?"))
+    await fulfillment(of: [next], timeout: 3)
+    let delivered = await until(3) { call.pool.transports[1].sent("delegation.context.append", item: "b").contains("Resultado: Está tudo certo.") }
+    XCTAssertTrue(delivered)
+    await call.controller.end()
+  }
+
+  /// The rebuilt call starts with the requests the master still has, and the same request delegated again is not
+  /// sent twice: the new item carries its result.
+  func testRebuiltCallCarriesRunningRequestsAndDoesNotRepeatThem() async throws {
+    let call = await resilient()
+    let asked = expectation(description: "asked")
+    call.master.asked = { asked.fulfill() }
+    call.pool.transports[0].event?(delegation("a", "Confira a sessão do Abacato."))
+    await fulfillment(of: [asked], timeout: 3)
+    call.pool.transports[0].event?(.failed(.dataChannelClosed))
+    let rebuilt = await until { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    let offers = try await call.offers()
+    XCTAssertEqual(offers.count, 2)
+    let resumed = offers[1]["initial_items"]?.array?.last?.object?["content"]?.array?.first?.object?["text"]?.string
+    XCTAssertTrue(resumed?.hasPrefix("Pedidos desta conversa já entregues ao agente e ainda em andamento") == true)
+    XCTAssertTrue(resumed?.contains("- Confira a sessão do Abacato.") == true)
+    XCTAssertNil(offers[0]["initial_items"], "a fresh call starts as before")
+    // Same request, other spelling: not sent again.
+    call.pool.transports[1].event?(delegation("b", "confira a sessao do abacato"))
+    let told = await until { call.pool.transports[1].sent("delegation.context.append", item: "b").contains("já está com o agente") }
+    XCTAssertTrue(told)
+    XCTAssertEqual(call.master.requests.count, 1)
+    call.master.update?(.finished("Tudo certo no Abacato."))
+    let result = await until(3) { call.pool.transports[1].sent("delegation.context.append", item: "b").contains("Resultado: Tudo certo no Abacato.") }
+    XCTAssertTrue(result)
+    let repeats = await call.reports("delegation_repeat")
+    XCTAssertEqual(repeats.count, 1)
+    // Settled: the same words now are a new request.
+    let again = expectation(description: "again")
+    call.master.asked = { again.fulfill() }
+    call.pool.transports[1].event?(delegation("c", "Confira a sessão do Abacato."))
+    await fulfillment(of: [again], timeout: 3)
+    XCTAssertEqual(call.master.requests.count, 2)
+    await call.controller.end()
+  }
+
+  /// ICE flapping does not stretch the grace; ICE coming back inside it keeps the same call.
+  func testIceFlappingKeepsTheGraceAndARecoveryKeepsTheCall() async throws {
+    let call = await resilient(.init(mediaGrace: 1, backoff: [0.05]))
+    let first = call.pool.transports[0]
+    first.event?(.disconnected)
+    XCTAssertEqual(call.controller.state.phase, .reconnecting)
+    try await Task.sleep(for: .milliseconds(600))
+    first.event?(.disconnected)
+    // Rebuilt 1 s after the first disconnection (about 0.45 s from now), not 1 s after the second.
+    let rebuilt = await until(0.7) { call.pool.transports.count == 2 }
+    XCTAssertTrue(rebuilt)
+    let ready = await until { call.controller.state.phase == .listening }
+    XCTAssertTrue(ready)
+    let second = call.pool.transports[1]
+    second.event?(.disconnected)
+    try await Task.sleep(for: .milliseconds(200))
+    second.event?(.connected)
+    XCTAssertEqual(call.controller.state.phase, .listening)
+    try await Task.sleep(for: .milliseconds(1200))
+    XCTAssertEqual(call.pool.transports.count, 2, "recovered inside the grace: no rebuild")
+    XCTAssertFalse(second.closed)
+    let recovered = await call.reports("ice_recovered")
+    XCTAssertEqual(recovered.count, 1)
+    let disconnected = await call.reports("ice_disconnected")
+    XCTAssertEqual(disconnected.map(\.kind), [.tolerated, .lost, .tolerated])
+    await call.controller.end()
+  }
+
+  /// The network coming back (Wi-Fi to 5G) leaves WebRTC only the handover window before the rebuild.
+  func testNetworkReturnLeavesOnlyTheHandoverWindow() async throws {
+    let call = await resilient(.init(mediaGrace: 30, handoverGrace: 0.2, backoff: [0.05]))
+    call.path.set(VoicePath(satisfied: false))
+    call.pool.transports[0].event?(.disconnected)
+    XCTAssertEqual(call.controller.state.phase, .offline)
+    try await Task.sleep(for: .milliseconds(300))
+    XCTAssertEqual(call.pool.transports.count, 1, "no rebuild while offline inside the grace")
+    call.path.set(VoicePath(satisfied: true, interfaces: ["cellular:pdp_ip0"]))
+    XCTAssertEqual(call.controller.state.phase, .reconnecting)
+    try await Task.sleep(for: .milliseconds(100))
+    XCTAssertEqual(call.pool.transports.count, 1, "WebRTC first gets the handover window")
+    let rebuilt = await until(2) { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    let changed = await call.reports("network_changed")
+    XCTAssertEqual(changed.map(\.kind), [.tolerated, .lost])
+    await call.controller.end()
+  }
+
+  /// A lease renewal answered 500 (the proxy's Redis away for a moment) is retried and reported once.
+  func testServerErrorOnRenewalIsRetriedAndReportedOnce() async throws {
+    let call = await resilient(.init(renewal: 0.05, renewalRetry: 0.05), http: VoiceFlakyHTTP(renewalOutages: 3))
+    let renewed = await until { await call.http.count("PUT") >= 6 }
+    XCTAssertTrue(renewed)
+    XCTAssertEqual(call.controller.state.phase, .listening)
+    XCTAssertEqual(call.pool.transports.count, 1)
+    let retries = await call.reports("lease_retry")
+    XCTAssertEqual(retries.map(\.code), ["http_500"])
+    await call.controller.end()
   }
 
   func testExplicitSilentLiveRecovery() async throws {

@@ -72,6 +72,15 @@ import UIKit
   @ObservationIgnored private var diagnosticsTask: Task<Void, Never>?
   @ObservationIgnored private var ready = false
   @ObservationIgnored private var mediaConnected = false
+  /// While ICE is disconnected: when the grace for WebRTC to recover on its own ends.
+  @ObservationIgnored private var graceUntil: TimeInterval?
+  /// Requests the master already has, carried to a rebuilt call so it neither forgets nor repeats them.
+  @ObservationIgnored private var continuity = VoiceContinuity()
+  /// The served prompt of this conversation; a rebuilt call reuses it instead of waiting for the server.
+  @ObservationIgnored private var servedInstructions: String?
+  /// A result sent as call context after a rebuild; an error right after it puts it back for the next delegation.
+  @ObservationIgnored private var contextAppend: (text: String, at: TimeInterval)?
+  @ObservationIgnored private var contextRejected = false
   @ObservationIgnored private var currentDelegation: String?
   @ObservationIgnored private var handled: Set<String> = []
   /// A delegation waiting for the master; a screen capture starts when GPT Live delegates, not when sent.
@@ -81,6 +90,8 @@ import UIKit
     let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>?
     /// The app added the capture because Alexandre talked about the screen; a failed capture still sends the text.
     let inferred: Bool
+    /// The GPT Live call that delegated it.
+    let link: UUID
   }
   @ObservationIgnored private var delegationQueue: [Delegation] = []
   /// Transcript pieces of what Alexandre said since the previous delegation (at most 45 s), to recognize a request about the screen
@@ -166,6 +177,7 @@ import UIKit
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false; recentSpeech = []
     trail = VoiceEventTrail()
+    graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; contextAppend = nil; contextRejected = false
     state.apply(.start); detail = "Preparando o microfone"; publish()
     inputItemID = nil; outputItemID = nil; interruptedAssistant = false; interruptedUser = false; capturedTurns = []
     #if DEBUG
@@ -266,9 +278,12 @@ import UIKit
   /// Readiness arrives later through `connected()`, before `timeout` or the link is lost.
   private func open(token: UUID, timeout: Double, message: String) async throws {
     let current = UUID()
-    link = current; ready = false; mediaConnected = false; lease = VoiceLeaseClock()
+    link = current; ready = false; mediaConnected = false; graceUntil = nil; lease = VoiceLeaseClock()
+    contextAppend = nil
     armWatchdog(token: token, seconds: timeout, message: message, reason: .attemptTimeout)
-    let instructions = try await instructions()
+    // A rebuilt call is the same conversation: its prompt does not wait for (or depend on) the OpenCode server.
+    let instructions = if let servedInstructions { servedInstructions } else { try await instructions() }
+    servedInstructions = instructions
     guard epoch == token, link == current, !Task.isCancelled else { throw CancellationError() }
     let events: @MainActor @Sendable (VoiceTransportEvent) -> Void = { [weak self] event in
       guard let self, self.epoch == token, self.link == current else { return }
@@ -291,7 +306,7 @@ import UIKit
     guard epoch == token, link == current else { throw CancellationError() }
     beginRenewal(signal, token: token, link: current)
     let answer = try await signal.createCall(sdp: await offer, instructions: instructions, voice: callVoice, history: await history,
-      request: { [self] in try await perform($0) })
+      resuming: continuity.item, request: { [self] in try await perform($0) })
     try Task.checkCancellation()
     guard epoch == token, link == current else { throw CancellationError() }
     callVoice = answer.voice
@@ -351,12 +366,13 @@ import UIKit
     renewal = Task { [weak self] in
       guard let self else { return }
       var delay = policy.renewal
+      var failing = false
       while !Task.isCancelled {
         do { try await Task.sleep(for: .seconds(delay)) } catch { return }
         guard epoch == token, link == current else { return }
         do {
           try await renew(signal, method: "PUT")
-          delay = policy.renewal
+          delay = policy.renewal; failing = false
         } catch {
           guard epoch == token, link == current, !Task.isCancelled, !(error is CancellationError) else { return }
           guard VoiceLeaseClock.isTransient(error) else {
@@ -365,6 +381,8 @@ import UIKit
             return
           }
           VoiceTransport.log.notice("phase=renewal-retry")
+          // One report per run of failures, not one per second.
+          if !failing { failing = true; report(.tolerated, .leaseRetry(error)) }
           guard lease.valid(at: Self.now) else { return }
           delay = min(policy.renewalRetry, max(0, lease.validUntil - Self.now))
         }
@@ -402,6 +420,8 @@ import UIKit
     switch event {
     case .connected:
       mediaConnected = true
+      if graceUntil != nil, connectedAt != nil { report(.tolerated, .iceRecovered) }
+      graceUntil = nil
       if ready { connected() }
     case .resumed: state.apply(.resume); publish()
     case .interrupted:
@@ -413,13 +433,21 @@ import UIKit
       if state.phase == .speaking { interruptedAssistant = true }
       if inputItemID != nil { interruptedUser = true }
       mediaConnected = false; state.apply(network.current.satisfied ? .reconnect : .offline); publish()
-      // WebRTC may restore the same path by itself; after the grace the call is rebuilt.
+      // WebRTC may restore the path by itself; after the grace the call is rebuilt. A flapping path does not
+      // extend it (the grace starts at the first disconnection).
+      guard graceUntil == nil else { return }
+      graceUntil = Self.now + policy.mediaGrace
+      if connectedAt != nil { report(.tolerated, .iceDisconnected) }
       armWatchdog(token: epoch, seconds: policy.mediaGrace, message: "A conexão de áudio não se recuperou.",
         reason: .iceDisconnected)
     case .failed(let reason): lose("A conexão de áudio foi encerrada.", reason)
     case .data(let data):
       do { handle(try VoiceProtocol.decode(data)) }
-      catch { Task { await fail(error.localizedDescription, .invalidEvent(VoiceProtocol.eventType(data))) } }
+      catch {
+        // One event the app cannot read never ends the call; GPT Live goes on with the next one.
+        VoiceTransport.log.notice("phase=invalid-event")
+        report(.tolerated, .invalidEvent(VoiceProtocol.eventType(data)))
+      }
     }
   }
   private func connected() {
@@ -429,6 +457,7 @@ import UIKit
     if connectedAt == nil { connectedAt = .now; VoiceFeedback.ready() }
     watchdog?.cancel(); watchdog = nil
     if recovery.active {
+      report(.tolerated, .reconnected(attempts: recovery.attempts))
       recovery.restore(); cues.play(.restored)
       VoiceTransport.log.notice("phase=recovered")
     }
@@ -464,15 +493,39 @@ import UIKit
       else { userUntil = ProcessInfo.processInfo.systemUptime + 1; inputItemID = nil; interruptedUser = false }
       publish()
     case .failure(let code):
-      Task { await fail("O serviço de voz informou uma falha. Tente novamente mais tarde.", .service(code)) }
+      VoiceTransport.log.notice("phase=service-error")
+      if let sent = contextAppend, Self.now - sent.at < 3 {
+        // The service did not take the result as call context: it waits for the next delegation instead.
+        contextAppend = nil; contextRejected = true
+        narration.retry(sent.text); finalNarration = true
+      }
+      // GPT Live keeps its session after most errors; only an expired one is rebuilt (VoiceProtocol.endsSession).
+      guard VoiceProtocol.endsSession(code) else { report(.tolerated, .service(code)); return }
+      lose("O serviço de voz encerrou a sessão. Reconectando…", .service(code))
+    case .closed: lose("O serviço de voz encerrou a sessão. Reconectando…", .sessionClosed)
+    case .unreadableDelegation(let id):
+      guard handled.insert(id).inserted else { return }
+      report(.tolerated, .invalidEvent("delegation.created"))
+      answer(id, "Não consegui ler esse pedido. Peça para Alexandre repetir.")
     case .delegation(let id, let text):
       VoiceTransport.log.notice("phase=delegation")
       guard !handled.contains(id) else { return }
       guard handled.count < 1024, delegationQueue.count < 8 else {
-        Task { await fail("Há pedidos demais nesta chamada. Reconecte para continuar.", .delegationOverflow) }; return
+        // Refused on its own item; the call and the requests already queued go on.
+        report(.tolerated, .delegationOverflow)
+        answer(id, "Há pedidos demais esperando o agente. Peça para Alexandre aguardar os anteriores.")
+        return
       }
       handled.insert(id)
       let asked = VoiceMasterRequest(text)
+      if continuity.repeats(asked.text, link: link) {
+        // A rebuilt call delegated again what the lost one had already sent: the master is on it, and this
+        // item now carries its progress and result.
+        report(.tolerated, .delegationRepeat)
+        currentDelegation = id
+        answer(id, "Esse pedido já está com o agente desde antes da queda da conexão; o resultado vem por aqui.")
+        return
+      }
       let now = ProcessInfo.processInfo.systemUptime
       // Transcript pieces carry their own spacing; they arrive while he speaks, before the delegation.
       let heard = recentSpeech.filter { now - $0.at <= 45 }.map(\.text).joined() + " " + asked.text
@@ -490,7 +543,8 @@ import UIKit
       } else {
         request.screen.map { target in screenTask(target, sessionID: current) }
       }
-      delegationQueue.append(Delegation(id: id, request: request, screen: screen, inferred: inferred))
+      delegationQueue.append(Delegation(id: id, request: request, screen: screen, inferred: inferred, link: link))
+      continuity.accepted(request.text, link: link)
       if delegationTask == nil { delegationTask = Task { await pumpDelegations() } }
     case .ignored: break
     }
@@ -515,7 +569,8 @@ import UIKit
     defer { if epoch == token { delegationTask = nil } }
     while epoch == token, !Task.isCancelled, !delegationQueue.isEmpty {
       let delegation = delegationQueue.removeFirst()
-      currentDelegation = delegation.id
+      // A delegation queued before a rebuild still goes to the master; its item stays in the lost call.
+      if delegation.link == link { currentDelegation = delegation.id }
       var screen: VoiceScreenShot?
       var request = delegation.request
       if let capture = delegation.screen {
@@ -527,6 +582,7 @@ import UIKit
           request = VoiceMasterRequest(text: request.text, delivery: request.delivery, screen: nil)
         case .failure(let refusal):
           guard epoch == token else { return }
+          continuity.dropped(request.text, link: delegation.link)
           refuseScreen(refusal)
           continue
         }
@@ -583,9 +639,11 @@ import UIKit
       if narrate { narration.offer(text) }
     case .finished(let text):
       state.masterWorking = false; detail = "A Sessão mestra concluiu"
-      masterProgressLine = detail
+      masterProgressLine = detail; continuity.settled()
       finalNarration = true; narration.offer("Resultado: " + text)
-    case .failed(let text): state.masterWorking = false; detail = text; masterProgressLine = text; finalNarration = true; narration.offer(text)
+    case .failed(let text):
+      state.masterWorking = false; detail = text; masterProgressLine = text; continuity.settled()
+      finalNarration = true; narration.offer(text)
     case .disconnected:
       detail = "Sem atualizações da mestra. Reconectando ao OpenCode…"
       masterProgressLine = detail
@@ -594,19 +652,41 @@ import UIKit
     publish()
   }
   private func flushNarration() async {
-    guard let id = currentDelegation, let transport, state.phase == .listening,
-      let text = narration.take(now: ProcessInfo.processInfo.systemUptime, speaking: false,
-        userUntil: userUntil, final: finalNarration) else { return }
-    let token = epoch
+    // After a rebuild, until GPT Live delegates again, only a result is worth saying; it goes as call context.
+    guard let transport, state.phase == .listening, currentDelegation != nil || (finalNarration && !contextRejected),
+      let text = narration.take(now: Self.now, speaking: false, userUntil: userUntil, final: finalNarration) else { return }
+    let token = epoch, current = link, final = finalNarration, delegation = currentDelegation
     finalNarration = false
+    let frames: [Data]
     do {
-      for data in try VoiceProtocol.append(id: id, text: text) {
-        guard epoch == token else { return }
+      frames = if let delegation { try VoiceProtocol.append(id: delegation, text: text) }
+        else { try VoiceProtocol.contextAppend("Retorno do agente que chegou durante a reconexão. " + text) }
+    } catch {
+      report(.tolerated, .init("narration_oversized"))
+      return
+    }
+    do {
+      for data in frames {
+        guard epoch == token, link == current else { return }
         try await transport.send(data)
       }
+      if delegation == nil { contextAppend = (text, Self.now); report(.tolerated, .contextAppend) }
     } catch {
-      guard epoch == token else { return }
-      await fail("Não foi possível transmitir a atualização da Sessão mestra.", .sendFailed)
+      guard epoch == token, link == current else { return }
+      // Not heard: the rebuilt call gets it.
+      if final { narration.retry(text); finalNarration = true }
+      lose("Não foi possível transmitir a atualização da Sessão mestra. Reconectando…", .sendFailed)
+    }
+  }
+  /// Answers one delegation right away, without the master; the call goes on.
+  private func answer(_ id: String, _ text: String) {
+    guard let transport, let frames = try? VoiceProtocol.append(id: id, text: text) else { return }
+    let token = epoch, current = link
+    Task { [weak self] in
+      do { for data in frames { try await transport.send(data) } } catch {
+        guard let self, epoch == token, link == current else { return }
+        lose("Não foi possível transmitir a resposta ao serviço de voz. Reconectando…", .sendFailed)
+      }
     }
   }
   func mute() { state.muted.toggle(); transport?.mute(state.muted); publish() }
@@ -715,9 +795,12 @@ import UIKit
     link = UUID()
     if state.phase == .speaking { interruptedAssistant = true }
     if inputItemID != nil { interruptedUser = true }
-    // Delegation items belong to the old call; the next call learns the master's state from memory.
+    // Delegation items belong to the old call; the next call learns the master's state from memory and the
+    // requests still running from `continuity`. Stale progress is dropped, but a result not yet heard is kept.
+    let unheard = finalNarration ? narration.waiting : nil
     currentDelegation = nil; narration = VoiceNarration(); finalNarration = false
-    ready = false; mediaConnected = false
+    if let unheard { narration.retry(unheard); finalNarration = true }
+    ready = false; mediaConnected = false; graceUntil = nil; contextAppend = nil
     connection?.cancel(); renewal?.cancel(); watchdog?.cancel(); leaseDeadline?.cancel()
     connection = nil; renewal = nil; watchdog = nil; leaseDeadline = nil
     state.apply(network.current.satisfied ? .reconnect : .offline)
@@ -758,6 +841,7 @@ import UIKit
       } catch {
         guard epoch == token, !Task.isCancelled, !(error is CancellationError) else { return }
         guard VoiceLeaseClock.isTransient(error) else { await fail(error.localizedDescription, .reconnectFailed(error)); return }
+        report(.tolerated, .reconnectFailed(error))
         await closeLink()
       }
     }
@@ -789,10 +873,14 @@ import UIKit
       return
     }
     if state.phase == .offline { state.apply(.reconnect); detail = "Reconectando a voz…"; publish() }
-    // A disconnected peer will not migrate to a new interface; rebuild without waiting for the grace.
-    if !recovery.active, connectedAt != nil, !mediaConnected, transport != nil {
-      lose("A rede mudou. Reconectando a voz…", .networkChanged)
-    }
+    // The network is back, maybe on another interface (Wi-Fi to 5G): WebRTC gets a short handover window to resume
+    // on a candidate pair it already has, then the call is rebuilt. Never longer than the grace already running.
+    guard !recovery.active, connectedAt != nil, !mediaConnected, transport != nil, let graceUntil,
+      graceUntil - Self.now > policy.handoverGrace else { return }
+    self.graceUntil = Self.now + policy.handoverGrace
+    report(.tolerated, .networkChanged)
+    armWatchdog(token: epoch, seconds: policy.handoverGrace, message: "A rede mudou. Reconectando a voz…",
+      reason: .networkChanged)
   }
 
   private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }

@@ -119,10 +119,12 @@ pelo WARP; não se publica essa origem na Internet.
    injeta credenciais. Só 201 com SDP e Location é aceito; criação ambígua não é repetida.
 3. `PUT /_gpt-live/sessions/{UUID}`, mesmo body, a cada cinco segundos. Timeout HTTP de oito
    segundos e margem fixa de dez segundos no prazo retornado, medida desde o início da requisição
-   que o confirmou. Rede inalcançável (erro de URL, HTTP 408/429/502/503/504) é repetida a cada
-   segundo enquanto essa lease confirmada cobrir a chamada; ao fim dela o áudio fecha, mesmo com uma
-   renovação ainda em voo. Recusa explícita (outro HTTP, lease malformada, de outra chamada ou já
-   dentro da margem) encerra na hora, sem reconexão. A lease padrão no deploy é de 60 segundos.
+   que o confirmou. Rede inalcançável ou serviço sobrecarregado (erro de URL, HTTP 408, 429 ou qualquer
+   5xx; o proxy responde 503 quando o Redis das leases cai ou falta capacidade) é repetida a cada
+   segundo enquanto essa lease confirmada cobrir a chamada; ao fim dela o áudio fecha e a chamada é
+   refeita, mesmo com uma renovação ainda em voo. Recusa explícita (outro HTTP: 404 lease ausente, 409
+   conflito de geração, 410 expirada; lease malformada, de outra chamada ou já dentro da margem) encerra
+   na hora, sem reconexão. A lease padrão no deploy é de 60 segundos.
 4. Encerramento fecha primeiro mídia/canal/áudio local, depois envia `DELETE` com `generation` na
    query. Se a rede estiver indisponível, a lease do proxy expira; não há retry de criação.
 
@@ -207,23 +209,57 @@ e `resumptionRecommendationNotification`. Sem recomendação de retomada, o cont
 
 ## Recuperação de rede
 
-Uma conversa já conectada sobrevive a túnel, troca de antena ou Wi-Fi→celular. `VoiceController`
-separa a **conversa** (`sessionID`, mestra, fila de delegações, memória, mute, Live Activity) do
-**link** (uma chamada GPT Live: transporte, `VoiceSignaling`, lease). Callbacks de um link antigo são
-descartados pelo token do link. Limites em `VoiceRecoveryPolicy` (Kit); a margem da lease não é
-configurável.
+Uma conversa já conectada sobrevive a túnel, elevador, troca de antena, Wi-Fi→5G e falhas passageiras do
+serviço. `VoiceController` separa a **conversa** (`sessionID`, mestra, fila de delegações, memória, mute,
+Live Activity) do **link** (uma chamada GPT Live: transporte, `VoiceSignaling`, lease). Callbacks de um link
+antigo são descartados pelo token do link. Limites em `VoiceRecoveryPolicy` (Kit); a margem da lease não é
+configurável. Até 30/10, qualquer `error` do GPT Live, evento ilegível ou falha de envio encerrava a chamada
+na hora (a queda de 31/10, 08:48); agora cada caso tem uma regra:
 
-- **Perda do link:** ICE `disconnected` dá 15 s para o WebRTC se recuperar sozinho; `failed`, canal
-  fechado ou fim da lease reconstroem a chamada na hora. Se `NWPathMonitor` (`VoicePathMonitor`) indicar
-  rede de volta enquanto o peer está desconectado, a reconstrução começa sem esperar os 15 s.
+| Situação | O que acontece |
+|---|---|
+| `error` do GPT Live | Registrado (`tolerated`, `service_error` com `type/code`) e a chamada segue. A referência do Realtime da OpenAI diz "Most errors are recoverable and the session will stay open", e o `openai/codex`, que usa este mesmo protocolo (`frameless bidi`), nunca encerra por um `error`: só quando o transporte fecha. Exceção: `session_expired` (a sessão chegou à duração máxima) refaz a chamada na hora (`VoiceProtocol.endsSession`) |
+| `session.closed` | Refaz a chamada |
+| Evento ilegível (JSON inválido, sem `type`, campo obrigatório ausente, acima de 256 KB) | Ignorado e registrado (`invalid_event` com o tipo) |
+| `delegation.created` com ID mas sem texto legível | A própria delegação recebe "Não consegui ler esse pedido…", para o GPT Live pedir de novo (como o Abacato) |
+| Mais de 8 pedidos na fila | A delegação nova recebe uma recusa; a chamada e a fila seguem |
+| Falha de envio no canal (`send`) | Refaz a chamada (`lose`); um resultado que não foi ouvido vai para a nova |
+| ICE `disconnected` | 15 s para o WebRTC se recuperar sozinho; desconexões repetidas não renovam o prazo (como o Abacato). Se a rede volta ou muda de interface nesse meio, restam no máximo 3 s |
+| ICE `failed`, canal fechado, media services reset | Refaz a chamada na hora |
+| Renovação da lease: rede, 408, 429 ou qualquer 5xx | Tentada de novo a cada 1 s enquanto a lease confirmada (menos 10 s) cobre a chamada; um registro por sequência de falhas. Ao fim dela, refaz a chamada |
+| Renovação recusada (outro 4xx: 404 lease ausente, 409 conflito, 410 expirada; lease malformada ou de outra chamada) | Encerra |
+| Interrupção de áudio | Pausa com **Toque em retomar**, como antes |
+
+- **WebRTC e a troca de rede:** o transporte liga o field trial `kRTCFieldTrialUseNWPathMonitor` do M147
+  (o mesmo do Abacato), para o WebRTC acompanhar as interfaces e passar sozinho ao par de candidatos do
+  celular quando o Wi-Fi cai. ICE restart de verdade não existe neste protocolo: a chamada nasce de um
+  único `POST /calls`, sem renegociação, e o `gatherOnce` não pode virar contínuo depois (o
+  `setConfiguration` do libwebrtc recusa). Sem recuperação dentro do prazo, a chamada é refeita.
 - **Reconstrução:** fecha mídia e lease antiga (DELETE sem bloquear) e abre uma chamada nova, com novos
-  UUIDs e a memória como `initial_items`, exatamente como uma chamada nova; antes, aguarda a gravação
-  local dos turnos ouvidos. Mute e a voz aceita continuam. Itens de delegação pertencem à chamada
-  antiga: o progresso pendente é descartado e a nova chamada recebe o estado da mestra pela memória.
-- **Limites:** janela de **90 s** desde a primeira perda, até **4 tentativas** com espera de 1, 3, 6 e
-  10 s, cada uma com **20 s** para ficar pronta. Sem rede, nenhuma tentativa é gasta: o estado é
+  UUIDs e a memória como `initial_items`; antes, aguarda a gravação local dos turnos ouvidos. Mute, a voz
+  aceita e o prompt da conversa continuam (a reconstrução não busca o prompt de novo nem depende do servidor
+  do OpenCode). Por último nos `initial_items` vai um item de dados com os pedidos já entregues à mestra (ou
+  na fila para ela) e ainda em andamento (`VoiceContinuity`, até 6).
+- **Sem repetir pedidos:** a fila de delegações e a mestra pertencem à conversa, então o que já foi entregue
+  continua lá. Se a chamada nova delegar de novo, com as mesmas palavras (ignorando maiúsculas, acentos e
+  pontuação), um pedido que a anterior já entregou, ele não vai à mestra: a delegação nova ouve "Esse pedido
+  já está com o agente…" e passa a receber o andamento e o resultado. A admissão na mestra também tolera a
+  rede: cada passo (info, ensure, sessão, anexo, prompt) é repetido em erro passageiro por até cerca de
+  15 s (1, 2, 4 e 8 s), e o prompt leva o mesmo ID nas tentativas; o servidor admite um ID uma vez só.
+- **Resultado durante a queda:** os itens de delegação ficam na chamada antiga, então o progresso pendente
+  é descartado, mas um resultado (ou falha) ainda não ouvido é guardado. Na chamada nova, ele vai para a
+  próxima delegação; se nenhuma vier, vai logo como contexto da chamada (`session.context.append`, que o
+  serviço aceita com texto, conferido em 29/10). **Se o GPT Live o fala sem ser perguntado ainda não foi
+  verificado numa chamada real.** Um `error` nos 3 s seguintes devolve o texto para a próxima delegação.
+- **Limites:** janela de **2 minutos** desde a primeira perda, até **6 tentativas** com espera de 1, 2, 4,
+  8, 15 e 15 s, cada uma com **20 s** para ficar pronta. Sem rede, nenhuma tentativa é gasta: o estado é
   **Sem conexão** e a rede é conferida a cada 250 ms até voltar ou a janela acabar. Esgotado, a faixa
-  mostra a falha e um alerta **Voz sem conexão** oferece **Tentar de novo** ou **Encerrar**.
+  mostra a falha e um alerta **Voz sem conexão** oferece **Tentar de novo** ou **Encerrar**. Até lá, faixa e
+  Live Activity mostram **Reconectando…** ou **Sem conexão**, nunca a falha.
+- **Diagnóstico:** cada falha tolerada e cada reconexão vão ao servidor (`Voice diagnostics`, seção
+  "Motivo da queda"): `tolerated` com `service_error`, `invalid_event`, `ice_disconnected`,
+  `ice_recovered`, `network_changed`, `lease_retry`, `reconnect_failed`, `delegation_overflow`,
+  `delegation_repeat`, `context_append` e `reconnected` (`code=attempts_N`); `lost` em cada perda.
 - **Falhas antes da primeira conexão** continuam encerrando com erro, sem retry (deadline de 45 s).
 - **Feedback:** faixa e Live Activity mostram **Reconectando…** ou **Sem conexão**. `VoiceCuePlayer`
   toca dois tons descendentes na perda, um tique suave a cada 3 s durante a recuperação, dois tons
@@ -285,8 +321,9 @@ verbatim ilimitado. O contrato está em `packages/plugin-app-custom/docs/voice-s
 
 ### Prompt editável no servidor
 
-O iPhone busca `custom.voice/instructions` antes de cada chamada GPT Live, inclusive ao
-reconectar. O Watch usa a mesma RPC no backend. O servidor relê `voice.md` no diretório
+O iPhone busca `custom.voice/instructions` antes de cada chamada GPT Live. Uma reconexão é a mesma
+conversa e reaproveita o prompt já carregado (desde 31/10), para não depender do servidor do OpenCode
+enquanto a rede oscila. O Watch usa a mesma RPC no backend. O servidor relê `voice.md` no diretório
 global de configuração (`OPENCODE_CONFIG_DIR`, senão `$XDG_CONFIG_HOME/opencode`, senão
 `~/.config/opencode`) em cada consulta, sem cache nem necessidade de reinício. A alteração
 vale para a próxima chamada; não muda uma chamada já aberta.
@@ -461,7 +498,7 @@ depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples.
 `UIBackgroundModes=audio` preserva a mídia autorizada quando o usuário bloqueia o telefone ou troca
 de aplicativo. O `EventHub` permanece ativo durante a chamada para acompanhar a mestra. Não há
 background task fictícia nem loop de áudio silencioso; durante uma recuperação de rede o tique
-audível descrito acima substitui o WebRTC por no máximo 90 s. O sistema ainda pode suspender/encerrar o
+audível descrito acima substitui o WebRTC por no máximo 2 minutos. O sistema ainda pode suspender/encerrar o
 app; isso não garante execução depois de force-quit.
 
 O target `VoiceActivity` (`br.com.alexandrem.opencode.VoiceActivity`, time `ERRYZ68LX5`) é embarcado

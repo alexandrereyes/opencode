@@ -59,6 +59,53 @@ struct VoiceTests {
     #expect(try VoiceProtocol.decode(Data(#"{"type":"session.started"}"#.utf8)) == .ready)
     #expect(throws: VoiceWireError.self) { try VoiceProtocol.decode(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client"}}"#.utf8)) }
     #expect(try VoiceProtocol.decode(Data(#"{"type":"novo.evento"}"#.utf8)) == .ignored)
+    // With an ID but no readable request, the delegation is answered instead of dropped.
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"ask-2","content":[]}}"#.utf8))
+      == .unreadableDelegation(id: "ask-2"))
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"ask-3"}}"#.utf8))
+      == .unreadableDelegation(id: "ask-3"))
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"session.closed"}"#.utf8)) == .closed)
+  }
+  /// Only an expired session ends GPT Live's session; every other error leaves it open.
+  @Test func onlyAnExpiredSessionEndsTheCall() throws {
+    func code(_ json: String) throws -> String? {
+      guard case .failure(let code) = try VoiceProtocol.decode(Data(json.utf8)) else { return "not a failure" }
+      return code
+    }
+    let expired = try code(#"{"type":"error","error":{"type":"invalid_request_error","code":"session_expired","message":"…"}}"#)
+    #expect(VoiceProtocol.endsSession(expired))
+    #expect(VoiceProtocol.endsSession("session_expired"))
+    for json in [
+      #"{"type":"error","error":{"type":"server_error","code":"internal"}}"#,
+      #"{"type":"error","error":{"type":"invalid_request_error","code":"conversation_already_has_active_response"}}"#,
+      #"{"type":"error","error":{"type":"invalid_request_error","code":"invalid_value"}}"#,
+      #"{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}"#,
+      #"{"type":"error"}"#,
+    ] { #expect(!VoiceProtocol.endsSession(try code(json))) }
+  }
+  @Test func callContextGoesInChunksWithoutADelegation() throws {
+    let text = String(repeating: "Resultado: ação concluída. ", count: 40)
+    let frames = try VoiceProtocol.contextAppend(text)
+    #expect(frames.count > 1)
+    let parts = try frames.map { frame -> String in
+      let value = try #require(JSONDecoder().decode(JSONValue.self, from: frame).object)
+      #expect(value["type"]?.string == "session.context.append")
+      #expect(value["delegation_item_id"] == nil)
+      return try #require(value["content"]?.array?.first?.object?["text"]?.string)
+    }
+    #expect(parts.allSatisfy { $0.utf8.count <= 500 } && parts.joined() == text)
+    #expect(throws: VoiceWireError.self) { try VoiceProtocol.contextAppend("") }
+  }
+  @Test func narrationPutsBackAnUnheardText() {
+    var narration = VoiceNarration()
+    narration.offer("Resultado: pronto.")
+    #expect(narration.take(now: 10, speaking: false, userUntil: 0, final: true) == "Resultado: pronto.")
+    narration.offer("Resultado: pronto.")
+    #expect(narration.waiting == nil, "the same text is not said twice")
+    narration.retry("Resultado: pronto.")
+    #expect(narration.waiting == "Resultado: pronto.", "unless it was not heard")
+    narration.retry("Outro")
+    #expect(narration.waiting == "Resultado: pronto.", "a text already waiting is kept")
   }
   @Test func unicodeChunksRemainWithinWireBudget() throws {
     let text = String(repeating: "Olá 👩🏽‍💻, verificação. ", count: 100)

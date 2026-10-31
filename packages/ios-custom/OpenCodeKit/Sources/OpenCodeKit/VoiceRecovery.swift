@@ -9,8 +9,12 @@ public struct VoiceRecoveryPolicy: Sendable, Equatable {
   public var renewal: TimeInterval
   /// Interval between renewal retries after a transient failure.
   public var renewalRetry: TimeInterval
-  /// Time WebRTC gets to restore a disconnected peer on its own before the call is rebuilt.
+  /// Time WebRTC gets to restore a disconnected peer on its own, on the same network, before the call is rebuilt.
+  /// Repeated disconnections inside it do not extend it.
   public var mediaGrace: TimeInterval
+  /// What is left of that grace once the network comes back on other interfaces (Wi-Fi to 5G): WebRTC may move
+  /// the call to a candidate pair it already has there before the call is rebuilt.
+  public var handoverGrace: TimeInterval
   /// Overall limit, from the first loss, to restore audio.
   public var window: TimeInterval
   /// Delay before each rebuilt call; its count is the attempt limit.
@@ -21,10 +25,11 @@ public struct VoiceRecoveryPolicy: Sendable, Equatable {
   public var networkPoll: TimeInterval
 
   public init(renewal: TimeInterval = 5, renewalRetry: TimeInterval = 1, mediaGrace: TimeInterval = 15,
-              window: TimeInterval = 90, backoff: [TimeInterval] = [1, 3, 6, 10], attemptTimeout: TimeInterval = 20,
-              networkPoll: TimeInterval = 0.25) {
+              handoverGrace: TimeInterval = 3, window: TimeInterval = 120, backoff: [TimeInterval] = [1, 2, 4, 8, 15, 15],
+              attemptTimeout: TimeInterval = 20, networkPoll: TimeInterval = 0.25) {
     self.renewal = renewal; self.renewalRetry = renewalRetry; self.mediaGrace = mediaGrace
-    self.window = window; self.backoff = backoff; self.attemptTimeout = attemptTimeout; self.networkPoll = networkPoll
+    self.handoverGrace = handoverGrace; self.window = window; self.backoff = backoff
+    self.attemptTimeout = attemptTimeout; self.networkPoll = networkPoll
   }
 }
 
@@ -40,13 +45,16 @@ public struct VoiceLeaseClock: Sendable, Equatable {
   }
   public func valid(at now: TimeInterval) -> Bool { now < validUntil }
 
-  /// Only an unreachable proxy is retried. An explicit refusal, a malformed lease or another call's lease
+  /// Only an unreachable or overloaded server is retried: a network error, a timeout, 408, 429 or any 5xx, from the
+  /// proxy or the OpenCode server. An explicit refusal (another 4xx), a malformed lease or another call's lease
   /// keeps ending the call immediately.
   public static func isTransient(_ error: any Error) -> Bool {
     if let error = error as? URLError { return error.code != .cancelled }
-    if case VoiceWireError.unavailable(let status) = error { return [408, 429, 502, 503, 504].contains(status) }
+    if case VoiceWireError.unavailable(let status) = error { return transient(status) }
+    if case ClientError.http(let status) = error { return transient(status) }
     return false
   }
+  private static func transient(_ status: Int) -> Bool { status == 408 || status == 429 || (500...599).contains(status) }
 }
 
 /// Attempt and deadline bookkeeping for rebuilding a lost call.

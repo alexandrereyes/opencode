@@ -77,6 +77,10 @@ public enum VoiceEvent: Equatable, Sendable {
   case ready, input(VoiceTranscriptPiece), output(VoiceTranscriptPiece), turnDone(VoiceCompletedTurn)
   /// `failure` carries GPT Live's error `type/code` for diagnostics, never its message.
   case delegation(id: String, text: String), failure(code: String?), ignored
+  /// GPT Live closed the session (`session.closed`).
+  case closed
+  /// A delegation whose request could not be read; it is answered so GPT Live asks Alexandre again.
+  case unreadableDelegation(id: String)
 }
 
 public enum VoiceScreenPlatform: Sendable { case iPhone, mac }
@@ -150,30 +154,59 @@ public enum VoiceProtocol {
         interrupted: turn?["interrupted"]?.bool == true || ["interrupted", "cancelled"].contains(turn?["status"]?.string ?? "")))
     case "delegation.created":
       guard let item = root?["item"]?.object, item["target"]?.string == "client" else { return .ignored }
-      guard item["type"]?.string == "delegation", let id = item["id"]?.string,
-        !id.isEmpty, id.utf8.count <= 1024, let content = item["content"]?.array else {
+      guard item["type"]?.string == "delegation", let id = item["id"]?.string, !id.isEmpty, id.utf8.count <= 1024 else {
         throw VoiceWireError.invalidEvent
       }
-      let text = content.compactMap { part -> String? in
+      let text = (item["content"]?.array ?? []).compactMap { part -> String? in
         guard part.object?["type"]?.string == "input_text" else { return nil }
         return part.object?["text"]?.string
       }.joined()
       guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.utf8.count <= 32_768 else {
-        throw VoiceWireError.invalidEvent
+        return .unreadableDelegation(id: id)
       }
       return .delegation(id: id, text: text)
     case "error":
       let error = root?["error"]?.object
       let code = [error?["type"]?.string, error?["code"]?.string].compactMap { $0 }.joined(separator: "/")
       return .failure(code: code.isEmpty ? nil : code)
+    case "session.closed": return .closed
     default: return .ignored
     }
   }
 
+  /// Whether a GPT Live error means its session is over. OpenAI's Realtime reference: "Most errors are recoverable
+  /// and the session will stay open"; openai/codex, on this same protocol, ends a call only when the transport
+  /// closes. The one that kills it is `session_expired`, sent when the session reaches its maximum duration.
+  public static func endsSession(_ code: String?) -> Bool {
+    code?.split(separator: "/").contains("session_expired") == true
+  }
+
   public static func append(id: String, text: String) throws -> [Data] {
-    guard !id.isEmpty, id.utf8.count <= 1024, !text.isEmpty, text.utf8.count <= 65_536 else {
-      throw VoiceWireError.oversized
+    guard !id.isEmpty, id.utf8.count <= 1024 else { throw VoiceWireError.oversized }
+    return try chunks(text).map {
+      try JSONEncoder().encode(JSONValue.object([
+        "type": .string("delegation.context.append"), "delegation_item_id": .string(id),
+        "channel": .string("speakable"),
+        "content": .array([.object(["type": .string("input_text"), "text": .string($0)])]),
+      ]))
     }
+  }
+
+  /// Context for the whole call rather than one delegation: how a rebuilt call hears a result its delegation, left
+  /// in the lost call, can no longer carry. The service accepts it with text (29/10, `missing_required_parameter:
+  /// content[0].text` for an image); whether GPT Live speaks it unprompted is not verified in a real call.
+  public static func contextAppend(_ text: String) throws -> [Data] {
+    try chunks(text).map {
+      try JSONEncoder().encode(JSONValue.object([
+        "type": .string("session.context.append"),
+        "content": .array([.object(["type": .string("input_text"), "text": .string($0)])]),
+      ]))
+    }
+  }
+
+  /// At most 500 UTF-8 bytes per part, never splitting a scalar.
+  private static func chunks(_ text: String) throws -> [String] {
+    guard !text.isEmpty, text.utf8.count <= 65_536 else { throw VoiceWireError.oversized }
     var chunks: [String] = []
     var chunk = ""
     for scalar in text.unicodeScalars {
@@ -181,13 +214,7 @@ public enum VoiceProtocol {
       chunk.unicodeScalars.append(scalar)
     }
     if !chunk.isEmpty { chunks.append(chunk) }
-    return try chunks.map {
-      try JSONEncoder().encode(JSONValue.object([
-        "type": .string("delegation.context.append"), "delegation_item_id": .string(id),
-        "channel": .string("speakable"),
-        "content": .array([.object(["type": .string("input_text"), "text": .string($0)])]),
-      ]))
-    }
+    return chunks
   }
 }
 
@@ -227,6 +254,13 @@ public struct VoiceNarration: Sendable {
     guard !speaking, now >= userUntil, final || now >= nextAllowed, let pending else { return nil }
     self.pending = nil; last = pending; nextAllowed = now + 5
     return pending
+  }
+  /// What is waiting to be said.
+  public var waiting: String? { pending }
+  /// Puts back a text that was taken but not heard (its call dropped), even when it was the last one said.
+  public mutating func retry(_ text: String) {
+    guard pending == nil else { return }
+    pending = text; last = nil
   }
 }
 

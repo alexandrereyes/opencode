@@ -26,12 +26,14 @@ extension VoiceMasterServing {
   private var promptID: String?
   private var lastSequence = 0
   private var revision = 0
+  /// Waits between retries of one step after a network blip (about 15 s in all), so the request is not lost.
+  private let retry: [Double]
 
-  init(sessions: SessionStore, update: @escaping @MainActor (VoiceMasterUpdate) -> Void) {
-    self.sessions = sessions; self.update = update
+  init(sessions: SessionStore, retry: [Double] = [1, 2, 4, 8], update: @escaping @MainActor (VoiceMasterUpdate) -> Void) {
+    self.sessions = sessions; self.retry = retry; self.update = update
   }
   func ask(_ request: VoiceMasterRequest, screen: VoiceScreenShot?) async throws {
-    let info = try await sessions.client.masterInfo()
+    let info = try await retrying { try await sessions.client.masterInfo() }
     guard info.version == 1 else { throw ClientError.operation("Atualize o servidor para usar a Sessão mestra.") }
     do { try await send(request, screen: screen, info: info) } catch ClientError.http(404) where masterID != nil {
       // Deleted during the call: ask the server for its replacement once.
@@ -43,15 +45,15 @@ extension VoiceMasterServing {
     if masterID == nil {
       // The server reuses the current master, or creates one if it is missing, deleted or archived.
       let fallback = info.model == nil
-        ? try await sessions.client.defaultModel(directory: sessions.client.chatRoot()) : nil
+        ? try await retrying { try await sessions.client.defaultModel(directory: sessions.client.chatRoot()) } : nil
       try Task.checkCancellation()
-      let master = try await sessions.client.ensureMaster(
-        model: info.model ?? fallback.map { ModelReference(id: $0.id, providerID: $0.providerID) }, voice: true)
+      let master = try await retrying { try await sessions.client.ensureMaster(
+        model: info.model ?? fallback.map { ModelReference(id: $0.id, providerID: $0.providerID) }, voice: true) }
       sessions.adoptMaster(master.preferences)
       masterID = master.sessionID
     }
     guard let masterID else { return }
-    let session = try await sessions.client.session(masterID)
+    let session = try await retrying { try await sessions.client.session(masterID) }
     guard let model = session.model ?? info.model else { throw ClientError.operation("A Sessão mestra não tem modelo selecionado.") }
     if subscription == nil { subscribe() }
     waiting = true
@@ -59,17 +61,28 @@ extension VoiceMasterServing {
     revision += 1
     messages = []
     let prompt = if let screen {
-      try await Self.request(request, screen: screen, session: session, model: model, client: sessions.client)
+      try await retrying { try await Self.request(request, screen: screen, session: session, model: model, client: sessions.client) }
     } else { PromptRequest(text: request.text, delivery: request.delivery, agent: "mestra", model: model) }
     promptID = prompt.id
     try Task.checkCancellation()
-    // Durable admission only; execution continues independently and is observed below.
-    try await sessions.client.prompt(prompt, sessionID: masterID)
+    // Durable admission only; execution continues independently and is observed below. A retry sends the same
+    // prompt ID, which the server admits once, so a reply lost on the way never delivers the request twice.
+    try await retrying { try await sessions.client.prompt(prompt, sessionID: masterID) }
     admitted = true
     // Shown, not spoken: GPT Live already acknowledges the request and would announce it again.
     update(.progress(request.delivery == .queue ? "Pedido na fila da Sessão mestra." : "Pedido enviado à Sessão mestra.",
       narrate: false))
     if terminalPending { await reconcile() }
+  }
+  /// Repeats one step while the OpenCode server is unreachable or overloaded; a refusal fails at once.
+  private func retrying<T>(_ operation: () async throws -> T) async throws -> T {
+    for delay in retry {
+      do { return try await operation() } catch {
+        guard VoiceLeaseClock.isTransient(error) else { throw error }
+        try await Task.sleep(for: .seconds(delay))
+      }
+    }
+    return try await operation()
   }
   /// The composer's attachment shape: staged upload, inline data URL when the model reads images.
   static func request(_ request: VoiceMasterRequest, screen: VoiceScreenShot, session: Session, model: ModelReference,

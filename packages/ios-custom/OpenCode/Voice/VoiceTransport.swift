@@ -22,7 +22,13 @@ protocol VoiceTransporting: AnyObject, Sendable {
 /// Only value types cross to MainActor; no WebRTC proxy escapes the executor.
 final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
   static let log = Logger(subsystem: "br.com.alexandrem.opencode", category: "VoiceStartup")
-  private static let ssl: Void = { RTCInitializeSSL() }()
+  private static let native: Void = {
+    // WebRTC follows the network itself (NWPathMonitor), so when Wi-Fi drops it can move the call to the candidate
+    // pair it already has on cellular instead of waiting for the path to time out. Set once, before any factory.
+    // Deprecated in M147, whose Objective-C factory has no other way to take field trials (Abacato does the same).
+    RTCInitFieldTrialDictionary([kRTCFieldTrialUseNWPathMonitor: kRTCFieldTrialEnabledValue])
+    RTCInitializeSSL()
+  }()
   private let queue = DispatchQueue(label: "br.com.alexandrem.opencode.voice", qos: .userInitiated)
   private let event: @MainActor @Sendable (VoiceTransportEvent) -> Void
   private var factory: RTCPeerConnectionFactory?
@@ -54,7 +60,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
     guard !closed else { continuation.resume(throwing: CancellationError()); return }
     pending = continuation
     do {
-      _ = Self.ssl
+      _ = Self.native
       try activate()
       installObservers()
       #if os(macOS)

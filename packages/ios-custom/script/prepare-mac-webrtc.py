@@ -22,7 +22,7 @@ headers = target / "Headers"
 headers.mkdir(parents=True, exist_ok=True)
 public = [
     "RTCAudioDevice.h", "RTCAudioSource.h", "RTCAudioTrack.h", "RTCConfiguration.h", "RTCCryptoOptions.h",
-    "RTCDataChannel.h", "RTCDataChannelConfiguration.h", "RTCIceCandidate.h",
+    "RTCDataChannel.h", "RTCDataChannelConfiguration.h", "RTCFieldTrials.h", "RTCIceCandidate.h",
     "RTCIceServer.h", "RTCMediaConstraints.h", "RTCMediaSource.h", "RTCMediaStream.h",
     "RTCMediaStreamTrack.h", "RTCPeerConnection.h", "RTCPeerConnectionFactory.h",
     "RTCRtpReceiver.h", "RTCRtpSender.h", "RTCRtpTransceiver.h", "RTCSSLAdapter.h",

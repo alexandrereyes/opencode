@@ -11,8 +11,10 @@ private actor VoiceMasterHTTP {
   var created = 0
   var uploads: [(URL, Data)] = []
   var ensureVoice: [Bool?] = []
-  let failsPrompt: Bool
-  init(masterID: String? = nil, failsPrompt: Bool = false) { self.masterID = masterID; self.failsPrompt = failsPrompt }
+  /// Prompts answered 503 before one goes through, like a WARP route that drops for a moment.
+  var promptFailures: Int
+  var promptIDs: [String?] = []
+  init(masterID: String? = nil, promptFailures: Int = 0) { self.masterID = masterID; self.promptFailures = promptFailures }
   func delete(_ id: String) { deleted.insert(id) }
   func respond(_ request: URLRequest) throws -> (Data, URLResponse) {
     requests.append(request)
@@ -53,7 +55,9 @@ private actor VoiceMasterHTTP {
         status = 404; value = .object(["_tag": .string("SessionNotFoundError")])
       } else if path.hasSuffix("/prompt") {
         promptID = input?.object?["id"]?.string
-        status = failsPrompt ? 503 : 200; value = .object([:])
+        promptIDs.append(promptID)
+        status = promptFailures > 0 ? 503 : 200; value = .object([:])
+        promptFailures -= 1
       } else if path.hasSuffix("/inbox") {
         value = .object(["data": .array([])])
       } else if path == "/api/session/\(masterID ?? "missing")" {
@@ -212,13 +216,31 @@ private actor VoiceMasterHTTP {
     XCTAssertEqual(ensures, 1)
   }
   func testFailedAdmissionNeverAnnouncesSuccess() async throws {
-    let http = VoiceMasterHTTP(masterID: "ses_existing", failsPrompt: true)
+    let http = VoiceMasterHTTP(masterID: "ses_existing", promptFailures: .max)
     let config = ServerConfiguration(url: URL(string: "http://127.0.0.1:4177")!)
     let client = OpenCodeClient(configuration: config) { try await http.respond($0) }
     var updates: [VoiceMasterUpdate] = []
-    let master = VoiceMaster(sessions: SessionStore(configuration: config, client: client)) { updates.append($0) }
+    let master = VoiceMaster(sessions: SessionStore(configuration: config, client: client), retry: [0.01, 0.01]) { updates.append($0) }
     do { try await master.ask(VoiceMasterRequest("Teste")); XCTFail("Expected failure") } catch {}
     XCTAssertTrue(updates.isEmpty)
+    let attempts = await http.promptIDs
+    XCTAssertEqual(attempts.count, 3, "two retries, then the failure")
+    master.stop()
+  }
+  /// A blip during admission: the retry carries the same prompt ID, which the server admits once.
+  func testAdmissionRetriesAfterABlipWithTheSamePromptID() async throws {
+    let http = VoiceMasterHTTP(masterID: "ses_existing", promptFailures: 2)
+    let config = ServerConfiguration(url: URL(string: "http://127.0.0.1:4177")!)
+    let client = OpenCodeClient(configuration: config) { try await http.respond($0) }
+    var updates: [VoiceMasterUpdate] = []
+    let master = VoiceMaster(sessions: SessionStore(configuration: config, client: client), retry: [0.01, 0.01, 0.01]) {
+      updates.append($0)
+    }
+    try await master.ask(VoiceMasterRequest("Pesquise na web"))
+    let attempts = await http.promptIDs
+    XCTAssertEqual(attempts.count, 3)
+    XCTAssertEqual(Set(attempts.compactMap { $0 }).count, 1)
+    guard case .progress(_, narrate: false) = updates.last else { return XCTFail("Missing admission") }
     master.stop()
   }
 }

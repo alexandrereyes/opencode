@@ -40,6 +40,20 @@ public struct VoiceFailureReason: Equatable, Sendable {
   public static let delegationOverflow = Self("delegation_overflow")
   public static func startFailed(_ error: any Error) -> Self { Self("start_failed", code: errorCode(error)) }
   public static func reconnectFailed(_ error: any Error) -> Self { Self("reconnect_failed", code: errorCode(error)) }
+  /// GPT Live closed the session (`session.closed`).
+  public static let sessionClosed = Self("session_closed")
+
+  // Tolerated: the call goes on (or was rebuilt) after these.
+  /// ICE came back on its own within the grace.
+  public static let iceRecovered = Self("ice_recovered")
+  /// A renewal did not get through; it is retried while the confirmed lease covers the call.
+  public static func leaseRetry(_ error: any Error) -> Self { Self("lease_retry", code: errorCode(error)) }
+  /// A lost call is back, after this many attempts.
+  public static func reconnected(attempts: Int) -> Self { Self("reconnected", code: "attempts_\(attempts)") }
+  /// A rebuilt call delegated again a request the master already had; it was not sent twice.
+  public static let delegationRepeat = Self("delegation_repeat")
+  /// A result that arrived during a rebuild went to the new call as context (`session.context.append`).
+  public static let contextAppend = Self("context_append")
 
   /// The kind of an error, never its message: `http_503`, `url_-1009`, `invalid_answer`, `DecodingError`.
   public static func errorCode(_ error: any Error) -> String {
