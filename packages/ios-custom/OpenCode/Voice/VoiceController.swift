@@ -58,6 +58,14 @@ import UIKit
     VoiceTransport(event: $0)
   }
   @ObservationIgnored private var callVoice = GPTLiveVoice.defaultVoice
+  /// A locked iPhone shows no OpenCode window: no capture is attempted, GPT Live hears why.
+  @ObservationIgnored private var screenLocked: @MainActor () -> Bool = {
+    #if os(iOS)
+    !UIApplication.shared.isProtectedDataAvailable
+    #else
+    false
+    #endif
+  }
   /// Names of the last events of this conversation, sent with each diagnostic report.
   @ObservationIgnored private var trail = VoiceEventTrail()
   @ObservationIgnored private var diagnostics = VoiceDiagnosticsOutbox.standard
@@ -119,6 +127,7 @@ import UIKit
     var screen: (@MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot)?
     /// Reports stay here; tests read them instead of a server.
     var diagnostics: VoiceDiagnosticsOutbox?
+    var screenLocked = false
   }
   @ObservationIgnored private var testing: TestDependencies?
   convenience init(testing: TestDependencies, preferences: VoicePreferences = VoicePreferences()) {
@@ -127,6 +136,7 @@ import UIKit
     if let network = testing.network { self.network = network }
     if let cues = testing.cues { self.cues = cues }
     if let screen = testing.screen { captureScreen = screen }
+    screenLocked = { [locked = testing.screenLocked] in locked }
     diagnostics = testing.diagnostics
       ?? VoiceDiagnosticsOutbox(url: FileManager.default.temporaryDirectory.appending(path: "voice-diagnostics-\(UUID()).json"))
   }
@@ -467,12 +477,19 @@ import UIKit
       // Transcript pieces carry their own spacing; they arrive while he speaks, before the delegation.
       let heard = recentSpeech.filter { now - $0.at <= 45 }.map(\.text).joined() + " " + asked.text
       recentSpeech = []
+      // Locked, there is nothing to capture: an explicit request is answered by voice (unlock first) and a guess
+      // is dropped, so the request goes as delegated.
+      let locked = screenLocked()
       // GPT Live sometimes delegates a question about the screen as plain text; the app attaches it anyway.
-      let inferred = asked.screen == nil && VoiceScreenIntent.mentionsScreen(heard)
+      let inferred = !locked && asked.screen == nil && VoiceScreenIntent.mentionsScreen(heard)
       let request = inferred ? VoiceMasterRequest(text: asked.text, delivery: asked.delivery, screen: .front) : asked
       // Captured now, before awaiting earlier delegations: the screen GPT Live was asked about.
       let current = sessions?.currentSessionID
-      let screen = request.screen.map { target in screenTask(target, sessionID: current) }
+      let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>? = if locked, request.screen != nil {
+        Task { .failure(.locked) }
+      } else {
+        request.screen.map { target in screenTask(target, sessionID: current) }
+      }
       delegationQueue.append(Delegation(id: id, request: request, screen: screen, inferred: inferred))
       if delegationTask == nil { delegationTask = Task { await pumpDelegations() } }
     case .ignored: break

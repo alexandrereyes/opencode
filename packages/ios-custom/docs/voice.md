@@ -395,6 +395,16 @@ depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples.
   como foi delegado, sem aviso; só o `screen` explícito continua bloqueando o envio. Até 30/10 ia com
   `[O app tentou anexar a tela, mas não conseguiu: motivo]`, mas a inferência erra: "ó isso aqui é uma
   anomalia", sobre memória do Mac, com o iPhone bloqueado, fez a mestra responder sobre a captura.
+- **Só quando ele nomeia a tela (31/10):** a rede passou a reconhecer só menções à própria tela (tela, print,
+  screenshot, captura de tela). Expressões que apontam sem nomear ("isso aqui", "olha aqui", "vê o que cê
+  acha", "o que acha disso", "janela", "página", "que erro é esse") saíram: são fala comum, e "dá uma
+  pesquisada na web… vê o que cê acha" tentou capturar a tela com o iPhone bloqueado. É a escada da skill
+  `abacato-prompts` (abacato-v2): regra presa a frases é enxugar gelo; decidir olhar é do GPT Live, pelo campo
+  estrutural `screen` que o prompt mínimo descreve numa linha (degrau 2), e uma falha dele nisso se corrige
+  nessa linha geral do prompt (degrau 1), não com mais frases aqui.
+- **iPhone bloqueado:** nada é capturado nem tentado. Com `screen` explícito, o GPT Live ouve
+  `VoiceScreenRefusal.locked` (desbloquear e abrir o OpenCode) e nada vai à mestra; a inferência pelas falas
+  nem é avaliada, e o pedido segue como foi delegado.
 - **Mestra:** o prompt dela manda usar a imagem para responder ao pedido, ignorá-la quando o pedido não
   for sobre ela e nunca dizer que não vê telas; se ele pediu para ver e a imagem não veio, diz que a
   captura não veio e pede "olha a tela".

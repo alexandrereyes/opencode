@@ -64,15 +64,18 @@ public enum VoiceScreenRefusal: Error, Equatable, Sendable, LocalizedError {
   }
 }
 
-/// Whether Alexandre is talking about what is on screen, so a delegation GPT Live sent without `"screen"` still
-/// carries the capture. Speech since the previous delegation counts too: "Pergunta pra Mestra" right after
-/// "tá vendo minha tela?" is about the screen.
+/// Whether Alexandre named the screen itself ("tá vendo minha tela?", "manda um print"), so a delegation GPT Live
+/// sent without `"screen"` still carries the capture. Speech since the previous delegation counts too: "Pergunta pra
+/// Mestra" right after "tá vendo minha tela?" is about the screen.
+///
+/// Only a narrow net: whether to look is GPT Live's call, through the `screen` field the voice prompt describes.
+/// Phrases that point at something without naming the screen ("isso aqui", "olha aqui", "vê o que cê acha", "o que
+/// acha disso") are everyday speech, and listing them here guessed wrong (31/10: "dá uma pesquisada… vê o que cê
+/// acha" tried a capture). When GPT Live misses one of those, the fix goes to the prompt's general line about the
+/// screen, not to a new phrase here.
 public enum VoiceScreenIntent {
   private static let patterns = [
-    #"\btelas?\b"#, #"\bscreen(shot)?s?\b"#, #"\bprints?\b"#, #"\bcaptura(r)?\b"#, #"\bjanelas?\b"#,
-    #"\bpaginas?\b"#, #"\bisso aqui\b"#, #"\bisto aqui\b"#, #"\bolha (aqui|isso|isto|so|essa|esse|ai|la)\b"#,
-    #"\b(ve|ver|vendo|veja|vejo|enxerga|enxergando) (isso|isto|aqui|essa|esse|o que)\b"#,
-    #"\bo que (voce |vc |ce )?acha diss[oa]\b"#, #"\bque erro e esse\b"#, #"\bo que (ta|esta) aparecendo\b"#,
+    #"\btelas?\b"#, #"\bscreenshots?\b"#, #"\bprints?\b"#, #"\bcaptura de tela\b"#,
   ].map { try! NSRegularExpression(pattern: $0) }
 
   public static func mentionsScreen(_ text: String) -> Bool {

@@ -467,9 +467,56 @@ private actor LiveMemoryHTTP {
   }
 
   private func screenController(_ transport: VoiceTestTransport, _ master: VoiceTestMaster, _ http: VoiceTestHTTP,
+    locked: Bool = false,
     screen: @escaping @MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot) -> VoiceController {
     VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
-      master: { update in master.update = update; return master }, request: { try await http.respond($0) }, screen: screen))
+      master: { update in master.update = update; return master }, request: { try await http.respond($0) }, screen: screen,
+      screenLocked: locked))
+  }
+
+  /// A locked iPhone never tries a capture: asked for the screen, GPT Live hears to unlock first and nothing goes;
+  /// a guess from his words is dropped and the request goes as delegated.
+  func testLockedIPhoneNeverCapturesTheScreen() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    var captures = 0
+    let controller = screenController(transport, master, http, locked: true) { _, id throws(VoiceScreenRefusal) in
+      captures += 1; return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 1]), sessionID: id)
+    }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"l1","content":[{"type":"input_text","text":"{\"text\":\"Dá uma olhada nessa tela\",\"screen\":true}"}]}}"#.utf8)))
+    let refused = await until { controller.detail == VoiceScreenRefusal.locked.localizedDescription }
+    XCTAssertTrue(refused)
+    let asked = expectation(description: "asked")
+    master.asked = { asked.fulfill() }
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"l2","content":[{"type":"input_text","text":"Tá vendo minha tela?"}]}}"#.utf8)))
+    await fulfillment(of: [asked], timeout: 3)
+    XCTAssertEqual(captures, 0)
+    XCTAssertEqual(master.requests.map(\.text), ["Tá vendo minha tela?"])
+    XCTAssertEqual(master.requests.map(\.screen), [nil])
+    await controller.end()
+  }
+
+  /// 31/10: "vê o que cê acha" closed a request to search the web; it is not about the screen.
+  func testPointingWordsWithoutTheScreenDoNotCapture() async throws {
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    var captures = 0
+    let controller = screenController(transport, master, http) { _, id throws(VoiceScreenRefusal) in
+      captures += 1; return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 2]), sessionID: id)
+    }
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    let asked = expectation(description: "asked")
+    master.asked = { asked.fulfill() }
+    transport.event?(.data(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"v1","content":[{"type":"input_text","text":"Dá uma pesquisada na web, vê o que cê acha desse relato"}]}}"#.utf8)))
+    await fulfillment(of: [asked], timeout: 3)
+    XCTAssertEqual(captures, 0)
+    XCTAssertEqual(master.requests.map(\.screen), [nil])
+    await controller.end()
   }
 
   func testScreenDelegationAttachesTheCaptureTakenWhenGPTLiveDelegated() async throws {

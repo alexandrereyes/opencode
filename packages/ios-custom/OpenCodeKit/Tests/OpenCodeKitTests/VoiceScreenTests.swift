@@ -58,14 +58,17 @@ struct VoiceScreenTests {
   }
 
   @Test(arguments: ["Você está vendo a minha tela aí?", "Tá conseguindo ver minha tela", "cê tá vendo minha tela aí",
-    "consegue ver isso?", "olha aqui", "vê essa tela", "O que você acha disso aqui?", "que erro é esse?",
-    "manda um print pra mestra", "Olha essa página", "o que tá aparecendo?"])
+    "vê essa tela", "olha a tela do OpenCode", "manda um print pra mestra", "tira um screenshot", "faz uma captura de tela"])
   func speechAboutTheScreen(_ text: String) {
     #expect(VoiceScreenIntent.mentionsScreen(text))
   }
 
+  /// Pointing at something is not naming the screen: whether to look stays with GPT Live's `screen` field.
   @Test(arguments: ["Pergunta pra Mestra", "Não, vai lá na Mestra que você consegue", "cria uma sessão no abacato",
-    "faz uma costela pro jantar", "liga pro telefone dele", "o que tem de novo?"])
+    "faz uma costela pro jantar", "liga pro telefone dele", "o que tem de novo?", "vê o que cê acha",
+    "Mas dá uma pesquisada na web aí antes de eu falar com o médico, vê o que cê acha em relação a esse tipo de relato",
+    "isso aqui é normal?", "o que você acha disso?", "olha aqui, eu acordo às três", "abre a janela do quarto",
+    "lê a próxima página", "que erro é esse?", "imprime o relatório", "vê isso pra mim"])
   func speechNotAboutTheScreen(_ text: String) {
     #expect(!VoiceScreenIntent.mentionsScreen(text))
   }
