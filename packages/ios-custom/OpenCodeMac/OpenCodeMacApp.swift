@@ -76,7 +76,11 @@ private struct MacRoot: View {
           MacWindowScene(app: runtime, store: store, target: target).id(runtime.identity)
         } else if let error = runtime.error {
           ContentUnavailableView {
-            Label("Credenciais indisponíveis", systemImage: "key")
+            if runtime.servers.testWithoutSandbox {
+              Label("App de teste sem sandbox", systemImage: "lock.shield")
+            } else {
+              Label("Credenciais indisponíveis", systemImage: "key")
+            }
           } description: { Text(error) } actions: {
             Button("Tentar novamente") { Task { await runtime.prepare() } }
           }

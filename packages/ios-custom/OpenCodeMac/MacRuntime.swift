@@ -124,6 +124,10 @@ import SwiftUI
   private static func serverStore() -> ServerStore {
     #if DEBUG
     if let fixture = MacServerChecks.servers() { return fixture }
+    if MacLaunch.testCopy {
+      let sandbox = TestInstall.sandbox(launch: .override(), defaults: .standard, credentials: ServerCredentials())
+      return ServerStore(launchOverride: sandbox, builtinURL: localURL, testWithoutSandbox: sandbox == nil)
+    }
     #endif
     return ServerStore(launchOverride: .override(), builtinURL: localURL)
   }
@@ -173,4 +177,8 @@ enum MacLaunch {
   /// `-OpenCodeMacBackground` with a fixture: a test copy that never takes the user's focus. No Dock icon or menu
   /// bar (an accessory app) and no activation; its windows stay off-screen as the captures already put them.
   static let background = fixture && ProcessInfo.processInfo.arguments.contains("-OpenCodeMacBackground")
+  /// A test copy: the scripts give each copy a bundle identifier of its own (`….ajustes.tests`, …), unlike the
+  /// installed app and the Debug build. It never connects to a saved server or to 4096 (`TestInstall`).
+  static let testCopy = !["br.com.alexandrem.opencode.mac", "br.com.alexandrem.opencode.mac.debug"]
+    .contains(Bundle.main.bundleIdentifier ?? "")
 }

@@ -5,7 +5,7 @@ extension ServerConfiguration {
   /// A loopback sandbox, never the production backend (4178) or UI proxy (4096). Agents run
   /// sandboxes on their own ports, so DEBUG failure fixtures must not require 4177/4183.
   public var isolatedTestSandbox: Bool {
-    url.scheme == "http" && url.host == "127.0.0.1" && url.port.map { ![4096, 4178].contains($0) } == true
+    url.scheme == "http" && ["127.0.0.1", "localhost"].contains(url.host) && url.port.map { ![4096, 4178].contains($0) } == true
   }
 }
 

@@ -30,7 +30,15 @@ struct OpenCodeApp: App {
 /// App-wide state, shared by the scene and by intents that run without one (Action button, Controls).
 @MainActor @Observable final class AppRuntime {
   static let shared = AppRuntime()
-  let servers = ServerStore(launchOverride: .override())
+  let servers: ServerStore = {
+    #if DEBUG && targetEnvironment(simulator)
+    // On the Simulator only tests run the app: never the saved servers or the real default, only a sandbox.
+    let sandbox = TestInstall.sandbox(launch: .override(), defaults: .standard, credentials: ServerCredentials())
+    return ServerStore(launchOverride: sandbox, testWithoutSandbox: sandbox == nil)
+    #else
+    return ServerStore(launchOverride: .override())
+    #endif
+  }()
   let appearance = AppearanceSettings()
   let voice = VoiceController()
   var store: SessionStore?
@@ -99,10 +107,15 @@ private struct AppRoot: View {
           .environment(\.voiceSessionStore, store)
       } else if let error = runtime.error {
         ContentUnavailableView {
-          Label("Credenciais indisponíveis", systemImage: "key")
+          if runtime.servers.testWithoutSandbox {
+            Label("App de teste sem sandbox", systemImage: "lock.shield")
+          } else {
+            Label("Credenciais indisponíveis", systemImage: "key")
+          }
         } description: { Text(error) } actions: {
           Button("Tentar novamente") { Task { await runtime.prepare() } }.disabled(runtime.switching)
         }
+        .accessibilityIdentifier(runtime.servers.testWithoutSandbox ? "test-without-sandbox" : "server-error")
       } else { ProgressView("Conectando…") }
     }
     .environment(\.appTheme, theme)

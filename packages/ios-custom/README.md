@@ -123,8 +123,8 @@ app's sidebar, with a different presentation. The web app is the behavior refere
   master never appears in the rows. `script/test-session-selection.py --device … --derived … --server-url …
   --home …` imports four owned sessions (no model calls) and runs `OpenCodeUITests/SessionSelectionTests`.
   Destructive UI tests call `requireSandbox()`, which reads the DEBUG `debug-server-url` marker and throws, without
-  acting, unless the app is connected to the sandbox; recreate the simulator between themes, since a relaunch without
-  test arguments would use the default server.
+  acting, unless the app is connected to the sandbox. It stays as a second check: since 31/10 a test install cannot
+  reach the real server at all (see [Test installs never reach the real server](#test-installs-never-reach-the-real-server--31-october)).
 - **Unread:** a dot, with no count. Marking a session as unread is not offered, because the backend only moves the
   viewed watermark forward.
 - **Filter chips:** "Todas" first, as a compact icon-only chip (`square.stack`, a stack of every session; at least
@@ -4230,6 +4230,27 @@ While someone uses the Mac, macOS may refuse to bring a test copy to the front: 
 `test-mac-window.sh` and the ⌘1–⌘9 check (menu commands follow the key window) can fail with the right geometry;
 failures now print whether the app and the window were in front. The base build
 (`fadcd1420a`) failed the same way in 2 of 3 runs under those conditions.
+
+### Test installs never reach the real server — 31 October
+
+- **Cause.** Without `-OpenCodeServerURL`, `ServerStore` used the saved server (`OpenCodeServers.active`) or the
+  built-in default, `http://opencode2-mac.alexandrem.com.br` on the iPhone (the real Mac through Cloudflare One) and
+  `127.0.0.1:4096` on the Mac (the production proxy). XCUITest passes `launchArguments` only to `launch()`:
+  `activate()` on a closed app, a relaunch by the system (a push or Live Activity wakes the app, which builds
+  `AppRuntime` with no scene) and the first launch after a reinstall arrive without them, and the Simulator keeps its
+  Keychain across uninstalls. The app then loaded real sessions before `requireSandbox()` could stop the test.
+- **Protection (`TestInstall`, DEBUG only).** A DEBUG build on the iOS Simulator and a Mac test copy (any bundle
+  identifier but `br.com.alexandrem.opencode.mac` and `….mac.debug`; the scripts rename each copy) never use the
+  saved servers or the default. They connect only to a loopback sandbox given at launch
+  (`ServerConfiguration.isolatedTestSandbox`: `127.0.0.1` or `localhost`, any port but 4096 and 4178); that sandbox
+  is remembered, so a relaunch without arguments returns to it. With none (or with 4096, 4178 or a remote host at
+  launch), `ServerStore.testWithoutSandbox` makes every connection fail and the app shows "App de teste sem
+  sandbox" (`test-without-sandbox`); Live Activity and push registration have no server either. Release builds
+  (TestFlight), DEBUG builds on a device and the installed Mac app keep their behaviour. In-memory fixtures (the
+  Mac's `-OpenCodeMacFixture`, the screen catalog) are unaffected.
+- **Checks.** `swift test` (`TestInstallTests`: no fallback to a saved or default server, 4096/4178/remote refused
+  and not remembered, the sandbox reused on a relaunch); `ServerIsolationTests` launches the test app without
+  arguments on a fresh simulator and requires the notice and no `debug-server-url`.
 
 ### Pergunta paralela — 29 October
 

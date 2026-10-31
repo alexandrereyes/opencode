@@ -25,13 +25,15 @@ public struct SavedServer: Identifiable, Codable, Sendable, Equatable {
 }
 
 public enum ServerStoreError: LocalizedError {
-  case invalidAddress, builtIn, missing, sandboxOnly
+  case invalidAddress, builtIn, missing, sandboxOnly, testWithoutSandbox
   public var errorDescription: String? {
     switch self {
     case .invalidAddress: "Informe um endereço HTTP ou HTTPS sem senha, consulta ou fragmento."
     case .builtIn: "O servidor padrão não pode ser removido nem ter seu endereço alterado."
     case .missing: "O servidor não está mais salvo."
     case .sandboxOnly: "Esta execução de teste aceita apenas servidores de loopback."
+    case .testWithoutSandbox:
+      "Este app de teste foi aberto sem um sandbox (-OpenCodeServerURL http://127.0.0.1:<porta>) e não se conecta ao servidor real nem a um servidor salvo."
     }
   }
 }
@@ -41,6 +43,8 @@ public enum ServerStoreError: LocalizedError {
   public private(set) var activeID = "builtin"
   public private(set) var revision = 0
   public let launchOverride: ServerConfiguration?
+  /// A test install (`TestInstall`) without a sandbox: it connects nowhere.
+  public let testWithoutSandbox: Bool
   @ObservationIgnored private let defaults: UserDefaults
   @ObservationIgnored private let credentials: ServerCredentials
   @ObservationIgnored private let storageKey: String
@@ -48,12 +52,15 @@ public enum ServerStoreError: LocalizedError {
   /// `builtinURL` is the default server: the Mac reached through Cloudflare One on the iPhone, this Mac's own
   /// local server in the Mac app.
   public init(defaults: UserDefaults = .standard, credentials: ServerCredentials = .init(),
-              launchOverride: ServerConfiguration? = nil, builtinURL: URL = ServerConfiguration.defaultURL) {
+              launchOverride: ServerConfiguration? = nil, builtinURL: URL = ServerConfiguration.defaultURL,
+              testWithoutSandbox: Bool = false) {
     self.defaults = defaults
     self.credentials = credentials
     self.launchOverride = launchOverride
+    self.testWithoutSandbox = testWithoutSandbox
     // Explicit test servers never read or overwrite the installed app's server registry.
-    storageKey = "OpenCodeServers" + (launchOverride.map { "." + $0.url.absoluteString } ?? "")
+    storageKey = "OpenCodeServers" + (testWithoutSandbox ? ".test-without-sandbox"
+      : launchOverride.map { "." + $0.url.absoluteString } ?? "")
     let saved = defaults.data(forKey: storageKey).flatMap {
       try? JSONDecoder().decode([SavedServer].self, from: $0)
     } ?? []
@@ -65,6 +72,7 @@ public enum ServerStoreError: LocalizedError {
   }
   public var active: SavedServer { servers.first { $0.id == activeID }! }
   public func configuration() throws -> ServerConfiguration {
+    if testWithoutSandbox { throw ServerStoreError.testWithoutSandbox }
     if active.builtIn, let launchOverride { return launchOverride }
     try validate(active.url)
     return ServerConfiguration(url: active.url, password: try credentials.password(account(activeID)))
@@ -112,6 +120,7 @@ public enum ServerStoreError: LocalizedError {
     persist()
   }
   public func validate(_ url: URL) throws {
+    if testWithoutSandbox { throw ServerStoreError.testWithoutSandbox }
     if let launchOverride, ["127.0.0.1", "localhost", "::1"].contains(launchOverride.url.host()),
        !["127.0.0.1", "localhost", "::1"].contains(url.host()) {
       throw ServerStoreError.sandboxOnly
