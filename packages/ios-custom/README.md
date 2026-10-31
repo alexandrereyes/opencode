@@ -4223,6 +4223,10 @@ tokens and twelve; a click, Shift+Return, Return and Esc in a question; a pendin
 Esc; ⌘C in the viewer (the clipboard is restored afterwards) and the drag provider; the archived search; the Ir
 menu's ⌘1–⌘9 and ⌘2; Contexto at 60% of a 2400-pt window; the right Option key's tap, hold, left Option and
 modifier cases with the fake recorder (no microphone); ↓ in both places; the master's trash. Each writes captures.
+**Running the checks.** `script/test-mac-ajustes.sh` takes the modes to run; without arguments it lists them and
+exits with an error. `--all` runs the whole battery, one app launch per mode: agents use it only when Alexandre
+asks for it explicitly, and otherwise run only the modes of what they changed (for example `markdown arquivos` after a
+change in Arquivos). `edge` runs only when named.
 `MacStress` now activates the app first (the search panel hides while another app is in front) and drags Contexto
 to 1400 pt as well; `-OpenCodeMacResourceProfile visible` streams Recursos from an off-screen test window (see
 [Recursos em palco](#recursos-em-palco--30-october)) and the fixture's `MacResourceSnapshot` lines count snapshots.

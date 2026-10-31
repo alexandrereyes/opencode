@@ -4,8 +4,26 @@
 # clipboard after the image check and exits every app process. The copy runs in the background
 # (`-OpenCodeMacBackground`): no Dock icon, menu bar or focus taken, windows off-screen.
 #
-#   [OPENCODE_MAC_THEME=openchamber-light] OPENCODE_MAC_DERIVED=<DerivedData> OPENCODE_MAC_CAPTURES=<folder> zsh packages/ios-custom/script/test-mac-ajustes.sh [mode …]
+#   [OPENCODE_MAC_THEME=openchamber-light] OPENCODE_MAC_DERIVED=<DerivedData> OPENCODE_MAC_CAPTURES=<folder> zsh packages/ios-custom/script/test-mac-ajustes.sh mode … | --all
+#
+# Pass the modes of what changed. `--all` runs every mode, one app launch each: agents use it only when Alexandre
+# asks for the whole battery.
 set -euo pipefail
+all=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos servidores recursos snippets)
+if (( $# == 0 )); then
+  print -u2 "Informe os modos a rodar (os do que foi alterado), ou --all para a bateria inteira (só quando o Alexandre pedir)."
+  print -u2 "Modos: ${all[*]} (e edge, fora do --all)"
+  exit 2
+fi
+if [[ $1 == --all ]]; then
+  modes=($all)
+else
+  modes=("$@")
+  for mode in $modes; do
+    # `edge` runs only on request, outside --all.
+    (( ${all[(Ie)$mode]} )) || [[ $mode == edge ]] || { print -u2 "Modo desconhecido: $mode. Modos: ${all[*]} edge"; exit 2; }
+  done
+fi
 package=${0:A:h:h}
 derived=${OPENCODE_MAC_DERIVED:-${TMPDIR%/}/opencode/mac-ajustes-work/mac-derived}
 prints=${OPENCODE_MAC_CAPTURES:-${TMPDIR%/}/opencode/mac-ajustes-prints/checks}
@@ -20,9 +38,6 @@ codesign --force --deep --sign - "$copy" 2>/dev/null
 # cfprefsd may still write the last app's preferences right after it exits.
 trap 'sleep 1; defaults delete "$domain" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$domain.plist"; rm -rf "$copy" "$samples" "$HOME/Library/Saved Application State/$domain.savedState"' EXIT
 failed=0
-# Without arguments, every mode (zsh does not split `${@:-…}` into words).
-modes=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos servidores recursos snippets)
-(( $# )) && modes=("$@")
 for mode in $modes; do
   # Each mode starts from a fresh window: no restored window, reading place or Contexto width.
   defaults delete "$domain" 2>/dev/null || true
