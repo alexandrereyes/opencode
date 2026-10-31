@@ -60,6 +60,8 @@ import SwiftUI
     target = store.memory.anchor ?? reading.position(store.id) ?? ReadingPosition(.followTail)
     super.init(nibName: nil, bundle: nil)
     layout.delegate = self
+    // `update` passes only changes: the end needs its padding below the last row from the start.
+    layout.setBottomPadding(bottomPadding)
     layout.setSpacerPrompt(store.memory.spacerPrompt)
     parses.landed = { [weak self] in self?.scheduleRebuild() }
     parses.rasterized = { [weak self] in self?.context.rasterRevision += 1 }
@@ -294,6 +296,11 @@ import SwiftUI
     }
     let oldIndex = Dictionary(old.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
     let newIndex = Dictionary(next.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+    // A row whose disclosure the reader just opened (only taps open them while the row is shown).
+    let opened = next.last { item in
+      guard let now = item.expansion, let was = oldIndex[item.id].flatMap({ old[$0].expansion }) else { return false }
+      return now.contains { $0.value && was[$0.key] != true }
+    }?.id
     let kept = old.filter { newIndex[$0.id] != nil }.map(\.id)
     let reordered = old.isEmpty || kept != next.filter { oldIndex[$0.id] != nil }.map(\.id)
     let deleted = old.indices.filter { newIndex[old[$0].id] == nil }.map { IndexPath(item: $0, section: 0) }
@@ -355,8 +362,27 @@ import SwiftUI
       return
     }
     collectionView.accessibilityValue = "\(store.messages.count) mensagens carregadas"
+    if let opened { showOpened(opened) }
     publishState()
     fillViewport()
+  }
+
+  /// What a disclosure opens grows below its row, whose top stays put: when it passes the bottom edge (a row
+  /// right above the composer), the transcript moves just enough to show it, never past the row's own top.
+  private func showOpened(_ id: String) {
+    let origin = collectionView.contentOffset.y
+    // Only a row on screen: one opened elsewhere (a revealed tool) comes with its own navigation.
+    guard let index = layout.geometry.index(of: id),
+      CGFloat(layout.geometry.tops[index]) < origin + collectionView.bounds.height else { return }
+    let target = { [unowned self] () -> CGFloat in
+      let geometry = layout.geometry
+      guard let index = geometry.index(of: id) else { return origin }
+      let top = CGFloat(geometry.tops[index])
+      let bottom = top + CGFloat(geometry.entries[index].height + geometry.bottomPadding)
+      return max(origin, min(bottom - collectionView.bounds.height, visibleTop(line: top, viewportTop: nil)))
+    }
+    guard target() > origin + 0.5 else { return }
+    scroll(to: target, animated: true)
   }
 
   /// A transcript shorter than its viewport cannot be scrolled to its top: page history in until it fills it

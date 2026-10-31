@@ -4,7 +4,9 @@
 `prepare --label L` turns `experimental.todo` on in a fake repository's `.opencode/opencode.jsonc` (never in the
 sandbox's global config) and imports one idle session whose transcript ends with a completed `todowrite`;
 `test --label L --device <fresh simulator>` runs OpenCodeUITests/SessionProgressUITests against it (one tiny real
-Luna-6/low run); `cleanup` deletes every owned session of every label.
+Luna-6/low run per test; `--only <test>` runs one); `cleanup` deletes every owned session of every label.
+`prepare --history N` puts N earlier turns (text and a finished Atividade each) before the plan, so the conversation
+scrolls and the run's Atividade lands right above the composer's stack.
 """
 import argparse
 import base64
@@ -27,6 +29,8 @@ parser.add_argument("--home", type=Path, default=temporary / "session-progress/s
 parser.add_argument("--device", default=os.environ.get("OPENCODE_TEST_DEVICE"))
 parser.add_argument("--derived", type=Path, default=temporary / "session-progress/derived-tests")
 parser.add_argument("--evidence", type=Path, default=temporary / "session-progress/evidence")
+parser.add_argument("--history", type=int, default=0)
+parser.add_argument("--only")
 args = parser.parse_args()
 assert args.port not in (4096, 4177, 4178, 4179, 4192), "Use an isolated sandbox port"
 owner = json.loads((args.home / "sandbox.json").read_text())
@@ -68,11 +72,27 @@ if args.command == "prepare":
     model = {"providerID": "llm-proxy", "id": "gpt-6-luna", "variant": "low"}
     now = int(time.time() * 1000)
     session = "ses_" + uuid.uuid4().hex
+    history = []
+    for turn in range(args.history):
+        at = now - 60_000 * (args.history - turn) - 10_000
+        history += [
+            {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": f"Etapa {turn + 1}: confira o módulo {turn + 1}.",
+                "time": {"created": at}},
+            {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build", "model": model,
+                "time": {"created": at + 1000, "completed": at + 9000}, "finish": "stop",
+                "content": [
+                    {"type": "tool", "id": "call_" + uuid.uuid4().hex, "name": "shell",
+                        "state": {"status": "completed", "input": {"command": f"bun test modulo-{turn + 1}"},
+                            "content": [{"type": "text", "text": "ok"}], "metadata": {}},
+                        "time": {"created": at + 1500, "ran": at + 1500, "completed": at + 4000}},
+                    {"type": "text", "text": f"Conferi o módulo {turn + 1}: os testes passam e a revisão não achou "
+                        "nada que bloqueie. Sigo para a próxima etapa sem mexer nos arquivos que o revisor lê."}]},
+        ]
     api("/api/experimental/session/import", {"info": {"id": session, "title": f"Progresso — {args.label}",
         "projectID": "global", "location": {"directory": str(directory)}, "agent": "build", "model": model,
         "cost": 0, "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
         "outcome": "succeeded", "time": {"created": now, "updated": now, "idle": now, "viewed": now}},
-        "location": {"directory": str(directory)}, "messages": [
+        "location": {"directory": str(directory)}, "messages": history + [
             {"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": "Planeje a Live Activity do Progresso.",
                 "time": {"created": now - 3000}},
             {"id": "msg_" + uuid.uuid4().hex, "type": "assistant", "agent": "build", "model": model,
@@ -118,7 +138,8 @@ try:
         status = subprocess.call(["xcodebuild", "test-without-building", "-xctestrun", str(configured),
             "-destination", "platform=iOS Simulator,id=" + args.device, "-parallel-testing-enabled", "NO",
             "-collect-test-diagnostics", "never", "-resultBundlePath", str(result),
-            "-only-testing:OpenCodeUITests/SessionProgressUITests"], stdout=output, stderr=subprocess.STDOUT)
+            "-only-testing:OpenCodeUITests/SessionProgressUITests" + (f"/{args.only}" if args.only else "")],
+            stdout=output, stderr=subprocess.STDOUT)
     subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(result),
         "--output-path", str(args.evidence / (args.label + "-attachments"))], check=True)
     print(args.label, "status", status)

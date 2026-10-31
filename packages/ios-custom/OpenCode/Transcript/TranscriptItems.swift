@@ -52,6 +52,13 @@ struct TranscriptItem: Identifiable, Equatable {
     default: nil
     }
   }
+  /// The disclosures chosen in an activity or shell row.
+  var expansion: [String: Bool]? {
+    switch kind {
+    case .activity(_, _, let expansion), .shell(_, let expansion): expansion
+    default: nil
+    }
+  }
   /// Rendered natively as a text view instead of hosted SwiftUI.
   var native: Bool {
     if case .prose = kind { return true }

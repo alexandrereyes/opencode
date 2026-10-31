@@ -344,7 +344,9 @@ Web projection sources: `packages/session-ui-custom/src/timeline/{projection,det
   control appears beyond `max(400, viewport height)` points from the bottom, or beyond 24 points once content was
   added below the end the reader last saw (growth, arrivals, even while hidden). It scrolls to the end once; nothing
   follows growth (iOS, 27 October): sending moves the sent prompt to the top of the transcript, and its answer grows
-  below it without moving the screen. Route entry acknowledges the session's
+  below it without moving the screen. A disclosure the reader opens keeps its row's top; when what it opens passes the
+  bottom edge (a row right above the composer stack), the transcript moves just enough to show it, never past that
+  top (iOS, 30 October). The end keeps 12 points below the last row. Route entry acknowledges the session's
   observed idle independently of position, transcript paging and catalogs, including child sessions, through the
   unchanged `POST /api/session/:id/view` payload `{idle}` on installed `1de0005…`. No API moves viewed backwards.
 
