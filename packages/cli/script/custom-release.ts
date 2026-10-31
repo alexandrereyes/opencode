@@ -758,9 +758,9 @@ export async function installMacProxy(host = { home: `/Users/${os.userInfo().use
   return "proxy updated and restarted"
 }
 
-async function macPublish(
+export async function macPublish(
   host: { home: string; mac: typeof onMac },
-  operation: "proxy" | "hub",
+  operation: "proxy" | "hub" | "controller",
   args: string[],
   input: Uint8Array,
 ) {
