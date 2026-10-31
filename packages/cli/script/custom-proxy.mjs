@@ -32,6 +32,46 @@ function target(req) {
   const url = new URL(req.url ?? "/", "http://localhost")
   return { url, path: url.pathname + url.search }
 }
+// Compatibility for clients that kept a directory open across the Linux -> native Mac cutover.
+// Apply only to an authenticated server location, never resource tickets or arbitrary request data.
+function relocated(req, url) {
+  const file = path.join(home, "location-aliases.json")
+  if (!fs.existsSync(file)) return { path: url.pathname + url.search, headers: req.headers }
+  const aliases = JSON.parse(fs.readFileSync(file, "utf8"))
+  const canonical = (directory) => {
+    for (const alias of aliases) {
+      if (directory === alias.from || directory.startsWith(alias.from + "/")) {
+        const target = alias.to + directory.slice(alias.from.length)
+        console.info(
+          JSON.stringify({
+            event: "location_alias",
+            at: new Date().toISOString(),
+            from: directory,
+            to: target,
+            userAgent: req.headers["user-agent"] ?? "",
+          }),
+        )
+        return target
+      }
+    }
+    return directory
+  }
+  const directory = url.searchParams.get("location[directory]")
+  if (directory) url.searchParams.set("location[directory]", canonical(directory))
+  let headers = req.headers
+  const header = req.headers["x-opencode-directory"]
+  if (typeof header === "string") {
+    let decoded
+    try {
+      decoded = decodeURIComponent(header)
+    } catch {
+      decoded = header
+    }
+    const target = canonical(decoded)
+    if (target !== decoded) headers = { ...headers, "x-opencode-directory": encodeURIComponent(target) }
+  }
+  return { path: url.pathname + url.search, headers }
+}
 function resources(url) {
   return url.pathname.startsWith("/resources/")
 }
@@ -98,13 +138,19 @@ function route(req) {
     return { status: 503 }
   }
   if (!authorized(req, url, server.password)) return { status: 401, challenge: challenge(req) }
+  let location
+  try {
+    location = relocated(req, url)
+  } catch {
+    return { status: 503 }
+  }
   return {
     options: {
       hostname: server.hostname,
       port: server.port,
-      path: forwarded,
+      path: location.path,
       method: req.method,
-      headers: req.headers,
+      headers: location.headers,
     },
   }
 }

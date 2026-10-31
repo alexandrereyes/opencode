@@ -176,14 +176,18 @@ test.skipIf(!compiler)(
     expect(build.stderr.toString()).toBe("")
     expect(build.exitCode).toBe(0)
 
-    const echo = Bun.spawn([binary, "sh", "-c", 'read line; echo "$line $PPID"; exit 3'], {
-      stdin: "pipe",
-      stdout: "pipe",
-    })
+    // On macOS the controller first runs itself again with responsibility disclaimed, so the command's parent is that
+    // second instance, a child of the first.
+    const echo = Bun.spawn(
+      [binary, "sh", "-c", 'read line; echo "$line $PPID $(ps -o ppid= -p $PPID | tr -d " ")"; exit 3'],
+      { stdin: "pipe", stdout: "pipe" },
+    )
     echo.stdin.write("hello\n")
     await echo.stdin.end()
     expect(await echo.exited).toBe(3)
-    expect((await new Response(echo.stdout).text()).trim()).toBe(`hello ${echo.pid}`)
+    const [line, parent, grandparent] = (await new Response(echo.stdout).text()).trim().split(" ")
+    expect(line).toBe("hello")
+    expect(Number(process.platform === "darwin" ? grandparent : parent)).toBe(echo.pid)
 
     const trapped = Bun.spawn([binary, "sh", "-c", 'trap "exit 7" TERM; echo ready; sleep 30 & wait'], {
       stdout: "pipe",
