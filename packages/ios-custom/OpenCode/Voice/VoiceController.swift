@@ -81,6 +81,8 @@ import UIKit
   /// A result sent as call context after a rebuild; an error right after it puts it back for the next delegation.
   @ObservationIgnored private var contextAppend: (text: String, at: TimeInterval)?
   @ObservationIgnored private var contextRejected = false
+  /// The type of the last command sent on the data channel, for diagnostics.
+  @ObservationIgnored private var lastSent: (type: String, at: TimeInterval)?
   @ObservationIgnored private var currentDelegation: String?
   @ObservationIgnored private var handled: Set<String> = []
   /// A delegation waiting for the master; a screen capture starts when GPT Live delegates, not when sent.
@@ -176,7 +178,7 @@ import UIKit
     recovery = VoiceRecovery(policy: policy); alert = nil
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false; recentSpeech = []
-    trail = VoiceEventTrail()
+    trail = VoiceEventTrail(); lastSent = nil
     graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; contextAppend = nil; contextRejected = false
     state.apply(.start); detail = "Preparando o microfone"; publish()
     inputItemID = nil; outputItemID = nil; interruptedAssistant = false; interruptedUser = false; capturedTurns = []
@@ -492,7 +494,7 @@ import UIKit
       if turn.role == .assistant { state.apply(.silence); outputItemID = nil; interruptedAssistant = false }
       else { userUntil = ProcessInfo.processInfo.systemUptime + 1; inputItemID = nil; interruptedUser = false }
       publish()
-    case .failure(let code):
+    case .failure(let code, let detail):
       VoiceTransport.log.notice("phase=service-error")
       if let sent = contextAppend, Self.now - sent.at < 3 {
         // The service did not take the result as call context: it waits for the next delegation instead.
@@ -500,8 +502,8 @@ import UIKit
         narration.retry(sent.text); finalNarration = true
       }
       // GPT Live keeps its session after most errors; only an expired one is rebuilt (VoiceProtocol.endsSession).
-      guard VoiceProtocol.endsSession(code) else { report(.tolerated, .service(code)); return }
-      lose("O serviço de voz encerrou a sessão. Reconectando…", .service(code))
+      guard VoiceProtocol.endsSession(code) else { report(.tolerated, .service(code, detail: detail)); return }
+      lose("O serviço de voz encerrou a sessão. Reconectando…", .service(code, detail: detail))
     case .closed: lose("O serviço de voz encerrou a sessão. Reconectando…", .sessionClosed)
     case .unreadableDelegation(let id):
       guard handled.insert(id).inserted else { return }
@@ -668,6 +670,7 @@ import UIKit
     do {
       for data in frames {
         guard epoch == token, link == current else { return }
+        lastSent = (delegation == nil ? "session.context.append" : "delegation.context.append", Self.now)
         try await transport.send(data)
       }
       if delegation == nil { contextAppend = (text, Self.now); report(.tolerated, .contextAppend) }
@@ -683,7 +686,12 @@ import UIKit
     guard let transport, let frames = try? VoiceProtocol.append(id: id, text: text) else { return }
     let token = epoch, current = link
     Task { [weak self] in
-      do { for data in frames { try await transport.send(data) } } catch {
+      do {
+        for data in frames {
+          self?.lastSent = ("delegation.context.append", Self.now)
+          try await transport.send(data)
+        }
+      } catch {
         guard let self, epoch == token, link == current else { return }
         lose("Não foi possível transmitir a resposta ao serviço de voz. Reconectando…", .sendFailed)
       }
@@ -734,7 +742,8 @@ import UIKit
     let entry = VoiceDiagnostic(kind: kind, reason: reason, build: Self.build, at: .now, call: sessionID,
       connectedSeconds: connectedAt.map { Date.now.timeIntervalSince($0) }, phase: String(describing: state.phase),
       recovering: recovery.active, events: trail, app: Self.appState, audio: Self.audioState,
-      network: network.current.satisfied ? network.current.interfaces.joined(separator: ",") : "unsatisfied")
+      network: network.current.satisfied ? network.current.interfaces.joined(separator: ",") : "unsatisfied",
+      lastSent: lastSent.map { ($0.type, Self.now - $0.at) })
     let outbox = diagnostics
     let client = client
     let previous = diagnosticsTask

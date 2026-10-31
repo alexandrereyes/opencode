@@ -69,7 +69,7 @@ struct VoiceTests {
   /// Only an expired session ends GPT Live's session; every other error leaves it open.
   @Test func onlyAnExpiredSessionEndsTheCall() throws {
     func code(_ json: String) throws -> String? {
-      guard case .failure(let code) = try VoiceProtocol.decode(Data(json.utf8)) else { return "not a failure" }
+      guard case .failure(let code, _) = try VoiceProtocol.decode(Data(json.utf8)) else { return "not a failure" }
       return code
     }
     let expired = try code(#"{"type":"error","error":{"type":"invalid_request_error","code":"session_expired","message":"…"}}"#)

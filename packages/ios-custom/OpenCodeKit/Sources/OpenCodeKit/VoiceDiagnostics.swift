@@ -1,21 +1,27 @@
 import Foundation
 
 /// Why a GPT Live call failed, was lost or ended: a category and, when there is one, the provider's error type and
-/// code, the unreadable event's type or the kind of error. Never speech, a transcript or a message text.
+/// code, the unreadable event's type or the kind of error. Never speech or a transcript; the provider's error message
+/// only as `detail`, sanitized (`VoiceDiagnosticText`).
 public struct VoiceFailureReason: Equatable, Sendable {
   public let category: String
   public let code: String?
+  public let detail: String?
 
-  public init(_ category: String, code: String? = nil) {
+  public init(_ category: String, code: String? = nil, detail: String? = nil) {
     self.category = category
     self.code = code.map(VoiceDiagnosticName.code).flatMap { $0.isEmpty ? nil : $0 }
+    self.detail = detail.map { VoiceDiagnosticText.sanitize($0, max: VoiceDiagnosticText.detailLimit) }
+      .flatMap { $0.isEmpty ? nil : $0 }
   }
 
   /// For logs: `service_error code=invalid_request_error/unknown_event`.
   public var summary: String { category + (code.map { " code=" + $0 } ?? "") }
 
-  /// GPT Live sent `error`; `code` is its `type/code`.
-  public static func service(_ code: String?) -> Self { Self("service_error", code: code) }
+  /// GPT Live sent `error`; `code` is its `type/code`, `detail` its sanitized message and `param`.
+  public static func service(_ code: String?, detail: String? = nil) -> Self {
+    Self("service_error", code: code, detail: detail)
+  }
   /// An event the app could not read; `code` is its `type`.
   public static func invalidEvent(_ type: String?) -> Self { Self("invalid_event", code: type) }
   /// The llm-proxy refused to renew the call's lease.
@@ -91,6 +97,29 @@ enum VoiceDiagnosticName {
   private static let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-:")
 }
 
+/// A provider's error text made safe for diagnostics, by the same rules as the server's `sanitize`: no control
+/// characters, quoted spans longer than 32 characters (which could echo speech) as `"…"`, whitespace collapsed, bounded.
+public enum VoiceDiagnosticText {
+  public static let detailLimit = 300
+
+  public static func sanitize(_ value: String, max: Int) -> String {
+    let visible = String(String.UnicodeScalarView(value.unicodeScalars.map {
+      $0.properties.generalCategory == .control ? " " : $0
+    }))
+    let text = visible.replacing(/"[^"]{33,}"|“[^”]{33,}”|'[^']{33,}'/, with: "\"…\"")
+      .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    return text.count > max ? String(text.prefix(max - 1)) + "…" : text
+  }
+
+  /// `message (param: …)`, each part sanitized; `nil` without either.
+  static func detail(message: String?, param: String?) -> String? {
+    let message = message.map { sanitize($0, max: 240) } ?? ""
+    let param = param.map { sanitize($0, max: 120) } ?? ""
+    let text = [message, param.isEmpty ? "" : "(param: \(param))"].filter { !$0.isEmpty }.joined(separator: " ")
+    return text.isEmpty ? nil : text
+  }
+}
+
 /// The names of the last events of a call, oldest first: GPT Live's event types and the transport's states.
 public struct VoiceEventTrail: Equatable, Sendable {
   public static let capacity = 24
@@ -139,10 +168,17 @@ public struct VoiceDiagnostic: Codable, Equatable, Sendable {
   public let app: App
   public let audio: Audio?
   public let network: String?
+  public let detail: String?
+  /// The type of the last command sent on the data channel, and how many seconds before the report.
+  public let lastSent: String?
+  public let lastSentSeconds: Double?
 
   public init(kind: Kind, reason: VoiceFailureReason, build: String, at: Date, call: UUID?, connectedSeconds: Double?,
-    phase: String, recovering: Bool, events: VoiceEventTrail, app: App, audio: Audio?, network: String?) {
-    self.kind = kind; self.reason = reason.category; self.code = reason.code
+    phase: String, recovering: Bool, events: VoiceEventTrail, app: App, audio: Audio?, network: String?,
+    lastSent: (type: String, seconds: Double)? = nil) {
+    self.kind = kind; self.reason = reason.category; self.code = reason.code; self.detail = reason.detail
+    self.lastSent = lastSent.map { VoiceDiagnosticName.label($0.type) }.flatMap { $0.isEmpty ? nil : $0 }
+    self.lastSentSeconds = self.lastSent == nil ? nil : lastSent.map { max(0, $0.seconds) }
     #if os(macOS)
     platform = "macos"
     #else

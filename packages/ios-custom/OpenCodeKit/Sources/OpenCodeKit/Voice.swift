@@ -75,8 +75,9 @@ public struct VoiceCompletedTurn: Equatable, Sendable {
 
 public enum VoiceEvent: Equatable, Sendable {
   case ready, input(VoiceTranscriptPiece), output(VoiceTranscriptPiece), turnDone(VoiceCompletedTurn)
-  /// `failure` carries GPT Live's error `type/code` for diagnostics, never its message.
-  case delegation(id: String, text: String), failure(code: String?), ignored
+  /// `failure` carries GPT Live's error `type/code` and, sanitized for diagnostics (`VoiceDiagnosticText`), its message
+  /// and `param`.
+  case delegation(id: String, text: String), failure(code: String?, detail: String? = nil), ignored
   /// GPT Live closed the session (`session.closed`).
   case closed
   /// A delegation whose request could not be read; it is answered so GPT Live asks Alexandre again.
@@ -166,9 +167,12 @@ public enum VoiceProtocol {
       }
       return .delegation(id: id, text: text)
     case "error":
+      // Fields nested in `error` or, failing that, at the top level, whose `type` is the event's own.
       let error = root?["error"]?.object
-      let code = [error?["type"]?.string, error?["code"]?.string].compactMap { $0 }.joined(separator: "/")
-      return .failure(code: code.isEmpty ? nil : code)
+      func field(_ name: String) -> String? { (error?[name] ?? (name == "type" ? nil : root?[name]))?.string }
+      let code = [field("type"), field("code")].compactMap { $0 }.joined(separator: "/")
+      return .failure(code: code.isEmpty ? nil : code,
+        detail: VoiceDiagnosticText.detail(message: field("message") ?? root?["error"]?.string, param: field("param")))
     case "session.closed": return .closed
     default: return .ignored
     }

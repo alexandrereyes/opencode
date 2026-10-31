@@ -317,6 +317,11 @@ encerra a chamada. Não há composer, Session de voz, filtro de listas ou botão
 apagar. A memória do servidor é rolante: resumo e turnos recentes, não arquivo
 verbatim ilimitado. O contrato está em `packages/plugin-app-custom/docs/voice-session.md`.
 
+Uma resposta da mestra que chega depois do fim da chamada (ou da queda) entra na memória pelo servidor, no
+`end` da chamada, como dado rotulado com o pedido e a resposta (`agent:<ID da resposta>`), só se nenhuma fala da
+assistente veio depois dela. A chamada seguinte começa sabendo que o pedido foi resolvido e não o delega de novo.
+Não muda nada no app; detalhes em "Late Mestra replies" no contrato.
+
 ## Sessão mestra
 
 ### Prompt editável no servidor
@@ -568,7 +573,11 @@ Falar com a mestra**.
   `type/code` do `error` do GPT Live, `invalid_event` com o tipo do evento, `lease_refused`, `send_failed`,
   `ice_failed`, `data_channel_closed`, `audio_interrupted`, `user_end`…), os últimos 24 nomes de evento
   (tipos do canal e estados do transporte), a fase, o estado do app (frente/fundo, bloqueado), a sessão de
-  áudio e a rota (iPhone) e a rede. Nada de fala, transcrição ou mensagem de erro. Vai a `custom.voice` →
+  áudio e a rota (iPhone) e a rede. Desde 31/10, um `service_error` leva também `detail`, a mensagem e o `param`
+  do erro sanitizados por `VoiceDiagnosticText` (sem caracteres de controle, trechos entre aspas com mais de 32
+  caracteres viram `"…"`, até 300 caracteres; o servidor aplica as mesmas regras de novo), e todo relatório leva o
+  tipo do último comando enviado no canal (`lastSent`, `delegation.context.append` ou `session.context.append`) e há
+  quantos segundos. Nada de fala ou transcrição. Vai a `custom.voice` →
   `diagnostics`; o servidor grava `Voice diagnostics` em `~/.local/share/opencode/log/opencode.log`. Sem
   servidor ou sem essa RPC, o app guarda até 20 em `Application Support/voice-diagnostics.json` e manda na
   próxima conexão do fluxo de eventos (`EventHub`). Em todo build, o os_log `VoiceStartup` registra
