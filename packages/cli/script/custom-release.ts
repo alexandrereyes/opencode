@@ -757,7 +757,8 @@ export async function installProxy(home: string, agents = path.join(os.homedir()
 export async function installMacProxy(host = { home: `/Users/${os.userInfo().username}`, mac: onMac }) {
   const plist = path.join(host.home, "Library/LaunchAgents", `${proxyLabel}.plist`)
   if (!(await Bun.file(plist).exists())) return `proxy skipped (${plist} not installed)`
-  const definition = await host.mac(["/usr/bin/plutil", "-convert", "json", "-o", "-", plist])
+  // By name: `mac` rewrites every argument starting with `/` (except `/Users`) as a Linux path.
+  const definition = await host.mac(["plutil", "-convert", "json", "-o", "-", plist])
   if (definition.code !== 0)
     throw new Error(`Cannot read ${plist} through mac (${definition.code}): ${definition.stderr.trim()}`)
   const parsed: unknown = await Promise.resolve()
