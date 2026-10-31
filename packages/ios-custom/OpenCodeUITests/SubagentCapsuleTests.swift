@@ -5,7 +5,7 @@ import XCTest
 /// a subagent are a long press on its title. Against an isolated sandbox (`script/test-subagent-capsule.py`):
 /// `OPENCODE_CAP_PARENT` has four subagents, `OPENCODE_CAP_BOTH` (a running subagent of its own and a resource in
 /// use), `OPENCODE_CAP_RESOURCE` (only a resource), `OPENCODE_CAP_AGENTS` (only a finished subagent) and
-/// `OPENCODE_CAP_NONE`.
+/// `OPENCODE_CAP_NONE` (nothing: still the grey square, unlike a top-level session).
 @MainActor final class SubagentCapsuleTests: XCTestCase {
   override func setUp() { continueAfterFailure = false }
   private var environment: [String: String] { ProcessInfo.processInfo.environment }
@@ -34,17 +34,12 @@ import XCTest
     wait(NSPredicate(format: "label == %@", title), on: header)
     return app
   }
-  /// The subagent's header: the badge, no … button, and the capsule with `label`, or none.
-  private func header(_ app: XCUIApplication, capsule label: String?) {
+  /// The subagent's header: the badge, no … button, and the capsule with `label`.
+  private func header(_ app: XCUIApplication, capsule label: String) {
     XCTAssertTrue(app.staticTexts["subagent-kicker"].waitForExistence(timeout: 10))
     let capsule = app.buttons["conversation-agents"]
-    if let label {
-      XCTAssertTrue(capsule.waitForExistence(timeout: 30))
-      wait(NSPredicate(format: "label == %@", label), on: capsule)
-    } else {
-      // The family and resources load after the transcript: give them the time the capsule would need.
-      XCTAssertFalse(capsule.waitForExistence(timeout: 8), "nothing to count: no capsule")
-    }
+    XCTAssertTrue(capsule.waitForExistence(timeout: 30))
+    wait(NSPredicate(format: "label == %@", label), on: capsule)
     XCTAssertFalse(app.buttons["Mais opções"].exists, "a subagent has no … button")
   }
   private func longPress(_ app: XCUIApplication, _ action: String) {
@@ -115,10 +110,21 @@ import XCTest
     XCTAssertTrue(app.buttons["agent-work-" + (try value("OPENCODE_CAP_AGENTS_CHILD"))].waitForExistence(timeout: 20))
     app.terminate()
 
-    // Nothing to count: no capsule and no … button; the long press still searches.
+    // Nothing to count: the grey square alone, which opens an empty list; the long press still searches.
     app = try launch("OPENCODE_CAP_NONE", title: "Etapa 4: notas F12")
-    header(app, capsule: nil)
+    header(app, capsule: "Agentes e tarefas")
     screenshot("none")
+    app.buttons["conversation-agents"].tap()
+    XCTAssertTrue(app.navigationBars["Agentes e tarefas"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["Nenhum subagente nesta sessão."].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.buttons["Agentes (0)"].isSelected && app.buttons["Scripts (0)"].exists)
+    XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'resource-row-'"))
+      .firstMatch.exists)
+    screenshot("none-agents")
+    app.buttons["Scripts (0)"].tap()
+    XCTAssertTrue(app.descendants(matching: .any)["scripts-empty"].waitForExistence(timeout: 5))
+    app.navigationBars["Agentes e tarefas"].buttons.element(boundBy: 0).tap()
+    XCTAssertTrue(app.buttons["subagent-badge"].waitForExistence(timeout: 10))
     longPress(app, "Buscar na conversa")
     XCTAssertTrue(app.textFields["conversation-search"].waitForExistence(timeout: 5))
     app.terminate()
@@ -147,7 +153,7 @@ import XCTest
       app.terminate()
     }
     let app = try launch("OPENCODE_CAP_NONE", title: "Etapa 4: notas F12")
-    header(app, capsule: nil)
+    header(app, capsule: "Agentes e tarefas")
     screenshot("none")
     app.buttons["subagent-badge"].press(forDuration: 1.0)
     XCTAssertTrue(app.buttons["Buscar na conversa"].waitForExistence(timeout: 5))

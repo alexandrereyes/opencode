@@ -447,7 +447,8 @@ struct ConversationView: View {
           .accessibilityIdentifier("conversation-switcher")
         }
       }
-      if !conversation.work.isEmpty || !conversation.resources.isEmpty {
+      // A subagent always has it (the grey square when there is nothing): its header has no … button.
+      if !conversation.work.isEmpty || !conversation.resources.isEmpty || subagent != nil {
         let resources = conversation.resources.filter(\.state.running).count
         Button {
           leavePosition()

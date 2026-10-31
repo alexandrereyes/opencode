@@ -1864,28 +1864,29 @@ Approved mockups: indicator option B with the long press of option A, and "Agent
   when its parent changes, so a subagent opened from a notification or a link has its path too.
 - **The capsule** counts this subagent's own subagents and scripts and opens its own "Agentes e tarefas":
   `ConversationStore.work` has the conversation itself as owner (a subagent no longer lists its siblings), from its own
-  family pages (`custom.session-family/page` of its ID) and its own transcript. It hides when there are none, as on a
-  top-level session, and shows the grey grid without a number when all finished. A subagent no longer reads its
-  parent's transcript nor refreshes on its siblings' events, so opening one costs one request less.
-- **No … button in a subagent (31 October).** The right side is only that capsule, the same component and rule as a
-  top-level session's: the agents icon always (the green animated grid with the running count, a grey square without
-  a number when nothing runs), then, when the subagent has resources, a divider and the devices icon with the count
-  of those running. Its resources are those
-  whose `owner.sessionID` is the subagent or one of its descendants (`ConversationStore.scheduleResources`; a
-  top-level session also matches `owner.rootSessionID`). So: subagents and resources show both halves, only
-  resources the grey square and the devices half, only subagents the agents icon alone, nothing hides the capsule and
-  leaves the right side empty. It opens the subagent's "Agentes e tarefas", which always opens on Agentes, where resources
-  are listed ("Esta sessão" above, each subagent's nested under it); Scripts holds only background shells. The …
-  menu's actions that make sense in a subagent are a **long press on its title** (the badge, `SubagentBadgeButton`, a
-  UIKit button like `ConversationOptionsMenu`: a SwiftUI `contextMenu` there left an animation running once Buscar
-  swapped the header, and the app never settled): Buscar na conversa,
-  Renomear and Detalhes da sessão (also the avatar and the context footer, as before). Dropped there: Nova sessão
-  (from the top-level session, which has the same project and checkout) and Excluir sessão (deleting one subagent
-  leaves its parent's `subagent` call pointing at nothing; delete the top-level session). Arquivar was never offered
-  for a subagent. `script/test-subagent-capsule.py` (`SubagentCapsuleTests`) checks the four cases against an
-  isolated sandbox: two booted simulators registered in its own hub with each subagent as owner, a running
-  sub-subagent, the long press's three actions, the capsule opening each list and the top-level session unchanged.
-  `ConversationMenuTests` runs its child case through the long press.
+  family pages (`custom.session-family/page` of its ID) and its own transcript. It shows the grey square without a
+  number when all finished. A subagent no longer reads its parent's transcript nor refreshes on its siblings' events,
+  so opening one costs one request less.
+- **No … button in a subagent (31 October).** The right side is only that capsule, the same component as a top-level
+  session's: the agents icon always (the green animated grid with the running count, a grey square without a number
+  when nothing runs), then, when the subagent has resources, a divider and the devices icon with the count of those
+  running. Its resources are those whose `owner.sessionID` is the subagent or one of its descendants
+  (`ConversationStore.scheduleResources`; a top-level session also matches `owner.rootSessionID`). So: subagents and
+  resources show both halves, only resources the grey square and the devices half, only subagents the agents icon
+  alone, and nothing the grey square alone, so a subagent's right side is never empty (a top-level session still hides
+  the capsule when there is nothing to count). It opens the subagent's "Agentes e tarefas", which always opens on
+  Agentes, where resources are listed ("Esta sessão" above, each subagent's nested under it); Scripts holds only
+  background shells. With nothing, the list says so: "Nenhum subagente nesta sessão." and, in Scripts, "Nenhum script
+  em segundo plano.". The … menu's actions that make sense in a subagent are a **long press on its title** (the badge,
+  `SubagentBadgeButton`, a UIKit button like `ConversationOptionsMenu`: a SwiftUI `contextMenu` there left an
+  animation running once Buscar swapped the header, and the app never settled): Buscar na conversa, Renomear and
+  Detalhes da sessão (also the avatar and the context footer, as before). Dropped there: Nova sessão (from the
+  top-level session, which has the same project and checkout) and Excluir sessão (deleting one subagent leaves its
+  parent's `subagent` call pointing at nothing; delete the top-level session). Arquivar was never offered for a
+  subagent. `script/test-subagent-capsule.py` (`SubagentCapsuleTests`) checks the four cases against an isolated
+  sandbox: two booted simulators registered in its own hub with each subagent as owner, a running sub-subagent, the
+  long press's three actions, the capsule opening each list (the empty one included) and the top-level session
+  unchanged. `ConversationMenuTests` runs its child case through the long press.
 - **"Agentes e tarefas" lines** (`ConversationAgentsView.agentRow`, the Mac's `SubagentLine`): the title, shimmering
   while it runs (`ShimmerText`, a UIKit port of `MacShimmerText`: a Core Animation band, one phase for every title, plain
   with Reduzir Movimento), `astramax · Astra 6 · max`, the metrics line `◔ 48% · ⚡ 100% · US$ 8,58 · 4m28s · ☑ 2/4`
@@ -1905,8 +1906,8 @@ Approved mockups: indicator option B with the long press of option A, and "Agent
   snapshot carries it), its own two subagents (one running), and a sibling without subagents. The light run captures;
   the dark run checks the parent's line and `☑ 2/4` from the snapshot, the sheet and Abrir subagente, the kicker without
   the old link, the child's capsule `1 agente em execução` opening its own list (no sibling, no itself), level 2
-  (`NÍVEL 2`, no capsule, three levels in Caminho), the long press's levels going back down the stack, Back returning to
-  the parent's list, stopping a grandchild (grey capsule without a number), and the sibling without a capsule. The
+  (`NÍVEL 2`, the grey square alone, three levels in Caminho), the long press's levels going back down the stack, Back returning to
+  the parent's list, stopping a grandchild (grey capsule without a number), and the sibling with the grey square alone. The
   tests that tapped the removed link now use the badge, Back or Caminho. Catalog: `testSubagent`
   (`session-subagent-header`, `-path`, `session-agents-progress`, `-sheet`).
 

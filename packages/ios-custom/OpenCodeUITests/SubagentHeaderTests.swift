@@ -89,12 +89,12 @@ import XCTest
     XCTAssertFalse(app.buttons["agent-work-" + child].exists)
     screenshot("child-agents")
 
-    // Level 2: NÍVEL 2, no capsule (no subagents of its own), the path with three levels.
+    // Level 2: NÍVEL 2, the grey square alone (no subagents of its own), the path with three levels.
     app.buttons["agent-work-" + grandchild].tap()
     wait(NSPredicate(format: "label == 'Conferir regras F12b'"), on: title)
     XCTAssertTrue(kicker.waitForExistence(timeout: 10))
     wait(NSPredicate(format: "label BEGINSWITH 'SUBAGENTE · NÍVEL 2 · '"), on: kicker)
-    XCTAssertFalse(app.buttons["conversation-agents"].exists, "no subagents: the capsule is gone")
+    wait(NSPredicate(format: "label == 'Agentes e tarefas'"), on: capsule)
     screenshot("level-2")
     app.buttons["subagent-badge"].tap()
     let levels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'subagent-path-'"))
@@ -138,13 +138,13 @@ import XCTest
     wait(NSPredicate(format: "label == 'Agentes e tarefas'"), on: capsule)
     screenshot("child-agents-finished")
 
-    // The sibling without subagents: no capsule.
+    // The sibling without subagents: the grey square alone.
     back.tap()
     XCTAssertTrue(app.buttons["agent-work-" + sibling].waitForExistence(timeout: 10))
     app.buttons["agent-work-" + sibling].tap()
     wait(NSPredicate(format: "label == 'Etapa 2: inventário F12'"), on: title)
     XCTAssertTrue(app.staticTexts["subagent-kicker"].waitForExistence(timeout: 10))
-    XCTAssertFalse(app.buttons["conversation-agents"].exists)
+    wait(NSPredicate(format: "label == 'Agentes e tarefas'"), on: capsule)
     screenshot("sibling")
   }
 
