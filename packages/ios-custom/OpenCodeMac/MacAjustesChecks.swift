@@ -1147,7 +1147,12 @@ import SwiftUI
     guard !MacContextProbe.narrow else { throw Failure(description: "1000 pt tratado como estreito") }
     guard root.subagents.shown.first(where: { $0.id == "ses_mac_c4" })?.permission?.preview
       == "Quer rodar: gh api repos/jean/referencias" else { throw Failure(description: "pedido do subagente esperando") }
-    // A running subagent's `todowrite`, through the shared stream like a real one: its line gains `☑ 1/3`.
+    // Lists from before the app opened come with the family snapshot: `ses_mac_c1` 2/4 and `ses_mac_c2` 0/5.
+    try await wait("Progresso do snapshot") {
+      let progress = Dictionary(root.subagents.shown.map { ($0.id, $0.progress?.label) }, uniquingKeysWith: { a, _ in a })
+      return progress["ses_mac_c1"] == "2/4" && progress["ses_mac_c2"] == "0/5" ? true : nil
+    }
+    // A running subagent's `todowrite`, through the shared stream like a real one: the live list wins, `☑ 1/3`.
     for event in progressEvents("ses_mac_c2") { runtime.store?.hub.inject(event) }
     try await wait("Progresso do subagente") {
       root.subagents.shown.first { $0.id == "ses_mac_c2" }?.progress?.label == "1/3" ? true : nil

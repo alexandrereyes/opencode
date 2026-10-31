@@ -162,6 +162,15 @@ struct MacFixtureServer: Sendable {
     }
   }
 
+  /// The family snapshot's Progresso (the plugin's hub saw these lists before the app opened): `ses_mac_c1` 2/4,
+  /// and `ses_mac_c2` 0/5, which the live `todowrite` of the `contexto` check then replaces with 1/3.
+  private static let snapshotProgress = [("ses_mac_c1", 2, 4), ("ses_mac_c2", 0, 5)].map { id, done, total in
+    let todos = (0..<total).map { index in
+      #"{"content":"Passo \#(index + 1)","status":"\#(index < done ? "completed" : index == done ? "in_progress" : "pending")"}"#
+    }.joined(separator: ",")
+    return #""\#(id)":{"done":\#(done),"finished":\#(done),"total":\#(total),"current":"Passo \#(done + 1)","todos":[\#(todos)]}"#
+  }.joined(separator: ",")
+
   private func rpc(_ name: String, _ input: [String: JSONValue]?) -> String? {
     // `-OpenCodeMacResourceProfile`: one line per snapshot, to count the previews' refreshes.
     if name == "custom.resources/snapshot", MacFixture.value("-OpenCodeMacResourceProfile") != nil {
@@ -193,7 +202,7 @@ struct MacFixtureServer: Sendable {
     case "custom.session-family/snapshot":
       switch input?["sessionID"]?.string {
       case MacFixture.rootID:
-        #"{"count":\#(Self.children.count + Self.grandchildren.count),"cost":63.89,"active":[\#((Self.live + Self.liveGrandchildren).map { session($0) }.joined(separator: ","))],"forms":[\#(rootQuestion)],"permissions":[\#(childPermission)]}"#
+        #"{"count":\#(Self.children.count + Self.grandchildren.count),"cost":63.89,"active":[\#((Self.live + Self.liveGrandchildren).map { session($0) }.joined(separator: ","))],"forms":[\#(rootQuestion)],"permissions":[\#(childPermission)],"progress":{\#(Self.snapshotProgress)}}"#
       case Self.parentOfGrandchildren:
         #"{"count":\#(Self.grandchildren.count),"cost":\#(Self.grandchildren.map(\.cost).reduce(0, +)),"active":[\#(Self.liveGrandchildren.map { session($0) }.joined(separator: ","))],"forms":[],"permissions":[]}"#
       default: #"{"count":0,"active":[],"forms":[],"permissions":[]}"#

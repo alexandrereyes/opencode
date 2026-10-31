@@ -3360,7 +3360,7 @@ mock "opção A", 30/10):
   `Arquivo | Diff` inside the panel is left for later.
 
 **Not provided by the server (left out of the line, no backend change):** a subagent's context before its first
-measured step; per-subagent cache when the child has no `tokens`; a subagent's Progresso written before the app opened (`☑ 2/4`, see below); the resource ↔ subagent link is inferred from
+measured step; per-subagent cache when the child has no `tokens`; the resource ↔ subagent link is inferred from
 `resource.owner.sessionID` walked up to the direct subagent, so a resource registered without an owner shows
 `Agente usando · —`; file dates and sizes for checkouts that are not on this Mac (`/api/fs/list` returns names only).
 
@@ -3382,10 +3382,12 @@ Approved mocks: option B (`opcao-b.png`) and, without the gutter, B1 with the `?
   `repeatForever` re-renders the window every frame, see `MacSpinningArc`); each pass starts on a multiple of the
   period of the media clock, so every title moves on the same phase. Both copies are drawn by AppKit
   (`cacheDisplay` still shows the title); Reduzir Movimento and `ImageRenderer` (`macStillCapture`) show plain text.
-- **Progresso** (`☑ 2/4`): a live subagent's open list from `SessionStore.progress`, which follows the
-  `todowrite` calls on the shared event stream for every session, subagents included ([Progresso](#progresso--30-october)). A list written
-  before the app opened shows from the subagent's next call, since navigation entries carry only the roots'; without
-  one the line keeps no room.
+- **Progresso** (`☑ 2/4`): a live subagent's open list from `SessionStore.progress(_:family:)`: the `todowrite`
+  calls on the shared event stream for every session, subagents included ([Progresso](#progresso--30-october)),
+  else the family snapshot's `progress` (30 October: the plugin's hub saw the lists written before the app opened;
+  [Subagente no iPhone e Progresso](#subagente-no-iphone-e-progresso--30-october)). The `contexto` check reads 2/4
+  and 0/5 from the fixture's snapshot, then a live `todowrite` replaces the 0/5 with 1/3. Without one the line keeps
+  no room.
 - **The open session**: Contexto follows the conversation in the middle column. Opening a subagent gives the column
   a `ContextColumnStore` of that session: its context against its model's limit, its cache, its cost and
   `Sessão · Subagentes` (its family snapshot), its own subagents (the root's grandchildren, with the same line and

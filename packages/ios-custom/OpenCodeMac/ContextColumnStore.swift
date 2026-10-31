@@ -77,11 +77,13 @@ import SwiftUI
       work: work, rootID: id, members: members, models: models, permissions: family?.permissions ?? [],
       forms: family?.forms ?? [], resources: resources, progress: progress)
   }
-  /// Each subagent's open Progresso (`2/4`), from the `todowrite` calls the shared event stream saw
-  /// (`SessionStore.progress`); a list from before the app opened shows from its next call.
+  /// Each subagent's open Progresso (`2/4`): the `todowrite` calls the shared event stream saw, else the family
+  /// snapshot's (the server's hub saw those from before the app opened); `SessionStore.progress(_:family:)`.
   private var progress: [String: ContextColumn.Progress] {
     Dictionary(uniqueKeysWithValues: members.compactMap { member in
-      sessions.progress(member.id).flatMap { $0.open ? (member.id, ContextColumn.Progress(done: $0.done, total: $0.total)) : nil }
+      sessions.progress(member.id, family: family).flatMap {
+        $0.open ? (member.id, ContextColumn.Progress(done: $0.done, total: $0.total)) : nil
+      }
     })
   }
   var tasks: [SessionWork] { work.filter { $0.kind == .script } }
