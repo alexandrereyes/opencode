@@ -66,7 +66,7 @@ export interface HubSettings {
    * A hub another machine runs (the Mac's LaunchAgent for a server on Linux): its `hub.json` as this machine reads it
    * and the host that reaches its loopback port. The plugin never starts, stops or inspects that hub's process.
    */
-  readonly remote?: { readonly info: string; readonly host: string }
+  readonly remote?: { readonly info: string; readonly host: string; readonly command?: readonly string[] }
   readonly paths?: PathMap
   /** Deadline, in milliseconds, of ordinary administrative requests (`adminTimeout` by default). */
   readonly timeout?: number
@@ -86,9 +86,22 @@ const slowTimeout = 15_000
  */
 export function hubSettings(env: Record<string, string | undefined> = process.env): HubSettings {
   const info = env.OPENCODE_RESOURCES_HUB_REMOTE_INFO
+  const command = env.OPENCODE_RESOURCES_HUB_REMOTE_INFO_COMMAND
+    ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String).check(Schema.isMinLength(1))))(
+        env.OPENCODE_RESOURCES_HUB_REMOTE_INFO_COMMAND,
+      )
+    : undefined
   return {
     state: stateDirectory(env),
-    ...(info ? { remote: { info, host: env.OPENCODE_RESOURCES_HUB_REMOTE_HOST || "127.0.0.1" } } : {}),
+    ...(info
+      ? {
+          remote: {
+            info,
+            host: env.OPENCODE_RESOURCES_HUB_REMOTE_HOST || "127.0.0.1",
+            ...(command ? { command } : {}),
+          },
+        }
+      : {}),
     ...(env.OPENCODE_RESOURCES_HUB_PATH_MAP ? { paths: pathMap(env.OPENCODE_RESOURCES_HUB_PATH_MAP) } : {}),
   }
 }
@@ -109,14 +122,28 @@ export function makeHubClient(options: HubSettings) {
   let cached: Info | undefined
   let starting: Promise<Info | undefined> | undefined
 
-  const read = async () =>
-    Option.getOrUndefined(
-      decodeInfo(
-        await Bun.file(file)
-          .json()
-          .catch(() => undefined),
-      ),
-    )
+  const read = async () => {
+    if (!remote?.command)
+      return Option.getOrUndefined(
+        decodeInfo(
+          await Bun.file(file)
+            .json()
+            .catch(() => undefined),
+        ),
+      )
+
+    // Run the read on the host: opening /Users from Linux can block a VM vCPU in virtio-fs.
+    // Keep credentials in stdout, never in argv or diagnostics; a failed command must not fall back to the mount.
+    const child = Bun.spawn([...remote.command], {
+      cwd: os.homedir(),
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      timeout: options.timeout ?? adminTimeout,
+    })
+    const [info, code] = await Promise.all([new Response(child.stdout).json().catch(() => undefined), child.exited])
+    return code === 0 ? Option.getOrUndefined(decodeInfo(info)) : undefined
+  }
 
   const healthy = (info: Info) =>
     fetch(`${origin(info)}/admin/health`, {

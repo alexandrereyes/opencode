@@ -44,6 +44,18 @@ describe("path map", () => {
     expect(settings.paths?.toHub("/home/u/x")).toBe("/Users/u/OrbStack/dev/home/u/x")
     expect(hubSettings({ OPENCODE_RESOURCES_HUB_REMOTE_INFO: "/x/hub.json" }).remote?.host).toBe("127.0.0.1")
   })
+
+  test("validates a host-side discovery command without interpreting it through a shell", () => {
+    const command = ["mac", "/mnt/mac/bin/cat", "/mnt/mac/Users/u/hub.json"]
+    expect(
+      hubSettings({
+        OPENCODE_RESOURCES_HUB_REMOTE_INFO: "/Users/u/hub.json",
+        OPENCODE_RESOURCES_HUB_REMOTE_INFO_COMMAND: JSON.stringify(command),
+      }).remote?.command,
+    ).toEqual(command)
+    for (const value of ["[]", "[1]", "not json"])
+      expect(() => hubSettings({ OPENCODE_RESOURCES_HUB_REMOTE_INFO_COMMAND: value })).toThrow()
+  })
 })
 
 describe("commands run on the Mac with `mac`", () => {
@@ -164,6 +176,42 @@ async function fakeHub() {
 }
 
 describe("remote hub client", () => {
+  test("discovers through a command and follows secret rotation without opening the shared info path", async () => {
+    const hub = await fakeHub()
+    const server = hub.serve()
+    servers.push(server)
+    await hub.announce(server.port!)
+    const client = makeHubClient({
+      state: path.join(hub.root, "local-state"),
+      remote: {
+        info: "/unmounted/Users/u/hub.json",
+        host: "localhost",
+        command: [process.execPath, "-e", "process.stdout.write(await Bun.file(process.argv[1]).text())", hub.info],
+      },
+    })
+    expect(await client.locks()).toEqual([])
+    hub.state.secret = "rotated"
+    await hub.announce(server.port!)
+    expect(await client.list()).toEqual({ resources: [] })
+    expect(await client.port()).toBe(server.port!)
+  })
+
+  test("a failed or stalled command never falls back to a readable shared info file", async () => {
+    const hub = await fakeHub()
+    const server = hub.serve()
+    servers.push(server)
+    await hub.announce(server.port!)
+    for (const script of ["process.exit(1)", "setInterval(() => {}, 1000)"])
+      expect(
+        await makeHubClient({
+          state: path.join(hub.root, "local-state"),
+          remote: { info: hub.info, host: "localhost", command: [process.execPath, "-e", script] },
+          timeout: 100,
+        }).locks(),
+      ).toBeUndefined()
+    expect(hub.state.hosts).toEqual([])
+  })
+
   test("never starts or stops the hub, reaches it on the remote host and follows a restart", async () => {
     const hub = await fakeHub()
     const marker = path.join(hub.root, "spawned")

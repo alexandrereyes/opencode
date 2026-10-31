@@ -89,11 +89,12 @@ hub's `simctl`), `POST /admin/events?wait=<ms>` (long poll; each event goes to e
 When the server runs on the OrbStack Linux machine, the hub stays on the Mac as a LaunchAgent with no parent
 (`docs/custom-macos.md`, "Linux runtime"). The plugin then only reads it, configured by:
 
-| Variable                             | Meaning                                                                                                   |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `OPENCODE_RESOURCES_HUB_REMOTE_INFO` | The Mac hub's `hub.json` as Linux reads it (`/Users/…`); turns remote mode on                             |
-| `OPENCODE_RESOURCES_HUB_REMOTE_HOST` | Host that reaches the Mac's loopback (`host.orb.internal`; default `127.0.0.1`)                           |
-| `OPENCODE_RESOURCES_HUB_PATH_MAP`    | `local=hub` prefix pairs separated by `:`, applied to `meta.workspace` both ways (Linux ↔ Mac directory) |
+| Variable                                     | Meaning                                                                                                                                                                                                                                                                        |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OPENCODE_RESOURCES_HUB_REMOTE_INFO`         | The Mac hub's `hub.json` as Linux reads it (`/Users/…`); turns remote mode on                                                                                                                                                                                                  |
+| `OPENCODE_RESOURCES_HUB_REMOTE_INFO_COMMAND` | Optional JSON argv array whose stdout supplies `hub.json`, e.g. `["mac","/mnt/mac/bin/cat","/mnt/mac/Users/u/.local/share/opencode-resources-hub/state/hub.json"]`. Runs with native Linux home as cwd and the admin deadline; it never falls back to opening the shared path. |
+| `OPENCODE_RESOURCES_HUB_REMOTE_HOST`         | Host that reaches the Mac's loopback (`host.orb.internal`; default `127.0.0.1`)                                                                                                                                                                                                |
+| `OPENCODE_RESOURCES_HUB_PATH_MAP`            | `local=hub` prefix pairs separated by `:`, applied to `meta.workspace` both ways (Linux ↔ Mac directory)                                                                                                                                                                      |
 
 In remote mode the plugin never starts, shuts down or inspects the hub's process; it reads `hub.json` again whenever a
 request cannot connect or gets 401 (a restarted hub has a new secret and maybe a new port), tickets announce the
@@ -101,6 +102,11 @@ hub's own `port` as `loopbackPort`, simulator names resolve through `GET /admin/
 `xcrun`) and, when `GET /admin/locks` does not answer, commands that drive resources still run but their result gains
 a warning (`lockUnavailable`) instead of silently skipping the lock. Commands the agent prefixes with `mac` (which
 runs them on the Mac) are detected like local ones.
+
+OrbStack servers should configure `REMOTE_INFO_COMMAND`: opening the Mac file from Linux traverses virtio-fs and
+has caused whole-VM hangs. The command performs the read on macOS and sends the bytes through the existing bridge.
+Publication of the Mac proxy and hub also sends bytes through stdin to `custom-mac-host.py`, which performs all
+filesystem operations natively on the Mac. This includes checking installed jobs and pruning old hub releases.
 
 Every shell command waits for `GET /admin/locks`, so administrative requests have a deadline (`adminTimeout`, 3 s;
 15 s for snapshots, control and `/admin/simulators`; the event long poll keeps its own). A hub that accepts

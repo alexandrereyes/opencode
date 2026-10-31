@@ -1,18 +1,6 @@
 #!/usr/bin/env bun
 
-import {
-  chmod,
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readlink,
-  realpath,
-  rename,
-  rm,
-  stat,
-  symlink,
-} from "node:fs/promises"
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readlink, realpath, rename, rm, symlink } from "node:fs/promises"
 import { Database } from "bun:sqlite"
 import { randomUUID } from "node:crypto"
 import os from "node:os"
@@ -751,24 +739,30 @@ export async function installProxy(home: string, agents = path.join(os.homedir()
 }
 
 /**
- * `installProxy` for a Linux server whose 4096 proxy stays on the Mac: through the mounted `/Users`, replaces the
- * Mac runtime's `bin/proxy.mjs` and restarts the job with `mac launchctl kickstart`, under the same conditions.
+ * `installProxy` for a Linux server: bytes travel through stdin and every Mac file operation runs on the Mac.
  */
 export async function installMacProxy(host = { home: `/Users/${os.userInfo().username}`, mac: onMac }) {
-  const plist = path.join(host.home, "Library/LaunchAgents", `${proxyLabel}.plist`)
-  if (!(await Bun.file(plist).exists())) return `proxy skipped (${plist} not installed)`
-  // By name: `mac` rewrites every argument starting with `/` (except `/Users`) as a Linux path.
-  const definition = await host.mac(["plutil", "-convert", "json", "-o", "-", plist])
-  if (definition.code !== 0)
-    throw new Error(`Cannot read ${plist} through mac (${definition.code}): ${definition.stderr.trim()}`)
-  const parsed: unknown = await Promise.resolve()
-    .then(() => JSON.parse(definition.stdout))
-    .catch(() => undefined)
-  return replaceProxy(path.join(host.home, ".local/share/opencode-custom-v2/bin/proxy.mjs"), parsed, async () => {
-    const uid = (await host.mac(["id", "-u"])).stdout.trim()
-    if (!/^\d+$/.test(uid)) return { code: 1, stderr: `cannot read the Mac user ID: ${JSON.stringify(uid)}` }
-    return host.mac(["launchctl", "kickstart", "-k", `gui/${uid}/${proxyLabel}`])
-  })
+  const source = await Bun.file(path.join(import.meta.dirname, "custom-proxy.mjs")).bytes()
+  const result = await macPublish(host, "proxy", [], source)
+  if (result !== "proxy installed") return result
+  const uid = (await host.mac(["id", "-u"])).stdout.trim()
+  if (!/^\d+$/.test(uid)) throw new Error("Cannot read the Mac user ID")
+  const restart = await host.mac(["launchctl", "kickstart", "-k", `gui/${uid}/${proxyLabel}`])
+  if (restart.code !== 0)
+    throw new Error(`Proxy installed but restart failed (${restart.code}): ${restart.stderr.trim()}`)
+  return "proxy updated and restarted"
+}
+
+async function macPublish(
+  host: { home: string; mac: typeof onMac },
+  operation: "proxy" | "hub",
+  args: string[],
+  input: Uint8Array,
+) {
+  const script = await Bun.file(path.join(import.meta.dirname, "custom-mac-host.py")).text()
+  const result = await host.mac(["python3", "-c", script, operation, host.home, ...args], input)
+  if (result.code !== 0) throw new Error(`Mac publication failed (${result.code}): ${result.stderr.trim()}`)
+  return result.stdout.trim()
 }
 
 async function replaceProxy(
@@ -847,11 +841,16 @@ ${Object.entries(environment)
 }
 
 /** Runs a command on the Mac from the OrbStack Linux machine (`mac`, with the Mac's login environment). */
-export async function onMac(args: string[]) {
-  const child = Bun.spawn([Bun.which("mac") ?? "/opt/orbstack-guest/bin/mac", ...args], {
+export async function onMac(args: string[], input?: Uint8Array) {
+  // Host paths must not be probed or rewritten as Linux files by the bridge.
+  const literal = args.map((value) =>
+    value.startsWith("/") && !value.startsWith("/mnt/") ? `/mnt/mac${value}` : value,
+  )
+  const child = Bun.spawn([Bun.which("mac") ?? "/opt/orbstack-guest/bin/mac", ...literal], {
+    cwd: os.homedir(),
     stdout: "pipe",
     stderr: "pipe",
-    stdin: "ignore",
+    stdin: input ?? "ignore",
     timeout: 30_000,
   })
   const [stdout, stderr, code] = await Promise.all([
@@ -864,35 +863,30 @@ export async function onMac(args: string[]) {
 
 /**
  * Publishes a Linux release's hub to the Mac, only when the hub's LaunchAgent is installed there: copies `plugin/` and
- * `serve-sim/` to `<hub>/releases/<commit>` through the mounted `/Users`, points `current` at it atomically, restarts
+ * `serve-sim/` through stdin to the native Mac publisher, points `current` at it atomically, restarts
  * the job with `launchctl kickstart -k` and keeps the three newest hub releases besides `current`.
  */
 export async function publishResourcesHub(
   release: { commit: string; directory: string },
   host = { home: `/Users/${os.userInfo().username}`, mac: onMac },
 ) {
-  const paths = resourcesHubPaths(host.home)
-  if (!(await Bun.file(paths.plist).exists())) return `resources hub skipped (${paths.plist} not installed)`
-  const releases = path.join(paths.root, "releases")
-  const target = path.join(releases, release.commit)
-  if (!(await Bun.file(path.join(target, "plugin/index.js")).exists())) {
-    await mkdir(releases, { recursive: true })
-    const staging = path.join(releases, `.${release.commit}-${randomUUID()}`)
-    try {
-      await mkdir(staging)
-      for (const part of ["plugin", "serve-sim"]) {
-        const from = path.join(release.directory, part)
-        if ((await readdir(from).catch(() => undefined)) === undefined) continue
-        await command(["cp", "-R", from, path.join(staging, part)])
-      }
-      // The release is read-only; the hub's copy stays writable so pruning can remove it.
-      await command(["chmod", "-R", "u+w", staging])
-      await rename(staging, target)
-    } finally {
-      await rm(staging, { recursive: true, force: true })
-    }
-  }
-  await point(paths.root, "current", release.commit)
+  const parts = []
+  for (const part of ["plugin", "serve-sim"])
+    if ((await readdir(path.join(release.directory, part)).catch(() => undefined)) !== undefined) parts.push(part)
+  const archive = Bun.spawn(["tar", "-C", release.directory, "-cf", "-", ...parts], {
+    env: { ...process.env, COPYFILE_DISABLE: "1" },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [data, error, code] = await Promise.all([
+    new Response(archive.stdout).arrayBuffer(),
+    new Response(archive.stderr).text(),
+    archive.exited,
+  ])
+  if (code !== 0) throw new Error(`Cannot archive the hub: ${error.trim()}`)
+  const publication = await macPublish(host, "hub", [release.commit], new Uint8Array(data))
+  if (publication !== "resources hub installed") return publication
   const uid = (await host.mac(["id", "-u"])).stdout.trim()
   if (!/^\d+$/.test(uid)) throw new Error(`Cannot read the Mac user ID through mac: ${JSON.stringify(uid)}`)
   const result = await host.mac(["launchctl", "kickstart", "-k", `gui/${uid}/${resourcesHubLabel}`])
@@ -900,14 +894,6 @@ export async function publishResourcesHub(
     throw new Error(
       `Hub ${release.commit} copied and current, but restart failed (${result.code}): ${result.stderr.trim()}`,
     )
-  const others = (
-    await Promise.all(
-      (await readdir(releases))
-        .filter((name) => sha.test(name) && name !== release.commit)
-        .map(async (name) => ({ name, time: (await stat(path.join(releases, name))).mtimeMs })),
-    )
-  ).toSorted((a, b) => b.time - a.time)
-  for (const old of others.slice(3)) await rm(path.join(releases, old.name), { recursive: true, force: true })
   return `resources hub ${release.commit} published and restarted`
 }
 

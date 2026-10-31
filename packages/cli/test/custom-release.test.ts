@@ -1493,7 +1493,7 @@ test("systemd stop reloads an older unit first, so its KillMode never kills the 
   expect(fixtureHost.state.calls).toEqual([`show ${unitName} --property=ActiveState,MainPID`, `stop ${unitName}`])
 })
 
-/** The Mac as the Linux machine sees it: `/Users/<user>` mounted, and `mac` answering plutil, id and launchctl. */
+/** A native Mac publisher runs against a temporary home; only launchctl is simulated. */
 async function macProxyFixture(options: { program?: string; installed?: boolean; kickstart?: number } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "mac-proxy-"))
   homes.push(root)
@@ -1501,22 +1501,26 @@ async function macProxyFixture(options: { program?: string; installed?: boolean;
   const target = path.join(home, ".local/share/opencode-custom-v2/bin/proxy.mjs")
   const plist = path.join(home, "Library/LaunchAgents", `${proxyLabel}.plist`)
   const program = options.program ?? target
-  if (options.installed ?? true) await Bun.write(plist, "<plist/>")
+  if (options.installed ?? true)
+    await Bun.write(
+      plist,
+      `<plist version="1.0"><dict><key>ProgramArguments</key><array><string>node</string><string>${program}</string></array></dict></plist>`,
+    )
   await Bun.write(target, "// old proxy")
   const calls: string[][] = []
   const host = {
     home,
-    async mac(args: string[]) {
+    async mac(args: string[], input?: Uint8Array) {
       calls.push(args)
-      // Like the real `mac`: an absolute program outside /Users becomes a Linux path the Mac cannot run.
-      if (args[0]?.startsWith("/") && !args[0].startsWith("/Users/"))
-        return { code: 1, stdout: "", stderr: "posix_spawn: no such file or directory" }
-      if (args[0] === "plutil")
-        return {
-          code: 0,
-          stdout: JSON.stringify({ ProgramArguments: ["/opt/homebrew/bin/node", program] }),
-          stderr: "",
-        }
+      if (args[0] === "python3") {
+        const child = Bun.spawn(args, { stdin: input ?? "ignore", stdout: "pipe", stderr: "pipe" })
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ])
+        return { code, stdout, stderr }
+      }
       if (args[0] === "id") return { code: 0, stdout: "501\n", stderr: "" }
       return { code: options.kickstart ?? 0, stdout: "", stderr: options.kickstart ? "kickstart failed" : "" }
     },
@@ -1524,13 +1528,14 @@ async function macProxyFixture(options: { program?: string; installed?: boolean;
   return { home, target, plist, calls, host }
 }
 
-test("a Linux activation updates the Mac's 4096 proxy through /Users and restarts it with mac", async () => {
+test("a Linux activation sends proxy bytes to a native Mac publisher and restarts the job", async () => {
   const source = await Bun.file(path.join(import.meta.dir, "../script/custom-proxy.mjs")).text()
   const mac = await macProxyFixture()
   expect(await installMacProxy(mac.host)).toBe("proxy updated and restarted")
   expect(await Bun.file(mac.target).text()).toBe(source)
-  expect(mac.calls).toEqual([
-    ["plutil", "-convert", "json", "-o", "-", mac.plist],
+  expect(mac.calls[0]?.slice(0, 2)).toEqual(["python3", "-c"])
+  expect(mac.calls[0]?.slice(3)).toEqual(["proxy", mac.home])
+  expect(mac.calls.slice(1)).toEqual([
     ["id", "-u"],
     ["launchctl", "kickstart", "-k", `gui/501/${proxyLabel}`],
   ])
@@ -1542,7 +1547,7 @@ test("a Linux activation updates the Mac's 4096 proxy through /Users and restart
 test("the Mac's proxy is left alone without its job, or when the job runs another proxy; restart failures surface", async () => {
   const missing = await macProxyFixture({ installed: false })
   expect(await installMacProxy(missing.host)).toContain("skipped")
-  expect(missing.calls).toEqual([])
+  expect(missing.calls).toHaveLength(1)
   const other = await macProxyFixture({ program: "/elsewhere/bin/proxy.mjs" })
   expect(await installMacProxy(other.host)).toContain("skipped")
   expect(await Bun.file(other.target).text()).toBe("// old proxy")

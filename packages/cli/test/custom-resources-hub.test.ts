@@ -22,7 +22,7 @@ afterEach(async () => {
   }
 })
 
-/** A fake Mac home (as Linux sees it through /Users), a read-only release and a recorded `mac` command. */
+/** The real host-side publisher writes a temporary Mac home; only process control is simulated. */
 async function fixture(options: { installed?: boolean; kickstart?: number } = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "opencode-hub-publish-")))
   directories.push(root)
@@ -40,8 +40,17 @@ async function fixture(options: { installed?: boolean; kickstart?: number } = {}
   const calls: string[][] = []
   const host = {
     home,
-    async mac(args: string[]) {
+    async mac(args: string[], input?: Uint8Array) {
       calls.push(args)
+      if (args[0] === "python3") {
+        const child = Bun.spawn(args, { stdin: input ?? "ignore", stdout: "pipe", stderr: "pipe" })
+        const [stdout, stderr, code] = await Promise.all([
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+          child.exited,
+        ])
+        return { code, stdout, stderr }
+      }
       if (args[0] === "id") return { code: 0, stdout: "501\n", stderr: "" }
       return { code: options.kickstart ?? 0, stdout: "", stderr: options.kickstart ? "Could not find service" : "" }
     },
@@ -77,7 +86,7 @@ test("the hub LaunchAgent runs the current release's plugin with the Mac's Bun, 
 })
 
 test("publication copies plugin and serve-sim, points current and restarts the job on the Mac", async () => {
-  const { paths, release, calls, host } = await fixture()
+  const { home, paths, release, calls, host } = await fixture()
   const target = await release(commit("a"))
   expect(await publishResourcesHub(target, host)).toContain("published and restarted")
   const copy = path.join(paths.root, "releases", commit("a"))
@@ -89,19 +98,20 @@ test("publication copies plugin and serve-sim, points current and restarts the j
   // Only the hub's files go to the Mac, and they stay writable so old copies can be pruned.
   expect(await Bun.file(path.join(copy, "bin/opencode")).exists()).toBe(false)
   expect((await stat(path.join(copy, "plugin/index.js"))).mode & 0o200).toBe(0o200)
-  expect(calls).toEqual([
+  expect(calls[0]?.slice(3)).toEqual(["hub", home, commit("a")])
+  expect(calls.slice(1)).toEqual([
     ["id", "-u"],
     ["launchctl", "kickstart", "-k", `gui/501/${resourcesHubLabel}`],
   ])
   // Publishing the same release again reuses the copy and restarts the job once more.
   await publishResourcesHub(target, host)
-  expect(calls).toHaveLength(4)
+  expect(calls).toHaveLength(6)
 })
 
 test("publication skips a Mac without the hub LaunchAgent and reports a failed restart", async () => {
   const skipped = await fixture({ installed: false })
   expect(await publishResourcesHub(await skipped.release(commit("a")), skipped.host)).toContain("skipped")
-  expect(skipped.calls).toEqual([])
+  expect(skipped.calls).toHaveLength(1)
   expect(await Bun.file(skipped.paths.root).exists()).toBe(false)
 
   const failing = await fixture({ kickstart: 113 })
