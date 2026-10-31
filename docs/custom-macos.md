@@ -519,6 +519,8 @@ Simulators, emulators and Chrome stay on the Mac, so the hub does too, as the La
 - **Mac shells.** `mac` does not pass Linux variables, so `~/.zshenv` on the Mac exports
   `PLAYWRIGHT_MCP_CONFIG=~/.local/share/opencode-resources-hub/state/playwright-cli.json` for
   `mac playwright-cli …`.
+- **Sandboxes never use it.** A Linux `custom-sandbox.ts` runs its own hub on the Mac (below, "Isolated source
+  development"). Tests reach a sandbox hub through `custom-sandbox.ts hub`, never through this `hub.json`.
 
 ### Isolated source development
 
@@ -541,11 +543,12 @@ For a reusable isolated instance from the current worktree, run from the reposit
 bun packages/cli/script/custom-sandbox.ts up
 bun packages/cli/script/custom-sandbox.ts status
 bun packages/cli/script/custom-sandbox.ts down
+bun packages/cli/script/custom-sandbox.ts hub   # writes <home>/resources-hub.json and prints its path
 ```
 
 The default is `http://127.0.0.1:4177`, tmux session `custom-sandbox-4177`, and
 `<os.tmpdir()>/opencode/custom-sandbox-4177` (canonicalized on macOS). Override with
-`--port` and `--home`; ports 4096 and 4178 are always refused. The sandbox's watch gateway listens on
+`--port` and `--home`; ports 4096, 4178 and 4179 (production's hub) are always refused. The sandbox's watch gateway listens on
 `--watch-port` (default `0`, any free port, logged as `Watch gateway listening`); 4192, production's, is refused. Dependencies must already
 be installed. `up` builds the plugin and upstream's web app (`packages/app`), removes `dist/sw.js`
 so the sandbox origin installs no service worker (upstream always registers `/sw.js` in production
@@ -566,11 +569,38 @@ When the plugin is listed as failed or never answers, it stops the sandbox and e
 pointing to `failed to load plugin` in the private `server.log`, so no test runs against a sandbox
 without the custom functions.
 
+**Resources hub.** A sandbox never uses production's hub: `up` drops every inherited `OPENCODE_RESOURCES_HUB_*`
+variable (the fixed port 4179 and the `REMOTE_*`/`PATH_MAP` that `manual.json` gives the Linux server).
+
+- **On the OrbStack Linux machine** (Linux with `mac`), simulators, emulators and Chrome live on the Mac, so the
+  sandbox gets its own hub there, started and stopped with it. `launch.ts` runs it in the foreground of `mac`
+  (signals reach it through the bridge, and killing the bridge ends it): the Mac runtime's
+  `~/.local/share/opencode-custom-v2/bin/bun` runs the worktree's built `packages/plugin-app-custom/dist/resources/hub/bin.js`
+  (read by the Mac through `~/OrbStack/dev`) with `OPENCODE_RESOURCES_HUB_PORT=0` (any free port) and its own state,
+  `/Users/<user>/.local/state/opencode-sandbox-hubs/<sandbox token>` (`hub.json`, `resources.json`, serve-sim records).
+  Log: `<home>/hub.log`. The server runs in remote mode against it (`REMOTE_INFO` read through `mac cat`,
+  `REMOTE_HOST=host.orb.internal`, the `/home/<user>/` path map). `up` waits up to 60 s for its `/admin/health` and
+  otherwise stops the sandbox with an error; `status` adds `hub: { mac, ready }`. `down` removes the Mac state only
+  after a clean hub exit (`hub.json` gone); after an abrupt one it keeps it, so the next `up` stops the serve-sim
+  helpers that hub left behind.
+- **Elsewhere** (macOS, plain Linux) the plugin starts a local hub in the sandbox's `xdg/state/opencode/resources-hub`,
+  as before.
+
+Test scripts reach the sandbox hub's admin API (to register a simulator, emulator or Chrome as an agent's resource)
+only through `custom-sandbox.ts hub --port … --home …`, which writes `<home>/resources-hub.json` (0600,
+`{ host, port, secret }`) and prints its path; use `host` for admin requests and for stream URLs (`ws://<host>:<loopbackPort>…`
+from a ticket). `test-resources.py`, `test-ios-simulator-resource.py`, `test-resources-android.py`,
+`test-subagent-capsule.py` and `test-chrome-resource.ts` do so. Create test simulators from a script that never
+prints their UDID or name: production's discovery registers any simulator named in a production session's shell
+command or output, so naming one there puts it in production's hub.
+
 The script discovers configuration/database paths through the installed `manual.json`,
 loads `environment.sh` privately, copies configuration without backups or service credentials,
 and redirects config, database, data, state and cache to the sandbox. Its first startup runs
-the real migrations; while that sandbox is stopped, a read-only SQLite attachment copies
-**only `credential`**, in one transaction. No production history is copied. Existing sandbox
+the real migrations; while that sandbox is stopped, it copies **only `credential`**: production opens with
+`new Database(path, { readonly: true })` (never a `file:…?mode=ro` URI, which Bun's SQLite does not honor on Linux and
+rejects with `SQLITE_CANTOPEN`), its rows are read in one `SELECT` and written to the sandbox in one transaction,
+through the columns both schemas share. Nothing writes to the production database. No production history is copied. Existing sandbox
 credentials are not overwritten on subsequent startups. The home is private (0700), and
 configuration, environment and password files are 0600. The script prints the password
 **path**, never its contents. It stops only the tmux session carrying its ownership token.

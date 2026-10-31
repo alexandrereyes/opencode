@@ -141,12 +141,14 @@ def prepare():
 
     # Two booted simulators in the sandbox's own hub, each in use by one subagent (the plugin starts the hub).
     rpc("custom.resources/list", {})
-    hub_file = args.home / "xdg/state/opencode/resources-hub/hub.json"
+    # The sandbox's own hub (on the Mac when the sandbox runs on the OrbStack Linux machine), never production's.
+    command = ["bun", str(Path(__file__).resolve().parents[3] / "packages/cli/script/custom-sandbox.ts"), "hub",
+        "--port", args.server_url.rsplit(":", 1)[1].rstrip("/"), "--home", str(args.home)]
     deadline = time.time() + 30
-    while not hub_file.exists() and time.time() < deadline:
+    while (located := subprocess.run(command, capture_output=True, text=True)).returncode and time.time() < deadline:
         time.sleep(0.5)
-    hub = json.loads(hub_file.read_text())
-    hub_url = "http://127.0.0.1:%d" % hub["port"]
+    hub = json.loads(Path(located.stdout.strip()).read_text())
+    hub_url = "http://%s:%d" % (hub["host"], hub["port"])
     bearer = {"Authorization": "Bearer " + hub["secret"], "Content-Type": "application/json"}
     devices = {both: args.resource_device_file.read_text().strip(), resource: args.device_file.read_text().strip()}
     ids = {}

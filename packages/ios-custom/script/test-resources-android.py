@@ -62,9 +62,11 @@ def api(path, body=None, method="POST"):
 def rpc(method, value):
     return api("/api/rpc/custom.resources/" + method, {"input": value})["output"]
 rpc("list", {})
-hub = json.loads((args.home / "xdg/state/opencode/resources-hub/hub.json").read_text())
+# The sandbox's own hub (on the Mac when the sandbox runs on the OrbStack Linux machine), never production's.
+hub = json.loads(Path(subprocess.check_output(["bun", str(Path(__file__).resolve().parents[3] / "packages/cli/script/custom-sandbox.ts"),
+    "hub", "--port", str(port), "--home", str(args.home)], text=True).strip()).read_text())
 def admin(path, body=None, method="GET"):
-    request = urllib.request.Request("http://127.0.0.1:%d%s" % (hub["port"], path),
+    request = urllib.request.Request("http://%s:%d%s" % (hub["host"], hub["port"], path),
         data=json.dumps(body).encode() if body is not None else None, method=method,
         headers={"Authorization": "Bearer " + hub["secret"], "Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -192,7 +194,7 @@ console.log(JSON.stringify({ stream, dragToFrame: { median: median(drags), all: 
   buttonToFrame: { median: median(buttons), all: buttons } }))
 """)
     def url(ticket):
-        return "ws://127.0.0.1:%d%s/stream?ticket=%s" % (ticket["loopbackPort"], ticket["path"], ticket["ticket"])
+        return "ws://%s:%d%s/stream?ticket=%s" % (hub["host"], ticket["loopbackPort"], ticket["path"], ticket["ticket"])
     scroll = "for i in 1 2 3 4 5 6; do %s -s %s shell input swipe 360 1300 360 400 300; %s -s %s shell input swipe 360 400 360 1300 300; done" % (
         adb_path, args.serial, adb_path, args.serial)
     hub_pid = hub.get("pid")

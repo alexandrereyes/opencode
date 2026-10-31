@@ -57,9 +57,11 @@ def api(path, body=None, method="POST"):
 def rpc(method, value):
     return api("/api/rpc/custom.resources/" + method, {"input": value})["output"]
 rpc("list", {})
-hub = json.loads((args.home / "xdg/state/opencode/resources-hub/hub.json").read_text())
+# The sandbox's own hub (on the Mac when the sandbox runs on the OrbStack Linux machine), never production's.
+hub = json.loads(Path(subprocess.check_output(["bun", str(Path(__file__).resolve().parents[3] / "packages/cli/script/custom-sandbox.ts"),
+    "hub", "--port", str(port), "--home", str(args.home)], text=True).strip()).read_text())
 def admin(path, body=None, method="GET"):
-    request = urllib.request.Request("http://127.0.0.1:%d%s" % (hub["port"], path),
+    request = urllib.request.Request("http://%s:%d%s" % (hub["host"], hub["port"], path),
         data=json.dumps(body).encode() if body is not None else None, method=method,
         headers={"Authorization": "Bearer " + hub["secret"], "Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -166,7 +168,7 @@ const sorted = ages.toSorted((a, b) => a - b)
 console.log(JSON.stringify({ frames: ages.length, fps: +(ages.length / ((Date.now() - first) / 1000)).toFixed(2),
   ageMedian: sorted[Math.floor(sorted.length / 2)], ageP95: sorted[Math.floor(sorted.length * 0.95)] }))
 """)
-    url = "ws://127.0.0.1:%d%s/stream?ticket=%s" % (ticket["loopbackPort"], ticket["path"], ticket["ticket"])
+    url = "ws://%s:%d%s/stream?ticket=%s" % (hub["host"], ticket["loopbackPort"], ticket["path"], ticket["ticket"])
     report["stream"] = json.loads(subprocess.check_output(["bun", str(probe), url], text=True).strip())
     started = time.time()
     rpc("snapshot", {"id": resource, "maxWidth": 240})

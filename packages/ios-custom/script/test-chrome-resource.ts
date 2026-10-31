@@ -48,7 +48,22 @@ const fixture = Bun.spawn(
   },
 )
 const fixtureURL = `http://127.0.0.1:${fixturePort}`
-const hubFile = path.join(args.home, "xdg/state/opencode/resources-hub/hub.json")
+// The sandbox's own hub (on the Mac when the sandbox runs on the OrbStack Linux machine), never production's.
+const sandboxHub = async (): Promise<{ host: string; port: number; secret: string }> => {
+  const file = Bun.spawnSync(
+    [
+      "bun",
+      path.join(root, "packages/cli/script/custom-sandbox.ts"),
+      "hub",
+      "--port",
+      new URL(args["server-url"]).port,
+      "--home",
+      args.home,
+    ],
+    { stderr: "inherit" },
+  )
+  return Bun.file(file.stdout.toString().trim()).json()
+}
 let resource: string | undefined
 
 try {
@@ -75,8 +90,8 @@ try {
   console.log("shell", shellID, "opened Chrome with a CDP port through the plugin's shell hook")
 
   // The hub's admin API stands in for discovery from the tool call.
-  const hub: { port: number; secret: string } = await Bun.file(hubFile).json()
-  const registered = await fetch(`http://127.0.0.1:${hub.port}/admin/resources`, {
+  const hub = await sandboxHub()
+  const registered = await fetch(`http://${hub.host}:${hub.port}/admin/resources`, {
     method: "PUT",
     headers: { authorization: `Bearer ${hub.secret}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -128,8 +143,8 @@ try {
 } finally {
   Bun.spawnSync(["playwright-cli", `-s=${session}`, "close"], { cwd: workspace, stdout: "ignore", stderr: "ignore" })
   if (resource) {
-    const hub: { port: number; secret: string } = await Bun.file(hubFile).json()
-    await fetch(`http://127.0.0.1:${hub.port}/admin/resources/${encodeURIComponent(resource)}`, {
+    const hub = await sandboxHub()
+    await fetch(`http://${hub.host}:${hub.port}/admin/resources/${encodeURIComponent(resource)}`, {
       method: "DELETE",
       headers: { authorization: `Bearer ${hub.secret}` },
     }).catch(() => undefined)
