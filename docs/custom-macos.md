@@ -474,6 +474,23 @@ OrbStack machine `dev`, Ubuntu arm64; setup in `core-infra/opencode-mac`). Diffe
   content changed, it replaces that file and restarts the job with
   `mac launchctl kickstart -k gui/$(mac id -u)/com.alexandrem.opencode2-ui`. A failure is reported without undoing the
   activation.
+- **Signed Mac controller.** Commands started through `mac` descend, on the Mac, from OrbStack Helper rather than from
+  the signed server, and OrbStack is responsible for their privacy (TCC) checks. Native helpers that only trust
+  descendants of `local.opencode.custom` (MacLock, for Computer Use while the Mac is locked) refuse them, and its
+  Accessibility, event-posting and input-monitoring checks fail. After a successful activation,
+  `installMacController` (`custom-mac-controller.ts`) sends `custom-mac-controller.c` on stdin to the Mac publisher
+  (`custom-mac-host.py controller`, like the hub and the proxy: Linux never opens the shared mount). On the Mac it
+  compiles the source with `clang` into the runtime's `mac-controller/OpenCode Custom Controller.app` (bundle
+  identifier `local.opencode.custom`, signed with the persistent local certificate, so the server's TCC grants apply
+  to it), swaps the app in and links `bin/mac-controller` to its executable, with explicit modes (`mac` processes
+  have no umask). It rebuilds only when the source or `Info.plist` changes (`mac-controller/source.sha256`) or the
+  signature stops verifying, and skips without `signing/signing.keychain-db`. The controller runs itself again with
+  responsibility disclaimed (`responsibility_spawnattrs_setdisclaim`, as Chromium does), becoming the responsible
+  process, then runs its arguments as a child sharing its stdio, forwards HUP/INT/QUIT/TERM and exits with the
+  child's status, e.g. as a local MCP command:
+  `["mac", "/Users/<user>/.local/share/opencode-custom-v2/bin/mac-controller", "node", "/Users/…/mcp-server.js"]`.
+  It grants nothing a process of the same user lacks (that user owns the signing keychain, which has an empty
+  password); other macOS users stay excluded by MacLock's UID check.
 - `custom:migrate` is macOS-only. Moving the runtime from the Mac: `core-infra/opencode-mac/opencode-migrate.sh`.
 
 #### Resources hub on the Mac
