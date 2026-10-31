@@ -75,6 +75,13 @@ import OpenCodeKit
     provider.reportCall(with: callUUID, endedAt: Date(), reason: .failed)
   }
 
+  /// The voice service or the gateway ended the call.
+  func remoteEnded() {
+    guard let callUUID else { return }
+    self.callUUID = nil
+    provider.reportCall(with: callUUID, endedAt: Date(), reason: .remoteEnded)
+  }
+
   nonisolated func providerDidReset(_ provider: CXProvider) {
     MainActor.assumeIsolated {
       log.append("reset")

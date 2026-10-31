@@ -13,8 +13,8 @@ struct VoiceView: View {
       status
       VoiceLevels(input: call.muted ? 0 : call.inputLevel, output: call.outputLevel, live: call.phase == .live)
         .frame(maxWidth: .infinity).frame(height: 104)
-      if case .failed(let message) = call.phase {
-        failure(message)
+      if let notice = call.phase.notice {
+        failure(notice)
       } else {
         captions
         controls
@@ -38,6 +38,7 @@ struct VoiceView: View {
     let (text, role): (String, ThemeRole) = switch call.phase {
     case .connecting: ("Conectando…", .textSecondary)
     case .failed: ("Sem conexão", .error)
+    case .ended: ("Encerrada", .warning)
     case .idle: ("Encerrada", .textSecondary)
     case .live:
       if let master = call.timeline.master, master.running { (master.text, .warning) }

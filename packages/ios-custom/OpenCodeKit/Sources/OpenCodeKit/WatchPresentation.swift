@@ -119,3 +119,19 @@ public struct WatchVoiceTimeline: Equatable, Sendable {
       && lhs.ended == rhs.ended && lhs.error == rhs.error && lhs.next == rhs.next && lhs.lastSeq == rhs.lastSeq
   }
 }
+
+/// What the watch says when the gateway ends a call (`status: ended` with the gateway's reason).
+public enum WatchVoiceEnd {
+  /// `nil` when the watch itself ended or replaced the call; unknown reasons get a generic notice.
+  public static func message(for reason: String) -> String? {
+    switch reason {
+    case "client_end", "replaced": nil
+    case "sideband_closed", "session_closed": "A conversa foi encerrada pelo serviço de voz."
+    case "heartbeat_timeout": "A conversa foi encerrada porque o relógio ficou sem conexão com o servidor."
+    case "lease_refused", "lease_lost": "A conversa foi encerrada porque o serviço de voz não manteve a chamada."
+    case "max_duration": "A conversa chegou ao limite de 30 minutos."
+    case "shutdown": "A conversa foi encerrada porque o servidor do OpenCode reiniciou."
+    default: "A conversa foi encerrada pelo servidor."
+    }
+  }
+}

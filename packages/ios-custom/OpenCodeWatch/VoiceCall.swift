@@ -9,7 +9,16 @@ import WatchKit
 /// gateway; the media never crosses the Mac.
 @MainActor @Observable final class VoiceCall {
   enum Phase: Equatable {
-    case idle, connecting, live, failed(String)
+    /// `ended`: the service or the gateway ended the call, with the reason in words.
+    case idle, connecting, live, failed(String), ended(String)
+
+    /// What the call screen says instead of the controls.
+    var notice: String? {
+      switch self {
+      case .failed(let message), .ended(let message): message
+      case .idle, .connecting, .live: nil
+      }
+    }
   }
 
   private(set) var phase: Phase = .idle
@@ -114,7 +123,7 @@ import WatchKit
     if let pairing { start(pairing: pairing) }
   }
 
-  func dismissFailure() { if case .failed = phase { phase = .idle } }
+  func dismissFailure() { if phase.notice != nil { phase = .idle } }
 
   // MARK: Private
 
@@ -140,8 +149,8 @@ import WatchKit
           guard self.attempt == attempt else { return }
           timeline.apply(batch)
           if let error = timeline.error, phase == .connecting { fail(VoiceFailure(error), attempt: attempt) }
-          if timeline.ended != nil {
-            end(local: false)
+          if let reason = timeline.ended {
+            serverEnded(reason, attempt: attempt)
             return
           }
         } catch is CancellationError {
@@ -172,6 +181,12 @@ import WatchKit
       }
     case .inputLevel(let level): inputLevel = level
     case .outputLevel(let level): outputLevel = level
+    case .ended(let failure) where failure.kind == .sessionEnded:
+      // The service ended the media; the gateway's `ended`, which says why, usually follows within a second.
+      Task {
+        try? await Task.sleep(for: .seconds(3))
+        fail(VoiceFailure("A conversa foi encerrada pelo serviço de voz.", detail: failure.message), attempt: attempt)
+      }
     case .ended(let failure):
       let message = switch failure.kind {
       case .network: "A conexão de voz caiu."
@@ -206,6 +221,17 @@ import WatchKit
     teardown()
     phase = .idle
     WKInterfaceDevice.current().play(.stop)
+  }
+
+  /// The gateway ended the call: unless the watch itself asked for it, the screen says why instead of closing.
+  private func serverEnded(_ reason: String, attempt: UUID) {
+    guard let message = WatchVoiceEnd.message(for: reason) else { return end(local: false) }
+    guard self.attempt == attempt, phase == .connecting || phase == .live else { return }
+    reportDiagnostics(stage: "ended", message: reason)
+    callKit.remoteEnded()
+    teardown()
+    phase = .ended(message)
+    WKInterfaceDevice.current().play(.failure)
   }
 
   /// Media and audio close first; then the gateway releases the call (and its lease).

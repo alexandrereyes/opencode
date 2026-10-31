@@ -188,6 +188,21 @@ private let stateJSON = """
     timeline.apply(try batch(#"{"events":[{"seq":3,"at":3,"type":"status","status":"ended","reason":"heartbeat"}],"next":3,"ended":true}"#))
     #expect(timeline.ended == "heartbeat")
   }
+
+  @Test func serviceEndingsSayWhyAndTheWatchsOwnEndStaysSilent() throws {
+    var timeline = WatchVoiceTimeline()
+    let json = #"{"events":[{"seq":1,"at":1,"type":"status","status":"ended","reason":"sideband_closed"}],"next":1,"ended":true}"#
+    timeline.apply(try JSONDecoder().decode(WatchVoiceEvents.self, from: Data(json.utf8)))
+    #expect(WatchVoiceEnd.message(for: try #require(timeline.ended)) == "A conversa foi encerrada pelo serviço de voz.")
+    #expect(WatchVoiceEnd.message(for: "session_closed") == "A conversa foi encerrada pelo serviço de voz.")
+    #expect(WatchVoiceEnd.message(for: "heartbeat_timeout")?.contains("sem conexão") == true)
+    #expect(WatchVoiceEnd.message(for: "lease_lost") == WatchVoiceEnd.message(for: "lease_refused"))
+    #expect(WatchVoiceEnd.message(for: "max_duration")?.contains("30 minutos") == true)
+    // A batch that only says `ended` gets the generic notice.
+    #expect(WatchVoiceEnd.message(for: "ended") == "A conversa foi encerrada pelo servidor.")
+    #expect(WatchVoiceEnd.message(for: "client_end") == nil)
+    #expect(WatchVoiceEnd.message(for: "replaced") == nil)
+  }
 }
 
 // MARK: Gateway client against a local HTTP server
