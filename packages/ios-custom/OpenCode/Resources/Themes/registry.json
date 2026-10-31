@@ -1,35 +1,5 @@
 [
   {
-    "id": "ayu-dark",
-    "name": "Ayu",
-    "dark": true
-  },
-  {
-    "id": "ayu-light",
-    "name": "Ayu",
-    "dark": false
-  },
-  {
-    "id": "cursor-dark",
-    "name": "Cursor",
-    "dark": true
-  },
-  {
-    "id": "cursor-light",
-    "name": "Cursor",
-    "dark": false
-  },
-  {
-    "id": "palenight-dark",
-    "name": "Palenight",
-    "dark": true
-  },
-  {
-    "id": "palenight-light",
-    "name": "Palenight",
-    "dark": false
-  },
-  {
     "id": "amoled-dark",
     "name": "AMOLED",
     "dark": true
@@ -37,116 +7,6 @@
   {
     "id": "amoled-light",
     "name": "AMOLED",
-    "dark": false
-  },
-  {
-    "id": "rosepine-dark",
-    "name": "Rose Pine",
-    "dark": true
-  },
-  {
-    "id": "rosepine-light",
-    "name": "Rose Pine",
-    "dark": false
-  },
-  {
-    "id": "vercel-dark",
-    "name": "Vercel",
-    "dark": true
-  },
-  {
-    "id": "vercel-light",
-    "name": "Vercel",
-    "dark": false
-  },
-  {
-    "id": "kanagawa-dark",
-    "name": "Kanagawa",
-    "dark": true
-  },
-  {
-    "id": "kanagawa-light",
-    "name": "Kanagawa",
-    "dark": false
-  },
-  {
-    "id": "orng-dark",
-    "name": "Orng",
-    "dark": true
-  },
-  {
-    "id": "orng-light",
-    "name": "Orng",
-    "dark": false
-  },
-  {
-    "id": "catppuccin-macchiato-dark",
-    "name": "Catppuccin Macchiato",
-    "dark": true
-  },
-  {
-    "id": "catppuccin-macchiato-light",
-    "name": "Catppuccin Macchiato",
-    "dark": false
-  },
-  {
-    "id": "openchamber-dark",
-    "name": "OpenChamber",
-    "dark": true
-  },
-  {
-    "id": "openchamber-light",
-    "name": "OpenChamber",
-    "dark": false
-  },
-  {
-    "id": "catppuccin-dark",
-    "name": "Catppuccin",
-    "dark": true
-  },
-  {
-    "id": "catppuccin-light",
-    "name": "Catppuccin",
-    "dark": false
-  },
-  {
-    "id": "carbonfox-dark",
-    "name": "Carbonfox",
-    "dark": true
-  },
-  {
-    "id": "carbonfox-light",
-    "name": "Carbonfox",
-    "dark": false
-  },
-  {
-    "id": "mercury-dark",
-    "name": "Mercury",
-    "dark": true
-  },
-  {
-    "id": "mercury-light",
-    "name": "Mercury",
-    "dark": false
-  },
-  {
-    "id": "cobalt2-dark",
-    "name": "Cobalt2",
-    "dark": true
-  },
-  {
-    "id": "cobalt2-light",
-    "name": "Cobalt2",
-    "dark": false
-  },
-  {
-    "id": "dracula-dark",
-    "name": "Dracula",
-    "dark": true
-  },
-  {
-    "id": "dracula-light",
-    "name": "Dracula",
     "dark": false
   },
   {
@@ -160,63 +20,23 @@
     "dark": false
   },
   {
-    "id": "gruvbox-dark",
-    "name": "Gruvbox",
+    "id": "ayu-dark",
+    "name": "Ayu",
     "dark": true
   },
   {
-    "id": "gruvbox-light",
-    "name": "Gruvbox",
+    "id": "ayu-light",
+    "name": "Ayu",
     "dark": false
   },
   {
-    "id": "shadesofpurple-dark",
-    "name": "Shades of Purple",
+    "id": "carbonfox-dark",
+    "name": "Carbonfox",
     "dark": true
   },
   {
-    "id": "shadesofpurple-light",
-    "name": "Shades of Purple",
-    "dark": false
-  },
-  {
-    "id": "lucent-orng-dark",
-    "name": "Lucent Orng",
-    "dark": true
-  },
-  {
-    "id": "lucent-orng-light",
-    "name": "Lucent Orng",
-    "dark": false
-  },
-  {
-    "id": "oc-2-dark",
-    "name": "OC-2",
-    "dark": true
-  },
-  {
-    "id": "oc-2-light",
-    "name": "OC-2",
-    "dark": false
-  },
-  {
-    "id": "monokai-dark",
-    "name": "Monokai",
-    "dark": true
-  },
-  {
-    "id": "monokai-light",
-    "name": "Monokai",
-    "dark": false
-  },
-  {
-    "id": "nord-dark",
-    "name": "Nord",
-    "dark": true
-  },
-  {
-    "id": "nord-light",
-    "name": "Nord",
+    "id": "carbonfox-light",
+    "name": "Carbonfox",
     "dark": false
   },
   {
@@ -230,63 +50,53 @@
     "dark": false
   },
   {
-    "id": "nightowl-dark",
-    "name": "Night Owl",
+    "id": "catppuccin-macchiato-dark",
+    "name": "Catppuccin Macchiato",
     "dark": true
   },
   {
-    "id": "nightowl-light",
-    "name": "Night Owl",
+    "id": "catppuccin-macchiato-light",
+    "name": "Catppuccin Macchiato",
     "dark": false
   },
   {
-    "id": "zenburn-dark",
-    "name": "Zenburn",
+    "id": "catppuccin-dark",
+    "name": "Catppuccin",
     "dark": true
   },
   {
-    "id": "zenburn-light",
-    "name": "Zenburn",
+    "id": "catppuccin-light",
+    "name": "Catppuccin",
     "dark": false
   },
   {
-    "id": "matrix-dark",
-    "name": "Matrix",
+    "id": "cobalt2-dark",
+    "name": "Cobalt2",
     "dark": true
   },
   {
-    "id": "matrix-light",
-    "name": "Matrix",
+    "id": "cobalt2-light",
+    "name": "Cobalt2",
     "dark": false
   },
   {
-    "id": "tokyonight-dark",
-    "name": "Tokyonight",
+    "id": "cursor-dark",
+    "name": "Cursor",
     "dark": true
   },
   {
-    "id": "tokyonight-light",
-    "name": "Tokyonight",
+    "id": "cursor-light",
+    "name": "Cursor",
     "dark": false
   },
   {
-    "id": "opencode-dark",
-    "name": "OpenCode",
+    "id": "dracula-dark",
+    "name": "Dracula",
     "dark": true
   },
   {
-    "id": "opencode-light",
-    "name": "OpenCode",
-    "dark": false
-  },
-  {
-    "id": "flexoki-dark",
-    "name": "Flexoki",
-    "dark": true
-  },
-  {
-    "id": "flexoki-light",
-    "name": "Flexoki",
+    "id": "dracula-light",
+    "name": "Dracula",
     "dark": false
   },
   {
@@ -300,13 +110,13 @@
     "dark": false
   },
   {
-    "id": "vesper-dark",
-    "name": "Vesper",
+    "id": "flexoki-dark",
+    "name": "Flexoki",
     "dark": true
   },
   {
-    "id": "vesper-light",
-    "name": "Vesper",
+    "id": "flexoki-light",
+    "name": "Flexoki",
     "dark": false
   },
   {
@@ -320,6 +130,36 @@
     "dark": false
   },
   {
+    "id": "gruvbox-dark",
+    "name": "Gruvbox",
+    "dark": true
+  },
+  {
+    "id": "gruvbox-light",
+    "name": "Gruvbox",
+    "dark": false
+  },
+  {
+    "id": "kanagawa-dark",
+    "name": "Kanagawa",
+    "dark": true
+  },
+  {
+    "id": "kanagawa-light",
+    "name": "Kanagawa",
+    "dark": false
+  },
+  {
+    "id": "lucent-orng-dark",
+    "name": "Lucent Orng",
+    "dark": true
+  },
+  {
+    "id": "lucent-orng-light",
+    "name": "Lucent Orng",
+    "dark": false
+  },
+  {
     "id": "material-dark",
     "name": "Material",
     "dark": true
@@ -330,23 +170,63 @@
     "dark": false
   },
   {
-    "id": "onedarkpro-dark",
-    "name": "One Dark Pro",
+    "id": "matrix-dark",
+    "name": "Matrix",
     "dark": true
   },
   {
-    "id": "onedarkpro-light",
-    "name": "One Dark Pro",
+    "id": "matrix-light",
+    "name": "Matrix",
     "dark": false
   },
   {
-    "id": "solarized-dark",
-    "name": "Solarized",
+    "id": "mercury-dark",
+    "name": "Mercury",
     "dark": true
   },
   {
-    "id": "solarized-light",
-    "name": "Solarized",
+    "id": "mercury-light",
+    "name": "Mercury",
+    "dark": false
+  },
+  {
+    "id": "monokai-dark",
+    "name": "Monokai",
+    "dark": true
+  },
+  {
+    "id": "monokai-light",
+    "name": "Monokai",
+    "dark": false
+  },
+  {
+    "id": "nightowl-dark",
+    "name": "Night Owl",
+    "dark": true
+  },
+  {
+    "id": "nightowl-light",
+    "name": "Night Owl",
+    "dark": false
+  },
+  {
+    "id": "nord-dark",
+    "name": "Nord",
+    "dark": true
+  },
+  {
+    "id": "nord-light",
+    "name": "Nord",
+    "dark": false
+  },
+  {
+    "id": "oc-2-dark",
+    "name": "OC-2",
+    "dark": true
+  },
+  {
+    "id": "oc-2-light",
+    "name": "OC-2",
     "dark": false
   },
   {
@@ -360,13 +240,43 @@
     "dark": false
   },
   {
-    "id": "synthwave84-dark",
-    "name": "Synthwave '84",
+    "id": "onedarkpro-dark",
+    "name": "One Dark Pro",
     "dark": true
   },
   {
-    "id": "synthwave84-light",
-    "name": "Synthwave '84",
+    "id": "onedarkpro-light",
+    "name": "One Dark Pro",
+    "dark": false
+  },
+  {
+    "id": "openchamber-dark",
+    "name": "OpenChamber",
+    "dark": true
+  },
+  {
+    "id": "openchamber-light",
+    "name": "OpenChamber",
+    "dark": false
+  },
+  {
+    "id": "opencode-dark",
+    "name": "OpenCode",
+    "dark": true
+  },
+  {
+    "id": "opencode-light",
+    "name": "OpenCode",
+    "dark": false
+  },
+  {
+    "id": "orng-dark",
+    "name": "Orng",
+    "dark": true
+  },
+  {
+    "id": "orng-light",
+    "name": "Orng",
     "dark": false
   },
   {
@@ -377,6 +287,96 @@
   {
     "id": "osaka-jade-light",
     "name": "Osaka Jade",
+    "dark": false
+  },
+  {
+    "id": "palenight-dark",
+    "name": "Palenight",
+    "dark": true
+  },
+  {
+    "id": "palenight-light",
+    "name": "Palenight",
+    "dark": false
+  },
+  {
+    "id": "rosepine-dark",
+    "name": "Rose Pine",
+    "dark": true
+  },
+  {
+    "id": "rosepine-light",
+    "name": "Rose Pine",
+    "dark": false
+  },
+  {
+    "id": "shadesofpurple-dark",
+    "name": "Shades of Purple",
+    "dark": true
+  },
+  {
+    "id": "shadesofpurple-light",
+    "name": "Shades of Purple",
+    "dark": false
+  },
+  {
+    "id": "solarized-dark",
+    "name": "Solarized",
+    "dark": true
+  },
+  {
+    "id": "solarized-light",
+    "name": "Solarized",
+    "dark": false
+  },
+  {
+    "id": "synthwave84-dark",
+    "name": "Synthwave '84",
+    "dark": true
+  },
+  {
+    "id": "synthwave84-light",
+    "name": "Synthwave '84",
+    "dark": false
+  },
+  {
+    "id": "tokyonight-dark",
+    "name": "Tokyonight",
+    "dark": true
+  },
+  {
+    "id": "tokyonight-light",
+    "name": "Tokyonight",
+    "dark": false
+  },
+  {
+    "id": "vercel-dark",
+    "name": "Vercel",
+    "dark": true
+  },
+  {
+    "id": "vercel-light",
+    "name": "Vercel",
+    "dark": false
+  },
+  {
+    "id": "vesper-dark",
+    "name": "Vesper",
+    "dark": true
+  },
+  {
+    "id": "vesper-light",
+    "name": "Vesper",
+    "dark": false
+  },
+  {
+    "id": "zenburn-dark",
+    "name": "Zenburn",
+    "dark": true
+  },
+  {
+    "id": "zenburn-light",
+    "name": "Zenburn",
     "dark": false
   }
 ]

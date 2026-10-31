@@ -4839,7 +4839,8 @@ packages/ios-custom/
 ## Development
 
 - Requirements: Xcode 27.1 / Swift 6.4 and a reachable OpenCode server.
-- **No CI.** Build, tests, and TestFlight uploads all run locally on this Mac.
+- **No CI.** Build, tests, and TestFlight uploads all run locally on this Mac (or from the OrbStack Linux machine,
+  whose `xcodebuild` runs on the Mac; see [Private TestFlight uploads](#private-testflight-uploads)).
 - Development backend: an isolated custom instance created by `packages/cli/script/custom-sandbox.ts` (see
   "Isolated source development" in `docs/custom-macos.md`). `bun dev serve` is not enough, because it does not load
   the custom plugin whose RPCs the app uses. Never use ports 4096 or 4178, and **never restart an existing backend or
@@ -4997,6 +4998,17 @@ private local logs, and, for signed runs, `ExportOptions.plist` and `export/`. D
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-sessoes-derived`; do not run two Xcode builds
 against it simultaneously. Auth arguments and Xcode logs are not echoed, even on failure; redact credential
 identifiers before sharing the logs. A successful upload still needs TestFlight processing; check App Store Connect.
+
+**From the OrbStack Linux machine** (Linux with `mac`), the same commands run from a Linux checkout or worktree.
+Git, the clean-tree checks and `generate-themes.ts` run on Linux; `swift` and `xcodebuild` are OrbStack command
+links that already run on the Mac and see the checkout through `~/OrbStack/dev`. The script never opens Mac paths
+from Linux: it reads the ASC config and checks the key through `mac` (`test`, `realpath`, `cat`), and passes the key
+and DerivedData to `xcodebuild` as `/mnt/mac/<path>`, the bridge's form for a literal Mac path, so the key stays
+on the Mac. `~/.appstoreconnect` and `ASC_CONFIG_FILE`/`ASC_KEY_PATH` therefore mean Mac paths there, and
+`OPENCODE_DERIVED_DATA` a Mac path too. Logs, `ExportOptions.plist`, the archive and `export/` go to
+`~/.cache/opencode/ios-archives/<run>` on Linux instead of `/private/var/folders/…`. A worktree
+cannot run the script **on the Mac** through `~/OrbStack/dev` (its `.git` file points to `/home/...`); run it from
+Linux, or on the Mac from its own clone.
 
 #### Icon and launch assets
 

@@ -717,7 +717,8 @@ would need a separate integration. No proxy-side account-affinity or retry polic
 
 The iOS and Mac themes are generated from the theme JSON files in `packages/ios-custom/script/theme/themes`,
 including **OpenChamber** (warm ink neutrals, orange accent, Vitesse-style syntax, teal links, green inline
-code and a tinted user-message bubble). Run `bun packages/ios-custom/script/generate-themes.ts`; the resolver
+code and a tinted user-message bubble). Run `bun packages/ios-custom/script/generate-themes.ts` (on Linux or the
+Mac: it reads the theme files in sorted order, so `registry.json` is byte-identical on both); the resolver
 in `packages/ios-custom/script/theme` came from the former custom web UI. Two optional pairs of theme
 variables apply to every theme that defines them: `v2-user-message-background`/`v2-user-message-text` (user
 bubble) and `v2-inline-code-background`/`v2-inline-code-text` (Markdown inline code and paths, which otherwise

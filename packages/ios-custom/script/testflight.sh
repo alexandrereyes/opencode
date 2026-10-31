@@ -18,6 +18,7 @@ Default: archive and upload to private, internal-only TestFlight.
 Credentials: ASC_KEY_ID, ASC_ISSUER_ID, optional ASC_KEY_PATH; alternatively
 ~/.appstoreconnect/opencode.env (or ASC_CONFIG_FILE outside the repository).
 Default key: ~/.appstoreconnect/private_keys/AuthKey_<ID>.p8
+On the OrbStack Linux machine these are Mac paths, read through `mac`; the key never leaves the Mac.
 USAGE
 }
 
@@ -49,6 +50,28 @@ done
 package=$(cd "$(dirname "$0")/.." && pwd -P)
 repository=$(git -C "$package" rev-parse --show-toplevel)
 commit=$(git -C "$repository" rev-parse --short HEAD)
+temporary=/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode
+
+# On the OrbStack Linux machine, xcodebuild and swift already run on the Mac, which sees /home/... through
+# ~/OrbStack/dev and takes /mnt/mac/<path> as the literal Mac <path>. The App Store Connect config and key, and
+# DerivedData, stay on the Mac: this shell reads Mac files only through `mac`, never through the shared mount.
+if [[ "$(uname -s)" == Linux ]] && command -v mac >/dev/null; then
+  host_home=/Users/$(id -un)
+  host_repository=$host_home/OrbStack/dev$repository
+  host_path() { printf '/mnt/mac%s' "$1"; }
+  on_host() {
+    local arguments=("${@:2}")
+    mac "$1" "${arguments[@]/#\//\/mnt\/mac\/}"
+  }
+  # On the Linux disk, which the Mac sees; not XDG_CACHE_HOME, which an agent shell inherits from the server.
+  archives=$HOME/.cache/opencode/ios-archives
+else
+  host_home=$HOME
+  host_repository=$repository
+  host_path() { printf '%s' "$1"; }
+  on_host() { "$@"; }
+  archives=$temporary/ios-archives
+fi
 
 require_clean() {
   if [[ "$allow_dirty" == false && -n "$(git -C "$repository" status --porcelain --untracked-files=all -- packages/ios-custom)" ]]; then
@@ -63,10 +86,10 @@ if [[ "$allow_dirty" == true ]]; then
 fi
 
 if [[ "$mode" != unsigned-check && "$auth" != xcode ]]; then
-  config=${ASC_CONFIG_FILE:-$HOME/.appstoreconnect/opencode.env}
-  if [[ -f "$config" ]]; then
-    case "$(realpath "$config")" in
-      "$repository"/*) fail 'The private ASC config must be outside the repository.' ;;
+  config=${ASC_CONFIG_FILE:-$host_home/.appstoreconnect/opencode.env}
+  if on_host test -f "$config"; then
+    case "$(on_host realpath "$config")" in
+      "$host_repository"/*) fail 'The private ASC config must be outside the repository.' ;;
     esac
     # Read literal KEY=value entries, never source/execute the private config.
     while IFS='=' read -r name value || [[ -n "$name" ]]; do
@@ -78,7 +101,7 @@ if [[ "$mode" != unsigned-check && "$auth" != xcode ]]; then
         ASC_KEY_PATH) ASC_KEY_PATH=${ASC_KEY_PATH:-$value} ;;
         *) fail 'Invalid ASC config entry. Use unquoted ASC_KEY_ID, ASC_ISSUER_ID, and optional ASC_KEY_PATH entries.' ;;
       esac
-    done < "$config"
+    done < <(on_host cat "$config")
   fi
   if [[ "$auth" == auto && -z "${ASC_KEY_ID:-}" && -z "${ASC_ISSUER_ID:-}" && -z "${ASC_KEY_PATH:-}" ]]; then
     auth=xcode
@@ -87,10 +110,10 @@ if [[ "$mode" != unsigned-check && "$auth" != xcode ]]; then
     'No App Store Connect API key configured. Set ASC_KEY_ID and ASC_ISSUER_ID, or create ~/.appstoreconnect/opencode.env (see README). Use --unsigned-check without credentials.'
     [[ "$ASC_KEY_ID" =~ ^[A-Za-z0-9]{10}$ ]] || fail 'ASC_KEY_ID must be a 10-character key identifier.'
     [[ "$ASC_ISSUER_ID" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]] || fail 'ASC_ISSUER_ID must be an issuer UUID.'
-    key=${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}
-    [[ -f "$key" && -r "$key" ]] || fail 'The App Store Connect private key is missing or unreadable. Set ASC_KEY_PATH or install AuthKey_<ID>.p8 in ~/.appstoreconnect/private_keys/.'
-    case "$(realpath "$key")" in
-      "$repository"/*) fail 'The App Store Connect private key must be outside the repository.' ;;
+    key=${ASC_KEY_PATH:-$host_home/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}
+    on_host test -f "$key" -a -r "$key" || fail 'The App Store Connect private key is missing or unreadable. Set ASC_KEY_PATH or install AuthKey_<ID>.p8 in ~/.appstoreconnect/private_keys/.'
+    case "$(on_host realpath "$key")" in
+      "$host_repository"/*) fail 'The App Store Connect private key must be outside the repository.' ;;
     esac
     auth=api-key
   fi
@@ -103,9 +126,8 @@ swift "$package/script/generate-icon.swift"
 require_clean
 
 build=$(date -u +%Y%m%d%H%M)
-temporary=/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode
-mkdir -p "$temporary/ios-archives"
-run=$(mktemp -d "$temporary/ios-archives/OpenCode-${build}-${commit}-${mode}.XXXXXX")
+mkdir -p "$archives"
+run=$(mktemp -d "$archives/OpenCode-${build}-${commit}-${mode}.XXXXXX")
 archive="$run/OpenCode.xcarchive"
 printf 'Build number (UTC yyyyMMddHHmm): %s\nMode: %s\nArchive: %s\n' "$build" "$mode" "$archive"
 
@@ -127,7 +149,7 @@ run_xcode() {
 }
 
 settings=(-project "$package/OpenCode.xcodeproj" -scheme OpenCode -configuration Release
-  -destination 'generic/platform=iOS' -derivedDataPath "${OPENCODE_DERIVED_DATA:-$temporary/ios-sessoes-derived}"
+  -destination 'generic/platform=iOS' -derivedDataPath "$(host_path "${OPENCODE_DERIVED_DATA:-$temporary/ios-sessoes-derived}")"
   -archivePath "$archive" "CURRENT_PROJECT_VERSION=$build" "OPENCODE_COMMIT=$commit")
 if [[ "$mode" == unsigned-check ]]; then
   run_xcode Archive archive "${settings[@]}" CODE_SIGNING_ALLOWED=NO
@@ -137,7 +159,7 @@ fi
 
 authentication=(-allowProvisioningUpdates)
 if [[ "$auth" == api-key ]]; then
-  authentication+=(-authenticationKeyPath "$key" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+  authentication+=(-authenticationKeyPath "$(host_path "$key")" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
   printf 'Authentication: App Store Connect API key (identifiers hidden).\n'
 else
   printf 'Authentication: existing Xcode account. If Apple requires renewed login, stop and sign in manually in Xcode.\n'

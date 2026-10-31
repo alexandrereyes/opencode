@@ -136,9 +136,10 @@ const roles = {
   chatAvatarSymbol: "text-strong",
 } as const
 
-const themes = new Bun.Glob("*.json")
+// Directory order differs between APFS and Linux file systems; the registry must not depend on it.
+const themes = Array.from(new Bun.Glob("*.json").scanSync(join(import.meta.dir, "theme/themes"))).sort()
 const registry: { id: string; name: string; dark: boolean }[] = []
-for await (const file of themes.scan(join(import.meta.dir, "theme/themes"))) {
+for (const file of themes) {
   const theme: DesktopTheme = await Bun.file(join(import.meta.dir, "theme/themes", file)).json()
   for (const mode of ["dark", "light"] as const) {
     const variant = theme[mode]
