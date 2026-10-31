@@ -80,6 +80,109 @@ import XCTest
     XCTAssertEqual(answered, ["itens": Value.array(["mac", "watch"])])
   }
 
+  // MARK: Keyboard
+
+  /// A long question first, so the second question's field starts below the visible conversation.
+  private func keyboardForm(second: [String: Any]) async throws -> (String, String) {
+    let long = "No Acompanhar, o texto que a pessoa pede ao agente fica guardado no registro da avaliação pela vida da "
+      + "conta, além dos registros técnicos de 30 dias. O que vale?"
+    return try await create([
+      ["key": "prazo", "type": "string", "title": "D033 Pedido de ajuste", "description": long,
+       "options": [
+         ["value": "prazo", "label": "Texto com prazo (Recomendado)", "description": "O registro fica sem o texto livre; o texto sai em 30 dias, como os registros técnicos"],
+         ["value": "sempre", "label": "Guardar sempre", "description": "O texto fica no registro enquanto a conta existir, junto da avaliação"],
+         ["value": "nunca", "label": "Não guardar", "description": "Nem o registro nem os logs técnicos guardam o texto livre da pessoa"],
+       ], "custom": true],
+      second,
+    ])
+  }
+  private func option(_ label: String) -> XCUIElement {
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+  }
+  private func waitKeyboard(_ shown: Bool) -> Bool {
+    let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == %@", NSNumber(value: shown)),
+      object: app.keyboards.firstMatch)
+    return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
+  }
+
+  /// Tapping an option (or empty space in the card) leaves the answer field; tapping the field brings it back.
+  func testTappingAnOptionOrTheCardHidesTheKeyboard() async throws {
+    let (session, form) = try await keyboardForm(second: ["key": "nota", "type": "string", "title": "Algo mais?"])
+    try open(session)
+    let prazo = app.textFields["question-answer-prazo"]
+    XCTAssertTrue(prazo.waitForExistence(timeout: 30), app.debugDescription)
+    prazo.tap()
+    prazo.typeText("outra")
+    XCTAssertTrue(waitKeyboard(true))
+    option("Guardar sempre").tap()
+    XCTAssertTrue(waitKeyboard(false), "Tocar numa opção esconde o teclado")
+    capture("teclado-opcao")
+    // The option's own answer field focuses again.
+    prazo.tap()
+    XCTAssertTrue(waitKeyboard(true))
+    XCTAssertTrue(waitFocus(prazo, true))
+    // Empty space in the card: its title.
+    app.staticTexts["D033 Pedido de ajuste"].tap()
+    XCTAssertTrue(waitKeyboard(false), "Tocar fora dos campos esconde o teclado")
+    // Answers and Enviar still work.
+    option("Texto com prazo").tap()
+    let nota = app.textFields["question-answer-nota"]
+    nota.tap()
+    nota.typeText("ok")
+    app.staticTexts["Algo mais?"].tap()
+    XCTAssertTrue(waitKeyboard(false))
+    app.buttons["Enviar"].tap()
+    let answered = try await waitAnswered(session, form)
+    XCTAssertEqual(answered, ["prazo": .string("prazo"), "nota": .string("ok")])
+  }
+
+  /// Return toward a question with options only leaves the field and hides the keyboard.
+  func testReturnToAnOptionsOnlyQuestionHidesTheKeyboard() async throws {
+    let (session, _) = try await keyboardForm(second: ["key": "seguir", "type": "string", "title": "Seguir com o desenho",
+      "options": [["value": "sim", "label": "Sim, seguir"], ["value": "nao", "label": "Não seguir"]]])
+    try open(session)
+    let prazo = app.textFields["question-answer-prazo"]
+    XCTAssertTrue(prazo.waitForExistence(timeout: 30), app.debugDescription)
+    prazo.tap()
+    prazo.typeText("outra\n")
+    XCTAssertTrue(waitKeyboard(false), "Return para uma pergunta só de opções esconde o teclado")
+    XCTAssertTrue(waitFocus(prazo, false))
+  }
+
+  /// Return toward a question with its own answer focuses that field where it can be seen.
+  func testReturnToAQuestionWithItsOwnAnswerShowsThatField() async throws {
+    let (session, _) = try await keyboardForm(second: ["key": "voz", "type": "string", "title": "Voz do Abacato",
+      "options": [["value": "marin", "label": "marin"], ["value": "cedar", "label": "cedar"]], "custom": true])
+    try open(session)
+    let prazo = app.textFields["question-answer-prazo"]
+    XCTAssertTrue(prazo.waitForExistence(timeout: 30), app.debugDescription)
+    prazo.tap()
+    prazo.typeText("outra\n")
+    let voz = app.textFields["question-answer-voz"]
+    XCTAssertTrue(waitFocus(voz, true))
+    let visible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: voz)
+    XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 5), .completed, "O campo em foco aparece na tela")
+    capture("teclado-proxima-resposta")
+  }
+
+  /// Dragging the conversation hides the keyboard of a question's field; the composer's keeps working.
+  func testDraggingTheConversationHidesTheKeyboard() async throws {
+    let (session, _) = try await keyboardForm(second: ["key": "nota", "type": "string", "title": "Algo mais?"])
+    try open(session)
+    let prazo = app.textFields["question-answer-prazo"]
+    XCTAssertTrue(prazo.waitForExistence(timeout: 30), app.debugDescription)
+    prazo.tap()
+    XCTAssertTrue(waitKeyboard(true))
+    app.collectionViews["conversation-transcript"].swipeUp()
+    XCTAssertTrue(waitKeyboard(false), "Arrastar a conversa esconde o teclado")
+    capture("teclado-arrastar")
+    let composer = app.textViews["conversation-composer"]
+    composer.tap()
+    XCTAssertTrue(waitKeyboard(true))
+    composer.typeText("Rascunho")
+    XCTAssertTrue((composer.value as? String ?? "").contains("Rascunho"))
+  }
+
   // MARK: Helpers
 
   private func open(_ session: String) throws {

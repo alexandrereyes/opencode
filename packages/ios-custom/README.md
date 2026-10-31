@@ -4071,6 +4071,17 @@ project filter replacing the chips and the highlight of the open subagent.
   has two questions: Return in the first goes to the second without sending, no ↑ appears, and Return in the second
   sends. `QuestionFormUITests` (iPhone, forms created through the sandbox API) covers several questions, two typed
   answers and a multiple choice with its own answer, reading each answer back from the server.
+  **No keyboard without a field (Alexandre, 31/10):** on the iPhone the keyboard stayed up with no field in sight.
+  Return from one question focused the next one's "Outra resposta…" field (`focusAnswer`), which sat below the
+  visible conversation: the card is one cell of the transcript's `UICollectionView`, which never scrolled it into view,
+  choosing an option did not touch the focus, and the transcript's `.interactive` dismissal only worked by dragging down
+  through the composer into the keyboard. Now choosing an option (radio or box) leaves the answer field
+  (`leaveAnswerField`); Return toward a question with options only leaves it too; a tap anywhere in the transcript
+  outside an editable field and any drag of the conversation end editing inside it (`TranscriptViewController`:
+  `collectionView.endEditing(true)`, so the composer, outside the transcript, keeps its keyboard and interactive
+  dismissal); and a question's field that takes the keyboard is scrolled into view (`revealAnswerField`). The Mac,
+  without an on-screen keyboard, is unchanged (`leaveAnswerField` does nothing there). `QuestionFormUITests` covers
+  option, card tap, Return to options only, Return to a hidden field, dragging and the composer afterwards.
 - **Title (A4, A9).** No popover and no `⌄`: the title is a label. The bar is the regular unified height, so the
   avatar and the two title lines center on the window buttons with room around them.
 - **Sessões (A5, A7).** Voice, Ajustes and Nova sessão sit at the column's right edge (a flexible space in the

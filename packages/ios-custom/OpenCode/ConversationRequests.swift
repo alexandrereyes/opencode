@@ -85,6 +85,8 @@ struct ConversationQuestionCard: View {
           if let description = field.description { Text(description).appFont(.preview) }
           ForEach(field.options ?? []) { option in
             Button {
+              // Choosing an option leaves the answer field: no keyboard without a field to type in.
+              leaveAnswerField()
               if field.type == .multiselect {
                 let selected = values[field.key]?.array ?? []
                 values[field.key] = .array(
@@ -220,6 +222,12 @@ struct ConversationQuestionCard: View {
     if typed { focusRequests[key, default: 0] += 1 } else { NSApp.keyWindow?.makeFirstResponder(nil) }
     #else
     focus = typed ? key : nil
+    #endif
+  }
+  /// The answer field with the keyboard gives it up. The Mac has no keyboard to hide and keeps its behavior.
+  private func leaveAnswerField() {
+    #if os(iOS)
+    focus = nil
     #endif
   }
   private func addCustom(_ field: PendingForm.Field) {

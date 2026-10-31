@@ -20,7 +20,7 @@ import SwiftUI
 /// same pass as any change. It is retained with its conversation, so returning to it shows the very view that
 /// was left. Growth never scrolls it: only sending a prompt, explicit navigation, ↓ and opening move it.
 @MainActor final class TranscriptViewController: UIViewController, UICollectionViewDataSource,
-  UICollectionViewDelegate, TranscriptLayoutDelegate
+  UICollectionViewDelegate, TranscriptLayoutDelegate, UIGestureRecognizerDelegate
 {
   let store: ConversationStore
   let context: TranscriptContext
@@ -96,6 +96,11 @@ import SwiftUI
     collection.accessibilityValue = "Restaurando leitura"
     collection.isHidden = true
     collection.translatesAutoresizingMaskIntoConstraints = false
+    // A tap outside a text field (an option, a question's title, empty space) leaves a question's answer field.
+    let tap = UITapGestureRecognizer(target: self, action: #selector(leaveAnswerField))
+    tap.cancelsTouchesInView = false
+    tap.delegate = self
+    collection.addGestureRecognizer(tap)
     container.addSubview(collection)
     NSLayoutConstraint.activate([
       collection.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -109,6 +114,12 @@ import SwiftUI
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    // A question's answer field may take the keyboard below the visible conversation (Return from the question
+    // before): it is scrolled into view once the keyboard has resized the conversation.
+    NotificationCenter.default.addObserver(self, selector: #selector(revealAnswerField),
+      name: UITextField.textDidBeginEditingNotification, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(revealAnswerField),
+      name: UIResponder.keyboardDidShowNotification, object: nil)
     observeContext()
     rebuild()
   }
@@ -911,6 +922,9 @@ import SwiftUI
   // MARK: Scrolling
 
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+    // Dragging the conversation leaves a question's answer field, so its keyboard goes; the composer is outside the
+    // transcript and keeps the interactive dismissal.
+    scrollView.endEditing(true)
     placedByReader = true
     layout.keepsEnd = false
     animating = nil
@@ -918,6 +932,32 @@ import SwiftUI
     layout.contentFloor = 0
     store.scrolling = true
     store.mcps.close()
+  }
+
+  // MARK: Question answer fields
+
+  @objc private func leaveAnswerField() { collectionView.endEditing(true) }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    // A tap on an editable field focuses it as usual.
+    !sequence(first: touch.view, next: { $0?.superview }).contains { view in
+      view is UITextField || (view as? UITextView)?.isEditable == true
+    }
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+
+  @objc private func revealAnswerField() {
+    DispatchQueue.main.async { [weak self] in
+      guard let self, let collection = collectionView, let field = Self.editing(in: collection) else { return }
+      collection.scrollRectToVisible(field.convert(field.bounds, to: collection).insetBy(dx: 0, dy: -16), animated: true)
+    }
+  }
+
+  private static func editing(in view: UIView) -> UIView? {
+    if view.isFirstResponder, view is UITextField { return view }
+    return view.subviews.lazy.compactMap { editing(in: $0) }.first
   }
 
   func scrollViewDidScroll(_ scrollView: UIScrollView) {
