@@ -26,8 +26,14 @@ import XCTest
     XCTAssertTrue(transcript.waitForExistence(timeout: 20))
     let ready = expectation(for: NSPredicate(format: "value != 'Restaurando leitura'"), evaluatedWith: transcript)
     XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
+    // A subagent has no … button: the same actions are a long press on its title (badge).
+    XCTAssertEqual(app.buttons["Mais opções"].exists, !child)
     for iteration in 0..<10 {
-      app.buttons["Mais opções"].tap()
+      if child {
+        app.buttons["subagent-badge"].press(forDuration: 1.0)
+      } else {
+        app.buttons["Mais opções"].tap()
+      }
       if iteration == 0 {
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "menu-updates-child-\(child)-headerOnly-\(headerOnly)"

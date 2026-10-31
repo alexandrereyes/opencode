@@ -394,7 +394,7 @@ struct ConversationView: View {
     return HStack(spacing: 9) {
       backButton(subagent)
       // Root conversations switch sessions from the avatar and title; the master and children keep the avatar's
-      // Detalhes da sessão (also in the … menu and the context footer).
+      // Detalhes da sessão (also in the … menu or a subagent's long press, and in the context footer).
       let switches = !master && conversation.session.map { $0.parentID == nil } == true
       HStack(spacing: 9) {
       if let session = conversation.session {
@@ -416,24 +416,22 @@ struct ConversationView: View {
         .accessibilityIdentifier("conversation-header-avatar")
         .accessibilityValue(master ? "Sessão mestra" : monogram)
       }
-      ConversationTitle(
+      let title = ConversationTitle(
         title: master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa", switches: switches,
         subtitle: subagent?.subtitle ?? headerSubtitle, status: headerStatus, waiting: conversation.waiting,
         kicker: subagent?.kicker)
-        // A subagent's badge, title and parent open its path; the avatar keeps Detalhes da sessão.
-        .overlay {
-          if subagent != nil {
-            Button {
-              sessions.drafts.draft(conversation.id).focused = false
-              pathOpen = true
-            } label: {
-              Color.clear.contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Caminho do subagente")
-            .accessibilityIdentifier("subagent-badge")
-          }
+      if subagent != nil {
+        // A subagent's badge, title and parent open its path; a long press has the … menu's actions that make sense
+        // there (a subagent has no … button: the agents capsule takes its place). The avatar keeps Detalhes.
+        title.overlay {
+          SubagentBadgeButton(theme: theme, actions: .init(path: {
+            sessions.drafts.draft(conversation.id).focused = false
+            pathOpen = true
+          }, search: openSearch, rename: openRename, details: { detailsOpen = true }))
         }
+      } else {
+        title
+      }
       }
       // A clear button over the avatar and title keeps their readouts while VoiceOver also gets the action.
       .overlay {
@@ -481,20 +479,13 @@ struct ConversationView: View {
             .glassEffect(.regular.interactive(), in: .circle)
         }.accessibilityLabel("Reiniciar Sessão mestra").accessibilityIdentifier("master-trash")
           .disabled(sessions.busy.contains("master-reset"))
-      } else {
+      } else if subagent == nil {
       ConversationOptionsMenu(
         sessionID: conversation.id, available: conversation.session != nil,
         canArchive: conversation.session?.parentID == nil, archiving: conversation.acting.contains("archive"),
         deleting: sessions.busy.contains(conversation.id),
         theme: theme,
-        actions: .init(search: {
-          sessions.drafts.draft(conversation.id).focused = false
-          transcript?.capture()
-          search.open = true
-        }, rename: {
-          renameTitle = conversation.session?.title ?? ""
-          renameOpen = true
-        }, details: {
+        actions: .init(search: openSearch, rename: openRename, details: {
           #if DEBUG
           if ProcessInfo.processInfo.arguments.contains("-OpenCodeMenuDiagnostics") {
             NSLog("DETAILS action session=%@ child=%@", conversation.id, String(conversation.isChild))
@@ -588,6 +579,15 @@ struct ConversationView: View {
       return
     }
     sessions.conversationPath.append(.init(id: id, parent: conversation.id))
+  }
+  private func openSearch() {
+    sessions.drafts.draft(conversation.id).focused = false
+    transcript?.capture()
+    search.open = true
+  }
+  private func openRename() {
+    renameTitle = conversation.session?.title ?? ""
+    renameOpen = true
   }
   /// Nova sessão inheriting this session's project, checkout and model (the … menu and the switcher).
   private func startNewSession() {

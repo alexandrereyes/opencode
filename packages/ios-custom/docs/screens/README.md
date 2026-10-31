@@ -108,7 +108,7 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Agentes encerrados | Agentes (3) → rolar; encerrados pela última execução, não pela criação | [PNG](session-agents-finished-dark.png) | — |
 | Scripts · em execução | Agentes e tarefas → Scripts (1); comando sintético e ação Parar | [PNG](session-agents-scripts-dark.png) | — |
 | Scripts · vazio | Agentes e tarefas → Scripts (0); “Nenhum script em segundo plano.” | [PNG](session-agents-scripts-empty-dark.png) | — |
-| Subagente | Conversa de um subagente: “SUBAGENTE · BUILD”, “de Revisar a navegação do app”, tinta e faixa de destaque; a pílula conta os subagentes dele | [PNG](session-subagent-header-dark.png) | [PNG](session-subagent-header-light.png) |
+| Subagente | Conversa de um subagente: “SUBAGENTE · BUILD”, “de Revisar a navegação do app”, tinta e faixa de destaque; sem “•••”, a pílula conta os subagentes e os recursos dele; toque longo no título busca, renomeia e abre os detalhes | [PNG](session-subagent-header-dark.png) | [PNG](session-subagent-header-light.png) |
 | Caminho do subagente | Subagente → selo; a principal e cada nível, “você está aqui” no aberto | [PNG](session-subagent-path-dark.png) | [PNG](session-subagent-path-light.png) |
 | Agentes com Progresso | Subagente → pílula → Agentes (3); ☑ 2/4 do snapshot de família e “agora:” com o item atual | [PNG](session-agents-progress-dark.png) | [PNG](session-agents-progress-light.png) |
 | Progresso de um subagente | Agentes → ☑ 2/4; a lista inteira e Abrir subagente | [PNG](session-agents-progress-sheet-dark.png) | [PNG](session-agents-progress-sheet-light.png) |

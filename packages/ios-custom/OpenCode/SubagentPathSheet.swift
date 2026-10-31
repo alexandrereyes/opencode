@@ -99,3 +99,62 @@ struct SubagentPathSheet: View {
     .accessibilityIdentifier("subagent-path-" + level.id)
   }
 }
+
+/// A subagent's badge, a clear button over its title: a tap opens Caminho, a long press the … menu's actions that make
+/// sense in a subagent (it has no … button). UIKit like `ConversationOptionsMenu`: the menu stays open across header
+/// updates, and choosing Buscar, which swaps the header for the search field, leaves no menu animation behind (a
+/// SwiftUI `contextMenu` there kept the app from ever settling).
+struct SubagentBadgeButton: UIViewRepresentable {
+  let theme: AppTheme
+  let actions: Actions
+
+  struct Actions {
+    let path: () -> Void
+    let search: () -> Void
+    let rename: () -> Void
+    let details: () -> Void
+  }
+  final class Coordinator {
+    var actions: Actions?
+    var theme: String?
+  }
+  func makeCoordinator() -> Coordinator { Coordinator() }
+  func makeUIView(context: Context) -> UIButton {
+    let button = UIButton(type: .custom)
+    button.showsMenuAsPrimaryAction = false
+    button.accessibilityLabel = "Caminho do subagente"
+    button.accessibilityHint = "Toque longo para buscar, renomear ou ver os detalhes"
+    button.accessibilityIdentifier = "subagent-badge"
+    button.addAction(UIAction { [weak coordinator = context.coordinator] _ in coordinator?.actions?.path() },
+      for: .primaryActionTriggered)
+    return button
+  }
+  func updateUIView(_ button: UIButton, context: Context) {
+    let coordinator = context.coordinator
+    coordinator.actions = actions
+    guard coordinator.theme != theme.id else { return }
+    coordinator.theme = theme.id
+    func icon(_ name: String) -> UIImage? {
+      UIImage(systemName: name)?.withTintColor(theme.uiColor(.primary), renderingMode: .alwaysOriginal)
+    }
+    // Handlers read the latest callbacks, not the ones of the body that built the menu.
+    button.menu = UIMenu(children: [
+      UIAction(title: "Buscar na conversa", image: icon("magnifyingglass")) { [weak coordinator] _ in
+        coordinator?.actions?.search()
+      },
+      UIAction(title: "Renomear", image: icon("pencil")) { [weak coordinator] _ in coordinator?.actions?.rename() },
+      UIAction(title: "Detalhes da sessão", image: icon("info.circle")) { [weak coordinator] _ in
+        coordinator?.actions?.details()
+      },
+    ])
+  }
+  /// Exactly the title's frame.
+  func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIButton, context: Context) -> CGSize? {
+    CGSize(width: proposal.width ?? 0, height: proposal.height ?? 0)
+  }
+  static func dismantleUIView(_ button: UIButton, coordinator: Coordinator) {
+    button.menu = nil
+    coordinator.actions = nil
+    coordinator.theme = nil
+  }
+}
