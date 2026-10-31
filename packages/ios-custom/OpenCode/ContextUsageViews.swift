@@ -104,3 +104,44 @@ struct SessionUsageSection: View {
   }
 }
 #endif
+
+/// `◔ 71% · 711,3k / 1M · ⚡ 99,0% · US$ 26,95 · 20m · ☑ 2/4`, in the order `ContextColumn.metrics` gives: the Mac's
+/// Contexto and the iPhone's "Agentes e tarefas" subagent lines.
+struct ContextMetricsLine: View {
+  @Environment(\.appTheme) private var theme
+  let metrics: [ContextColumn.Metric]
+  let usage: ContextUsage?
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 5) {
+      ForEach(Array(metrics.enumerated()), id: \.offset) { index, metric in
+        if index > 0 { Text("·").foregroundStyle(theme.color(.textWeak)) }
+        item(metric)
+      }
+    }
+    .appFont(.footnote).monospacedDigit().lineLimit(1)
+  }
+
+  @ViewBuilder private func item(_ metric: ContextColumn.Metric) -> some View {
+    switch metric.kind {
+    case .context:
+      HStack(spacing: 4) {
+        if let usage { ContextUsageRing(usage: usage, size: 10) }
+        Text(metric.text).foregroundStyle(theme.color(.text))
+      }
+    case .cache:
+      HStack(spacing: 2) {
+        Image(systemName: "bolt.fill").font(.system(size: 8)).foregroundStyle(theme.color(.textSecondary))
+        Text(metric.text).foregroundStyle(theme.color(metric.warning ? .warning : .text))
+      }
+    case .progress:
+      HStack(spacing: 3) {
+        Image(systemName: "checklist").font(.system(size: 9)).foregroundStyle(theme.color(.textSecondary))
+        Text(metric.text).foregroundStyle(theme.color(.text))
+      }
+      .accessibilityLabel("Progresso \(metric.text)")
+    case .cost: Text(metric.text).foregroundStyle(theme.color(.textStrong))
+    case .tokens, .elapsed: Text(metric.text).foregroundStyle(theme.color(.textSecondary))
+    }
+  }
+}

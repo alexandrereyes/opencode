@@ -205,13 +205,13 @@ import XCTest
         openTranscriptChild()
       }
       openChild()
-      XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 10))
+      XCTAssertTrue(app.buttons["subagent-badge"].waitForExistence(timeout: 10))
       app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
         .press(
           forDuration: 0.05,
           thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
       screenshot("parent-edge-swipe-" + theme)
-      XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForNonExistence(timeout: 5))
+      XCTAssertTrue(app.buttons["subagent-badge"].waitForNonExistence(timeout: 5))
       // A child opened from the agents screen returns to it first.
       let agentsBar = app.navigationBars["Agentes e tarefas"]
       if agentsBar.waitForExistence(timeout: 2) { agentsBar.buttons.element(boundBy: 0).tap() }

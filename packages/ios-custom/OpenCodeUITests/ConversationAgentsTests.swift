@@ -54,6 +54,12 @@ import XCTest
     XCTAssertFalse(row(app, script).exists, "a script is never listed as an agent")
     XCTAssertFalse(app.staticTexts["Shell em background"].exists)
     XCTAssertFalse(app.staticTexts["Sem recursos"].exists)
+    // Live first, then the newest finished up to five; the rest behind "+1 concluídos".
+    let finishedToggle = app.buttons["agents-finished-toggle"]
+    XCTAssertTrue(finishedToggle.waitForExistence(timeout: 20))
+    XCTAssertTrue(finishedToggle.label.contains("+1 concluídos"), finishedToggle.label)
+    XCTAssertFalse(row(app, order[5]).exists)
+    finishedToggle.tap()
     let rows = order.map { row(app, $0) }
     XCTAssertTrue(rows.allSatisfy { $0.waitForExistence(timeout: 20) })
     XCTAssertEqual(rows.map(\.frame.minY), rows.map(\.frame.minY).sorted(), "running first, then by latest activity")
@@ -102,7 +108,7 @@ import XCTest
     // The delegated row opens its child, not the root.
     row(app, delegated).tap()
     let title = app.staticTexts["conversation-header-title"]
-    XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.buttons["subagent-badge"].waitForExistence(timeout: 20))
     XCTAssertEqual(title.label, "Delegar verificação real")
     screenshot("delegated-child")
     app.buttons["Voltar"].firstMatch.tap()
@@ -112,7 +118,7 @@ import XCTest
     rows[5].tap()
     XCTAssertTrue(title.waitForExistence(timeout: 20))
     XCTAssertEqual(title.label, "Mapear dependências")
-    XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.buttons["subagent-badge"].waitForExistence(timeout: 20))
     screenshot("child")
     app.buttons["Voltar"].firstMatch.tap()
     XCTAssertTrue(bar.waitForExistence(timeout: 10))
@@ -126,15 +132,18 @@ import XCTest
     XCTAssertFalse(bar.exists)
     XCTAssertEqual(title.label, "Agentes e tarefas")
 
-    // A child opened from the list: "Voltar à sessão principal" skips the list and lands on the parent conversation.
+    // A child opened from the list: its path's first level skips the list and lands on the parent conversation.
     agents.tap()
     XCTAssertTrue(agentsTab.waitForExistence(timeout: 10))
     XCTAssertTrue(agentsTab.isSelected)
     XCTAssertTrue(row(app, running).waitForExistence(timeout: 10))
     row(app, running).tap()
-    XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.buttons["subagent-badge"].waitForExistence(timeout: 20))
     XCTAssertEqual(title.label, "Executar verificação longa")
-    app.buttons["Voltar à sessão principal"].tap()
+    app.buttons["subagent-badge"].tap()
+    let principal = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'subagent-path-'")).element(boundBy: 0)
+    XCTAssertTrue(principal.waitForExistence(timeout: 10))
+    principal.tap()
     XCTAssertTrue(agents.waitForExistence(timeout: 10))
     XCTAssertFalse(bar.exists)
     XCTAssertEqual(title.label, "Agentes e tarefas")

@@ -39,17 +39,17 @@ struct ConversationView: View {
   @State private var quoteRevealTask: Task<Void, Never>?
   @State private var revertCandidate: ConversationMessage?
   @State private var readAloudHeight: CGFloat = 0
+  /// A subagent's path sheet (its badge), and the level chosen there, applied once the sheet has dismissed.
+  @State private var pathOpen = false
+  @State private var pathChoice: String?
   let sessions: SessionStore
-  let parentOnStack: String?
   let master: Bool
 
   init(
-    id: String, sessions: SessionStore, parentOnStack: String? = nil, toolID: String? = nil, master: Bool = false,
-    atRequest: Bool = false
+    id: String, sessions: SessionStore, toolID: String? = nil, master: Bool = false, atRequest: Bool = false
   ) {
     self.sessions = sessions
     self.master = master
-    self.parentOnStack = parentOnStack
     _requestedTool = State(initialValue: toolID)
     _requestedEnd = State(initialValue: atRequest)
     _conversation = State(initialValue: sessions.conversation(id, master: master))
@@ -194,6 +194,21 @@ struct ConversationView: View {
       conversation.revealedToolID = tool
       requestedTool = tool
     }
+    .sheet(isPresented: $pathOpen, onDismiss: {
+      guard let id = pathChoice else { return }
+      pathChoice = nil
+      openLevel(id)
+    }) {
+      if let subagent = subagentHeader {
+        SubagentPathSheet(levels: subagent.levels, current: conversation.id, sessions: sessions) { id in
+          pathChoice = id
+          pathOpen = false
+        } close: {
+          pathOpen = false
+        }
+        .sessionAlertOverlay()
+      }
+    }
     .sheet(isPresented: $contextOpen) { ConversationContextSheet(store: conversation, showLocation: showLocation).sessionAlertOverlay() }
     .sheet(item: $quoteDetail, onDismiss: {
       if let quote = quoteEditing {
@@ -336,17 +351,6 @@ struct ConversationView: View {
           .foregroundStyle(theme.color(.textSecondary)).padding(14).frame(maxWidth: .infinity)
       } else {
         VStack(spacing: 0) {
-          if let parent = conversation.session?.parentID {
-            Button("Voltar à sessão principal") {
-              if parentOnStack == parent {
-                leavePosition()
-                // The parent may sit below its agents screen; return to the conversation itself.
-                if let index = sessions.conversationPath.lastIndex(where: { $0.id == parent && !$0.agents && !$0.newSession }) {
-                  sessions.conversationPath.removeSubrange((index + 1)...)
-                } else { dismiss() }
-              } else { openChild(parent) }
-            }.appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-          }
           if let progress = conversation.progress(fallback: sessions.progress(conversation.id)) {
             ConversationProgressPill(progress: progress).padding(.bottom, 8)
           }
@@ -386,16 +390,9 @@ struct ConversationView: View {
     // Both projections walk the transcript; the header reads each several times per update.
     let context = conversation.context
     let running = conversation.runningCount
+    let subagent = subagentHeader
     return HStack(spacing: 9) {
-      Button {
-        leavePosition()
-        dismiss()
-      } label: {
-        Image(systemName: "chevron.left").appSymbol(.navigation).frame(
-          width: 36, height: 36
-        ).glassEffect(.regular.interactive(), in: .circle)
-      }
-      .buttonStyle(.plain).accessibilityLabel("Voltar")
+      backButton(subagent)
       // Root conversations switch sessions from the avatar and title; the master and children keep the avatar's
       // Detalhes da sessão (also in the … menu and the context footer).
       let switches = !master && conversation.session.map { $0.parentID == nil } == true
@@ -409,7 +406,8 @@ struct ConversationView: View {
         } label: {
           ConversationAvatar(
             context: context, master: master, colors: colors, monogram: monogram,
-            icon: master || chat ? nil : ProjectIcon.of(project))
+            icon: master || chat || subagent != nil ? nil : ProjectIcon.of(project),
+            agent: subagent == nil ? nil : theme.color(.accent))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(
@@ -420,7 +418,22 @@ struct ConversationView: View {
       }
       ConversationTitle(
         title: master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa", switches: switches,
-        subtitle: headerSubtitle, status: headerStatus, waiting: conversation.waiting)
+        subtitle: subagent?.subtitle ?? headerSubtitle, status: headerStatus, waiting: conversation.waiting,
+        kicker: subagent?.kicker)
+        // A subagent's badge, title and parent open its path; the avatar keeps Detalhes da sessão.
+        .overlay {
+          if subagent != nil {
+            Button {
+              sessions.drafts.draft(conversation.id).focused = false
+              pathOpen = true
+            } label: {
+              Color.clear.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Caminho do subagente")
+            .accessibilityIdentifier("subagent-badge")
+          }
+        }
       }
       // A clear button over the avatar and title keeps their readouts while VoiceOver also gets the action.
       .overlay {
@@ -497,7 +510,84 @@ struct ConversationView: View {
       }
     }
     .foregroundStyle(theme.color(.textStrong)).padding(.horizontal, AppLayout.margin).padding(.vertical, 6)
-    .background(theme.color(.background))
+    .background {
+      // A subagent's header, like the Mac's banner: a faint accent tint and an accent stripe at the leading edge.
+      if subagent != nil {
+        ZStack(alignment: .leading) {
+          theme.color(.background)
+          theme.color(.accent).opacity(0.08)
+          Rectangle().fill(theme.color(.accent)).frame(width: 3)
+        }
+      } else {
+        theme.color(.background)
+      }
+    }
+  }
+  /// What a subagent's header shows: `SUBAGENTE · NÍVEL 2 · ASTRAMAX`, `de <parent>` and the levels from the
+  /// top-level session down to it. Nil for a top-level session and the master.
+  private var subagentHeader: SubagentHeader? {
+    guard !master, let session = conversation.session, let parent = session.parentID else { return nil }
+    let ancestors = conversation.ancestors
+    let root = ancestors.first ?? sessions.entries.first { $0.session.id == parent }?.session
+    // From the loaded sessions (the list, the root's family, the ancestors this conversation read).
+    let below = root.map { sessions.subagentPath(root: $0.id, child: conversation.id) } ?? []
+    let levels = (root.map { [$0] } ?? []) + (below.isEmpty ? [session] : below)
+    let depth = max(1, levels.count - 1)
+    let parentTitle = levels.dropLast().last?.displayTitle
+      ?? sessions.liveConversation(parent)?.session?.displayTitle
+    return SubagentHeader(
+      kicker: (["SUBAGENTE"] + (depth > 1 ? ["NÍVEL \(depth)"] : []) + [conversation.childAgentName.uppercased()])
+        .joined(separator: " · "),
+      subtitle: parentTitle.map { "de " + $0 } ?? "",
+      levels: levels)
+  }
+  /// Back returns to where Alexandre came from (the list of agents or the parent); a subagent's long press lists
+  /// every level up to the top-level session.
+  @ViewBuilder private func backButton(_ subagent: SubagentHeader?) -> some View {
+    let label = Image(systemName: "chevron.left").appSymbol(.navigation).frame(width: 36, height: 36)
+      .glassEffect(.regular.interactive(), in: .circle)
+    if let subagent {
+      Menu {
+        ForEach(Array(subagent.levels.enumerated()), id: \.element.id) { index, level in
+          Button {
+            openLevel(level.id)
+          } label: {
+            Text(level.displayTitle)
+            Text(index == 0 ? "sessão principal" : level.id == conversation.id ? "você está aqui" : "subagente")
+          }
+          .disabled(level.id == conversation.id)
+          .accessibilityIdentifier("subagent-level-" + level.id)
+        }
+      } label: {
+        label
+      } primaryAction: {
+        leavePosition()
+        dismiss()
+      }
+      .buttonStyle(.plain).accessibilityLabel("Voltar").accessibilityHint("Toque longo para os níveis")
+      .accessibilityIdentifier("conversation-back")
+    } else {
+      Button {
+        leavePosition()
+        dismiss()
+      } label: {
+        label
+      }
+      .buttonStyle(.plain).accessibilityLabel("Voltar")
+    }
+  }
+  /// A level of the path: back down the stack when it is there (past its agents screen), else opened on top, so
+  /// Back still returns here.
+  private func openLevel(_ id: String) {
+    guard id != conversation.id else { return }
+    leavePosition()
+    if let index = sessions.conversationPath.lastIndex(where: {
+      $0.id == id && !$0.agents && !$0.newSession && !$0.master
+    }) {
+      sessions.conversationPath.removeSubrange((index + 1)...)
+      return
+    }
+    sessions.conversationPath.append(.init(id: id, parent: conversation.id))
   }
   /// Nova sessão inheriting this session's project, checkout and model (the … menu and the switcher).
   private func startNewSession() {

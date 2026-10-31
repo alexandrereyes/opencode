@@ -104,10 +104,14 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Menu da mensagem | Conversa → segurar a mensagem enviada; Copiar, Redefinir para este ponto e Salvar como snippet | [PNG](conversation-user-menu-dark.png) | [PNG](conversation-user-menu-light.png) |
 | Salvar como snippet | Menu da mensagem → Salvar como snippet; editor em folha com o texto, um nome e o projeto da conversa | [PNG](conversation-save-snippet-dark.png) | [PNG](conversation-save-snippet-light.png) |
 | Detalhes da sessão | Conversa → ⋯ → Detalhes da sessão (também acessível pelo contexto/cache); uso, projeto e diretório | [PNG](session-details-default-dark.png) | [PNG](session-details-default-light.png) |
-| Agentes e recursos | Conversa → pílula no cabeçalho → Agentes (3); ativo antes dos encerrados, iOS/Android e Chrome aninhado | [PNG](session-agents-resources-dark.png) | — |
+| Agentes e recursos | Conversa → pílula no cabeçalho → Agentes (3); ativo antes dos encerrados, com a linha do Mac (título com brilho, métricas, ☑ 2/4 e “agora: …”), iOS/Android e Chrome aninhado | [PNG](session-agents-resources-dark.png) | — |
 | Agentes encerrados | Agentes (3) → rolar; encerrados pela última execução, não pela criação | [PNG](session-agents-finished-dark.png) | — |
 | Scripts · em execução | Agentes e tarefas → Scripts (1); comando sintético e ação Parar | [PNG](session-agents-scripts-dark.png) | — |
 | Scripts · vazio | Agentes e tarefas → Scripts (0); “Nenhum script em segundo plano.” | [PNG](session-agents-scripts-empty-dark.png) | — |
+| Subagente | Conversa de um subagente: “SUBAGENTE · BUILD”, “de Revisar a navegação do app”, tinta e faixa de destaque; a pílula conta os subagentes dele | [PNG](session-subagent-header-dark.png) | [PNG](session-subagent-header-light.png) |
+| Caminho do subagente | Subagente → selo; a principal e cada nível, “você está aqui” no aberto | [PNG](session-subagent-path-dark.png) | [PNG](session-subagent-path-light.png) |
+| Agentes com Progresso | Subagente → pílula → Agentes (3); ☑ 2/4 do snapshot de família e “agora:” com o item atual | [PNG](session-agents-progress-dark.png) | [PNG](session-agents-progress-light.png) |
+| Progresso de um subagente | Agentes → ☑ 2/4; a lista inteira e Abrir subagente | [PNG](session-agents-progress-sheet-dark.png) | [PNG](session-agents-progress-sheet-light.png) |
 | Explorador de arquivos | Detalhes → Diretório de trabalho | [PNG](files-explorer-default-dark.png) | — |
 | Arquivo Markdown | Explorador → README.md; Fechar e Arquivos, pasta e "1 de 3" acima do texto, player e chevron inferior para o próximo arquivo | [PNG](files-markdown-default-dark.png) | — |
 | Gaveta Arquivos | No visualizador, o botão ao lado de Fechar: filtro, Todos/Alterados, Recentes, a pasta com o arquivo aberto marcado e Buscar em toda a sessão | [PNG](files-drawer-default-dark.png) | — |

@@ -153,7 +153,7 @@ import XCTest
       let child = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
       XCTAssertTrue(child.waitForExistence(timeout: 10))
       child.tap()
-      XCTAssertTrue(app.buttons["Voltar à sessão principal"].waitForExistence(timeout: 15))
+      XCTAssertTrue(app.buttons["subagent-badge"].waitForExistence(timeout: 15))
       var request = URLRequest(url: URL(string: TestSandbox.url + "/api/session/" + id + "/prompt")!)
       request.httpMethod = "POST"
       request.setValue("Basic " + Data(("opencode:" + (environment["OPENCODE_TEST_PASSWORD"] ?? "")).utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
@@ -184,7 +184,8 @@ import XCTest
         XCTAssertLessThan(attempt, 119, "The owned replay child must finish before leaving the test")
         try await Task.sleep(for: .milliseconds(500))
       }
-      app.buttons["Voltar à sessão principal"].tap()
+      // Opened from the parent's transcript: Back returns to it.
+      app.buttons["conversation-back"].tap()
       XCTAssertTrue(list.waitForExistence(timeout: 15))
     }
     app.terminate()

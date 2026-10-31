@@ -53,7 +53,7 @@ import XCTest
     let app = try launch("CHILD")
     XCTAssertTrue(app.staticTexts["child-agent"].exists)
     XCTAssertFalse(app.buttons["agent-picker"].exists)
-    XCTAssertTrue(app.buttons["Voltar à sessão principal"].exists)
+    XCTAssertTrue(app.buttons["subagent-badge"].exists)
     let editor = app.textViews["conversation-composer"]
     editor.tap()
     editor.typeText("Responda apenas: Filho respondeu.")
@@ -63,7 +63,11 @@ import XCTest
     XCTAssertFalse(app.buttons["session-alert-open"].exists)
     _ = app.descendants(matching: .any)["action-toast"].waitForNonExistence(timeout: 6)
     screenshot("child-sent")
-    app.buttons["Voltar à sessão principal"].tap()
+    // Opened directly: the badge's path leads to the top-level session (its first level).
+    app.buttons["subagent-badge"].tap()
+    let principal = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'subagent-path-'")).element(boundBy: 0)
+    XCTAssertTrue(principal.waitForExistence(timeout: 10))
+    principal.tap()
     XCTAssertTrue(app.staticTexts["Onda 7 — sessão principal"].waitForExistence(timeout: 15))
   }
   func testLiveBannersAcrossScreensAndTapNavigation() async throws {

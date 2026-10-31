@@ -62,7 +62,7 @@ import XCTest
       app.terminate()
       let child = try launch("CHILD", native: native)
       XCTAssertTrue(child.textViews.matching(NSPredicate(format: "value CONTAINS 'Licenças revisadas'")).firstMatch.waitForExistence(timeout: 10))
-      XCTAssertTrue(child.buttons["Voltar à sessão principal"].exists)
+      XCTAssertTrue(child.buttons["subagent-badge"].exists)
       shot("child", native: native)
       child.terminate()
     }

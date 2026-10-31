@@ -189,6 +189,25 @@ import Testing
     #expect(row.progress?.now == "Atualizar a Live Activity e o relógio")
   }
 
+  /// `custom.session-family/snapshot`'s `progress` (rev. 2026-10-30): each active descendant's list by session ID,
+  /// in the Sessões row's shape; older servers omit it.
+  @Test func familySnapshotCarriesEachSubagentsProgresso() throws {
+    let json = #"""
+      {"count":2,"cost":1.5,"active":[],"forms":[],"permissions":[],"progress":{"ses_child":{"done":2,"finished":2,
+      "total":4,"current":"Comparar o inventário","todos":[{"content":"Ler o inventário","status":"completed"},
+      {"content":"Listar as regras","status":"completed"},{"content":"Comparar o inventário","status":"in_progress"},
+      {"content":"Escrever as notas","status":"pending"}]}}}
+      """#
+    let snapshot = try JSONDecoder().decode(FamilySnapshot.self, from: Data(json.utf8))
+    let progress = SessionProgress(items: try #require(snapshot.progress?["ses_child"]).todos)
+    #expect(progress.count == "2/4")
+    #expect(progress.open)
+    #expect(progress.current?.content == "Comparar o inventário")
+    let older = try JSONDecoder().decode(FamilySnapshot.self, from: Data(
+      #"{"count":0,"active":[],"forms":[],"permissions":[]}"#.utf8))
+    #expect(older.progress == nil)
+  }
+
   @Test func olderBackendsAndOtherUnitsKeepTheirLabels() throws {
     let json = """
       {"v":1,"updatedAt":1,"host":"Mac","counts":{"working":1,"question":0,"permission":0,"failed":0,"idle":0,

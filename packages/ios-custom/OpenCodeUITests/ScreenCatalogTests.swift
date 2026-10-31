@@ -416,6 +416,27 @@ import XCTest
     shot("files-html-preview")
   }
 
+  /// A subagent (the fixture's conversation as a child of "Revisar a navegação do app"): its header, its path, its
+  /// own "Agentes e tarefas" with the running subagent's Progresso from the family snapshot, and that list's sheet.
+  func testSubagent() {
+    let app = launch(["-OpenCodeFixtureChild"])
+    defer { app.terminate() }
+    tap("session-row-ses_scroll_0000", app)
+    XCTAssertTrue(app.staticTexts["subagent-kicker"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["conversation-agents"].waitForExistence(timeout: 10))
+    shot("session-subagent-header")
+    tap("subagent-badge", app)
+    XCTAssertTrue(app.buttons["subagent-path-ses_fixture_parent"].waitForExistence(timeout: 10))
+    shot("session-subagent-path")
+    tap("Fechar", app)
+    tap("conversation-agents", app)
+    XCTAssertTrue(app.buttons["agent-progress-ses_catalog_review"].waitForExistence(timeout: 10))
+    shot("session-agents-progress")
+    tap("agent-progress-ses_catalog_review", app)
+    XCTAssertTrue(app.buttons["agent-progress-open"].waitForExistence(timeout: 10))
+    shot("session-agents-progress-sheet")
+  }
+
   func testScriptsEmpty() {
     let app = launch(["-OpenCodeCatalogNoScripts"])
     defer { app.terminate() }

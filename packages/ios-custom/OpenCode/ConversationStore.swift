@@ -31,13 +31,16 @@ import UniformTypeIdentifiers
   let mcps: ConversationMCPStore
   let reversion: ConversationRevert
   private(set) var family: FamilySnapshot?
+  /// This session's descendants at any depth (`custom.session-family/page`): a subagent lists its own.
   private(set) var children: [Session] = []
+  /// A subagent's ancestors, the top-level session first (one read each, when its parent changes): the header's
+  /// level and path when the stack did not come through them (a notification, a link).
+  private(set) var ancestors: [Session] = []
   /// Simulators, emulators and browsers this conversation's family used (`custom.resources`).
   private(set) var resources: [SessionResource] = []
   @ObservationIgnored private var resourcesTask: Task<Void, Never>?
   private(set) var active: Set<String> = []
   private(set) var shells: [ShellInfo] = []
-  private(set) var ownerMessages: [ConversationMessage] = []
   private(set) var branch = ""
   private(set) var located: LocatedDirectory?
   private(set) var loading = false
@@ -302,11 +305,10 @@ import UniformTypeIdentifiers
   var details: ContextDetails {
     ContextDetails(messages: messages, models: displayModels, session: session, family: family)
   }
+  /// This session's own subagents and background shells; a subagent lists its own, not its siblings.
   var work: [SessionWork] {
     ConversationProjection.work(
-      ownerID: session?.parentID ?? id, viewedID: id,
-      messages: session?.parentID == nil ? messages : ownerMessages,
-      children: children, active: active, shells: shells)
+      ownerID: id, viewedID: id, messages: messages, children: children, active: active, shells: shells)
   }
   var runningCount: Int { work.filter(\.running).count }
   var runningAgents: Int { work.filter { $0.kind == .agent && $0.running }.count }
@@ -793,7 +795,7 @@ import UniformTypeIdentifiers
       case .update(let event) where event.type == OpenCodeClient.resourcesChangedEvent:
         scheduleResources()
       case .update(let event):
-        let ids = Set([id, session?.parentID].compactMap { $0 } + children.map(\.id))
+        let ids = Set([id] + children.map(\.id))
         guard event.data.owner.map(ids.contains) == true || event.type.hasPrefix("rpc.") else {
           continue
         }
@@ -835,6 +837,8 @@ import UniformTypeIdentifiers
         from: JSONEncoder().encode(fixture.entries[0].session))
       value["parentID"] = .string("ses_fixture_parent")
       session = try! JSONDecoder().decode(Session.self, from: JSONEncoder().encode(value))
+      // Its parent, for the header's `de …` and the path.
+      ancestors = [try! JSONDecoder().decode(Session.self, from: Data(#"{"id":"ses_fixture_parent","projectID":"project_scroll_0","title":"Revisar a navegação do app","location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576700000,"updated":1792576800000}}"#.utf8))]
     }
     let paged = arguments.contains("-OpenCodeFixturePaged")
     // Paged fixtures expose only the newest page; `older()` prepends the rest like a cursor read.
@@ -858,6 +862,7 @@ import UniformTypeIdentifiers
     if ScrollFixtures.mode == "catalog" {
       resources = ScreenCatalogFixture.resources
       children = ScreenCatalogFixture.children
+      family = ScreenCatalogFixture.family
       shells = arguments.contains("-OpenCodeCatalogNoScripts") ? [] : ScreenCatalogFixture.scripts
       active = ScreenCatalogFixture.active
       preferences = fixture.preferences
@@ -899,6 +904,16 @@ import UniformTypeIdentifiers
       }
       if next != resources { resources = next }
     }
+  }
+  /// The parent chain up to the top-level session, top first; a level that fails to read ends it there.
+  private func readAncestors(_ parent: String?) async -> [Session] {
+    var chain: [Session] = []
+    var next = parent
+    while let id = next, chain.count < 16, let session = try? await client.session(id) {
+      chain.insert(session, at: 0)
+      next = session.parentID
+    }
+    return chain
   }
   #if DEBUG
   static let fixturePage = 30
@@ -1119,15 +1134,12 @@ import UniformTypeIdentifiers
       var members: [Session] = []
       var after: String?
       repeat {
-        let page = try await client.familyPage(infoValue.parentID ?? id, after: after)
+        let page = try await client.familyPage(id, after: after)
         members.append(contentsOf: page.data)
         if page.next == after { break }
         after = page.next
       } while after != nil
-      let parentMessages =
-        if let parent = infoValue.parentID {
-          try await client.conversation(parent).data.reversed().map { $0 }
-        } else { [ConversationMessage]() }
+      let lineage = ancestors.last?.id == infoValue.parentID ? ancestors : await readAncestors(infoValue.parentID)
       let (queueValue, preferencesValue) = try await (queued, settings)
       let catalogs = try await (nextModels, nextDefault, nextAgents, nextProviders)
       try Task.checkCancellation()
@@ -1147,7 +1159,7 @@ import UniformTypeIdentifiers
       shells = snapshots.1
       branch = snapshots.2.first?.branch ?? URL(fileURLWithPath: directory).lastPathComponent
       self.located = snapshots.2.first
-      ownerMessages = parentMessages
+      ancestors = lineage
       if progressGateDirectory != directory {
         progressGateDirectory = directory
         progressEnabled = SessionProgress.enabled((try? await client.newSessionConfiguration(directory: directory)) ?? [])

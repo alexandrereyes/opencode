@@ -11,6 +11,8 @@ struct ConversationAvatar: View {
   let monogram: String
   /// The project's own icon, replacing the monogram inside the context ring.
   var icon: ProjectIcon? = nil
+  /// A subagent's conversation: the agent grid in this color instead of the project.
+  var agent: Color? = nil
   /// The ring's outer side; the Mac's thin title bar uses a smaller one.
   var size: CGFloat = 44
 
@@ -25,7 +27,10 @@ struct ConversationAvatar: View {
           )
           .rotationEffect(.degrees(-90))
       }
-      if let icon {
+      if let agent {
+        Circle().fill(theme.color(.surface)).padding(4)
+        AgentPixels(color: agent, size: size * 0.4, running: false, grid: true)
+      } else if let icon {
         ProjectIconAvatar(icon: icon, size: size - 8)
       } else {
         Circle().fill(master ? theme.color(.surface) : colors.background).padding(4)
@@ -33,7 +38,7 @@ struct ConversationAvatar: View {
       if master {
         Image(systemName: "point.3.connected.trianglepath.dotted")
           .appSymbol(.action).foregroundStyle(theme.color(.accent))
-      } else if icon == nil {
+      } else if icon == nil, agent == nil {
         Text(monogram).appFont(.message, weight: .medium).foregroundStyle(colors.text)
           .lineLimit(1).minimumScaleFactor(0.5)
       }
@@ -51,9 +56,17 @@ struct ConversationTitle: View {
   let subtitle: String
   let status: String
   let waiting: Bool
+  /// A subagent's `SUBAGENTE · ASTRAMAX`, above the title in small accent capitals.
+  var kicker: String? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
+      if let kicker {
+        // Beside a wide agents capsule it tightens before it cuts the agent's name.
+        Text(kicker).appFont(.micro, weight: .semibold).tracking(1).foregroundStyle(theme.color(.accent))
+          .lineLimit(1).allowsTightening(true).minimumScaleFactor(0.75).truncationMode(.tail)
+          .accessibilityIdentifier("subagent-kicker")
+      }
       HStack(spacing: 4) {
         Text(title)
           .appFont(.navigation).lineLimit(1)

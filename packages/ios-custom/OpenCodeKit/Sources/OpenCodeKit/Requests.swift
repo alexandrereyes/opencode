@@ -67,6 +67,8 @@ public struct FamilySnapshot: Codable, Sendable {
   public let active: [Session]
   public let forms: [PendingForm]
   public let permissions: [PermissionRequest]
+  /// The Progresso of each active descendant showing one, by session ID (rev. 2026-10-30); absent on older servers.
+  public let progress: [String: NavigationEntry.Progress]?
 }
 
 public enum JSONValue: Codable, Sendable, Equatable {

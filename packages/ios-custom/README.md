@@ -1790,9 +1790,10 @@ promoted, as then requested; a background subagent started an hour earlier and s
 finished ones (session "Live activity"). Scripts follow the same rule (running first, then by completion). A running
 row's elapsed time counts from its latest call, so a long background child no longer shows the age of the shell it
 happens to run. The screen applies a new order only while the list is idle (`onScrollPhaseChange`), with a 0.25 s
-snappy animation (none with Reduzir Movimento), so a row never moves under a finger; the header count is unchanged. Each
-row has the same layout: agent, task title, state (Em execução with elapsed time, Concluído, Erro, Interrompido or
-Encerrado with duration), chevron and child context/cache line. Only running rows show the stop button (and swipe/menu
+snappy animation (none with Reduzir Movimento), so a row never moves under a finger; the header count is unchanged. A
+script row shows its command, state (Em execução with elapsed time, Concluído, Erro, Interrompido or Encerrado with
+duration) and chevron; a subagent row is the Mac's Contexto line since 30 October (see [Subagente no iPhone e
+Progresso](#subagente-no-iphone-e-progresso--30-october)). Only running rows show the stop button (and swipe/menu
 stop); the column stays reserved so rows line up. State comes from `/session/active` first, then the child's
 `outcome`, then its `subagent` tool status. The header button appears whenever the list has an entry: green with the
 running count while something runs, neutral without a number otherwise.
@@ -1843,6 +1844,52 @@ so there is a single list component. Verify after `build-for-testing` with
 child made running by a Luna 6 / low `sleep`, has the parent start a background subagent, a background `sleep 301`
 script and a foreground delegation, runs `OpenCodeUITests/ConversationAgentsTests`, then interrupts, stops the script
 and deletes the family.
+
+### Subagente no iPhone e Progresso — 30 October
+
+Approved mockups: indicator option B with the long press of option A, and "Agentes e tarefas" option 1
+(`.agent-artifacts/subagente-iphone/` of the main checkout).
+
+- **The subagent's header** (`ConversationView.subagentHeader`): small accent capitals `SUBAGENTE · ASTRAMAX` above the
+  title (`SUBAGENTE · NÍVEL 2 · …` one level deeper; the agent's catalog name), `de <pai> · trabalhando…` below it, a
+  faint accent tint with a 3-pt accent stripe at the leading edge (the Mac's banner), and the agent grid instead of the
+  project in the avatar (its context ring stays; it still opens Detalhes). "Voltar à sessão principal" above the tray is
+  gone. The badge (title and parent) opens **Caminho** (`SubagentPathSheet`): the top-level session, then each
+  subagent down to this one as a small tree with agent and state, "você está aqui" on the open one. **Back** still
+  returns to where Alexandre came from (the parent's transcript or its "Agentes e tarefas"); a **long press** on it
+  (`Menu` with `primaryAction`) lists the same levels. A level goes back down the stack when it is there (past its
+  agents screen), else it opens on top, so Back returns again.
+- **Levels** come from `SessionStore.subagentPath` (moved from the Mac, shared): the list, the root's family, the
+  child's own session and `ConversationStore.ancestors`, the parent chain a subagent reads once (one `GET` per level)
+  when its parent changes, so a subagent opened from a notification or a link has its path too.
+- **The capsule** counts this subagent's own subagents and scripts and opens its own "Agentes e tarefas":
+  `ConversationStore.work` has the conversation itself as owner (a subagent no longer lists its siblings), from its own
+  family pages (`custom.session-family/page` of its ID) and its own transcript. It hides when there are none, as on a
+  top-level session, and shows the grey grid without a number when all finished. A subagent no longer reads its
+  parent's transcript nor refreshes on its siblings' events, so opening one costs one request less.
+- **"Agentes e tarefas" lines** (`ConversationAgentsView.agentRow`, the Mac's `SubagentLine`): the title, shimmering
+  while it runs (`ShimmerText`, a UIKit port of `MacShimmerText`: a Core Animation band, one phase for every title, plain
+  with Reduzir Movimento), `astramax · Astra 6 · max`, the metrics line `◔ 48% · ⚡ 100% · US$ 8,58 · 4m28s · ☑ 2/4`
+  (`ContextColumn.metrics` and the shared `ContextMetricsLine`; the tokens drop when it does not fit) and `agora: …`:
+  the Progresso's current item, else the current tool from the subagent's transcript tail (`client.preview`, at most
+  eight live subagents without a Progresso, read again on their steps). A subagent waiting for Alexandre carries an amber
+  `?` and says what it asks, with **Permitir · Negar** for a permission or **Responder ›** for a question; a finished
+  line is dimmed and says how it ended. Live first, then the newest finished up to five, the rest behind
+  **+N concluídos ›** (`ContextColumn.subagents`). Stop, swipe and the menu stay. **`☑ 2/4`** (a 44-pt target) opens
+  the subagent's Progresso (`ConversationProgressList`, live while open) with **Abrir subagente**.
+- **Where the Progresso comes from** (`SessionStore.progress(_:family:)`): the list the app folded from live events
+  wins, else the family snapshot's `progress` (the plugin's Live Activity hub, which saw every `todowrite` since the
+  server started: before the app opened and while it was suspended; `plugin-app-custom/docs/progress.md`), else the
+  Sessões row's. The Mac's Contexto uses the same source.
+- **Checks.** `script/test-subagent-header.py` (`SubagentHeaderTests`) against an isolated sandbox with a fake APNs
+  and a fresh simulator: a child that really runs with a Progresso of 2/4 written before the app opened (so only the
+  snapshot carries it), its own two subagents (one running), and a sibling without subagents. The light run captures;
+  the dark run checks the parent's line and `☑ 2/4` from the snapshot, the sheet and Abrir subagente, the kicker without
+  the old link, the child's capsule `1 agente em execução` opening its own list (no sibling, no itself), level 2
+  (`NÍVEL 2`, no capsule, three levels in Caminho), the long press's levels going back down the stack, Back returning to
+  the parent's list, stopping a grandchild (grey capsule without a number), and the sibling without a capsule. The
+  tests that tapped the removed link now use the badge, Back or Caminho. Catalog: `testSubagent`
+  (`session-subagent-header`, `-path`, `session-agents-progress`, `-sheet`).
 
 ### Recursos das sessões (simulador, emulador, Chrome) — 25 October
 

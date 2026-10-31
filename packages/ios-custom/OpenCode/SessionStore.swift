@@ -274,6 +274,27 @@ final class SessionStore {
   func progress(_ id: String) -> SessionProgress? {
     liveProgress[id] ?? entries.first { $0.session.id == id }?.progress.map { SessionProgress(items: $0.todos) }
   }
+  /// A subagent's Progresso in the lists ("Agentes e tarefas", Contexto): the list this app folded from live events,
+  /// else its family snapshot's (the server saw the calls the app missed: before it opened or while suspended).
+  func progress(_ id: String, family: FamilySnapshot?) -> SessionProgress? {
+    liveProgress[id] ?? family?.progress?[id].map { SessionProgress(items: $0.todos) } ?? progress(id)
+  }
+  /// The open subagent's ancestry below `root`, oldest first and ending at `child`, from the sessions already
+  /// loaded (the list, the root's family, the child's own conversation and the ancestors it read): no request.
+  func subagentPath(root: String, child: String) -> [Session] {
+    var sessions = Dictionary(entries.map { ($0.session.id, $0.session) }, uniquingKeysWith: { a, _ in a })
+    for session in liveConversation(child)?.ancestors ?? [] { sessions[session.id] = session }
+    for session in liveConversation(root)?.children ?? [] { sessions[session.id] = session }
+    if let current = liveConversation(child)?.session { sessions[child] = current }
+    return SubagentNavigation.path(root: root, child: child, sessions: Array(sessions.values))
+  }
+  /// A level of the subagent path in words: `precisa de você`, `trabalhando`, `falhou` or `concluído`.
+  func subagentState(_ session: Session) -> String {
+    let entry = entries.first { $0.session.id == session.id }
+    if entry?.permissionAt != nil || entry?.questionAt != nil { return "precisa de você" }
+    if active.contains(session.id) { return "trabalhando" }
+    return session.outcome == .failed ? "falhou" : "concluído"
+  }
   var filtered: [SessionRow] {
     #if DEBUG && os(iOS)
     if client.configuration.url.host == "127.0.0.1", ConversationOpeningMetrics.enabled,

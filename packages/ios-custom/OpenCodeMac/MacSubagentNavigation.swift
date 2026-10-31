@@ -53,17 +53,6 @@ struct MacSubagentBanner: View {
   }
 }
 
-extension SessionStore {
-  /// The open subagent's ancestry below `root`, oldest first and ending at `child`, from the sessions already
-  /// loaded (the list, the root's family, the child's own conversation): no request.
-  func subagentPath(root: String, child: String) -> [Session] {
-    var sessions = Dictionary(entries.map { ($0.session.id, $0.session) }, uniquingKeysWith: { a, _ in a })
-    for session in liveConversation(root)?.children ?? [] { sessions[session.id] = session }
-    if let current = liveConversation(child)?.session { sessions[child] = current }
-    return SubagentNavigation.path(root: root, child: child, sessions: Array(sessions.values))
-  }
-}
-
 /// Only the currently opened ancestry is expanded; returning to its root removes the branch.
 struct MacSubagentTree: View {
   @Environment(\.appTheme) private var theme
@@ -87,7 +76,7 @@ struct MacSubagentTree: View {
               Text(session.displayTitle).font(.system(size: 12, weight: .medium)).lineLimit(1)
                 .foregroundStyle(theme.color(.textStrong))
               Text((store.liveConversation(session.id).map(MacSubagentIdentity.agent) ?? session.agent ?? "Subagente")
-                + " · " + state(session)).font(.system(size: 10)).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
+                + " · " + store.subagentState(session)).font(.system(size: 10)).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
             }
             Spacer(minLength: 0)
           }
@@ -101,11 +90,5 @@ struct MacSubagentTree: View {
         }.buttonStyle(.plain).accessibilityIdentifier("subagent-tree-" + session.id)
       }
     }.padding(.top, path.isEmpty ? 0 : 6)
-  }
-  private func state(_ session: Session) -> String {
-    let entry = store.entries.first { $0.session.id == session.id }
-    if entry?.permissionAt != nil || entry?.questionAt != nil { return "precisa de você" }
-    if store.active.contains(session.id) { return "trabalhando" }
-    return session.outcome == .failed ? "falhou" : "concluído"
   }
 }

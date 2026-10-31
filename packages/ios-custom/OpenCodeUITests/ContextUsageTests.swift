@@ -128,7 +128,7 @@ import XCTest
     let line = app.buttons["conversation-usage"]
     XCTAssertTrue(line.waitForExistence(timeout: 20))
     XCTAssertFalse(line.label.contains("399 mil"))
-    XCTAssertTrue(app.buttons["Voltar à sessão principal"].exists)
+    XCTAssertTrue(app.buttons["subagent-badge"].exists)
     XCTAssertTrue(app.staticTexts["child-agent"].exists)
     XCTAssertTrue(app.buttons["Parar"].exists)
     shot("child")
