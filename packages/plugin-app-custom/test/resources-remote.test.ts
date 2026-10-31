@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { references, touchesResources } from "../src/resources/discovery"
 import { protocol, type Lock } from "../src/resources/hub/hub"
+import { namespaceOf, sameNamespace } from "../src/resources/adapters/chrome"
 import { blocking } from "../src/resources/lock"
 import type { Resources } from "../src/resources/rpc"
 import { hubCommand, hubSettings, HubError, makeHubClient, pathMap } from "../src/resources/supervisor"
@@ -109,6 +110,25 @@ describe("commands run on the Mac with `mac`", () => {
     expect(blocking("mac playwright-cli snapshot", locks, "/home/u/app")).toBe(browser)
     expect(blocking("mac playwright-cli -s=other snapshot", locks, "/home/u/app")).toBeUndefined()
   })
+
+  test.skipIf(process.platform !== "linux")(
+    "a Mac workspace is never probed from Linux: unknown, so a default-session playwright-cli still waits",
+    () => {
+      // Unmapped Mac paths reach the server as is; probing them would go through virtio-fs.
+      const browser: Lock = {
+        id: "chrome:default",
+        kind: "chrome",
+        label: "default",
+        meta: { kind: "chrome", session: "default", workspace: "/Users/u/Dev/app" },
+        expiresAt: 0,
+      }
+      expect(namespaceOf("/Users/u/Dev/app")).toBe("")
+      expect(sameNamespace("/Users/u/Dev/app", "/home/u/app")).toBe(true)
+      expect(sameNamespace("/mnt/mac/Users/u", undefined)).toBe(true)
+      expect(blocking("mac playwright-cli snapshot", [browser], "/home/u/app")).toBe(browser)
+      expect(blocking("git status", [browser], "/home/u/app")).toBeUndefined()
+    },
+  )
 })
 
 /** A hub on "another machine": a fake admin API whose secret and port can change, as a restarted hub's do. */

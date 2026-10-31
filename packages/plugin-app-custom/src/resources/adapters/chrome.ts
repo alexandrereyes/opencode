@@ -402,11 +402,23 @@ export async function locate(
   )
 }
 
+const macRoots = ["/Users", "/mnt/mac", "/Volumes", "/Applications", "/Library", "/private"]
+
+/**
+ * A Mac directory as a Linux server sees it: through OrbStack's virtio-fs, whose calls run on a VM vCPU, so a probe
+ * the Mac blocks freezes the whole machine. Such directories are never probed from Linux.
+ */
+function macMount(directory: string) {
+  return process.platform === "linux" && macRoots.some((root) => directory === root || directory.startsWith(`${root}/`))
+}
+
 /**
  * `playwright-cli`'s session namespace for a directory, as its client computes it: the nearest of up to ten ancestors
- * holding `.playwright`, or `""` for the global namespace shared by every other directory.
+ * holding `.playwright`, or `""` for the global namespace shared by every other directory. A Mac directory seen from
+ * Linux is not probed (`""`; `sameNamespace` treats it as unknown).
  */
 export function namespaceOf(directory: string) {
+  if (macMount(directory)) return ""
   for (let current = directory, depth = 0; depth < 10; depth++) {
     if (existsSync(path.join(current, ".playwright"))) return current
     const parent = path.dirname(current)
@@ -416,9 +428,12 @@ export function namespaceOf(directory: string) {
   return ""
 }
 
-/** Whether two shell directories reach the same `playwright-cli` sessions (unknown directories match any). */
+/**
+ * Whether two shell directories reach the same `playwright-cli` sessions (unknown directories, including Mac ones seen
+ * from Linux, match any).
+ */
 export function sameNamespace(a: string | undefined, b: string | undefined) {
-  return a === undefined || b === undefined || namespaceOf(a) === namespaceOf(b)
+  return a === undefined || b === undefined || macMount(a) || macMount(b) || namespaceOf(a) === namespaceOf(b)
 }
 
 async function workingDirectories(pids: readonly number[]) {

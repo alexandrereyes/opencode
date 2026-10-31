@@ -49,12 +49,13 @@ function implicit(command: string, lock: Lock, workdir: string | undefined) {
       !/\badb\s+(-s\b|--serial\b)/.test(command) &&
       !/ANDROID_SERIAL=/.test(command)
     )
+  // Text checks first: the namespace comparison probes directories, and runs before every shell command.
   return (
     lock.meta.kind === "chrome" &&
     (lock.meta.session ?? "default") === "default" &&
-    sameNamespace(lock.meta.workspace, workdir) &&
     /\bplaywright-cli\b/.test(command) &&
-    !/(\s-s[= ]|\s--session[= ]|PLAYWRIGHT_CLI_SESSION=)/.test(command)
+    !/(\s-s[= ]|\s--session[= ]|PLAYWRIGHT_CLI_SESSION=)/.test(command) &&
+    sameNamespace(lock.meta.workspace, workdir)
   )
 }
 

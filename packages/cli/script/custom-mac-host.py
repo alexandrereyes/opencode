@@ -153,9 +153,17 @@ def controller(home, bundle_id, subject, data):
             raise ValueError(f'Signing identity "{subject}" is missing from {keychain}')
         run(["codesign", "--force", "--sign", found.group(1), "--keychain", str(keychain), str(built)])
         run(["codesign", "--verify", "--strict", str(built)])
+        previous = work / "previous.app"
         if app.exists():
-            os.rename(app, work / "previous.app")
-        os.rename(built, app)
+            os.rename(app, previous)
+        try:
+            os.rename(built, app)
+        except BaseException:
+            # Put the working app back; an interruption between the renames heals at the next activation, which sees
+            # no app behind the link and rebuilds.
+            if previous.exists() and not app.exists():
+                os.rename(previous, app)
+            raise
         atomic(stamp, (digest + "\n").encode(), 0o644)
         link.parent.mkdir(parents=True, exist_ok=True)
         pending = work / "link"
