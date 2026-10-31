@@ -64,9 +64,42 @@ export const registerVoice = Effect.fn("Voice.register")(function* (ctx: Context
           Effect.map((compactionScheduled) => ({ ...input, compactionScheduled })),
           Effect.mapError((cause) => failure(context.error, cause)),
         ),
+      diagnostics: logDiagnostics,
     })
     .pipe(Effect.orDie)
 })
+
+/** `custom.voice` → `diagnostics`: one `Voice diagnostics` log line per report the app sends. */
+export const logDiagnostics = (input: typeof Voice.Diagnostics.Type) =>
+  Effect.forEach(input.events, (event) => Effect.logInfo("Voice diagnostics", diagnosticFields(event)), {
+    discard: true,
+  }).pipe(Effect.as({ accepted: input.events.length }))
+
+/** One flat line per report, grep-friendly in the server log: `reason=service_error code=… events=a,b,c`. */
+export function diagnosticFields(event: Voice.Diagnostic) {
+  return {
+    kind: event.kind,
+    reason: event.reason,
+    ...(event.code ? { code: event.code } : {}),
+    platform: event.platform,
+    build: event.build,
+    at: new Date(event.at).toISOString(),
+    ...(event.call ? { call: event.call } : {}),
+    ...(event.connectedSeconds === undefined ? {} : { connectedSeconds: Math.round(event.connectedSeconds) }),
+    phase: event.phase,
+    recovering: event.recovering,
+    app: event.app.state,
+    locked: event.app.locked,
+    ...(event.audio
+      ? {
+          audio: `${event.audio.category}/${event.audio.mode}` + (event.audio.otherAudio ? " other-audio" : ""),
+          route: `out=${event.audio.outputs.join("+") || "-"} in=${event.audio.inputs.join("+") || "-"}`,
+        }
+      : {}),
+    ...(event.network ? { network: event.network } : {}),
+    events: event.events.join(","),
+  }
+}
 
 export function makeVoice(ctx: VoiceContext, scope: Scope.Scope) {
   const pending = new Set<Voice.Scope>()

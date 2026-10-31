@@ -32,6 +32,9 @@ import OpenCodeKit
             delay = 1
             connection += 1
             connected = true
+            // Voice failure reports that could not reach the server go now (custom.voice → diagnostics).
+            let client = client
+            Task { await VoiceDiagnosticsOutbox.standard.flush { try await client.voiceDiagnostics($0) } }
             #if os(iOS)
             DeviceAgent.shared.connected(client)
             AgentsActivityAgent.shared.connected(client)

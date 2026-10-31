@@ -516,6 +516,17 @@ Falar com a mestra**.
   `launch-foreground reason=…`, `launch-acknowledged`, `start`, `ready`, `failed`, `end`) no os_log
   `VoiceStartup`; builds DEBUG também as gravam em `Library/Caches/voice-launch.log`, lido do container
   do app no aparelho com `xcrun devicectl device copy from`.
+- **Motivo da queda (31/10):** toda falha (`fail`), perda com reconexão (`lose`), interrupção de áudio e fim
+  pelo usuário vira um relatório `VoiceDiagnostic` (OpenCodeKit) com a categoria (`service_error` com o
+  `type/code` do `error` do GPT Live, `invalid_event` com o tipo do evento, `lease_refused`, `send_failed`,
+  `ice_failed`, `data_channel_closed`, `audio_interrupted`, `user_end`…), os últimos 24 nomes de evento
+  (tipos do canal e estados do transporte), a fase, o estado do app (frente/fundo, bloqueado), a sessão de
+  áudio e a rota (iPhone) e a rede. Nada de fala, transcrição ou mensagem de erro. Vai a `custom.voice` →
+  `diagnostics`; o servidor grava `Voice diagnostics` em `~/.local/share/opencode/log/opencode.log`. Sem
+  servidor ou sem essa RPC, o app guarda até 20 em `Application Support/voice-diagnostics.json` e manda na
+  próxima conexão do fluxo de eventos (`EventHub`). Em todo build, o os_log `VoiceStartup` registra
+  `phase=failed reason=<categoria> code=…` e `phase=lost reason=…` como públicos; o texto mostrado continua só
+  no arquivo DEBUG.
 
 ### Verificação — 24/10
 

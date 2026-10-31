@@ -85,6 +85,18 @@ authenticated normal plugin transport, for example
   Short calls incur no summary request. No call/Session ID is required. It also
   removes the current Mestra's voice-call note (`docs/master-session.md`); a
   failure there is only logged.
+- **`diagnostics({events:[...]})`** (1–20 reports) logs one `Voice diagnostics` line per report the iPhone or
+  Mac app sends when a call fails (`failed`), is lost and reconnects (`lost`), has its audio interrupted
+  (`interrupted`), survives a failure (`tolerated`) or is ended by Alexandre (`ended`). A report carries only
+  bounded names: the `reason` category (`service_error`, `invalid_event`, `lease_refused`, `lease_expired`,
+  `send_failed`, `ice_failed`, `ice_disconnected`, `peer_failed`, `data_channel_closed`, `media_services_reset`,
+  `attempt_timeout`, `network_changed`, `audio_interrupted`, `recovery_exhausted`, `start_failed`,
+  `reconnect_failed`, `microphone_denied`, `delegation_overflow`, `user_end`), a `code` (GPT Live's error
+  `type/code`, the unreadable event's type or an error kind such as `http_409`), the last 24 event names, the
+  call phase, the app state (`active`/`inactive`/`background`, locked), the audio session and route on the
+  iPhone, and the network path. No speech, transcript or error message fits the schema. The app keeps up to 20
+  unsent reports and sends them on the next event-stream connection. Read them with
+  `grep 'Voice diagnostics' ~/.local/share/opencode/log/opencode.log`.
 
 Batches accept 1–128 turns. IDs are nonempty and at most 200 characters; each
 text is at most 64,000 characters. Roles are strictly `user` and `assistant`.

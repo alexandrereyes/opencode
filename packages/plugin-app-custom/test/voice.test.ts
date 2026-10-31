@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { Clock, Deferred, Effect, Fiber, Schema } from "effect"
+import { Clock, Deferred, Effect, Fiber, Logger, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { Session } from "@opencode/schema/session"
 import { SessionMessage } from "@opencode/schema/session-message"
@@ -10,6 +10,7 @@ import {
   estimateTokens,
   key,
   limits,
+  logDiagnostics,
   makeVoice,
   masterLabel,
   summaryLabel,
@@ -73,7 +74,7 @@ function fixture(initial?: Voice.Record) {
 
 test("KV protocol replaces the eco contract, validates batches and reserves future scopes", () => {
   expect(Voice.version).toBe(2)
-  expect(Object.keys(Voice.Definition.methods)).toEqual(["info", "instructions", "append", "context", "end"])
+  expect(Object.keys(Voice.Definition.methods)).toEqual(["info", "instructions", "append", "context", "end", "diagnostics"])
   expect(key("global")).toBe("voice/transcript/global")
   for (const input of [
     { version: 1, scope: "global", turns: [turn("id")] },
@@ -431,3 +432,62 @@ it.effect("master status is read-only data, sent only while it runs, and exclude
     expect(f.generated).toEqual([])
   }),
 )
+
+const diagnostic = {
+  kind: "failed",
+  reason: "service_error",
+  code: "invalid_request_error/unknown_event",
+  platform: "ios",
+  build: "0.1.0 (202610311200)",
+  at: Date.UTC(2026, 9, 31, 11, 48, 55),
+  call: "855CA9AC-0000-4000-8000-000000000000",
+  connectedSeconds: 168.4,
+  phase: "listening",
+  recovering: false,
+  events: ["delegation.created", "transport.connected", "error"],
+  app: { state: "background", locked: true },
+  audio: { category: "PlayAndRecord", mode: "VoiceChat", inputs: ["MicrophoneBuiltIn"], outputs: ["Speaker"] },
+  network: "wifi",
+} as const
+
+test("voice diagnostics carry categories and names only and log one line each", async () => {
+  const decodeDiagnostics = Schema.decodeUnknownSync(Voice.Diagnostics)
+  for (const events of [
+    [],
+    Array.from({ length: 21 }, () => diagnostic),
+    [{ ...diagnostic, kind: "crashed" }],
+    [{ ...diagnostic, reason: "" }],
+    // Free text does not fit: speech or an error message cannot ride along.
+    [{ ...diagnostic, code: "x".repeat(121) }],
+    [{ ...diagnostic, events: [...diagnostic.events, "y".repeat(65)] }],
+    [{ ...diagnostic, events: Array.from({ length: 25 }, () => "error") }],
+    [{ ...diagnostic, app: { state: "suspended", locked: true } }],
+  ])
+    expect(() => decodeDiagnostics({ events })).toThrow()
+  const logged: { message: unknown }[] = []
+  const result = await Effect.runPromise(
+    logDiagnostics(decodeDiagnostics({ events: [diagnostic, { ...diagnostic, kind: "ended", reason: "user_end" }] })).pipe(
+      Effect.provideService(Logger.CurrentLoggers, new Set([Logger.make((entry) => logged.push({ message: entry.message }))])),
+    ),
+  )
+  expect(result).toEqual({ accepted: 2 })
+  expect(logged.map((entry) => (entry.message as unknown[])[0])).toEqual(["Voice diagnostics", "Voice diagnostics"])
+  expect((logged[0]?.message as unknown[])[1]).toEqual({
+    kind: "failed",
+    reason: "service_error",
+    code: "invalid_request_error/unknown_event",
+    platform: "ios",
+    build: "0.1.0 (202610311200)",
+    at: "2026-10-31T11:48:55.000Z",
+    call: "855CA9AC-0000-4000-8000-000000000000",
+    connectedSeconds: 168,
+    phase: "listening",
+    recovering: false,
+    app: "background",
+    locked: true,
+    audio: "PlayAndRecord/VoiceChat",
+    route: "out=Speaker in=MicrophoneBuiltIn",
+    network: "wifi",
+    events: "delegation.created,transport.connected,error",
+  })
+})

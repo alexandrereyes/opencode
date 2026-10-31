@@ -58,6 +58,10 @@ import UIKit
     VoiceTransport(event: $0)
   }
   @ObservationIgnored private var callVoice = GPTLiveVoice.defaultVoice
+  /// Names of the last events of this conversation, sent with each diagnostic report.
+  @ObservationIgnored private var trail = VoiceEventTrail()
+  @ObservationIgnored private var diagnostics = VoiceDiagnosticsOutbox.standard
+  @ObservationIgnored private var diagnosticsTask: Task<Void, Never>?
   @ObservationIgnored private var ready = false
   @ObservationIgnored private var mediaConnected = false
   @ObservationIgnored private var currentDelegation: String?
@@ -113,6 +117,8 @@ import UIKit
     var network: (any VoicePathMonitoring)?
     var cues: (any VoiceCueing)?
     var screen: (@MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot)?
+    /// Reports stay here; tests read them instead of a server.
+    var diagnostics: VoiceDiagnosticsOutbox?
   }
   @ObservationIgnored private var testing: TestDependencies?
   convenience init(testing: TestDependencies, preferences: VoicePreferences = VoicePreferences()) {
@@ -121,6 +127,8 @@ import UIKit
     if let network = testing.network { self.network = network }
     if let cues = testing.cues { self.cues = cues }
     if let screen = testing.screen { captureScreen = screen }
+    diagnostics = testing.diagnostics
+      ?? VoiceDiagnosticsOutbox(url: FileManager.default.temporaryDirectory.appending(path: "voice-diagnostics-\(UUID()).json"))
   }
   #endif
 
@@ -147,6 +155,7 @@ import UIKit
     recovery = VoiceRecovery(policy: policy); alert = nil
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false; recentSpeech = []
+    trail = VoiceEventTrail()
     state.apply(.start); detail = "Preparando o microfone"; publish()
     inputItemID = nil; outputItemID = nil; interruptedAssistant = false; interruptedUser = false; capturedTurns = []
     #if DEBUG
@@ -219,7 +228,7 @@ import UIKit
     }
     #if os(macOS)
     if MacLaunch.fixture, testing == nil {
-      connection = Task { await fail("Use o motor falso de voz nesta demonstração local.") }
+      connection = Task { await fail("Use o motor falso de voz nesta demonstração local.", .init("fixture")) }
       return
     }
     #endif
@@ -234,12 +243,12 @@ import UIKit
       guard let self else { return }
       let allowed = await permission()
       guard epoch == token, !Task.isCancelled else { return }
-      guard allowed else { await fail("Permita o microfone nos Ajustes para conversar por voz."); return }
+      guard allowed else { await fail("Permita o microfone nos Ajustes para conversar por voz.", .microphoneDenied); return }
       do {
         try await open(token: token, timeout: 45, message: "A conexão de voz demorou demais. Confira o WARP e tente novamente.")
       } catch {
         guard epoch == token, !Task.isCancelled, !(error is CancellationError) else { return }
-        await fail(error.localizedDescription)
+        await fail(error.localizedDescription, .startFailed(error))
       }
     }
   }
@@ -248,7 +257,7 @@ import UIKit
   private func open(token: UUID, timeout: Double, message: String) async throws {
     let current = UUID()
     link = current; ready = false; mediaConnected = false; lease = VoiceLeaseClock()
-    armWatchdog(token: token, seconds: timeout, message: message)
+    armWatchdog(token: token, seconds: timeout, message: message, reason: .attemptTimeout)
     let instructions = try await instructions()
     guard epoch == token, link == current, !Task.isCancelled else { throw CancellationError() }
     let events: @MainActor @Sendable (VoiceTransportEvent) -> Void = { [weak self] event in
@@ -341,7 +350,8 @@ import UIKit
         } catch {
           guard epoch == token, link == current, !Task.isCancelled, !(error is CancellationError) else { return }
           guard VoiceLeaseClock.isTransient(error) else {
-            await fail("A autorização da voz não pôde ser renovada. A chamada foi encerrada por segurança.")
+            await fail("A autorização da voz não pôde ser renovada. A chamada foi encerrada por segurança.",
+              .leaseRefused(error))
             return
           }
           VoiceTransport.log.notice("phase=renewal-retry")
@@ -357,19 +367,28 @@ import UIKit
     leaseDeadline = Task { [weak self] in
       do { try await Task.sleep(for: .seconds(max(0, remaining))) } catch { return }
       guard let self, epoch == token, link == current else { return }
-      lose("A autorização da voz expirou sem rede. Reconectando…")
+      lose("A autorização da voz expirou sem rede. Reconectando…", .leaseExpired)
     }
   }
-  private func armWatchdog(token: UUID, seconds: Double, message: String) {
+  private func armWatchdog(token: UUID, seconds: Double, message: String, reason: VoiceFailureReason) {
     watchdog?.cancel()
     let current = link
     watchdog = Task { [weak self] in
       do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
       guard let self, epoch == token, link == current else { return }
-      lose(message)
+      lose(message, reason)
     }
   }
   private func receive(_ event: VoiceTransportEvent) {
+    let name = switch event {
+    case .connected: "transport.connected"
+    case .interrupted: "transport.interrupted"
+    case .resumed: "transport.resumed"
+    case .disconnected: "transport.disconnected"
+    case .failed(let reason): "transport." + reason.category
+    case .data(let data): VoiceProtocol.eventType(data) ?? "unreadable"
+    }
+    trail.record(name)
     switch event {
     case .connected:
       mediaConnected = true
@@ -379,16 +398,18 @@ import UIKit
       if state.phase == .speaking { interruptedAssistant = true }
       if inputItemID != nil { interruptedUser = true }
       state.apply(.interruption); detail = "Toque em retomar após a interrupção"; publish()
+      report(.interrupted, .audioInterrupted)
     case .disconnected:
       if state.phase == .speaking { interruptedAssistant = true }
       if inputItemID != nil { interruptedUser = true }
       mediaConnected = false; state.apply(network.current.satisfied ? .reconnect : .offline); publish()
       // WebRTC may restore the same path by itself; after the grace the call is rebuilt.
-      armWatchdog(token: epoch, seconds: policy.mediaGrace, message: "A conexão de áudio não se recuperou.")
-    case .failed: lose("A conexão de áudio foi encerrada.")
+      armWatchdog(token: epoch, seconds: policy.mediaGrace, message: "A conexão de áudio não se recuperou.",
+        reason: .iceDisconnected)
+    case .failed(let reason): lose("A conexão de áudio foi encerrada.", reason)
     case .data(let data):
       do { handle(try VoiceProtocol.decode(data)) }
-      catch { Task { await fail(error.localizedDescription) } }
+      catch { Task { await fail(error.localizedDescription, .invalidEvent(VoiceProtocol.eventType(data))) } }
     }
   }
   private func connected() {
@@ -432,12 +453,13 @@ import UIKit
       if turn.role == .assistant { state.apply(.silence); outputItemID = nil; interruptedAssistant = false }
       else { userUntil = ProcessInfo.processInfo.systemUptime + 1; inputItemID = nil; interruptedUser = false }
       publish()
-    case .failure: Task { await fail("O serviço de voz informou uma falha. Tente novamente mais tarde.") }
+    case .failure(let code):
+      Task { await fail("O serviço de voz informou uma falha. Tente novamente mais tarde.", .service(code)) }
     case .delegation(let id, let text):
       VoiceTransport.log.notice("phase=delegation")
       guard !handled.contains(id) else { return }
       guard handled.count < 1024, delegationQueue.count < 8 else {
-        Task { await fail("Há pedidos demais nesta chamada. Reconecte para continuar.") }; return
+        Task { await fail("Há pedidos demais nesta chamada. Reconecte para continuar.", .delegationOverflow) }; return
       }
       handled.insert(id)
       let asked = VoiceMasterRequest(text)
@@ -567,7 +589,7 @@ import UIKit
       }
     } catch {
       guard epoch == token else { return }
-      await fail("Não foi possível transmitir a atualização da Sessão mestra.")
+      await fail("Não foi possível transmitir a atualização da Sessão mestra.", .sendFailed)
     }
   }
   func mute() { state.muted.toggle(); transport?.mute(state.muted); publish() }
@@ -576,7 +598,8 @@ import UIKit
     #if os(macOS)
     let sounded = connectedAt != nil && state.visible
     #endif
-    alert = nil; await retire(); state.apply(.end); detail = ""; publish(); VoiceLaunchLog.record("end")
+    if state.visible, state.phase != .failed { report(.ended, .userEnd) }
+    alert = nil; await retire(); state.apply(.end); detail = ""; publish(); VoiceLaunchLog.record("end", reason: "user_end")
     #if os(macOS)
     if sounded { cues.play(.ended) }
     #endif
@@ -594,9 +617,10 @@ import UIKit
     await watch.value
     deadline.cancel()
   }
-  private func fail(_ message: String) async {
+  private func fail(_ message: String, _ reason: VoiceFailureReason) async {
     guard state.visible, state.phase != .failed, !busy else { return }
-    VoiceLaunchLog.record("failed", detail: message)
+    VoiceLaunchLog.record("failed", detail: message, reason: reason.summary)
+    report(.failed, reason)
     await retire(); state.apply(.failure(message)); detail = message; publish()
     VoiceFeedback.failed()
     #if os(macOS)
@@ -604,17 +628,72 @@ import UIKit
     #endif
   }
 
+  // MARK: Diagnostics
+
+  /// Queues one report for the server (`custom.voice` → `diagnostics`, logged as `Voice diagnostics`) and tries to
+  /// send it; a report the server did not take goes with the next one or on the next connection. Only categories,
+  /// event names and device state, never speech. `tolerated` is for failures the call survives.
+  func report(_ kind: VoiceDiagnostic.Kind, _ reason: VoiceFailureReason) {
+    let entry = VoiceDiagnostic(kind: kind, reason: reason, build: Self.build, at: .now, call: sessionID,
+      connectedSeconds: connectedAt.map { Date.now.timeIntervalSince($0) }, phase: String(describing: state.phase),
+      recovering: recovery.active, events: trail, app: Self.appState, audio: Self.audioState,
+      network: network.current.satisfied ? network.current.interfaces.joined(separator: ",") : "unsatisfied")
+    let outbox = diagnostics
+    let client = client
+    let previous = diagnosticsTask
+    diagnosticsTask = Task {
+      await previous?.value
+      await outbox.add(entry)
+      #if DEBUG
+      if testing != nil { return }
+      #endif
+      if let client { await outbox.flush { try await client.voiceDiagnostics($0) } }
+    }
+  }
+
+  private static var build: String {
+    let info = Bundle.main.infoDictionary
+    return "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+  }
+
+  private static var appState: VoiceDiagnostic.App {
+    #if os(iOS)
+    let application = UIApplication.shared
+    let state: VoiceDiagnostic.AppState = switch application.applicationState {
+    case .active: .active
+    case .inactive: .inactive
+    default: .background
+    }
+    return .init(state: state, locked: !application.isProtectedDataAvailable)
+    #else
+    return .init(state: NSApplication.shared.isActive ? .active : .background, locked: false)
+    #endif
+  }
+
+  private static var audioState: VoiceDiagnostic.Audio? {
+    #if os(iOS)
+    let session = AVAudioSession.sharedInstance()
+    return .init(category: session.category.rawValue.replacingOccurrences(of: "AVAudioSessionCategory", with: ""),
+      mode: session.mode.rawValue.replacingOccurrences(of: "AVAudioSessionMode", with: ""),
+      inputs: session.currentRoute.inputs.map(\.portType.rawValue),
+      outputs: session.currentRoute.outputs.map(\.portType.rawValue), otherAudio: session.isOtherAudioPlaying)
+    #else
+    return nil
+    #endif
+  }
+
   // MARK: Network recovery
 
   /// The current link is gone. An established conversation rebuilds the call with memory, within the
   /// recovery window; a call that never connected fails as before.
-  private func lose(_ reason: String) {
+  private func lose(_ message: String, _ reason: VoiceFailureReason) {
     guard state.visible, state.phase != .failed, !busy else { return }
-    guard connectedAt != nil else { Task { await fail(reason) }; return }
+    guard connectedAt != nil else { Task { await fail(message, reason) }; return }
     let token = epoch
     let first = !recovery.active
+    report(.lost, reason)
     recovery.lose(at: Self.now)
-    VoiceTransport.log.notice("phase=lost")
+    VoiceLaunchLog.record("lost", reason: reason.summary)
     // Invalidate every callback of the old call before tearing it down.
     link = UUID()
     if state.phase == .speaking { interruptedAssistant = true }
@@ -661,7 +740,7 @@ import UIKit
         return
       } catch {
         guard epoch == token, !Task.isCancelled, !(error is CancellationError) else { return }
-        guard VoiceLeaseClock.isTransient(error) else { await fail(error.localizedDescription); return }
+        guard VoiceLeaseClock.isTransient(error) else { await fail(error.localizedDescription, .reconnectFailed(error)); return }
         await closeLink()
       }
     }
@@ -670,7 +749,7 @@ import UIKit
     VoiceTransport.log.notice("phase=recovery-exhausted")
     cues.play(.failed)
     alert = message
-    await fail(message)
+    await fail(message, .recoveryExhausted)
   }
 
   /// Tears down a failed attempt so the next one starts from a clean link.
@@ -695,7 +774,7 @@ import UIKit
     if state.phase == .offline { state.apply(.reconnect); detail = "Reconectando a voz…"; publish() }
     // A disconnected peer will not migrate to a new interface; rebuild without waiting for the grace.
     if !recovery.active, connectedAt != nil, !mediaConnected, transport != nil {
-      lose("A rede mudou. Reconectando a voz…")
+      lose("A rede mudou. Reconectando a voz…", .networkChanged)
     }
   }
 

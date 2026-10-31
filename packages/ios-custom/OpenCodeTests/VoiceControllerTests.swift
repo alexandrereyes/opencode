@@ -434,6 +434,38 @@ private actor LiveMemoryHTTP {
 
   // MARK: Screen for the master
 
+  /// The report of a failed call names the category, GPT Live's error code and the last events, never what was said.
+  func testFailureReportCarriesTheCategoryCodeAndEventNamesOnly() async throws {
+    let outbox = VoiceDiagnosticsOutbox(url: FileManager.default.temporaryDirectory.appending(path: "voice-diagnostics-\(UUID()).json"))
+    let transport = VoiceTestTransport(), master = VoiceTestMaster(), http = VoiceTestHTTP()
+    let controller = VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
+      master: { update in master.update = update; return master }, request: { try await http.respond($0) },
+      diagnostics: outbox))
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    transport.event?(.data(Data(#"{"type":"output_transcript.added","item":{"id":"o1","text":"Frase falada jabuticaba"}}"#.utf8)))
+    transport.event?(.data(Data(#"{"type":"error","error":{"type":"invalid_request_error","code":"unknown_event","message":"Mensagem do provedor"}}"#.utf8)))
+    let failed = await until { controller.state.phase == .failed }
+    XCTAssertTrue(failed)
+    let reported = await until { await outbox.pending().count == 1 }
+    XCTAssertTrue(reported)
+    let pending = await outbox.pending()
+    let report = try XCTUnwrap(pending.first)
+    XCTAssertEqual(report.kind, .failed)
+    XCTAssertEqual(report.reason, "service_error")
+    XCTAssertEqual(report.code, "invalid_request_error/unknown_event")
+    XCTAssertEqual(report.platform, "ios")
+    XCTAssertEqual(Array(report.events.suffix(2)), ["output_transcript.added", "error"])
+    let json = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
+    XCTAssertFalse(json.contains("jabuticaba") || json.contains("Mensagem"))
+    // Closing the failed call is not a second report.
+    await controller.end()
+    let count = await outbox.pending().count
+    XCTAssertEqual(count, 1)
+  }
+
   private func screenController(_ transport: VoiceTestTransport, _ master: VoiceTestMaster, _ http: VoiceTestHTTP,
     screen: @escaping @MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal) -> VoiceScreenShot) -> VoiceController {
     VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
@@ -712,7 +744,7 @@ private actor LiveMemoryHTTP {
     let ready = await until { controller.state.phase == .listening }
     XCTAssertTrue(ready)
     path.set(VoicePath(satisfied: false))
-    pool.transports[0].event?(.failed)
+    pool.transports[0].event?(.failed(.iceFailed))
     XCTAssertEqual(controller.state.phase, .offline)
     let failed = await until { controller.state.phase == .failed }
     XCTAssertTrue(failed)
@@ -732,7 +764,7 @@ private actor LiveMemoryHTTP {
     controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
     let offered = await until { await http.count("POST", calls: true) == 1 }
     XCTAssertTrue(offered)
-    pool.transports[0].event?(.failed)
+    pool.transports[0].event?(.failed(.iceFailed))
     let failed = await until { controller.state.phase == .failed }
     XCTAssertTrue(failed)
     XCTAssertEqual(pool.transports.count, 1)
@@ -767,7 +799,7 @@ private actor LiveMemoryHTTP {
     XCTAssertEqual(controller.state.phase, .listening)
     XCTAssertEqual(transports.count, 1)
     // A media loss rebuilds a second real call.
-    transports[0].event(.failed)
+    transports[0].event(.failed(.iceFailed))
     XCTAssertEqual(controller.state.phase, .reconnecting)
     let recovered = await until(30) { transports.count == 2 && controller.state.phase == .listening }
     XCTAssertTrue(recovered, controller.detail)

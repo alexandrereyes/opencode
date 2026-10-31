@@ -75,7 +75,8 @@ public struct VoiceCompletedTurn: Equatable, Sendable {
 
 public enum VoiceEvent: Equatable, Sendable {
   case ready, input(VoiceTranscriptPiece), output(VoiceTranscriptPiece), turnDone(VoiceCompletedTurn)
-  case delegation(id: String, text: String), failure, ignored
+  /// `failure` carries GPT Live's error `type/code` for diagnostics, never its message.
+  case delegation(id: String, text: String), failure(code: String?), ignored
 }
 
 public enum VoiceScreenPlatform: Sendable { case iPhone, mac }
@@ -124,6 +125,12 @@ public enum VoiceProtocol {
     return instructions.contains(marker) ? instructions : screenInstructions(platform) + "\n\n" + instructions
   }
 
+  /// The event's `type`, for the diagnostics trail; nil when the payload is not a JSON object with one.
+  public static func eventType(_ data: Data) -> String? {
+    guard data.count <= 256 * 1024 else { return nil }
+    return (try? JSONDecoder().decode(JSONValue.self, from: data))?.object?["type"]?.string
+  }
+
   public static func decode(_ data: Data) throws -> VoiceEvent {
     guard data.count <= 256 * 1024 else { throw VoiceWireError.oversized }
     let root = try JSONDecoder().decode(JSONValue.self, from: data).object
@@ -155,7 +162,10 @@ public enum VoiceProtocol {
         throw VoiceWireError.invalidEvent
       }
       return .delegation(id: id, text: text)
-    case "error": return .failure
+    case "error":
+      let error = root?["error"]?.object
+      let code = [error?["type"]?.string, error?["code"]?.string].compactMap { $0 }.joined(separator: "/")
+      return .failure(code: code.isEmpty ? nil : code)
     default: return .ignored
     }
   }

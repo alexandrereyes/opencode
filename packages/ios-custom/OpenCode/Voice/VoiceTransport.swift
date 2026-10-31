@@ -5,7 +5,8 @@ import OSLog
 @preconcurrency import WebRTC
 
 enum VoiceTransportEvent: Sendable {
-  case connected, interrupted, resumed, disconnected, data(Data), failed
+  /// `failed` says which part of the link went down, for the call's diagnostics.
+  case connected, interrupted, resumed, disconnected, data(Data), failed(VoiceFailureReason)
 }
 
 protocol VoiceTransporting: AnyObject, Sendable {
@@ -235,7 +236,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
     observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification,
       object: nil, queue: nil) { [weak self] _ in
         guard let self else { return }
-        self.queue.async { if !self.closed { self.emit(.failed) } }
+        self.queue.async { if !self.closed { self.emit(.failed(.mediaReset)) } }
       })
     #endif
   }
@@ -257,16 +258,16 @@ extension VoiceTransport: RTCPeerConnectionDelegate, RTCDataChannelDelegate {
       guard self.peer === peer, !self.closed else { return }
       if state == .connected || state == .completed { self.iceConnected = true; self.updateConnected() }
       if state == .disconnected { self.iceConnected = false; self.emit(.disconnected) }
-      if state == .failed { self.emit(.failed) }
+      if state == .failed { self.emit(.failed(.iceFailed)) }
     }
   }
   func peerConnection(_ peer: RTCPeerConnection, didChange state: RTCPeerConnectionState) {
-    queue.async { if self.peer === peer, !self.closed, state == .failed { self.emit(.failed) } }
+    queue.async { if self.peer === peer, !self.closed, state == .failed { self.emit(.failed(.peerFailed)) } }
   }
   func dataChannelDidChangeState(_ channel: RTCDataChannel) {
     queue.async {
       guard self.channel === channel, !self.closed else { return }
-      if channel.readyState == .closed || channel.readyState == .closing { self.emit(.failed); return }
+      if channel.readyState == .closed || channel.readyState == .closing { self.emit(.failed(.dataChannelClosed)); return }
       self.updateConnected()
     }
   }
