@@ -313,7 +313,7 @@ half orange, half gray.
   4. otherwise the mascot inside the state ring (rev. 2026-10-30; it was a plain `success` ring).
 
 **Apple Watch Smart Stack** (`.small` supplemental family, rev. 2026-10-27; approved mock
-`.agent-artifacts/watch/smartstack-b3-anel-segmentado.png`). No watchOS app: declare
+`.agent-artifacts/watch/smartstack-b3-anel-segmentado.png`). The card comes from the iPhone's extension: declare
 `.supplementalActivityFamilies([.small])` and branch on `@Environment(\.activityFamily)` in the Lock Screen closure.
 
 - Left: the mascot inside the **state ring** (rev. 2026-10-30; it used to be a subagent progress ring, whose
@@ -326,7 +326,10 @@ half orange, half gray.
   `Não lida` (`primary`) for `idle` rows. A `todos` row with `current` reads `done/total · <current>` instead
   (rev. 2026-10-30).
 - Fixed metrics that fit the `.small` size on the smallest supported watch without clipping. Tap uses the same
-  `widgetURL` as the Lock Screen card.
+  `widgetURL` as the Lock Screen card. On the watch, the watch app lists `AgentsActivityAttributes` in
+  `WKSupportsLiveActivityLaunchAttributeTypes` (rev. 2026-11-01), so a tap opens the watch app on its Painel instead
+  of the full-screen card with "open on iPhone" ([watch.md](watch.md), "Launch"); the voice Live Activity is not
+  listed. The card stays one tap target, with no buttons (a button would run on the iPhone).
 
 **Taps:** the Lock Screen card opens the first attention session, else the focus session, else the Sessões list;
 attention rows and expanded-island rows link to their own session. Deep links are an iOS concern.
