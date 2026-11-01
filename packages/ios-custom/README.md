@@ -2594,7 +2594,8 @@ rings' row (38 pt): measured 33 pt on iPhone 17 Pro, 35 pt on iPhone SE, 32–33
 - **Release (`+N às HH:mm`):** only when every known blocker reports its end (the wait's end, the 5-hour reset when
   that window is at 0), the latest of them; a refusal the windows do not explain, or a blocker without a time, has
   none. A weekly renewal never becomes a release, and a weekly window the proxy does not report (Max 5x today) is not a
-  blocker. `N` counts accounts back within that minute.
+  blocker. `N` counts accounts back within that minute. Since "Relógio + prazo" (below) the strip shows each account's
+  own wait instead, and this release stays in VoiceOver and the details.
 - **No aggregation:** counts are of subscriptions, never of quota; no percent is summed or averaged; plans only
   identify (short label: the multiplier of `Subscriptions.planLabel`, else that label, else the proxy's identifier
   capitalized, `Outro` without a plan). There is no hard-coded list of plans in the strip.
@@ -2638,6 +2639,41 @@ in `SessionsView` and `MacSessionColumn`); on iPhone both sizes scale with `.cap
   counts take over (`5x ●12 ◷4`, then `12/16`, then the provider's counts); full balances stay in VoiceOver, the Mac
   tooltip and the details. `SessionQuotaRow` now gives each provider its narrowest form first and shares the rest by
   need, so a long row of rings never pushes the other provider's counts under its icon.
+
+### Sessões strip: "Relógio + prazo" — 1 November
+
+Approved mockup: option B of `.agent-artifacts/cotas-assinaturas/prazos-compactos/` in the main checkout. A stopped or
+exhausted account whose return the data gives shows it next to its symbol (`SubscriptionWaitMark`): the 12 pt clock and
+`35m`/`2h`/`2d` in the warning color for a stopped one, the renewal arrow (`arrow.clockwise`) and the time in the error
+color for an exhausted week, so a renewing week no longer looks closed. Ready accounts keep their rings. Everything
+else keeps its symbol without a time: the clock alone for a stop with no known end or reason, ⊘ for a week with no
+renewal reported, the warning sign for login, `?` for no measurement (Free). Disabled accounts stay out.
+
+- **The time** (`SubscriptionMarks.Wait`, per account, never per plan): the end of the **last** of the account's known
+  blockers (the proxy's wait, the 5-hour window at zero, the weekly window at zero with the proxy refusing), so a
+  renewal that leaves another window blocking is never shown, and a 5-hour window back in 1 h 40 reads `2h`, not
+  `5h`. None when the refusal is unexplained, a blocker has no end, the time has passed (the next reading confirms it;
+  a renewal passed since the reading makes the account `?`) or the windows are stale (the proxy's wait alone does not
+  say the account is back; the details still show it). The countdown rounds up (minutes below 1 h, hours below 24 h,
+  then days) so it never promises the account sooner; it moves with the store's existing 60 s refresh, no timer per
+  mark. The Mac tooltip and VoiceOver give the time, span and causes as an estimate (`Faia · Max 5x · parada, volta às
+  16:00, em 1 h 40 min (previsto pela janela de 5 horas)`, `semana não informada` when the week is not reported); the
+  details keep their release and weekly renewal apart, unchanged.
+- **Summary:** `4 prontas` without `+1 às`, which the marks now carry. When counts replace the marks, the summary
+  keeps when the next accounts are back, any wait or renewal (`14 prontas · +1 em 45m`, then `+1 45m`); plans give way
+  to counts by state before it goes. The counts show the renewal arrow for exhausted weeks when every one has a known
+  renewal, ⊘ otherwise.
+- **Unchanged:** the order (ready by balance, stopped by release, exhausted, login, unmeasured), the plan runs, the
+  pinned dash, the 33 pt height (32–33 pt on the Mac) and the fallbacks. `SessionQuotaRow` now splits an overflowing
+  row as evenly as possible between each provider's narrowest form and what it needs, so both keep their next return
+  where they can (only the Mac's narrowest column with the `many` fixture fits one).
+
+Verification: `SubscriptionMarksTests` (every blocker combination, the later one winning, the week with a later
+5-hour reset, unknown, passed and stale times, login and Free, rounding at the boundaries, `next`, spoken prazos);
+`SessionQuotaMarksTests` with `OPENCODE_PROXY_STUB=waits` (`5x:100,9,B35m,B2h,B|20x:E2d`, `Pro Max:78|Plus:B2h|Pro
+Max:!|Free:?,?`, VoiceOver prazos, 33 pt, the dash under Iris turned on and off in the details) and the updated
+`marks|many` values, in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas` checks the same runs and
+renders `prazos-*` with Iris and Faia highlighted.
 
 Verification: `SubscriptionMarksTests` (balance per window, one window, 0, 100, stale, order, runs, pinned, spoken
 balances); `SessionQuotaMarksTests` read `5x:100,72,64,41,B|20x:E,E` and the `many` runs, the `Saldos` suffix and a 33 pt

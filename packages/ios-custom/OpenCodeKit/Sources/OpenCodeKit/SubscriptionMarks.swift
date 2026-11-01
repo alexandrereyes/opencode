@@ -17,25 +17,21 @@ public enum SubscriptionMark: Sendable, Equatable {
   case attention
 
   public init(_ account: Subscriptions.Account, now: Date) {
-    let fresh = !account.stale && account.hasCapacity != nil && !account.renewalPassed(at: now)
-      && (account.remaining != nil || account.fiveHourRemaining != nil)
+    let fresh = Self.fresh(account, now: now)
     if !account.authenticated { self = .attention; return }
     if fresh, account.hasCapacity == false, account.remaining == 0 { self = .exhausted; return }
-    if account.cooldownSeconds > 0 { self = .blocked(until: Self.release(account, fresh: fresh, now: now)); return }
+    if account.cooldownSeconds > 0 { self = .blocked(until: SubscriptionMarks.Wait(account, now: now)?.until); return }
     if !fresh { self = .unmeasured; return }
     // The proxy's permission wins over a rounded percent: "0%" with capacity still serves.
     if account.hasCapacity == true { self = .ready; return }
-    self = .blocked(until: Self.release(account, fresh: fresh, now: now))
+    self = .blocked(until: SubscriptionMarks.Wait(account, now: now)?.until)
   }
 
-  /// When every known blocker ends. A refusal with no known blocker, or a blocker without an end, has no time:
-  /// the weekly renewal is not a release for an account the weekly window does not block.
-  static func release(_ account: Subscriptions.Account, fresh: Bool, now: Date) -> Date? {
-    var ends: [Date?] = []
-    if account.cooldownSeconds > 0 { ends.append(now.addingTimeInterval(account.cooldownSeconds)) }
-    if fresh, account.fiveHourRemaining == 0 { ends.append(Subscriptions.date(account.fiveHourResetAt)) }
-    guard !ends.isEmpty, !ends.contains(where: { $0 == nil }) else { return nil }
-    return ends.compactMap { $0 }.max().flatMap { $0 > now ? $0 : nil }
+  /// A measurement the strip can trust now: not stale, with the proxy's answer, no renewal passed since, and at
+  /// least one window reported.
+  static func fresh(_ account: Subscriptions.Account, now: Date) -> Bool {
+    !account.stale && account.hasCapacity != nil && !account.renewalPassed(at: now)
+      && (account.remaining != nil || account.fiveHourRemaining != nil)
   }
 
   public var title: String {
@@ -61,6 +57,74 @@ public struct SubscriptionMarks: Sendable {
     public let pinned: Bool
     /// What a ready account has left; nil for every other mark, which never shows a number.
     public let balance: Balance?
+    /// When a stopped or exhausted account is back, when the data says; nil for every other mark and for an
+    /// unknown time, which never shows a countdown.
+    public let wait: Wait?
+  }
+  /// When a stopped or exhausted account is back by the data the proxy reports: the end of the last of its known
+  /// blockers (the proxy's wait, the 5-hour window at zero, the weekly window at zero), never the first renewal
+  /// that would leave another one blocking. Nil when the refusal is unexplained, a blocker has no known end or the
+  /// time has already passed (the next reading confirms it). An estimate, not a promise: a limit the proxy does not
+  /// report (Max 5x reports no weekly window) can still hold the account.
+  public struct Wait: Sendable, Equatable {
+    public enum Cause: Sendable, Equatable { case proxy, fiveHour, weekly }
+    public let until: Date
+    /// Every known blocker, the one that ends last first.
+    public let causes: [Cause]
+    /// The weekly window is not reported, so it cannot be ruled out.
+    public let partial: Bool
+
+    init(until: Date, causes: [Cause], partial: Bool = false) {
+      self.until = until
+      self.causes = causes
+      self.partial = partial
+    }
+
+    init?(_ account: Subscriptions.Account, now: Date) {
+      let fresh = SubscriptionMark.fresh(account, now: now)
+      var blockers: [(cause: Cause, end: Date?)] = []
+      if account.cooldownSeconds > 0 { blockers.append((.proxy, now.addingTimeInterval(account.cooldownSeconds))) }
+      if fresh, account.fiveHourRemaining == 0 { blockers.append((.fiveHour, Subscriptions.date(account.fiveHourResetAt))) }
+      if fresh, account.hasCapacity == false, account.remaining == 0 {
+        blockers.append((.weekly, Subscriptions.date(account.resetAt)))
+      }
+      let ends = blockers.compactMap { blocker in blocker.end.map { (cause: blocker.cause, end: $0) } }
+      guard !ends.isEmpty, ends.count == blockers.count, let last = ends.map(\.end).max(), last > now else { return nil }
+      until = last
+      causes = ends.sorted { $0.end > $1.end }.map(\.cause)
+      partial = account.remaining == nil
+    }
+
+    /// The strip's countdown, rounded up so it never promises the account sooner: `35m`, `2h`, `2d`.
+    public func short(now: Date) -> String {
+      let seconds = max(1, until.timeIntervalSince(now))
+      let minutes = Int((seconds / 60).rounded(.up))
+      if minutes < 60 { return "\(minutes)m" }
+      let hours = Int((seconds / 3_600).rounded(.up))
+      if hours < 24 { return "\(hours)h" }
+      return "\(Int((seconds / 86_400).rounded(.up)))d"
+    }
+
+    /// `volta às 16:00, em 1 h 40 min (previsto pela janela de 5 horas e espera do proxy)`.
+    public func spoken(now: Date, calendar: Calendar = .current) -> String {
+      let total = max(1, Int((until.timeIntervalSince(now) / 60).rounded(.up)))
+      let days = total / 1_440
+      let hours = total % 1_440 / 60
+      let minutes = total % 60
+      let span = days > 0
+        ? "\(days) \(days == 1 ? "dia" : "dias")" + (hours > 0 ? " e \(hours) h" : "")
+        : [hours > 0 ? "\(hours) h" : nil, minutes > 0 ? "\(minutes) min" : nil].compactMap { $0 }.joined(separator: " ")
+      let names = causes.map { cause in
+        switch cause {
+        case .proxy: "espera do proxy"
+        case .fiveHour: "janela de 5 horas"
+        case .weekly: "renovação da semana"
+        }
+      }
+      let time = calendar.isDate(until, inSameDayAs: now) ? "às " : ""
+      return "volta \(time)\(SubscriptionFormat.moment(until, now: now, calendar: calendar)), em \(span) (previsto pela "
+        + names.joined(separator: " e ") + (partial ? "; semana não informada" : "") + ")"
+    }
   }
   /// The share left of the window that limits a ready account now: the smaller of its measured 5-hour and weekly
   /// windows, never a capacity and never comparable across plans. With one window reported, it is that one and
@@ -139,6 +203,9 @@ public struct SubscriptionMarks: Sendable {
   public func count(_ kind: Kind) -> Int { groups.reduce(0) { $0 + $1.count(kind) } }
   /// The earliest time a blocked account is back, and how many come back within that minute.
   public let release: Release?
+  /// The same over every account with a known wait, an exhausted one's weekly renewal included: the strip's counts
+  /// fallback says when the next accounts are back (`+1 em 35m`). The details keep `release` and renewals apart.
+  public let next: Release?
 
   public init(accounts: [Subscriptions.Account], pinned: String? = nil, now: Date) {
     let enabled = accounts.filter(\.enabled)
@@ -149,8 +216,10 @@ public struct SubscriptionMarks: Sendable {
       return Group(plan: plan, label: plan == nil ? "Outro" : Self.label(title), title: title,
         accounts: enabled.filter { $0.plan == plan }.map { account in
           let mark = SubscriptionMark(account, now: now)
+          // Only over a fresh measurement: with old windows, the proxy's wait ending does not say the account is back.
+          let stopped = (Kind(mark) == .blocked || Kind(mark) == .exhausted) && SubscriptionMark.fresh(account, now: now)
           return Account(id: account.id, name: account.name, mark: mark, pinned: account.id == pinned,
-            balance: mark == .ready ? Balance(account) : nil)
+            balance: mark == .ready ? Balance(account) : nil, wait: stopped ? Wait(account, now: now) : nil)
         })
     }
     let ordered = built.filter { $0.count(.unmeasured) < $0.accounts.count }
@@ -164,6 +233,8 @@ public struct SubscriptionMarks: Sendable {
     release = releases.min().map { first in
       Release(count: releases.filter { $0.timeIntervalSince(first) < 60 }.count, at: first)
     }
+    let waits = ordered.flatMap(\.accounts).compactMap(\.wait?.until)
+    next = waits.min().map { first in Release(count: waits.filter { $0.timeIntervalSince(first) < 60 }.count, at: first) }
   }
 
   static func runs(_ groups: [Group], order: [String]) -> [Group] {
@@ -222,6 +293,13 @@ public struct SubscriptionMarks: Sendable {
       .joined(separator: " · ")
   }
 
+  /// The strip's counts fallback, where no mark shows its wait: `14 prontas · +1 em 35m` (`+1 35m` when compact).
+  public func summary(now: Date, next: Bool, compact: Bool = false) -> String {
+    let base = summary(now: now, release: false)
+    guard next, let soon = self.next, total > 0 else { return base }
+    return base + " · +\(soon.count) " + (compact ? "" : "em ") + Wait(until: soon.at, causes: []).short(now: now)
+  }
+
   /// VoiceOver: every plan with its accounts by state, then the release; `balances` adds each ready account's
   /// balance and its window, in the strip's order.
   public func spoken(_ provider: String, now: Date, calendar: Calendar = .current, balances: Bool = false) -> String {
@@ -242,7 +320,12 @@ public struct SubscriptionMarks: Sendable {
     let release = releaseLabel(now: now, calendar: calendar).map { ". " + $0.replacingOccurrences(of: "+", with: "Mais ") + " volta" } ?? ""
     let left = runs.flatMap(\.accounts).compactMap { account in account.balance.map { account.name + " " + $0.spoken } }
     let tail = balances && !left.isEmpty ? ". Saldos: " + left.joined(separator: ", ") : ""
-    return "\(provider), \(ready) de \(total) assinaturas prontas agora. " + plans.joined(separator: ". ") + release + tail
+    let back = runs.flatMap(\.accounts).compactMap { account in
+      account.wait.map { account.name + " " + $0.spoken(now: now, calendar: calendar) }
+    }
+    let waits = balances && !back.isEmpty ? ". Prazos: " + back.joined(separator: "; ") : ""
+    return "\(provider), \(ready) de \(total) assinaturas prontas agora. " + plans.joined(separator: ". ") + release
+      + tail + waits
   }
 }
 

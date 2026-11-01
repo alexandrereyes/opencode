@@ -6,7 +6,7 @@ import OpenCodeKit
 /// resets with and without expiry, and automation on for Claude only. "Usar redefinição" and the automation
 /// switch change this in-memory state after a delay, so "Aplicando…" can be seen; nothing reaches a proxy.
 /// `-OpenCodeMacProxyScenario loading|error|empty` answers the list read with a request that never ends, a
-/// failure, or no accounts; `marks|many` answers the Sessões strip fixture (`SubscriptionMarksFixture`).
+/// failure, or no accounts; `marks|many|waits` answers the Sessões strip fixture (`SubscriptionMarksFixture`).
 actor MacFixtureProxy {
   private let scenario = MacFixture.value("-OpenCodeMacProxyScenario")
   private let now: Date
@@ -61,6 +61,7 @@ actor MacFixtureProxy {
       case "loading": try? await Task.sleep(for: .seconds(3_600)); return nil
       case "error": return nil
       case "marks", "many": return output(SubscriptionMarksFixture.snapshot(many: scenario == "many", now: now))
+      case "waits": return output(SubscriptionMarksFixture.waits(now: now))
       default: return output(snapshot)
       }
     case "setAutomation":

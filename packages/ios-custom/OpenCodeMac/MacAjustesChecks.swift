@@ -1780,9 +1780,9 @@ import SwiftUI
 
   // MARK: Cotas — the Sessões strip of subscription marks (rev. 2026-11-01)
 
-  /// `-OpenCodeMacProxyScenario marks`: every account of every plan in its group with the projection's mark, then the
-  /// production strip (`SessionQuotaMarks`) of that fixture, of that fixture with one account highlighted and of a
-  /// store with the `many` fixture, rendered
+  /// `-OpenCodeMacProxyScenario marks`: every account of every plan in its group with the projection's mark and wait,
+  /// then the production strip (`SessionQuotaMarks`) of that fixture, of that fixture with one account highlighted,
+  /// of a store with the `many` fixture and of one with the `waits` fixture ("Relógio + prazo"), rendered
   /// at the narrowest, default and widest Sessões column in both themes: never taller than the old ring row (38 pt) and
   /// nothing drawn against the right edge.
   private static func cotas(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String,
@@ -1790,35 +1790,39 @@ import SwiftUI
   {
     let quota = try require(runtime.store, "sessões").quota
     try await wait("cotas do fixture", timeout: 12) { (quota.marks(.anthropic)?.total ?? 0) > 0 ? true : nil }
-    // The strip's runs: each ready account's balance, larger first within its plan, then the other states.
-    func plans(_ marks: SubscriptionMarks?) -> String {
-      (marks?.runs ?? []).map { group in
+    // The strip's runs: each ready account's balance, larger first within its plan, then the other states with their
+    // own wait when the data gives one, `^` after the highlighted account.
+    func plans(_ store: SubscriptionStore, _ provider: SubscriptionProvider) -> String {
+      (store.marks(provider)?.runs ?? []).map { group in
         group.label + ":" + group.accounts.map { account in
-          if let balance = account.balance { return "\(balance.percent)" }
-          switch SubscriptionMarks.Kind(account.mark) {
-          case .ready: return "R"
-          case .blocked: return "B"
-          case .exhausted: return "E"
-          case .unmeasured: return "?"
-          case .attention: return "!"
-          }
+          let mark: String = {
+            if let balance = account.balance { return "\(balance.percent)" }
+            switch SubscriptionMarks.Kind(account.mark) {
+            case .ready: return "R"
+            case .blocked: return "B"
+            case .exhausted: return "E"
+            case .unmeasured: return "?"
+            case .attention: return "!"
+            }
+          }()
+          return mark + (account.wait?.short(now: store.now) ?? "") + (account.pinned ? "^" : "")
         }.joined(separator: ",")
       }.joined(separator: "|")
     }
-    let claude = plans(quota.marks(.anthropic))
-    let codex = plans(quota.marks(.codex))
+    let claude = plans(quota, .anthropic)
+    let codex = plans(quota, .codex)
     print("MacAjustes cotas: Claude \(claude) · Codex \(codex)")
-    guard claude == "5x:100,72,64,41,B|20x:E,E", codex == "Pro Max:64|5x:B,E|Free:?,?",
+    guard claude == "5x:100,72,64,41,B2h|20x:E3d,E3d", codex == "Pro Max:64|5x:B3h,E2d|Free:?,?",
       quota.marks(.anthropic)?.release?.count == 1, quota.marks(.codex)?.release?.count == 1 else {
       throw Failure(description: "marcas: Claude \(claude) · Codex \(codex)")
     }
-    let many = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(many: true),
+    let many = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(scenario: "many"),
       defaults: UserDefaults(suiteName: "br.com.alexandrem.opencode.mac.ajustes.cotas") ?? .standard)
     await many.refresh()
     // The same fixture with Iris (Codex, 64) and Atlas (Claude, 72) highlighted, one on each line: a dash under its
     // ring, which keeps its place in the order. Then the Sessões column itself with both, unhighlighted afterwards.
-    func highlight(_ store: SubscriptionStore) throws -> [String] {
-      for (provider, name) in [(SubscriptionProvider.codex, "Iris"), (.anthropic, "Atlas")]
+    func highlight(_ store: SubscriptionStore, claude name: String = "Atlas") throws -> [String] {
+      for (provider, name) in [(SubscriptionProvider.codex, "Iris"), (.anthropic, name)]
         where store.selected(provider)?.name != name {
         let account = try require(store.snapshot?.pool(provider).accounts.first { $0.name == name }, name)
         store.toggleSelection(account, provider: provider)
@@ -1828,13 +1832,27 @@ import SwiftUI
     }
     let suite = "br.com.alexandrem.opencode.mac.ajustes.cotas.destaque"
     UserDefaults.standard.removePersistentDomain(forName: suite)
-    let pinned = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(many: false),
+    let pinned = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(scenario: "marks"),
       defaults: UserDefaults(suiteName: suite) ?? .standard)
     await pinned.refresh()
     let highlighted = try highlight(pinned)
-    print("MacAjustes cotas destaque: \(plans(pinned.marks(.anthropic))) · \(highlighted)")
-    guard plans(pinned.marks(.anthropic)) == claude, plans(pinned.marks(.codex)) == codex,
+    print("MacAjustes cotas destaque: \(plans(pinned, .anthropic)) · \(highlighted)")
+    guard plans(pinned, .anthropic) == "5x:100,72^,64,41,B2h|20x:E3d,E3d",
+      plans(pinned, .codex) == "Pro Max:64^|5x:B3h,E2d|Free:?,?",
       highlighted == ["Iris", "Atlas"] else { throw Failure(description: "destaque: \(highlighted)") }
+    // "Relógio + prazo": 35m, 2h from the later of two blockers, an unexplained stop without a time, the week's 2d,
+    // login and Free; Iris and Faia (a wait mark) highlighted.
+    let waitsSuite = "br.com.alexandrem.opencode.mac.ajustes.cotas.prazos"
+    UserDefaults.standard.removePersistentDomain(forName: waitsSuite)
+    let waits = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(scenario: "waits"),
+      defaults: UserDefaults(suiteName: waitsSuite) ?? .standard)
+    await waits.refresh()
+    _ = try highlight(waits, claude: "Faia")
+    print("MacAjustes cotas prazos: Claude \(plans(waits, .anthropic)) · Codex \(plans(waits, .codex))")
+    guard plans(waits, .anthropic) == "5x:100,9,B35m,B2h^,B|20x:E2d",
+      plans(waits, .codex) == "Pro Max:78^|Plus:B2h|Pro Max:!|Free:?,?" else {
+      throw Failure(description: "prazos: \(plans(waits, .anthropic)) · \(plans(waits, .codex))")
+    }
     _ = try highlight(quota)
     try await Task.sleep(for: .milliseconds(600))
     shot("janela-destaque")
@@ -1844,7 +1862,7 @@ import SwiftUI
     try await Task.sleep(for: .milliseconds(800))
     shot("coluna")
     let other = AppTheme.load(theme.dark ? "openchamber-light" : "openchamber-dark")
-    for (name, source) in [("varias", quota), ("muitas", many), ("destaque", pinned)] {
+    for (name, source) in [("varias", quota), ("muitas", many), ("destaque", pinned), ("prazos", waits)] {
       for width in [272.0, 302.0, 452.0] {
         for variant in [theme, other] {
           // 2 pt below the strip for the last line's dash, which falls into the margin under it.
@@ -1878,10 +1896,13 @@ import SwiftUI
     }
   }
 
-  /// The `marks` or `many` fixture for another store, read once; actions never reach a proxy.
+  /// The `marks`, `many` or `waits` fixture for another store, read once; actions never reach a proxy.
   private struct StripClient: SubscriptionClient {
-    let many: Bool
-    func subscriptions() async throws -> Subscriptions { SubscriptionMarksFixture.snapshot(many: many, now: .now) }
+    let scenario: String
+    func subscriptions() async throws -> Subscriptions {
+      scenario == "waits" ? SubscriptionMarksFixture.waits(now: .now)
+        : SubscriptionMarksFixture.snapshot(many: scenario == "many", now: .now)
+    }
     func setSubscriptionAutomation(_ provider: SubscriptionProvider, enabled: Bool) async throws -> Subscriptions.Automation {
       throw SubscriptionActionFailure.unsupported
     }

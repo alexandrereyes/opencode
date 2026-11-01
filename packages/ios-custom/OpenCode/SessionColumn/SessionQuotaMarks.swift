@@ -21,7 +21,6 @@ struct SessionQuotaMarks: View {
         SessionQuotaRow(spacing: 10) { providers(.marks) }
         // One line each: 1 pt apart keeps two 16 pt rings within today's 33 pt.
         VStack(alignment: .leading, spacing: 1) { providers(.line) }
-        VStack(alignment: .leading, spacing: 1) { providers(.lineReady) }
         SessionQuotaRow(spacing: 10) { providers(.adaptive) }
       }
     }
@@ -44,9 +43,9 @@ struct SessionQuotaMarks: View {
 }
 
 /// The providers side by side, each with room for what it shows: as even as the row allows when everything fits,
-/// each one's narrowest form plus a share of the rest in proportion to what it needs beyond that when it does not,
-/// so a provider with longer plan names keeps its marks while the other never overflows. Each provider then fits its
-/// own content to that width.
+/// as even as possible between each one's narrowest form and what it needs when it does not, so a provider with
+/// longer plan names keeps its marks while the other never overflows. Each provider then fits its own content to
+/// that width.
 private struct SessionQuotaRow: Layout {
   let spacing: CGFloat
 
@@ -81,20 +80,24 @@ private struct SessionQuotaRow: Layout {
       }
       return ideal.map { max($0, level) }
     }
-    // Each keeps its last fallback (what it shows at no width); the rest goes by what each needs beyond it, so one
-    // provider's long row of rings never squeezes the other's counts under its neighbor.
+    // As even as the row allows, never below a provider's last fallback (what it shows at no width) nor above what
+    // it needs: one provider's long row of rings never squeezes the other's counts under its neighbor, and both
+    // keep room for when their next accounts are back.
     let least = subviews.map { $0.sizeThatFits(.init(width: 0, height: nil)).width }
-    let spare = max(0, available - least.reduce(0, +))
-    let more = zip(ideal, least).map { max(0, $0 - $1) }
-    return zip(least, more).map { $0 + spare * $1 / max(more.reduce(0, +), 1) }
+    func widths(_ level: CGFloat) -> [CGFloat] { zip(least, ideal).map { min(max($0, $1), max($0, level)) } }
+    let level = (0..<30).reduce((low: CGFloat(0), high: ideal.max() ?? 0)) { range, _ in
+      let middle = (range.low + range.high) / 2
+      return widths(middle).reduce(0, +) > available ? (range.low, middle) : (middle, range.high)
+    }.low
+    return widths(level)
   }
 }
 
 private struct SessionQuotaProvider: View {
   /// `marks`: every mark, on two lines, never degraded (the strip moves on when it does not fit). `line`: the same
-  /// on one line, the summary after the marks; `lineReady` leaves its release out. `adaptive`: two lines that fall
-  /// back to counts within their width.
-  enum Style { case marks, line, lineReady, adaptive }
+  /// on one line, the summary after the marks. Both leave the release out: each stopped mark shows its own wait.
+  /// `adaptive`: two lines that fall back to counts within their width, which then say when the next ones are back.
+  enum Style { case marks, line, adaptive }
   @Environment(\.appTheme) private var theme
   #if os(iOS)
   // The ready ring (16 pt) and the other states' symbols (12 pt) keep the approved mockup's proportion.
@@ -115,33 +118,29 @@ private struct SessionQuotaProvider: View {
   var body: some View {
     HStack(alignment: .center, spacing: 8) {
       ProxyProviderIcon(provider: provider).frame(width: icon, height: icon)
-      if style == .line || style == .lineReady {
+      if style == .line {
         HStack(spacing: 7) {
           if let marks, marks.total > 0 {
             plans(marks.runs) { group in each(group) }
-            summary("· " + marks.summary(now: now, compact: true, release: style == .line))
+            summary("· " + marks.summary(now: now, release: false))
           } else {
             summary(line)
           }
         }
         .monospacedDigit()
       } else {
-        VStack(alignment: .leading, spacing: 3) {
+        Group {
           if let marks, marks.total > 0 {
             if style == .marks {
-              plans(marks.runs) { group in each(group) }
-              summary(marks.summary(now: now))
+              lines(plans(marks.runs) { group in each(group) }, marks.summary(now: now, release: false))
             } else {
+              // The marks first, without the release; then counts, whose summary says when the next ones are back
+              // (`+1 em 35m`, then `+1 35m`): plans give way to keep it before it goes.
               ViewThatFits(in: .horizontal) {
-                plans(marks.runs) { group in each(group) }
-                plans(marks.groups) { group in counts(group) }
-                plans(marks.groups) { group in ready(group) }
-                states(marks)
-              }
-              ViewThatFits(in: .horizontal) {
-                summary(marks.summary(now: now))
-                summary(marks.summary(now: now, compact: true))
-                summary(marks.summary(now: now, release: false))
+                lines(plans(marks.runs) { group in each(group) }, marks.summary(now: now, release: false))
+                ForEach(Self.fallbacks, id: \.self) { fallback in
+                  lines(top(fallback.top, marks), marks.summary(now: now, next: fallback.next, compact: fallback.compact))
+                }
               }
             }
           } else {
@@ -162,6 +161,28 @@ private struct SessionQuotaProvider: View {
     guard let status else { return "consultando…" }
     guard status == "ok", let marks else { return status == "unconfigured" ? "sem LLM proxy" : "indisponível" }
     return marks.summary(now: now)
+  }
+
+  /// The counts fallbacks in order: by state per plan, the ready share per plan, the provider's states; each with
+  /// the next return, then its compact form, then without it.
+  private struct Fallback: Hashable { let top: Int; let next: Bool; let compact: Bool }
+  private static let fallbacks = [(true, false), (true, true), (false, false)].flatMap { next, compact in
+    (0..<3).map { Fallback(top: $0, next: next, compact: compact) }
+  }
+
+  @ViewBuilder private func top(_ kind: Int, _ marks: SubscriptionMarks) -> some View {
+    switch kind {
+    case 0: plans(marks.groups) { group in counts(group) }
+    case 1: plans(marks.groups) { group in ready(group) }
+    default: states(marks)
+    }
+  }
+
+  private func lines<Top: View>(_ top: Top, _ text: String) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      top
+      summary(text)
+    }
   }
 
   /// Every run or plan with its short plan label; one with no measured account shows only its `?` count.
@@ -192,6 +213,8 @@ private struct SessionQuotaProvider: View {
           Group {
             if let balance = account.balance {
               SubscriptionRingMark(balance: balance, size: ring)
+            } else if let wait = account.wait {
+              SubscriptionWaitMark(kind: .init(account.mark), text: wait.short(now: now), size: glyph)
             } else {
               SubscriptionMarkGlyph(kind: .init(account.mark), size: glyph)
             }
@@ -203,23 +226,26 @@ private struct SessionQuotaProvider: View {
               Capsule().fill(theme.color(.textStrong)).frame(width: ring * 0.4, height: 1).offset(y: 1)
             }
           }
-          .help("\(account.name) · \(group.title) · \(account.balance?.spoken ?? Self.state(account.mark))")
+          .help("\(account.name) · \(group.title) · \(state(account))")
         }
       }
     }
   }
 
   private func counts(_ group: SubscriptionMarks.Group) -> some View {
-    tally { group.count($0) }
+    tally(group.accounts)
   }
 
-  /// Glyph and count of each state present.
-  private func tally(_ count: @escaping (SubscriptionMarks.Kind) -> Int) -> some View {
-    HStack(spacing: 4) {
-      ForEach(SubscriptionMarks.Kind.allCases.filter { count($0) > 0 }, id: \.self) { kind in
+  /// Glyph and count of each state present; exhausted weeks show the renewal arrow when every one has a known
+  /// renewal, the crossed circle otherwise.
+  private func tally(_ accounts: [SubscriptionMarks.Account]) -> some View {
+    let exhausted = accounts.filter { SubscriptionMarks.Kind($0.mark) == .exhausted }
+    return HStack(spacing: 4) {
+      ForEach(SubscriptionMarks.Kind.allCases.filter { kind in accounts.contains { SubscriptionMarks.Kind($0.mark) == kind } }, id: \.self) { kind in
         HStack(spacing: 1) {
-          SubscriptionMarkGlyph(kind: kind, size: glyph)
-          Text("\(count(kind))").appFont(.footnote).foregroundStyle(theme.color(.text))
+          SubscriptionMarkGlyph(kind: kind, renewing: kind == .exhausted && exhausted.allSatisfy { $0.wait != nil }, size: glyph)
+          Text("\(accounts.filter { SubscriptionMarks.Kind($0.mark) == kind }.count)").appFont(.footnote)
+            .foregroundStyle(theme.color(.text))
         }
       }
     }
@@ -228,7 +254,7 @@ private struct SessionQuotaProvider: View {
   /// The narrowest strip: the provider's accounts by state, without the plans (they stay in VoiceOver, the
   /// tooltip and the details).
   private func states(_ marks: SubscriptionMarks) -> some View {
-    tally { marks.count($0) }.lineLimit(1).fixedSize()
+    tally(marks.groups.flatMap(\.accounts)).lineLimit(1).fixedSize()
   }
 
   private func summary(_ text: String) -> some View {
@@ -240,28 +266,32 @@ private struct SessionQuotaProvider: View {
       .appFont(.footnote).foregroundStyle(theme.color(.textSecondary))
   }
 
-  static func state(_ mark: SubscriptionMark) -> String {
-    guard case .blocked(let until?) = mark else { return mark.title }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "pt_BR")
-    formatter.dateFormat = Calendar.current.isDateInToday(until) ? "HH:mm" : "dd/MM HH:mm"
-    return "parada até " + formatter.string(from: until)
+  /// The tooltip's state: the balance and its window, the wait with its time and cause, or the state alone.
+  private func state(_ account: SubscriptionMarks.Account) -> String {
+    if let balance = account.balance { return balance.spoken }
+    if let wait = account.wait { return account.mark.title + ", " + wait.spoken(now: now) }
+    // The proxy's wait over windows read too long ago: its end does not say the account is back.
+    guard case .blocked(let until?) = account.mark else { return account.mark.title }
+    return "parada até " + SubscriptionFormat.moment(until, now: now) + " (medição antiga, volta não confirmada)"
   }
 
   #if DEBUG
-  /// What the UI tests read: the strip's runs with each account's balance or state, in order
-  /// (`5x:100,72,64,41,B|20x:E,E`).
+  /// What the UI tests read: the strip's runs with each account's balance, state and wait, in order, `^` after the
+  /// highlighted one (`5x:100,72^,64,41,B2h|20x:E3d,E3d`).
   var fixture: String {
     (marks?.runs ?? []).map { group in
       group.label + ":" + group.accounts.map { account in
-        if let balance = account.balance { return "\(balance.percent)" }
-        switch SubscriptionMarks.Kind(account.mark) {
-        case .ready: return "R"
-        case .blocked: return "B"
-        case .exhausted: return "E"
-        case .unmeasured: return "?"
-        case .attention: return "!"
-        }
+        let mark: String = {
+          if let balance = account.balance { return "\(balance.percent)" }
+          switch SubscriptionMarks.Kind(account.mark) {
+          case .ready: return "R"
+          case .blocked: return "B"
+          case .exhausted: return "E"
+          case .unmeasured: return "?"
+          case .attention: return "!"
+          }
+        }()
+        return mark + (account.wait?.short(now: now) ?? "") + (account.pinned ? "^" : "")
       }.joined(separator: ",")
     }.joined(separator: "|")
   }
@@ -296,6 +326,31 @@ struct SubscriptionRingMark: View {
   }
 }
 
+/// A stopped or exhausted subscription whose return the data gives: the state's symbol (a clock for a wait, the
+/// renewal arrow for an exhausted week) and how long is left, rounded up (`35m`, `2h`, `2d`). An estimate: the
+/// tooltip, VoiceOver and the details carry the time and its cause.
+struct SubscriptionWaitMark: View {
+  @Environment(\.appTheme) private var theme
+  let kind: SubscriptionMarks.Kind
+  let text: String
+  let size: Double
+
+  var body: some View {
+    HStack(spacing: 1.5) {
+      SubscriptionMarkGlyph(kind: kind, renewing: kind == .exhausted, size: size)
+      Text(text)
+        .font(.system(size: size * 0.84, weight: .bold).width(.condensed))
+        .monospacedDigit()
+        .lineLimit(1)
+        .fixedSize()
+        .foregroundStyle(theme.color(kind == .exhausted ? .error : .warning))
+    }
+    // Apart from the next mark, so a clock that follows never reads as part of this time.
+    .padding(.trailing, 2)
+    .accessibilityHidden(true)
+  }
+}
+
 /// One subscription's state, readable without color: a filled dot (ready), a clock (stopped for a while), a
 /// crossed circle (week exhausted), a question mark (no measurement) and a warning sign (needs login). The account
 /// shown in the summary ("Mostrar no resumo") gets a ring around its mark.
@@ -303,6 +358,8 @@ struct SubscriptionMarkGlyph: View {
   @Environment(\.appTheme) private var theme
   let kind: SubscriptionMarks.Kind
   var pinned = false
+  /// An exhausted week with a known renewal: the renewal arrow instead of the crossed circle.
+  var renewing = false
   let size: Double
 
   var body: some View {
@@ -320,7 +377,7 @@ struct SubscriptionMarkGlyph: View {
     switch kind {
     case .ready: "circle.fill"
     case .blocked: "clock.fill"
-    case .exhausted: "nosign"
+    case .exhausted: renewing ? "arrow.clockwise" : "nosign"
     case .unmeasured: "questionmark.circle"
     case .attention: "exclamationmark.triangle.fill"
     }

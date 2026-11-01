@@ -20,6 +20,7 @@ private actor SubscriptionTestClient: SubscriptionClient {
   init(scenario: String) { self.scenario = scenario }
   func subscriptions() async throws -> Subscriptions {
     if scenario == "marks" || scenario == "many" { return SubscriptionMarksFixture.snapshot(many: scenario == "many", now: .now) }
+    if scenario == "waits" { return SubscriptionMarksFixture.waits(now: .now) }
     if scenario == "unavailable" { return .unavailable }
     if scenario == "unconfigured" { return .init(status: "unconfigured") }
     let now = Date.now
@@ -97,6 +98,40 @@ enum SubscriptionMarksFixture {
       codex += [stale, login, account("plus", plan: "plus", weekly: 33, fiveHour: 60)]
         + (1...6).map { account("free\($0)", plan: "free", weekly: nil, fiveHour: nil) }
     }
+    return Subscriptions(status: "ok", accounts: codex, automation: .init(enabled: false),
+      anthropic: .init(status: "ok", accounts: claude, automation: .init(enabled: false)))
+  }
+
+  /// `waits`, the approved "Relógio + prazo" mockup: ready rings, then each stopped or exhausted account's own wait.
+  /// Codex: Iris ready (78), Kauri whose 5-hour window is back in 50 min while the proxy waits 2 h (so 2h), Lume
+  /// needing login and two Free accounts. Claude: Brisa (100) and Duna (9) ready, Eco in the proxy's 35-minute wait,
+  /// Faia's 5-hour window back in 1 h 40 (2h, not the window's 5 hours), Gávea refused for no known reason, and
+  /// Farol's exhausted week renewing in 1 day and 22 hours (2d).
+  static func waits(now: Date) -> Subscriptions {
+    func at(_ offset: Double) -> String { ISO8601DateFormatter().string(from: now.addingTimeInterval(offset)) }
+    func account(_ id: String, plan: String, weekly: Double?, fiveHour: Double?, capacity: Bool? = true,
+                 fiveHourReset: Double = 3 * 3_600, cooldown: Double = 0, weeklyReset: Double = 4 * 86_400,
+                 authenticated: Bool = true) -> Subscriptions.Account {
+      Subscriptions.Account(id: id, name: id.capitalized, authenticated: authenticated, plan: plan, remaining: weekly,
+        resetAt: weekly == nil ? nil : at(weeklyReset), fiveHourRemaining: fiveHour,
+        fiveHourResetAt: fiveHour == nil ? nil : at(fiveHourReset), observedAt: at(-120), hasCapacity: capacity,
+        cooldownSeconds: cooldown)
+    }
+    let codex = [
+      account("iris", plan: "promax", weekly: 81, fiveHour: 78),
+      account("kauri", plan: "plus", weekly: 60, fiveHour: 0, capacity: false, fiveHourReset: 3_000, cooldown: 7_200),
+      account("lume", plan: "promax", weekly: 70, fiveHour: 70, authenticated: false),
+      account("mira", plan: "free", weekly: nil, fiveHour: nil),
+      account("nara", plan: "free", weekly: nil, fiveHour: nil),
+    ]
+    let claude = [
+      account("brisa", plan: "max5x", weekly: nil, fiveHour: 100),
+      account("duna", plan: "max5x", weekly: 9, fiveHour: 70),
+      account("eco", plan: "max5x", weekly: 60, fiveHour: 40, capacity: false, cooldown: 2_100),
+      account("faia", plan: "max5x", weekly: 60, fiveHour: 0, capacity: false, fiveHourReset: 6_000),
+      account("gavea", plan: "max5x", weekly: 60, fiveHour: 30, capacity: false),
+      account("farol", plan: "max20x", weekly: 0, fiveHour: nil, capacity: false, weeklyReset: 46 * 3_600),
+    ]
     return Subscriptions(status: "ok", accounts: codex, automation: .init(enabled: false),
       anthropic: .init(status: "ok", accounts: claude, automation: .init(enabled: false)))
   }
