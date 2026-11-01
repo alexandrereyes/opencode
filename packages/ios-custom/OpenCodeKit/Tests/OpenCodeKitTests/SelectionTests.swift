@@ -239,6 +239,9 @@ private let selectionModel = ModelReference(
   #expect(SideQuestionRequest.slashQuestion(.init(text: "/btw\u{00a0}ação")) == "ação")
   #expect(SideQuestionRequest.slashQuestion(.init(text: "/btwhatever")) == nil)
   #expect(SideQuestionRequest.slashQuestion(.init(text: "texto /btw")) == nil)
+  #expect(SideQuestionRequest.slashQuestion(.init(text: "#btw Qual?")) == "Qual?")
+  #expect(SideQuestionRequest.slashQuestion(.init(text: "#btwhatever")) == nil)
+  #expect(SideQuestionRequest.slashQuestion(.init(text: "texto #btw")) == nil)
 }
 
 @Test func sideQuestionHTTPIsTransientGenerateOnly() async throws {

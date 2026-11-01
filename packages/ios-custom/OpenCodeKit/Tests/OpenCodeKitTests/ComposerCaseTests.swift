@@ -23,8 +23,8 @@ private let notes = ComposerApp(
     return source.suggestions(trigger, agents: agents, apps: apps).map(\.token.id)
   }
   for query in ["$commit", "$Commit", "$COMMIT"] { #expect(try ids(query) == ["commit", "recommit"]) }
-  for query in ["#commit", "#COMMIT", "#Commit", "#CPP"] { #expect(try ids(query) == ["push"]) }
-  for query in ["/commit", "/COMMIT", "/Commit"] { #expect(try ids(query).first == "commit") }
+  for query in ["/commit", "/COMMIT", "/Commit", "/CPP"] { #expect(try ids(query) == ["push"]) }
+  for query in ["#commit", "#COMMIT", "#Commit"] { #expect(try ids(query).first == "commit") }
   for query in ["@saf", "@SAF", "@Saf"] { #expect(try ids(query, apps: [safari, notes]) == [safari.token.id]) }
   let agents = try JSONDecoder().decode(
     [AgentInfo].self, from: Data(#"[{"id":"general","name":"general","mode":"subagent"}]"#.utf8))

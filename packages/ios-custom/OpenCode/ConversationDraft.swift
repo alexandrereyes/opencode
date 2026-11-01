@@ -327,7 +327,7 @@ extension ComposerTokenKind {
     }()
     if trigger != next { trigger = next }
     // Esc closes the panel only for the word it was open on. Once that word is gone (erased, sent), the same
-    // trigger typed again opens it: a `/` dismissed once at the start used to stay closed for good.
+    // trigger typed again opens it: a `#` dismissed once at the start used to stay closed for good.
     if let dismissed = dismissedTrigger, focused, selection.length == 0, input?.markedTextRange == nil,
       ComposerTrigger.detect(in: CFAttributedStringGetString(editorText) as NSString, cursor: selection.location)
         .map({ $0.character != dismissed.character || $0.range.location != dismissed.range.location }) ?? true

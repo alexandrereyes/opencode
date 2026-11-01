@@ -22,7 +22,7 @@ struct SnippetEditorContext {
     self.project = project.flatMap { id in id != "global" && projects.contains { $0.id == id } ? id : nil }
   }
 
-  /// The `#` query becomes the name; a message's or selection's text the content, named from its first words.
+  /// The `/` query becomes the name; a message's or selection's text the content, named from its first words.
   @MainActor func route(_ launch: SnippetEditorLaunch) -> SnippetEditorRoute {
     let snippet = launch.content.isEmpty
       ? Snippet(name: launch.name, project: project)

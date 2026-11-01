@@ -414,13 +414,13 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   capsule as the compact `MCP · N/M` pill, a flexible space and a round button:
   microphone when the field is empty (WhatsApp style); with text, send plus a compact microphone at its left
   ([Microphone beside Send](#microphone-beside-send--25-october)). The agent (`build ⌄`) opens the line below the card.
-- **Triggers:** `@` context (sessions, apps, agents, references), `&` files, `/` commands, `$` skills, and `#`
+- **Triggers:** `@` context (sessions, apps, agents, references), `&` files, `#` commands, `$` skills, and `/`
   snippets open a suggestion panel above the composer; the chosen item becomes a colored token in the field. Return
-  picks the panel's first (highlighted) item (see [Quote comment composer](#quote-comment-composer--24-october) and
-  [Files on `&`](#files-on---28-october)).
+  picks the panel's first (highlighted) item (see [Quote comment composer](#quote-comment-composer--24-october),
+  [Files on `&`](#files-on---28-october) and [`/` snippets, `#` commands](#-snippets--commands--1-november)).
 - **Selection:** selecting text in a response shows the native edit menu with `Copiar`, `Comentar`, and `Pergunta
 paralela`. A comment attaches the quoted passage above the composer (`Citações · 1`) and is sent with the message.
-  The side question (`/btw`) opens in a sheet that is not saved to the conversation.
+  The side question (`#btw`) opens in a sheet that is not saved to the conversation.
   Consecutive paragraphs, headings, list items, quotations and rules of a completed response are one
   `UITextView` (`MarkdownProse`), so a selection, copy (Markdown paragraphs, one list item per line) or comment
   spans them; spacing, nesting and quotation levels are paragraph attributes, and borders and rules are drawn by the
@@ -600,10 +600,10 @@ marks retained after relaunch. No physical device, production mutation or new ba
 **Alexandre, 24/10: o comentário usa o mesmo compositor.** The **Comentário** sheet hosts the message composer's own
 `ComposerEditor`, configured by `ComposerComment` (placeholder, the message draft's other attachment bytes for the
 shared 25 MiB limit, and the commit action), instead of a separate text field. It keeps the same card, `ComposerTextView`
-(label **Comentário**, identifier `comment-composer`), `@`/`&`/`$`/`#` suggestions and tokens, focus, dictation (hold, lock,
+(label **Comentário**, identifier `comment-composer`), `@`/`&`/`$`/`/` suggestions and tokens, focus, dictation (hold, lock,
 pending download; a finished transcription refocuses the comment) and the **+** menu with **Fotos** and **Arquivos**.
 It omits the model/effort, MCP and agent selectors (they belong to the message, as on the web, whose comment editor has
-none), `/` commands (they only run at the start of the message itself; the web's comment editor has no commands either)
+none), `#` commands (they only run at the start of the message itself; the web's comment editor has no commands either)
 and **Expandir compositor** (the sheet already rises to full height with the keyboard; a fullscreen cover over a sheet
 would add a second presentation for no extra room). The round action shows a checkmark, **Concluir comentário**
 (`comment-done`), when there is content; Shift+Return does the same. **Concluir** in the bar stays the only commit and
@@ -708,6 +708,32 @@ against an isolated sandbox: `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_HOME`, `
 `<home>/repos/app-mentions`, connects the real `codex-computer-use` there (only `list_apps` runs; no app is
 controlled and nothing is sent), restores the MCP state and deletes the Session.
 
+### `/` snippets, `#` commands — 1 November
+
+**Alexandre, 01/11:** the native apps swapped the two triggers: `/` opens snippets (it was `#`) and `#` opens
+commands (it was `/`), because snippets are used more and `/` takes fewer taps on the iPhone keyboard. The glyphs live
+in `ComposerTrigger.command` and `ComposerTrigger.snippet` (OpenCodeKit), used by detection, both panels, their tokens,
+Nova sessão's typed command, the Mac's `MacComposerFeatures`, the snippet screens (`/name`), the empty-state help and
+the `slash.circle` icon of Salvar como snippet and the Snippets tab. Only the typed glyph changed: a command token
+still dispatches by its `id` (`ComposerDispatch`) and a snippet token still expands to its `value`, so the server, its
+endpoints, the snippet catalog (names, aliases, content) and the web and TUI (`/` commands, `#` snippets there) are
+untouched.
+
+- **`#`** opens commands only at the start of the message, as `/` did; elsewhere `#` stays prose (Markdown headings
+  need a space after it, which closes the panel). Fields without commands keep none: the comment composer offers
+  `@`, `&`, `$` and `/`.
+- **`/`** opens snippets wherever a word starts, but only while the query could be a snippet name (letters, digits,
+  `-`, `_`, the plugin's rule): paths and URLs (`/tmp/x`, `/Users/a.txt`, `https://…`) close it at their second `/`,
+  `.` or `:`, so Return keeps its normal meaning there. A bare `/palavra` at the end of a line still opens it, as
+  `#palavra` did before.
+- **Drafts** saved earlier keep their `#name` snippet and `/name` command tokens: the token's kind decides, so they
+  expand and run as before (`earlierTriggerTokensKeepWorkingByKind`). Slash skills appear in the `#` panel as `#name`.
+- **Side question:** `#btw <pergunta>` sends it, like picking `#btw`; a typed `/btw <pergunta>` (the web's, and drafts
+  written before) still does. Older sections of this README write commands as `/name`; in the apps they are `#name`.
+
+Verification: `swift test` (`ComposerTests`, `ComposerCaseTests`), `script/test-mac-ajustes.sh snippets` and, on the
+iPhone sandbox, `SnippetsUITests/testConversationShortcutsAndLiveHash` and `ComposerCaseUITests`.
+
 ### Case-insensitive suggestions — 24 October
 
 Every trigger ignores case. `$`, `#`, `/`, agents, references and apps rank locally with case- and
@@ -718,8 +744,8 @@ results are merged by recency; accents are still matched as typed there ("sessao
 composer does the same in `composer/session-search.ts`.
 
 After `build-for-testing`, `script/test-composer-case.py` (same environment variables as `test-app-mentions.py`)
-creates a fake repository, five disposable Sessions and one snippet, runs `ComposerCaseUITests` (`&`, `@`, `$`, `#`,
-`/` in several cases, then Return on `#COMMIT`) and removes them.
+creates a fake repository, five disposable Sessions and one snippet, runs `ComposerCaseUITests` (`&`, `@`, `$`, `/`,
+`#` in several cases, then Return on `/COMMIT`) and removes them.
 
 ### Session mentions — 29 October
 
@@ -1545,7 +1571,7 @@ elsewhere; the offline dictation fixture now accepts any isolated loopback sandb
 
 To make room, the agent (`build ⌄`, `agent-picker`; `child-agent` text for children and the master) left the control
 row for the line below the card (`ComposerFooter`): before the usage in a conversation, alone in Nova sessão, the
-empty master composer and the fullscreen composer. Tapping it (or `/agent`) opens the same sheet, now presented from
+empty master composer and the fullscreen composer. Tapping it (or `#agent`) opens the same sheet, now presented from
 `ConversationDraft.choosingAgent`. The comment sheet has no agent, as before. When the row runs out of width the model
 label shrinks to 75% and then truncates; `+`, the MCP pill and both round buttons keep their size (iPhone SE 375 pt
 shows `Opus 5.5 · xhi…` with text). Accessibility sizes keep the row's horizontal scroll, and in the footer the usage
@@ -2208,21 +2234,21 @@ in OpenCodeKit (`Snippets.swift`: `Snippet`, `SnippetRules`, `SnippetCatalog`, `
 `OpenCode/Snippets/`.
 
 - **Entry:** Você ▸ **Composer** ▸ **Snippets** with the catalog's count (`settings-snippets`). `SessionStore.snippets`
-  is one `SnippetCatalog` per server, shared with every composer's `#`; it reloads on `rpc.custom.snippets.updated`
+  is one `SnippetCatalog` per server, shared with every composer's `/`; it reloads on `rpc.custom.snippets.updated`
   and after a reconnection once loaded.
 - **List:** search (name, aliases and description, folded), chips **Todos**, **Globais** and one per project that has
-  snippets (with the project's avatar), sections Globais → projects by name → **Projeto removido**. Rows show `#name`
+  snippets (with the project's avatar), sections Globais → projects by name → **Projeto removido**. Rows show `/name`
   in the snippet token color, the description, the aliases and the **substitui o global** badge
   (`SnippetRules.overridden`). Tap edits; swipe (and the long press) offers **Duplicar**, which opens the copy
   (`revisar-copia`, aliases dropped) in the editor so saving confirms it, and **Apagar**, always confirmed. While
   filtering, a footer counts `N de M snippets`. An empty catalog shows **Nenhum snippet ainda** with **Novo snippet**.
-- **Editor** (full screen from the list, a sheet over a conversation): Cancelar and Salvar; **Gatilho** with the `#`
+- **Editor** (full screen from the list, a sheet over a conversation): Cancelar and Salvar; **Gatilho** with the `/`
   and the live result of `SnippetRules.issues` (format, name or alias taken in the scope: red border and message, or
   `Disponível em opencode2 · substitui o global`); Descrição; Conteúdo (multi-line, plain text) with a token preview;
   Atalhos as removable chips with a validated **+**; **Escopo** (Global or a project, `SnippetScopePicker`); and
   **Apagar snippet** when editing. Salvar is enabled only without issues and, when editing, with a change; a refusal
   from the server (`SnippetSaveError`) shows under its field. A swipe down never discards typed work.
-- **Shortcuts:** the `#` panel's shared footer (`ComposerSnippetActions`): **Novo snippet…** (the query becomes the
+- **Shortcuts:** the `/` panel's shared footer (`ComposerSnippetActions`): **Novo snippet…** (the query becomes the
   name) and **Gerenciar snippets…** (Você ▸ Snippets in a sheet over the conversation, on its project's chip, like
   the Mac's); and **Salvar como snippet** in a sent message's long-press menu (`UserMessageSnippetAction`, after
   Redefinir para este ponto) and in the composer selection's edit menu, right after Cortar and Copiar (in Nova sessão
@@ -2230,8 +2256,8 @@ in OpenCodeKit (`Snippets.swift`: `Snippet`, `SnippetRules`, `SnippetCatalog`, `
   `ComposerEditor` like the side question), already in the conversation's project (`SnippetEditorContext`; chats,
   project `global`, and unknown projects start global), with the text and a name from its first words
   (`SnippetLibrary.draft`). The composer's text stays as it was; from the composer, it regains focus after the sheet,
-  where `#` already lists the new snippet.
-- **Live `#`:** `ComposerSuggestions` reloads an open `#` panel when `SnippetCatalog.revision` changes, so a snippet
+  where `/` already lists the new snippet.
+- **Live `/`:** `ComposerSuggestions` reloads an open `/` panel when `SnippetCatalog.revision` changes, so a snippet
   saved here, in Você or by another client shows without reopening the conversation.
 - **Later:** ordering by use, variables and mentions inside the content.
 
@@ -2384,8 +2410,8 @@ has no selected projects, the empty state (otherwise it skips).
   `OpenCodeUITests/NewSessionModelDefaultTests` chooses Luna 6 · low in Chats, creates the chat (one tiny send), finds
   it again on the next Nova sessão, checks that an inherited menu Nova sessão (second send) keeps the default, and
   that missing models/efforts fall back (no send). It needs Chats and `llm-proxy` Luna/Astra in an isolated sandbox
-  and restores the saved default. `/compact` and `/btw` require an existing session and are disabled here;
-  known backend slash commands use the command endpoint, including when typed without choosing a suggestion.
+  and restores the saved default. `#compact` and `#btw` require an existing session and are disabled here;
+  known backend commands use the command endpoint, including when typed (`#name`) without choosing a suggestion.
 - **Send:** generate the Session ID on the client → resolve/create the worktree → await live MCP mutations and apply/
   verify explicit destination intents → create Session with agent/model/Location → serialize attachments/tokens with
   the existing wave-3 encoder and submit prompt (or backend command). Progress uses the shared send button. Success
@@ -3078,7 +3104,7 @@ The approved palette C, project rail C and subagent banner A + tree C are implem
 general-polish and ⌘K fixes. Their contract and reference images are `.agent-artifacts/mac-app/ESCOLHAS.md` and
 `escolhas/` in the `mac-escolhas` worktree.
 
-- **Model palette** (`OpenCodeMac/MacModelPalette.swift`): the composer capsule, `/model` (including Nova sessão)
+- **Model palette** (`OpenCodeMac/MacModelPalette.swift`): the composer capsule, `#model` (including Nova sessão)
   and **⌥⌘M** open a centered, dark-material AppKit child panel with a dimmed background. ⇧⌘M keeps its existing
   Sessão mestra action. ↑↓ select; ←→ choose supported effort; Return applies; ⌘Return applies and writes the
   existing `model.default` preference through `SessionStore.rememberNewSessionModel`; Esc or outside click closes
@@ -3271,12 +3297,12 @@ File names open Arquivos at their folder. Search (⌘F, or the conversation's `�
 
 **Composer.** `ConversationDraft` (persistent draft, attachments, quotes, the queued prompt being edited) on
 `ComposerInputView`, an `NSTextView` with the iPhone's atomic tokens (`ComposerTokenAttachment` drawn with AppKit).
-`@` (sessions, apps, agents, references), `!` (files), `/` (commands), `$` (skills) and `#` (snippets) open the shared
+`@` (sessions, apps, agents, references), `&` (files), `#` (commands), `$` (skills) and `/` (snippets) open the shared
 `ComposerSuggestions` panel; Return picks its first item, Esc closes it. **Return sends and Shift+Return (or
 ⌥Return) breaks the line**, the Mac chat convention, unlike the iPhone's software keyboard. Attachments come from
 `+` (Arquivos…, Imagens…), a drop on the conversation or a pasted image, through `ConversationStore.importAttachment`.
-The model capsule and `/model` open the model and effort picker, the agent capsule beside it (and `/agent`) its
-picker, the MCP capsule a popover with each server's switch; `/btw` asks a side question in a sheet. Sending is
+The model capsule and `#model` open the model and effort picker, the agent capsule beside it (and `#agent`) its
+picker, the MCP capsule a popover with each server's switch; `#btw` asks a side question in a sheet. Sending is
 `ConversationStore.send`, so the delivery follows the server's preference while the agent works (steer or queue)
 and right-clicking Enviar offers the other one (Enviar agora / Adicionar à fila); the tray (`ConversationTray`)
   lists the queue with Editar, Enviar agora and ×. The microphone now uses the shared on-device recorder and
@@ -3777,19 +3803,19 @@ rules: [`plugin-app-custom/docs/snippets.md`](../plugin-app-custom/docs/snippets
   projects by name → "Projeto removido", the Todos / Globais / Projetos filter, folded search over name, aliases and
   description, Duplicar with a free `-copia` name and no aliases, drafts named from the first words) and
   `SnippetCatalog`. `SessionStore` owns one catalog per server: it reloads on `rpc.custom.snippets.updated` (without a
-  navigation reload) and after a reconnection, and every composer's `#` reads it, so an open conversation offers a
-  snippet saved anywhere at once. The `#` panel takes an optional footer, `ComposerSnippetActions` (Novo snippet…,
+  navigation reload) and after a reconnection, and every composer's `/` reads it, so an open conversation offers a
+  snippet saved anywhere at once. The `/` panel takes an optional footer, `ComposerSnippetActions` (Novo snippet…,
   Gerenciar snippets…), that each app fills with its own screen.
 - **Mac, Ajustes ▸ Snippets** (`MacSnippetSettings`, tab after Modelos, a 900 × 640 window): on the left the search,
   Todos / Globais / Projetos and the list grouped by scope (project avatar, count, aliases, "substitui o global"),
-  `+` and `⋯` (Duplicar, Apagar…); on the right the editor: Nome with `#` and its live message ("Disponível em
-  opencode2 · substitui #revisar global" or the error), Descrição, Atalhos as chips (Return, commas or spaces add),
+  `+` and `⋯` (Duplicar, Apagar…); on the right the editor: Nome with `/` and its live message ("Disponível em
+  opencode2 · substitui /revisar global" or the error), Descrição, Atalhos as chips (Return, commas or spaces add),
   Escopo (Global, the projects, "Projeto removido"), Conteúdo (plain text, monospaced) and Prévia, then Duplicar,
   Apagar…, Reverter (Cancelar for an untouched new one) and Salvar (⌘S, disabled while anything is invalid). Empty
   name or content only show once touched or after Salvar. Apagar always confirms; leaving unsaved changes asks too.
   Empty catalog: "Nenhum snippet ainda" with Novo snippet. A new snippet in Ajustes is Global, or in the project
   "Gerenciar snippets…" came from. The state (`MacSnippetBoard`) belongs to `MacRuntime`.
-- **Mac, shortcuts:** the `#` panel's footer and ⌘N while it is open (the editor sees key equivalents before the main
+- **Mac, shortcuts:** the `/` panel's footer and ⌘N while it is open (the editor sees key equivalents before the main
   menu's Nova sessão) open Ajustes on a new snippet in the conversation's project; Gerenciar snippets… opens the list
   on that project. "Salvar como snippet…" heads the composer's context menu over a selection (snippet tokens expanded;
   the composer keeps its text) and a sent prompt's new right-click menu (Copiar, Copiar citação when it has quotes,
@@ -3800,8 +3826,9 @@ Verification: `swift test` (`SnippetsTests`: rules and their Portuguese messages
 duplicate, drafts, the client's refusals and the catalog's reload on the event only), the plugin's tests, and
 `script/test-mac-ajustes.sh snippets`: one launch with the fixture's in-memory catalog starting empty (empty state,
 live validation, six snippets in three scopes, the override, an alias conflict, edit, Reverter, Duplicar, Apagar
-through its confirmation's own button, another client's save reaching the open conversation's `#` through the event,
-the panel and ⌘N, Gerenciar on the project, Salvar como snippet from a selection's context menu and from a prompt's).
+through its confirmation's own button, another client's save reaching the open conversation's `/` through the event,
+`#rev` listing the fixture's `review` command, Return on `/ios` and `#rev` making the right token with the caret after
+it, the panel and ⌘N, Gerenciar on the project, Salvar como snippet from a selection's context menu and from a prompt's).
 
 ### Dados do Mac — 29 October
 

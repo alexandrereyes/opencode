@@ -71,7 +71,7 @@ import XCTest
     if let text = composer.value as? String, !text.isEmpty {
       composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: text.count + 2))
     }
-    composer.typeText("/btw")
+    composer.typeText("#btw")
     let suggestion = app.buttons["suggestion-btw"]
     XCTAssertTrue(suggestion.waitForExistence(timeout: 10))
     suggestion.tap()
@@ -80,7 +80,7 @@ import XCTest
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.textViews["side-question-composer"])], timeout: 5), .completed)
 
     composer.tap()
-    composer.typeText("/btw Qual é a ordem dos passos?")
+    composer.typeText("#btw Qual é a ordem dos passos?")
     let send = app.buttons["composer-send"]
     XCTAssertTrue(send.waitForExistence(timeout: 5))
     send.tap()

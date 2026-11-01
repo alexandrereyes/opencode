@@ -26,7 +26,7 @@ struct MacSettingsView: View {
       MacModelSettings(runtime: runtime)
         .tabItem { Label("Modelos", systemImage: "cpu") }.tag("modelos")
       MacSnippetSettings(runtime: runtime)
-        .tabItem { Label("Snippets", systemImage: "number") }.tag(MacSnippets.tab)
+        .tabItem { Label("Snippets", systemImage: "slash.circle") }.tag(MacSnippets.tab)
       MacSubscriptionSettings(runtime: runtime)
         .tabItem { Label("Assinaturas", systemImage: "gauge.with.dots.needle.67percent") }.tag("assinaturas")
       MacDataSettings(agent: .shared)

@@ -1,8 +1,9 @@
 import type { Snippets } from "./rpc.js"
 
 /**
- * What a name or alias may be (rev. 2026-10-30): letters (accents too), digits, `-` and `_`. The composer's `#` query
- * stops at whitespace, `#`, `@` and `$`, so a handle with any of them could not be typed. `docs/snippets.md`.
+ * What a name or alias may be (rev. 2026-10-30): letters (accents too), digits, `-` and `_`. The native composers' `/`
+ * query accepts only these (since 2026-11-01; it was `#`), so a handle with anything else could not be typed.
+ * `docs/snippets.md`.
  */
 export const handle = /^[\p{L}\p{M}\p{N}_-]+$/u
 

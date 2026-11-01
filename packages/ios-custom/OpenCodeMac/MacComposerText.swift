@@ -236,7 +236,7 @@ final class ComposerTextNSView: NSTextView {
   var firstSuggestion: (() -> (() -> Void)?)?
   /// Moves the panel's highlight by ±1; false while it has nothing to move through.
   var moveSuggestion: ((Int) -> Bool)?
-  /// ⌘N while the `#` panel is open: a new snippet instead of Nova sessão.
+  /// ⌘N while the `/` panel is open: a new snippet instead of Nova sessão.
   var newSnippet: (() -> Void)?
   /// "Salvar como snippet…" in a selection's context menu, with the selected text (snippet tokens expanded).
   var saveSnippet: ((String) -> Void)?

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Snippets on the iPhone against an owned, isolated sandbox: Você ▸ Snippets (create, a name error, edit, duplicate,
 scope, delete with confirmation) and the conversation shortcuts (Salvar como snippet from a message and from the
-composer's selection, Novo snippet from `#`, `#` following saves without reopening).
+composer's selection, Novo snippet from `/`, `/` following saves without reopening).
 
 Each phase runs on a simulator created for it and deleted afterwards. The catalog must start empty; every snippet,
 Session and the fake repository's project data the run creates are removed at the end. No model call is made.
@@ -103,7 +103,7 @@ status = 1
 try:
     if catalog():
         raise SystemExit("The sandbox catalog is not empty; this runner only clears what it creates.")
-    # A Git repository with one commit is a Core project of its own (not "global"), so `#` and the editor see it.
+    # A Git repository with one commit is a Core project of its own (not "global"), so `/` and the editor see it.
     directory = home / "repos" / "snippets-ios"
     (directory / "src").mkdir(parents=True, exist_ok=True)
     (directory / "README.md").write_text("Repositório falso dos testes de snippets.\n")

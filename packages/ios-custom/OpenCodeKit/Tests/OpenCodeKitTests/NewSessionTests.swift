@@ -254,15 +254,15 @@ private func newRequest(_ directory: String) -> PromptRequest {
 @Test func newSessionTypedBackendCommandUsesSameSerializationAndLocalCommandsStayDisabled() throws {
   var sources = ComposerSources()
   sources.commands = try newDecode(#"[{"name":"review"}]"#)
-  let document = sources.newSessionDocument(.init(text: "/review confira"))
+  let document = sources.newSessionDocument(.init(text: "#review confira"))
   #expect(ComposerDispatch.resolve(document) == .command("review", "confira"))
   #expect(
     PromptRequest(document: document, delivery: .steer, agent: "build", model: newModel).text
       == "confira")
   #expect(
-    ComposerDispatch.resolve(sources.newSessionDocument(.init(text: "/compact")))
+    ComposerDispatch.resolve(sources.newSessionDocument(.init(text: "#compact")))
       == .local("compact"))
-  #expect(ComposerDispatch.resolve(sources.newSessionDocument(.init(text: "/unknown"))) == .prompt)
+  #expect(ComposerDispatch.resolve(sources.newSessionDocument(.init(text: "#unknown"))) == .prompt)
   let skill = ComposerDocument(
     text: "/review",
     tokens: [.init(start: 0, end: 7, token: .init(kind: .skill, id: "review", text: "/review"))])

@@ -39,7 +39,7 @@ final class ComposerSuggestionReturn {
   func selected(for trigger: ComposerTrigger) -> ComposerSuggestion? { self.trigger == trigger ? selected : nil }
 }
 
-/// The `#` panel's footer (rev. 2026-10-30): create a snippet, or manage them (Ajustes ▸ Snippets on the Mac, Você ▸
+/// The `/` panel's footer (rev. 2026-10-30): create a snippet, or manage them (Ajustes ▸ Snippets on the Mac, Você ▸
 /// Snippets on the iPhone), each platform opening its own screen.
 struct ComposerSnippetActions {
   let new: () -> Void
@@ -123,7 +123,7 @@ struct ComposerSuggestions: View {
       proxy.scrollTo(id)
     }
     }.frame(maxHeight: 250).fixedSize(horizontal: false, vertical: true)
-    if let snippetActions, trigger.character == "#" { snippetFooter(snippetActions) }
+    if let snippetActions, trigger.character == ComposerTrigger.snippet { snippetFooter(snippetActions) }
     }
       .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
       .overlay {
@@ -132,7 +132,7 @@ struct ComposerSuggestions: View {
       .task(
         id: Load(
           trigger: trigger, apps: trigger.character == "@" ? ComposerAppMentions.shared.revision : 0,
-          snippets: trigger.character == "#" ? store.snippets?.revision ?? 0 : 0)
+          snippets: trigger.character == ComposerTrigger.snippet ? store.snippets?.revision ?? 0 : 0)
       ) {
         // An app listing or a snippet change that arrives while the panel is open merges without re-debouncing or
         // dropping the item Return would choose.

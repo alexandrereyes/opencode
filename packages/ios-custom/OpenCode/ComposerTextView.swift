@@ -168,7 +168,7 @@ struct ComposerTextView: UIViewRepresentable {
         .trimmingCharacters(in: .whitespacesAndNewlines)
       guard !selected.isEmpty else { return nil }
       // The draft keeps its text: the editor opens in a sheet with a copy of the selection.
-      let action = UIAction(title: "Salvar como snippet", image: UIImage(systemName: "number")) { _ in save(selected) }
+      let action = UIAction(title: "Salvar como snippet", image: UIImage(systemName: "slash.circle")) { _ in save(selected) }
       // Right after the standard edit actions, like the responses' Comentar, so it shows without paging the menu.
       return UIMenu(children: Array(suggestedActions.prefix(1)) + [UIMenu(options: .displayInline, children: [action])]
         + suggestedActions.dropFirst())

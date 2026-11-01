@@ -1,15 +1,16 @@
 # Snippets (`custom.snippets`)
 
-A snippet is a saved text that the composer inserts with `#`: the iPhone and Mac apps show `#name` as a token, and on
-send the token becomes the snippet's content, as plain text. `@`, `&`, `$` or `#` inside the content stay text; there
-are no variables. The apps manage the catalog in **Ajustes ▸ Snippets** (rev. 2026-10-30).
+A snippet is a saved text that the composer inserts with `/` (since 2026-11-01; it was `#`, which now opens commands):
+the iPhone and Mac apps show `/name` as a token, and on send the token becomes the snippet's content, as plain text.
+`@`, `&`, `$`, `#` or `/` inside the content stay text; there are no variables. The trigger is only the apps' typed
+glyph: names, aliases and this contract did not change, and drafts with an earlier `#name` token still expand. The apps manage the catalog in **Ajustes ▸ Snippets** (rev. 2026-10-30).
 
 ## Storage and scope
 
 - One catalog per server, in the plugin storage key `snippets:catalog`. Every Location's plugin instance reads and
   writes the same catalog atomically, so every app connected to the server sees the same snippets.
 - `project` absent: **global**, offered in every conversation. `project` set: offered only in sessions of that
-  Core project (`Project.ID`). A project snippet may share a global one's name; in that project, `#` offers the
+  Core project (`Project.ID`). A project snippet may share a global one's name; in that project, `/` offers the
   project one instead.
 - A snippet whose project no longer exists is kept; the apps list it under "Projeto removido".
 
@@ -18,9 +19,9 @@ are no variables. The apps manage the catalog in **Ajustes ▸ Snippets** (rev. 
 ```ts
 Info {
   id: string            // non-empty; chosen by the client (the apps use a lowercase UUID)
-  name: string          // the `#name` trigger
+  name: string          // the `/name` trigger
   description: string   // may be empty
-  aliases: string[]     // other words that find it after `#`
+  aliases: string[]     // other words that find it after `/`
   content: string       // must have a non-whitespace character
   project?: Project.ID  // absent: global
 }
@@ -34,7 +35,7 @@ Info {
 
 `save` creates or replaces by `id` (last write wins; there is no revision). `save` and `remove` emit the event
 `rpc.custom.snippets.updated` with `{}` on the Location of the call; clients reload the whole list when they see it.
-The apps' composers reload their `#` catalog on it, so an open conversation offers a new snippet at once.
+The apps' composers reload their `/` catalog on it, so an open conversation offers a new snippet at once.
 
 Errors are `RpcError` bodies (HTTP 400) with an English `message` and structured `data`; the apps render their own
 Portuguese text from `data`:
@@ -50,8 +51,8 @@ invalid:  { field: "name" | "aliases", reason: "format" | "duplicate", value }  
 `OpenCodeKit/Snippets.swift` while typing):
 
 1. **Format** of the name, then of each alias: letters (accented ones too, composed or decomposed), digits, `-` and
-   `_` (`/^[\p{L}\p{M}\p{N}_-]+$/u`). No whitespace, `#`, `@`, `$` or other punctuation: the composer's `#` query
-   stops at those, so such a handle could not be typed. → `invalid { field, reason: "format", value }`.
+   `_` (`/^[\p{L}\p{M}\p{N}_-]+$/u`). No whitespace, `#`, `@`, `$`, `/` or other punctuation: the apps' `/` query
+   accepts only those characters (so a path such as `/tmp/x` does not open it), and such a handle could not be typed. → `invalid { field, reason: "format", value }`.
 2. **Repetition** inside the snippet: an alias equal to the name or to an earlier alias, ignoring case. →
    `invalid { field: "aliases", reason: "duplicate", value }`.
 3. **Uniqueness in the scope**: the name and every alias against the names and aliases of the other snippets with the

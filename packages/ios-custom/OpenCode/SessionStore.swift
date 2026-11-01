@@ -140,7 +140,7 @@ final class SessionStore {
   let toast = ToastCenter()
   let alerts: SessionAlertCenter
   let catalog: ModelCatalogCache
-  /// The server's snippets, shared by Ajustes and every composer's `#`; it follows `rpc.custom.snippets.updated`.
+  /// The server's snippets, shared by Ajustes and every composer's `/`; it follows `rpc.custom.snippets.updated`.
   let snippets: SnippetCatalog
 
   @ObservationIgnored let client: OpenCodeClient

@@ -102,7 +102,7 @@ import XCTest
     name.typeText("revisar código")
     let problem = element("snippet-name-problem", app)
     XCTAssertTrue(problem.waitForExistence(timeout: 5))
-    XCTAssertTrue(problem.label.contains("Sem espaços nem #, @, $"))
+    XCTAssertTrue(problem.label.contains("Sem espaços nem /, #, @, $"))
     XCTAssertFalse(app.buttons["snippet-save"].isEnabled)
     shot("error-keyboard")
 
@@ -150,10 +150,10 @@ import XCTest
     }
     app.textFields["snippet-name"].typeText("review")
     XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
-      predicate: NSPredicate(format: "label CONTAINS 'já é atalho de #revisar nos globais'"),
+      predicate: NSPredicate(format: "label CONTAINS 'já é atalho de /revisar nos globais'"),
       object: element("snippet-name-problem", app))], timeout: 5), .completed)
     app.textFields["snippet-name"].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "revisar")
-    XCTAssertTrue(element("snippet-name-problem", app).label.contains("Já existe #revisar nos globais"))
+    XCTAssertTrue(element("snippet-name-problem", app).label.contains("Já existe /revisar nos globais"))
     shot("error-conflict")
     let scope = element("snippet-scope", app)
     reveal(scope, app)
@@ -197,7 +197,7 @@ import XCTest
     shot("you-row")
   }
 
-  /// Salvar como snippet from a sent message and from the composer's selection, Novo snippet from the `#` panel, and
+  /// Salvar como snippet from a sent message and from the composer's selection, Novo snippet from the `/` panel, and
   /// the panel listing snippets saved meanwhile (here and by another client) without reopening the conversation.
   func testConversationShortcutsAndLiveHash() throws {
     let session = try XCTUnwrap(environment["OPENCODE_SNIPPETS_SESSION"])
@@ -225,14 +225,14 @@ import XCTest
     XCTAssertEqual(messageScope.value as? String, project)
     save(app, title: "Novo snippet")
 
-    // `#` lists it at once.
+    // `/` lists it at once.
     editor.tap()
-    editor.typeText("#revise")
-    let saved = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '#revise-o-diff'")).firstMatch
-    XCTAssertTrue(saved.waitForExistence(timeout: 10), "# should list the snippet saved from the message")
+    editor.typeText("/revise")
+    let saved = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '/revise-o-diff'")).firstMatch
+    XCTAssertTrue(saved.waitForExistence(timeout: 10), "/ should list the snippet saved from the message")
     shot("hash-after-message")
 
-    // Novo snippet at the end of the panel takes the query as its name; back in the composer `#` lists it.
+    // Novo snippet at the end of the panel takes the query as its name; back in the composer `/` lists it.
     editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "deploy-ios")
     XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 10))
     let create = app.buttons["snippet-panel-new"]
@@ -246,16 +246,16 @@ import XCTest
     XCTAssertEqual(panelScope.value as? String, project)
     type("Publique a versão no TestFlight interno.", into: "snippet-content", app)
     save(app, title: "Novo snippet")
-    let deploy = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '#deploy-ios'")).firstMatch
-    XCTAssertTrue(deploy.waitForExistence(timeout: 10), "the composer returns with # listing the new snippet")
-    XCTAssertTrue((editor.value as? String)?.contains("#deploy-ios") == true, "the draft keeps its text")
+    let deploy = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '/deploy-ios'")).firstMatch
+    XCTAssertTrue(deploy.waitForExistence(timeout: 10), "the composer returns with / listing the new snippet")
+    XCTAssertTrue((editor.value as? String)?.contains("/deploy-ios") == true, "the draft keeps its text")
 
     // Another client saves one while the panel is open: it shows without reopening anything.
     editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 10) + "externo")
     XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 10))
     try saveFromAnotherClient(name: "externo-api")
-    let external = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '#externo-api'")).firstMatch
-    XCTAssertTrue(external.waitForExistence(timeout: 15), "# should follow rpc.custom.snippets.updated")
+    let external = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '/externo-api'")).firstMatch
+    XCTAssertTrue(external.waitForExistence(timeout: 15), "/ should follow rpc.custom.snippets.updated")
     shot("hash-live")
 
     // Gerenciar snippets opens Você ▸ Snippets over the conversation; closing it returns to the composer.

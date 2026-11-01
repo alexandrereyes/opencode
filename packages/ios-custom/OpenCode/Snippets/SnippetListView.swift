@@ -110,12 +110,12 @@ struct SnippetListView: View {
     .fullScreenCover(item: $editor) { route in
       SnippetEditorView(catalog: catalog, projects: projects, route: route).sessionAlertOverlay()
     }
-    .confirmationDialog("Apagar #\(deleting?.name ?? "")?", isPresented: Binding(
+    .confirmationDialog("Apagar \(ComposerTrigger.snippet)\(deleting?.name ?? "")?", isPresented: Binding(
       get: { deleting != nil }, set: { if !$0 { deleting = nil } }
     ), titleVisibility: .visible, presenting: deleting) { snippet in
       Button("Apagar snippet", role: .destructive) { Task { await remove(snippet) } }
       Button("Cancelar", role: .cancel) { deleting = nil }
-    } message: { _ in Text("Ele deixa de aparecer no # do iPhone e do Mac. Mensagens já enviadas não mudam.") }
+    } message: { _ in Text("Ele deixa de aparecer no / do iPhone e do Mac. Mensagens já enviadas não mudam.") }
     .alert("Não foi possível apagar", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
       Button("OK") { failure = nil }
     } message: { Text(failure ?? "") }
@@ -170,7 +170,7 @@ private struct SnippetRow: View {
       HStack(spacing: 10) {
         VStack(alignment: .leading, spacing: 3) {
           HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text("#" + snippet.name).appFont(.body, weight: .semibold)
+            Text(ComposerTrigger.snippet + snippet.name).appFont(.body, weight: .semibold)
               .foregroundStyle(theme.color(.composerSnippet)).lineLimit(1)
             Spacer(minLength: 4)
             if overrides {
@@ -199,7 +199,7 @@ private struct SnippetRow: View {
     .accessibilityIdentifier("snippet-row-" + snippet.name)
   }
   private var accessibilityLabel: String {
-    var parts = ["#" + snippet.name]
+    var parts = [ComposerTrigger.snippet + snippet.name]
     if !snippet.description.isEmpty { parts.append(snippet.description) }
     if !snippet.aliases.isEmpty { parts.append("atalhos " + snippet.aliases.joined(separator: ", ")) }
     if overrides { parts.append("substitui o global") }
@@ -258,13 +258,13 @@ struct SnippetEmptyState: View {
   let create: () -> Void
   var body: some View {
     VStack(spacing: 14) {
-      Text("#").font(.system(size: 44, weight: .bold, design: .rounded)).foregroundStyle(theme.color(.composerSnippet))
+      Text(ComposerTrigger.snippet).font(.system(size: 44, weight: .bold, design: .rounded)).foregroundStyle(theme.color(.composerSnippet))
         .frame(width: 84, height: 84)
         .background(theme.color(.composerSnippet).opacity(0.14), in: RoundedRectangle(cornerRadius: 20))
         .accessibilityHidden(true)
       Text("Nenhum snippet ainda").appFont(.title, weight: .bold).foregroundStyle(theme.color(.textStrong))
         .multilineTextAlignment(.center).accessibilityAddTraits(.isHeader)
-      Text("Textos que você reutiliza. Digite \(Text("#").foregroundColor(theme.color(.composerSnippet))) no composer para inserir; no envio, o token vira o texto.")
+      Text("Textos que você reutiliza. Digite \(Text(ComposerTrigger.snippet).foregroundColor(theme.color(.composerSnippet))) no composer para inserir; no envio, o token vira o texto.")
         .appFont(.secondary).foregroundStyle(theme.color(.text)).multilineTextAlignment(.center)
       Button(action: create) {
         Text("Novo snippet").appFont(.body, weight: .semibold).frame(maxWidth: .infinity, minHeight: 44)

@@ -95,7 +95,7 @@ struct MacFixtureServer: Sendable {
     case "/api/shell":
       return #"{"data":[{"id":"shl_dev","status":"running","command":"bun run dev --port 4177","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 12 * minute)}},{"id":"shl_test","status":"running","command":"xcodebuild test -scheme OpenCode","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 3 * minute)}}]}"#
     case "/api/vcs/diff": return "{\"data\":\(changes)}"
-    // The composer's suggestions (`/` commands, `$` skills, `@` references, `#` snippets).
+    // The composer's suggestions (`#` commands, `$` skills, `@` references, `/` snippets).
     case "/api/command":
       return #"{"data":[{"name":"review","description":"Revisar as mudanças"},{"name":"commit","description":"Analisa as mudanças e faz o commit"}]}"#
     case "/api/skill": return #"{"data":[{"id":"playwright-cli","name":"playwright-cli","description":"Automatiza o navegador"}]}"#

@@ -45,7 +45,7 @@ struct SettingsView: View {
             SnippetListView(catalog: store.snippets, projects: store.projects)
           } label: {
             HStack(spacing: 12) {
-              Text("#").appFont(.body, weight: .bold).foregroundStyle(theme.color(.composerSnippet))
+              Text(ComposerTrigger.snippet).appFont(.body, weight: .bold).foregroundStyle(theme.color(.composerSnippet))
                 .frame(width: 30, height: 30)
                 .background(theme.color(.composerSnippet).opacity(0.14), in: RoundedRectangle(cornerRadius: 7))
                 .accessibilityHidden(true)
@@ -59,7 +59,7 @@ struct SettingsView: View {
           .accessibilityValue(store.snippets.loaded ? "\(store.snippets.items.count)" : "")
           .accessibilityIdentifier("settings-snippets")
         } header: { Text("Composer") } footer: {
-          Text("Textos que você insere com # no composer, no iPhone e no Mac.")
+          Text("Textos que você insere com / no composer, no iPhone e no Mac.")
         }.listRowBackground(theme.color(.surface))
         .task { await store.snippets.loadIfNeeded() }
         Section("Leitura") {

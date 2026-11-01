@@ -62,10 +62,10 @@ import XCTest
     editor.typeText("fim\n")
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "fim\n"), evaluatedWith: editor)], timeout: 5), .completed)
     // An empty list (no snippets in the fixture) keeps the line break too.
-    editor.typeText("#nada")
+    editor.typeText("/nada")
     XCTAssertTrue(app.staticTexts["Nenhum item correspondente"].waitForExistence(timeout: 5))
     editor.typeText("\n")
-    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "#nada\n"), evaluatedWith: editor)], timeout: 5), .completed)
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "/nada\n"), evaluatedWith: editor)], timeout: 5), .completed)
     // Still loading (the panel waits 180 ms): Return keeps the line break.
     editor.typeText("&REA\n")
     XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS %@", "&REA\n"), evaluatedWith: editor)], timeout: 5), .completed)

@@ -40,11 +40,11 @@ import Testing
   }
 
   @Test func handlesAreUniqueInTheirScopeBothWays() {
-    #expect(Self.issues(Snippet(name: "REVISAR", content: "x")) == ["Já existe #revisar nos globais."])
-    #expect(Self.issues(Snippet(name: "review", content: "x")) == ["“review” já é atalho de #revisar nos globais."])
+    #expect(Self.issues(Snippet(name: "REVISAR", content: "x")) == ["Já existe /revisar nos globais."])
+    #expect(Self.issues(Snippet(name: "review", content: "x")) == ["“review” já é atalho de /revisar nos globais."])
     #expect(Self.issues(Snippet(name: "novo", aliases: ["Resumo"], content: "x"))
-      == ["O atalho “Resumo” já é usado por #resumo nos globais."])
-    #expect(Self.issues(Snippet(name: "Deploy", content: "x", project: "prj_op")) == ["Já existe #deploy em opencode2."])
+      == ["O atalho “Resumo” já é usado por /resumo nos globais."])
+    #expect(Self.issues(Snippet(name: "Deploy", content: "x", project: "prj_op")) == ["Já existe /deploy em opencode2."])
     #expect(Self.issues(Snippet(name: "deploy", content: "x", project: "prj_gone")).isEmpty)
     // Other scopes are free, and a snippet never collides with itself.
     #expect(Self.issues(Snippet(name: "swarm", content: "x")).isEmpty)
@@ -145,7 +145,7 @@ import Testing
     await catalog.load()
     try await catalog.save(Self.catalog[2], projects: Self.projects)
     #expect(catalog.items.map(\.id) == ["p1"])
-    await #expect(throws: SnippetSaveError(issue: .init(.name, "Já existe #deploy em opencode2."))) {
+    await #expect(throws: SnippetSaveError(issue: .init(.name, "Já existe /deploy em opencode2."))) {
       try await catalog.save(Snippet(id: "other", name: "deploy", content: "x", project: "prj_op"), projects: Self.projects)
     }
     await #expect(throws: SnippetSaveError(issue: .init(.name, SnippetRules.formatHint))) {
@@ -159,7 +159,7 @@ import Testing
   @Test func olderServersConflictWithTheNameOnly() {
     let error = SnippetSaveError.decode(type: "conflict", data: .object(["name": .string("revisar")]),
       snippet: Snippet(name: "revisar", content: "x"), projects: [])
-    #expect(error?.issue == .init(.name, "Já existe #revisar nos globais."))
+    #expect(error?.issue == .init(.name, "Já existe /revisar nos globais."))
     #expect(SnippetSaveError.decode(type: "rpc.internal", data: nil, snippet: Snippet(), projects: []) == nil)
   }
 

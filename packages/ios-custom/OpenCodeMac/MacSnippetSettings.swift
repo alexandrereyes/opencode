@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Ajustes ▸ Snippets (rev. 2026-10-30, option A of `.agent-artifacts/snippets-cadastro/mac/mac-opcao-a.png`): the
-/// list grouped by scope on the left (search, Todos / Globais / Projetos), the editor on the right. The `#` panel
+/// list grouped by scope on the left (search, Todos / Globais / Projetos), the editor on the right. The `/` panel
 /// (Novo snippet… ⌘N, Gerenciar snippets…), a selection in the composer and a sent message's right-click menu
 /// (Salvar como snippet…) open it through `MacSnippets`. Rules and contract: `plugin-app-custom/docs/snippets.md`.
 struct MacSnippetSettings: View {
@@ -284,14 +284,14 @@ private struct MacSnippetManager: View {
     }
     .task { await catalog.loadIfNeeded() }
     .alert(
-      "Apagar #\(board.deleting?.name ?? "")?",
+      "Apagar \(ComposerTrigger.snippet)\(board.deleting?.name ?? "")?",
       isPresented: Binding(get: { board.deleting != nil }, set: { if !$0 { board.deleting = nil } })
     ) {
       let target = board.deleting
       Button("Apagar", role: .destructive) { Task { await board.confirmDelete(target) } }
       Button("Cancelar", role: .cancel) {}
     } message: {
-      Text("Ele some do # em todos os apps e dispositivos. Mensagens já enviadas não mudam. Não dá para desfazer.")
+      Text("Ele some do / em todos os apps e dispositivos. Mensagens já enviadas não mudam. Não dá para desfazer.")
     }
     .alert(
       "Descartar as alterações?",
@@ -301,7 +301,7 @@ private struct MacSnippetManager: View {
       Button("Descartar", role: .destructive) { board.discardPending(next) }
       Button("Continuar editando", role: .cancel) {}
     } message: {
-      Text("As alterações em #\(board.baseline?.name.isEmpty == false ? board.baseline!.name : "novo snippet") não foram salvas.")
+      Text("As alterações em \(ComposerTrigger.snippet)\(board.baseline?.name.isEmpty == false ? board.baseline!.name : "novo snippet") não foram salvas.")
     }
   }
 }
@@ -389,7 +389,7 @@ private struct MacSnippetList: View {
     return Button { board.select(snippet.id) } label: {
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 6) {
-          Text("#" + snippet.name).appFont(.secondary, weight: .semibold).foregroundStyle(theme.color(.composerSnippet))
+          Text(ComposerTrigger.snippet + snippet.name).appFont(.secondary, weight: .semibold).foregroundStyle(theme.color(.composerSnippet))
             .lineLimit(1)
           Spacer(minLength: 4)
           if SnippetRules.overridden(snippet, in: board.items) != nil {
@@ -442,7 +442,7 @@ private struct MacSnippetEditor: View {
             label("Nome")
             VStack(alignment: .leading, spacing: 5) {
               HStack(spacing: 6) {
-                Text("#").foregroundStyle(theme.color(.textSecondary))
+                Text(ComposerTrigger.snippet).foregroundStyle(theme.color(.textSecondary))
                 TextField("nome", text: binding(\.name, .name)).textFieldStyle(.plain)
                   .accessibilityIdentifier("snippet-name")
               }
@@ -477,7 +477,7 @@ private struct MacSnippetEditor: View {
               if let issue = issue(.content) {
                 message(issue.message, role: .error)
               } else {
-                message("Texto puro: @, & e $ no conteúdo não viram menções; # insere o texto todo.", role: .textSecondary)
+                message("Texto puro: @, & e $ no conteúdo não viram menções; / insere o texto todo.", role: .textSecondary)
               }
             }
           }
@@ -507,7 +507,7 @@ private struct MacSnippetEditor: View {
       message(issue.message, role: .error)
     } else if !draft.name.isEmpty {
       let place = SnippetRules.place(draft.project, projects: board.projects)
-      let replaces = SnippetRules.overridden(draft, in: board.items).map { " · substitui #\($0.name) global" } ?? ""
+      let replaces = SnippetRules.overridden(draft, in: board.items).map { " · substitui \(ComposerTrigger.snippet)\($0.name) global" } ?? ""
       Label("Disponível \(place)\(replaces)", systemImage: "checkmark.circle.fill").appFont(.caption)
         .foregroundStyle(theme.color(.success))
     }
@@ -590,7 +590,7 @@ private struct MacSnippetEditor: View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 6) {
         Text("Antes do PR,").foregroundStyle(theme.color(.text))
-        Text("#" + (draft.name.isEmpty ? "nome" : draft.name)).foregroundStyle(theme.color(.composerSnippet))
+        Text(ComposerTrigger.snippet + (draft.name.isEmpty ? "nome" : draft.name)).foregroundStyle(theme.color(.composerSnippet))
           .padding(.horizontal, 4).background(theme.color(.composerSnippet).opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
         Text("→ envia").foregroundStyle(theme.color(.textSecondary))
       }
@@ -643,11 +643,11 @@ private struct MacSnippetEmpty: View {
 
   var body: some View {
     VStack(spacing: 12) {
-      Text("#").font(.system(size: 40, weight: .semibold)).foregroundStyle(theme.color(.composerSnippet))
+      Text(ComposerTrigger.snippet).font(.system(size: 40, weight: .semibold)).foregroundStyle(theme.color(.composerSnippet))
         .frame(width: 72, height: 72)
         .background(theme.color(.composerSnippet).opacity(0.1), in: RoundedRectangle(cornerRadius: 18))
       Text("Nenhum snippet ainda").appFont(.title, weight: .semibold).foregroundStyle(theme.color(.textStrong))
-      Text("Snippets são textos que você reutiliza. Digite # no composer para inserir; no envio, o token vira o texto.")
+      Text("Snippets são textos que você reutiliza. Digite / no composer para inserir; no envio, o token vira o texto.")
         .appFont(.secondary).foregroundStyle(theme.color(.textSecondary)).multilineTextAlignment(.center)
         .frame(maxWidth: 360)
       Button("Novo snippet", action: create).buttonStyle(.borderedProminent).tint(theme.color(.primary))

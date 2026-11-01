@@ -45,7 +45,8 @@ public struct SideQuestionRequest: Encodable, Sendable {
   }
   public static func slashQuestion(_ document: ComposerDocument) -> String? {
     let text = document.expanded.text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard text.hasPrefix("/btw") else { return nil }
+    // `#btw` since the triggers swapped; `/btw` (the web's, and drafts typed before) still asks.
+    guard [ComposerTrigger.command, "/"].contains(where: { text.hasPrefix($0 + "btw") }) else { return nil }
     let question = text.dropFirst(4)
     guard question.isEmpty || question.first?.isWhitespace == true else { return nil }
     return String(question).trimmingCharacters(in: .whitespacesAndNewlines)

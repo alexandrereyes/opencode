@@ -59,7 +59,7 @@ public struct ComposerSources: Sendable {
   public var snippets: [ComposerSnippet] = []
   public init() {}
   public func newSessionDocument(_ document: ComposerDocument) -> ComposerDocument {
-    guard document.text.hasPrefix("/"), document.validTokens.first?.start != 0,
+    guard document.text.hasPrefix(ComposerTrigger.command), document.validTokens.first?.start != 0,
       let word = document.text.split(whereSeparator: \.isWhitespace).first else { return document }
     let name = String(word.dropFirst())
     let local = ["compact", "btw"].contains(name)
@@ -157,7 +157,7 @@ public struct ComposerSources: Sendable {
       return skills.map {
         skill($0, prefix: "$")
       }
-    case "#":
+    case ComposerTrigger.snippet:
       var merged: [String: ComposerSnippet] = [:]
       for snippet in snippets where snippet.project == nil || snippet.project == project {
         let key = snippet.name.lowercased()
@@ -165,11 +165,12 @@ public struct ComposerSources: Sendable {
       }
       return merged.values.sorted { $0.name < $1.name }.map {
         .init(
-          section: "Snippets", title: "#\($0.name)", subtitle: $0.description, icon: "number",
-          token: .init(kind: .snippet, id: $0.id, text: "#\($0.name)", value: $0.content),
+          section: "Snippets", title: ComposerTrigger.snippet + $0.name, subtitle: $0.description,
+          icon: "slash.circle",
+          token: .init(kind: .snippet, id: $0.id, text: ComposerTrigger.snippet + $0.name, value: $0.content),
           aliases: $0.aliases)
       }
-    case "/":
+    case ComposerTrigger.command:
       let local = [
         ("compact", "Resume a conversa para liberar contexto"),
         ("btw", "Pergunta paralela, sem salvar na conversa"),
@@ -181,19 +182,19 @@ public struct ComposerSources: Sendable {
         !local.contains { $0.0 == item.name }
       }.map {
         .init(
-          section: "Comandos", title: "/\($0.name)", subtitle: $0.description ?? "",
-          icon: "slash.circle",
-          token: .init(kind: .command, id: $0.name, text: "/\($0.name)", value: "backend"))
+          section: "Comandos", title: ComposerTrigger.command + $0.name, subtitle: $0.description ?? "",
+          icon: "number",
+          token: .init(kind: .command, id: $0.name, text: ComposerTrigger.command + $0.name, value: "backend"))
       }
         + local.map {
           .init(
-            section: "Comandos", title: "/\($0.0)", subtitle: $0.1, icon: "slash.circle",
-            token: .init(kind: .command, id: $0.0, text: "/\($0.0)", value: "client"))
+            section: "Comandos", title: ComposerTrigger.command + $0.0, subtitle: $0.1, icon: "number",
+            token: .init(kind: .command, id: $0.0, text: ComposerTrigger.command + $0.0, value: "client"))
         }
         + skills.filter {
           $0.slash == true && !names.contains($0.name)
         }
-        .map { skill($0, prefix: "/") }
+        .map { skill($0, prefix: ComposerTrigger.command) }
     default: return []
     }
   }

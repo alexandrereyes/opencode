@@ -33,22 +33,33 @@ private func detected(_ text: String) -> ComposerTrigger? {
   #expect(trigger?.query == "sam")
   #expect(trigger?.range == NSRange(location: prefix.utf16.count, length: 4))
   #expect(ComposerTrigger.detect(in: String(repeating: "a", count: 10_000) as NSString, cursor: 10_000) == nil)
-  #expect(ComposerTrigger.detect(in: "hello /sam" as NSString, cursor: 10) == nil)
+  // Commands only at the start of the message; snippets anywhere a word starts.
+  #expect(ComposerTrigger.detect(in: "hello #sam" as NSString, cursor: 10) == nil)
+  #expect(ComposerTrigger.detect(in: "hello /sam" as NSString, cursor: 10)?.character == "/")
   #expect(ComposerTrigger.detect(in: "\u{FFFC}" as NSString, cursor: 1) == nil)
 }
 
-@Test func composerTriggerBoundariesAndSlashScope() {
-  for marker in ["@", "$", "#"] {
+@Test func composerTriggerBoundariesAndCommandScope() {
+  #expect(ComposerTrigger.command == "#" && ComposerTrigger.snippet == "/")
+  for marker in ["@", "$", "/"] {
     #expect(detected(marker)?.character == marker)
     #expect(detected("Olá \(marker)te")?.query == "te")
     #expect(detected("(\(marker)te")?.character == marker)
     #expect(detected("texto\(marker)te") == nil)
     #expect(detected("\(marker)teste ") == nil)
   }
-  #expect(detected("/com")?.query == "com")
-  #expect(detected(" /com") == nil)
-  #expect(detected("a\n/com") == nil)
+  #expect(detected("#com")?.character == "#")
+  #expect(detected("#com")?.query == "com")
+  #expect(detected(" #com") == nil)
+  #expect(detected("a\n#com") == nil)
   #expect(detected("https://example.com") == nil)
+  // Markdown, paths and URLs stay prose: a heading, a second `/` or a character no snippet name has closes the panel.
+  for prose in ["# Título", "## Seção", "Veja /tmp/x", "/Users/alex", "/docs/a.md", "abra /a.txt", "x/y", "#a#b",
+    "https://example.com/path", "(veja /a:b"] {
+    #expect(detected(prose) == nil, "\(prose)")
+  }
+  #expect(detected("Use /revisar-pr_2")?.query == "revisar-pr_2")
+  #expect(detected("Use /ação")?.query == "ação")
   #expect(detected("e-mail@dominio.com") == nil)
   #expect(detected("Atualiza @docs/infra")?.query == "docs/infra")
   let token = ComposerToken(kind: .agent, id: "explore", text: "@Explore")
@@ -75,10 +86,14 @@ private func detected(_ text: String) -> ComposerTrigger? {
     [{"name":"effect","path":"/references/effect","description":"Biblioteca"},
      {"name":"private","path":"/private","hidden":true}]
     """, [ComposerReference].self)
-  let slash = try #require(detected("/"))
-  let suggestions = source.suggestions(slash)
+  let commands = try #require(detected("#"))
+  let suggestions = source.suggestions(commands)
   #expect(suggestions.map(\.token.id) == ["review", "compact", "btw", "model", "agent", "check"])
-  #expect(suggestions.filter { $0.title == "/review" }.count == 1)
+  #expect(suggestions.filter { $0.title == "#review" }.count == 1)
+  // The token shows the new trigger and still names the same command or skill.
+  #expect(suggestions.first?.token == ComposerToken(kind: .command, id: "review", text: "#review", value: "backend"))
+  #expect(suggestions.last?.token == ComposerToken(kind: .skill, id: "check", text: "#conversation-check"))
+  #expect(source.suggestions(try #require(detected("/"))).isEmpty)
   #expect(
     !suggestions.contains {
       ["undo", "redo", "fork", "terminal", "export", "new"].contains($0.token.id)
@@ -179,10 +194,13 @@ private func detected(_ text: String) -> ComposerTrigger? {
     {"id":"other","name":"outro","description":"Não","aliases":[],"content":"no","project":"other"}]
     """, [ComposerSnippet].self)
   #expect(
-    source.suggestions(try #require(detected("#")), project: "p").map(\.token.id) == ["local"])
+    source.suggestions(try #require(detected("/")), project: "p").map(\.token.id) == ["local"])
   #expect(
-    source.suggestions(try #require(detected("#diff")), project: "p").first?.token.value == "local")
-  #expect(source.suggestions(try #require(detected("#rv"))).first?.token.id == "global")
+    source.suggestions(try #require(detected("/diff")), project: "p").first?.token.value == "local")
+  #expect(source.suggestions(try #require(detected("/rv"))).first?.token.id == "global")
+  #expect(source.suggestions(try #require(detected("Veja /rv"))).first?.token
+    == ComposerToken(kind: .snippet, id: "global", text: "/Revisar", value: "global"))
+  #expect(source.suggestions(try #require(detected("#"))).allSatisfy { $0.token.kind != .snippet })
 }
 
 @Test func skillRankingPrefersNameAndIDBeforeDescription() throws {
@@ -211,7 +229,7 @@ private func detected(_ text: String) -> ComposerTrigger? {
     """
     [{"id":"review-skill","name":"review-skill","slash":true}]
     """, [ComposerSkill].self)
-  let items = source.suggestions(try #require(detected("/review")))
+  let items = source.suggestions(try #require(detected("#review")))
   #expect(items.map(\.token.id) == ["review-code", "review-skill", "pre-review", "describe"])
   #expect(items.map(\.section) == ["Comandos", "Skills", "Comandos", "Comandos"])
 }
@@ -250,10 +268,10 @@ private func detected(_ text: String) -> ComposerTrigger? {
      {"id":"revisar-id","name":"z-other","description":"","aliases":[],"content":"d"}]
     """, [ComposerSnippet].self)
   #expect(
-    source.suggestions(try #require(detected("#revis"))).map(\.token.id)
+    source.suggestions(try #require(detected("/revis"))).map(\.token.id)
       == ["revisar-id", "prefix", "substring", "description"])
   #expect(
-    source.suggestions(try #require(detected("#"))).map(\.token.id)
+    source.suggestions(try #require(detected("/"))).map(\.token.id)
       == ["description", "substring", "revisar-id", "prefix"])
 }
 
@@ -305,6 +323,37 @@ private func detected(_ text: String) -> ComposerTrigger? {
     text: "a\r\n$check", tokens: [.init(start: 3, end: 9, token: skill)]
   ).normalized
   #expect(normalized.tokens.first?.start == 2)
+}
+
+/// Drafts saved before the triggers swapped keep `#name` snippet and `/name` command tokens: the kind decides, so they
+/// expand and run exactly as the new `/name` and `#name` ones.
+@Test func earlierTriggerTokensKeepWorkingByKind() {
+  for (snippetText, commandText) in [("#r", "/review"), ("/r", "#review")] {
+    let snippet = ComposerToken(kind: .snippet, id: "r", text: snippetText, value: "Revise tudo")
+    let request = PromptRequest(
+      document: .init(text: snippetText + " agora", tokens: [.init(start: 0, end: 2, token: snippet)]),
+      delivery: .queue, agent: "build", model: composerModel)
+    #expect(request.text == "Revise tudo agora")
+    let command = ComposerToken(kind: .command, id: "review", text: commandText, value: "backend")
+    let document = ComposerDocument(text: commandText + " src", tokens: [.init(start: 0, end: 7, token: command)])
+    #expect(ComposerDispatch.resolve(document) == .command("review", "src"))
+    let local = ComposerToken(kind: .command, id: "compact", text: String(commandText.prefix(1)) + "compact", value: "client")
+    #expect(ComposerDispatch.resolve(.init(text: local.text, tokens: [.init(start: 0, end: 8, token: local)]))
+      == .local("compact"))
+  }
+  // Untyped text is never a command, with either glyph.
+  #expect(ComposerDispatch.resolve(.init(text: "#review")) == .prompt)
+  #expect(ComposerDispatch.resolve(.init(text: "/review")) == .prompt)
+}
+
+@Test func newSessionTypedCommandBecomesItsTokenWithTheNewTrigger() throws {
+  var source = ComposerSources()
+  source.commands = try decodeComposer(#"[{"name":"review","description":"Revisa"}]"#, [ComposerCommand].self)
+  let typed = source.newSessionDocument(.init(text: "#review src"))
+  #expect(typed.validTokens.first?.token == ComposerToken(kind: .command, id: "review", text: "#review", value: "backend"))
+  #expect(ComposerDispatch.resolve(typed) == .command("review", "src"))
+  #expect(source.newSessionDocument(.init(text: "/review src")).validTokens.isEmpty)
+  #expect(source.newSessionDocument(.init(text: "# Título")).validTokens.isEmpty)
 }
 
 @Test func dispatchDistinguishesSelectedCommandSlashSkillAndRawText() {

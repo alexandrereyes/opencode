@@ -540,9 +540,9 @@ import XCTest
     ).firstMatch
     XCTAssertTrue(skill.waitForExistence(timeout: 10))
     skill.tap()
-    editor.typeText("#resumo")
+    editor.typeText("/resumo")
     let snippet = app.buttons.matching(
-      NSPredicate(format: "identifier BEGINSWITH 'suggestion-' AND label CONTAINS '#resumo'")
+      NSPredicate(format: "identifier BEGINSWITH 'suggestion-' AND label CONTAINS '/resumo'")
     ).firstMatch
     XCTAssertTrue(snippet.waitForExistence(timeout: 10))
     snippet.tap()
@@ -579,7 +579,7 @@ import XCTest
     waitValue(main, "")
     let bubble = light.staticTexts.matching(
       NSPredicate(
-        format: "label CONTAINS 'Veja @docs/alternativas.md @Explore $conversation-check #resumo'")
+        format: "label CONTAINS 'Veja @docs/alternativas.md @Explore $conversation-check /resumo'")
     ).firstMatch
     XCTAssertTrue(bubble.waitForExistence(timeout: 15))
     screenshot("comment-sent-openchamber-light")
@@ -588,7 +588,7 @@ import XCTest
     XCTAssertTrue(
       dark.staticTexts.matching(
         NSPredicate(
-          format: "label CONTAINS 'Veja @docs/alternativas.md @Explore $conversation-check #resumo'"
+          format: "label CONTAINS 'Veja @docs/alternativas.md @Explore $conversation-check /resumo'"
         )
       ).firstMatch.waitForExistence(timeout: 10))
     screenshot("comment-sent-openchamber-dark")

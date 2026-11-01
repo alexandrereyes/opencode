@@ -257,7 +257,7 @@ private struct MacPromptRow: View {
           .disabled(store.reversion.pending)
       case .saveSnippet:
         Divider()
-        Button("Salvar como snippet…", systemImage: "number") { MacPromptMenu.saveSnippet(message, store: store) }
+        Button("Salvar como snippet…", systemImage: "slash.circle") { MacPromptMenu.saveSnippet(message, store: store) }
       }
     }
   }

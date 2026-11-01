@@ -81,7 +81,7 @@ import UniformTypeIdentifiers
   /// A tool to reveal once the conversation is visible again, set from the agents screen.
   var toolRequest: String?
   var sideQuestion: SideQuestionLaunch?
-  /// "Novo snippet" in the `#` panel and "Salvar como snippet": the snippet editor in a sheet over the conversation.
+  /// "Novo snippet" in the `/` panel and "Salvar como snippet": the snippet editor in a sheet over the conversation.
   var snippetEditor: SnippetEditorLaunch?
   var readingRequest: ConversationReadingRequest?
   var expansionValues: [String: Bool] = [:] {
@@ -113,7 +113,7 @@ import UniformTypeIdentifiers
   /// The screen's event loop is running; off screen, `SessionStore` feeds the stream log instead.
   @ObservationIgnored private var live = false
   @ObservationIgnored private var composerCatalog: ComposerSources?
-  /// The server's snippets shared with Ajustes; `#` reads them instead of its own copy, so a snippet saved anywhere
+  /// The server's snippets shared with Ajustes; `/` reads them instead of its own copy, so a snippet saved anywhere
   /// shows at once. Nil in stores without a session list (fixtures).
   @ObservationIgnored let snippets: SnippetCatalog?
   private(set) var composerLocation: String?
@@ -547,7 +547,7 @@ import UniformTypeIdentifiers
     if composerCatalog == nil {
       composerCatalog = try await client.composerSources(directory: directory)
     }
-    if trigger.character == "#", let snippets {
+    if trigger.character == ComposerTrigger.snippet, let snippets {
       await snippets.loadIfNeeded()
       if snippets.loaded { composerCatalog?.snippets = snippets.items }
     }
@@ -567,7 +567,7 @@ import UniformTypeIdentifiers
     }
   }
   func newSessionDocument(_ document: ComposerDocument) async throws -> ComposerDocument {
-    guard document.text.hasPrefix("/"), document.validTokens.first?.start != 0,
+    guard document.text.hasPrefix(ComposerTrigger.command), document.validTokens.first?.start != 0,
       let directory = composerLocation else { return document }
     if composerCatalog == nil { composerCatalog = try await client.composerSources(directory: directory) }
     return composerCatalog?.newSessionDocument(document) ?? document
@@ -1283,7 +1283,7 @@ import UniformTypeIdentifiers
   }
 }
 
-/// What the snippet editor over a conversation starts with: the `#` query as the name, or a message's text.
+/// What the snippet editor over a conversation starts with: the `/` query as the name, or a message's text.
 struct SnippetEditorLaunch: Identifiable {
   let id = UUID()
   var name = ""

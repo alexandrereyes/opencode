@@ -85,9 +85,9 @@ try:
             "files": [{key: value for key, value in file.items() if key != "data"} for file in sent["files"]],
             "agents": [{key: value for key, value in agent.items() if key in {"name", "mention"}} for agent in sent["agents"]],
             "skills": [{key: value for key, value in skill.items() if key in {"id", "name", "mention"}} for skill in sent["skills"]]}, indent=2, ensure_ascii=False))
-        assert "@docs/alternativas.md" in quote["comment"] and "$conversation-check" in quote["comment"] and "#resumo" in quote["comment"]
+        assert "@docs/alternativas.md" in quote["comment"] and "$conversation-check" in quote["comment"] and "/resumo" in quote["comment"]
         expansion = next(part["expansion"] for part in quote["commentPrompt"] if part["type"] == "snippet")
-        assert "User comment: " + quote["comment"].replace("#resumo", expansion).strip() in sent["text"]
+        assert "User comment: " + quote["comment"].replace("/resumo", expansion).strip() in sent["text"]
         files = sent["files"]
         main = next(file for file in files if file.get("mention") is not None)
         mention = main["mention"]

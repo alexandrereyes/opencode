@@ -578,7 +578,7 @@ private struct MacBaseBranchPicker: View {
     async let models = sessions.client.models(directory: directory)
     async let agents = sessions.client.agents(directory: directory)
     async let configuration = sessions.client.newSessionConfiguration(directory: directory)
-    // The composer's own catalog: suggestions (`@` agents, `/` commands, `$` skills…) for this directory.
+    // The composer's own catalog: suggestions (`@` agents, `#` commands, `$` skills…) for this directory.
     async let composer: Void = self.composer.loadNewSession(
       directory: directory, projectID: project?.id ?? "global", recent: sessions.catalog.recent)
     let values = try await (models, agents, configuration, composer)

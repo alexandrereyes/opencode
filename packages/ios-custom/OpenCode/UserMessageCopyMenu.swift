@@ -80,7 +80,7 @@ struct UserMessageCopyMenu: UIViewRepresentable {
         // Opens the snippet editor with a copy of the text; the message and the draft stay as they are.
         let text = message.copyText.trimmingCharacters(in: .whitespacesAndNewlines)
         let save = snippet.flatMap { snippet in
-          text.isEmpty ? nil : UIAction(title: "Salvar como snippet", image: UIImage(systemName: "number")) { _ in
+          text.isEmpty ? nil : UIAction(title: "Salvar como snippet", image: UIImage(systemName: "slash.circle")) { _ in
             snippet.save(text)
           }
         }

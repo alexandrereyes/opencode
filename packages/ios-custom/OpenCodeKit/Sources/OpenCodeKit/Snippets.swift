@@ -53,7 +53,7 @@ public struct SnippetIssue: Equatable, Sendable {
 /// The plugin's rules (`src/snippets/rules.ts`): names and aliases have letters (accented ones too), digits, `-` and
 /// `_`, and every one of them is unique in its scope (the global snippets, or one project's), ignoring case.
 public enum SnippetRules {
-  public static let formatHint = "Sem espaços nem #, @, $. Use letras, números, - e _."
+  public static let formatHint = "Sem espaços nem /, #, @, $. Use letras, números, - e _."
 
   /// `^[\p{L}\p{M}\p{N}_-]+$`, like the plugin.
   public static func isHandle(_ value: String) -> Bool {
@@ -85,8 +85,8 @@ public enum SnippetRules {
       result.append(.init(.name, formatHint))
     } else if let other = owner(snippet.name) {
       result.append(.init(.name, key(other.name) == key(snippet.name)
-        ? "Já existe #\(other.name) \(place)."
-        : "“\(snippet.name)” já é atalho de #\(other.name) \(place)."))
+        ? "Já existe \(ComposerTrigger.snippet)\(other.name) \(place)."
+        : "“\(snippet.name)” já é atalho de \(ComposerTrigger.snippet)\(other.name) \(place)."))
     }
     var seen: Set<String> = [key(snippet.name)]
     for alias in snippet.aliases {
@@ -95,7 +95,7 @@ public enum SnippetRules {
       } else if !seen.insert(key(alias)).inserted {
         result.append(.init(.alias(alias), "O atalho “\(alias)” repete o nome ou outro atalho."))
       } else if let other = owner(alias) {
-        result.append(.init(.alias(alias), "O atalho “\(alias)” já é usado por #\(other.name) \(place)."))
+        result.append(.init(.alias(alias), "O atalho “\(alias)” já é usado por \(ComposerTrigger.snippet)\(other.name) \(place)."))
       }
     }
     if snippet.content.allSatisfy(\.isWhitespace) {
@@ -104,7 +104,7 @@ public enum SnippetRules {
     return result
   }
 
-  /// The global snippet a project snippet replaces in that project's `#`, if any.
+  /// The global snippet a project snippet replaces in that project's `/`, if any.
   public static func overridden(_ snippet: Snippet, in catalog: [Snippet]) -> Snippet? {
     guard snippet.project != nil else { return nil }
     return catalog.first { $0.project == nil && $0.id != snippet.id && key($0.name) == key(snippet.name) }
@@ -133,11 +133,11 @@ public struct SnippetSaveError: Error, LocalizedError, Equatable, Sendable {
     case "conflict":
       let existing = fields["existing"]?.string ?? snippet.name
       if fields["field"]?.string == "alias" {
-        return .init(issue: .init(.alias(value), "O atalho “\(value)” já é usado por #\(existing) \(place)."))
+        return .init(issue: .init(.alias(value), "O atalho “\(value)” já é usado por \(ComposerTrigger.snippet)\(existing) \(place)."))
       }
       return .init(issue: .init(.name, SnippetRules.key(existing) == SnippetRules.key(value)
-        ? "Já existe #\(existing) \(place)."
-        : "“\(value)” já é atalho de #\(existing) \(place)."))
+        ? "Já existe \(ComposerTrigger.snippet)\(existing) \(place)."
+        : "“\(value)” já é atalho de \(ComposerTrigger.snippet)\(existing) \(place)."))
     case "invalid":
       let duplicate = fields["reason"]?.string == "duplicate"
       if fields["field"]?.string == "aliases" {
@@ -188,7 +188,7 @@ extension OpenCodeClient {
 
 // MARK: Catalog
 
-/// The server's catalog for one connection, shared by Ajustes and every composer's `#`: it reloads on
+/// The server's catalog for one connection, shared by Ajustes and every composer's `/`: it reloads on
 /// `rpc.custom.snippets.updated` and after a reconnection (events sent while disconnected are lost).
 @MainActor @Observable public final class SnippetCatalog {
   public private(set) var items: [Snippet] = []

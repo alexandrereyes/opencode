@@ -4,7 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The chat's composer on the iPhone's model (`ConversationDraft`, `ConversationStore.send`, `ComposerSources`):
-/// `@` sessions, apps, agents and references, `&` files, `/` commands, `$` skills and `#` snippets open the
+/// `@` sessions, apps, agents and references, `&` files, `#` commands, `$` skills and `/` snippets open the
 /// shared suggestion panel (↑/↓ or ⌃P/⌃N move, Return or Tab picks, Esc closes) and become atomic colored tokens;
 /// a pasted or dropped image is cited in the text as `[image-1.png]`, like the web; `+` adds attachments; quotes
 /// wait in `Citações · N`. Then the model and agent capsules and the microphone, which
@@ -248,15 +248,15 @@ struct MacComposer: View {
       newSnippet: snippetShortcut, saveSnippet: { saveSnippet($0) })
   }
 
-  /// ⌘N makes a snippet only while the `#` panel is open.
+  /// ⌘N makes a snippet only while the `/` panel is open.
   private var snippetShortcut: (() -> Void)? {
-    guard trigger?.character == "#" else { return nil }
+    guard trigger?.character == ComposerTrigger.snippet else { return nil }
     return { newSnippet() }
   }
 
   // MARK: Snippets (Ajustes ▸ Snippets)
 
-  /// The `#` panel's "Novo snippet…" and ⌘N while it is open: a new snippet in this conversation's project.
+  /// The `/` panel's "Novo snippet…" and ⌘N while it is open: a new snippet in this conversation's project.
   private func newSnippet() {
     draft.dismissSuggestions()
     MacSnippets.new(Snippet(project: MacSnippets.project(of: store)))
@@ -466,7 +466,7 @@ struct MacComposerEditor: NSViewRepresentable {
   var moveSuggestion: (Int) -> Bool = { _ in false }
   /// Pasted images and files; nil where the composer takes no attachments.
   let attach: (([NSPasteboardItem]) -> Bool)?
-  /// ⌘N while the `#` panel is open.
+  /// ⌘N while the `/` panel is open.
   var newSnippet: (() -> Void)? = nil
   /// "Salvar como snippet…" in a selection's context menu.
   var saveSnippet: ((String) -> Void)? = nil
@@ -601,8 +601,8 @@ struct MacComposerEmbedding {
 /// What a composer offers where it is. Dictation (the microphone, the right Option key, ⌃⌥Space), the growing and
 /// scrolling field, Return/Shift+Return/Esc and the automatic corrections turned off come with every one.
 struct MacComposerFeatures {
-  /// The suggestion triggers that open the panel (`@` `&` `/` `$` `#`); none in a plain answer.
-  var triggers: Set<String> = ["@", "&", "/", "$", "#"]
+  /// The suggestion triggers that open the panel (`@` `&` `#` commands `$` `/` snippets); none in a plain answer.
+  var triggers: Set<String> = ["@", "&", ComposerTrigger.command, "$", ComposerTrigger.snippet]
   /// `+`, images pasted or dropped and cited in the text, and the attachments' chips.
   var attachments = true
   /// The model and agent capsules (the chat's; Nova sessão shows its own below the editor).
@@ -615,7 +615,7 @@ struct MacComposerFeatures {
   static let chat = MacComposerFeatures()
   static let newSession = MacComposerFeatures(capsules: false)
   /// A quote's comment: tokens and attachments, but no command, which only starts a prompt.
-  static let comment = MacComposerFeatures(triggers: ["@", "&", "$", "#"], capsules: false)
+  static let comment = MacComposerFeatures(triggers: ["@", "&", "$", ComposerTrigger.snippet], capsules: false)
   /// Pergunta paralela: plain text, typed or dictated, in a card of its own.
   static let reply = MacComposerFeatures(triggers: [], attachments: false, capsules: false)
   /// A question's own answer or a form field, inside the question's card.

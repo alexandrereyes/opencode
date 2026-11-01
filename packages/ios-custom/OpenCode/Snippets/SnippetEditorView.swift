@@ -2,7 +2,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// What the editor starts from: an existing snippet to edit, or a new one (empty, a duplicate, a message's text,
-/// the `#` query).
+/// the `/` query).
 struct SnippetEditorRoute: Identifiable {
   let id = UUID()
   var snippet: Snippet
@@ -82,7 +82,7 @@ struct SnippetEditorView: View {
           if let issue = candidateIssue ?? aliasIssue {
             problem(issue.message).accessibilityIdentifier("snippet-alias-problem")
           } else {
-            Text("Outras palavras que encontram este snippet depois do #.")
+            Text("Outras palavras que encontram este snippet depois da \(ComposerTrigger.snippet).")
           }
         }.listRowBackground(theme.color(.surface))
         Section("Escopo") {
@@ -119,10 +119,10 @@ struct SnippetEditorView: View {
           Button("Salvar") { Task { await save() } }.disabled(!canSave).accessibilityIdentifier("snippet-save")
         }
       }
-      .confirmationDialog("Apagar #\(route.snippet.name)?", isPresented: $deleting, titleVisibility: .visible) {
+      .confirmationDialog("Apagar \(ComposerTrigger.snippet)\(route.snippet.name)?", isPresented: $deleting, titleVisibility: .visible) {
         Button("Apagar snippet", role: .destructive) { Task { await remove() } }
         Button("Cancelar", role: .cancel) {}
-      } message: { Text("Ele deixa de aparecer no # do iPhone e do Mac. Mensagens já enviadas não mudam.") }
+      } message: { Text("Ele deixa de aparecer no / do iPhone e do Mac. Mensagens já enviadas não mudam.") }
       .alert("Não foi possível concluir", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
         Button("OK") { failure = nil }
       } message: { Text(failure ?? "") }
@@ -144,7 +144,7 @@ struct SnippetEditorView: View {
 
   private var trigger: some View {
     HStack(spacing: 10) {
-      Text("#").appFont(.body, weight: .semibold).foregroundStyle(theme.color(.composerSnippet))
+      Text(ComposerTrigger.snippet).appFont(.body, weight: .semibold).foregroundStyle(theme.color(.composerSnippet))
         .frame(width: 32, height: 32)
         .background(theme.color(.surfaceRaised), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityHidden(true)
@@ -153,7 +153,7 @@ struct SnippetEditorView: View {
         .focused($focus, equals: .name)
         .onSubmit { focus = .content }
         .accessibilityLabel("Gatilho")
-        .accessibilityHint(nameIssue?.message ?? "Nome que você digita depois do #")
+        .accessibilityHint(nameIssue?.message ?? "Nome que você digita depois da \(ComposerTrigger.snippet)")
         .accessibilityIdentifier("snippet-name")
     }
     .padding(.horizontal, 6).padding(.vertical, 4)
@@ -217,7 +217,7 @@ struct SnippetEditorView: View {
     }
     .appFont(.secondary)
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("No composer, #\(snippet.name) envia o texto acima")
+    .accessibilityLabel("No composer, \(ComposerTrigger.snippet)\(snippet.name) envia o texto acima")
   }
 
   private var aliases: some View {
@@ -306,7 +306,7 @@ struct SnippetToken: View {
   @Environment(\.appTheme) private var theme
   let name: String
   var body: some View {
-    Text("#" + name).appFont(.secondary, weight: .semibold).lineLimit(1)
+    Text(ComposerTrigger.snippet + name).appFont(.secondary, weight: .semibold).lineLimit(1)
       .foregroundStyle(theme.color(.composerSnippet))
       .padding(.horizontal, 8).padding(.vertical, 3)
       .background(theme.color(.composerSnippet).opacity(0.14), in: RoundedRectangle(cornerRadius: 7))

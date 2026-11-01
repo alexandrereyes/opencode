@@ -182,6 +182,15 @@ public struct ComposerDocument: Codable, Sendable, Equatable {
 }
 
 public struct ComposerTrigger: Sendable, Equatable {
+  /// The native apps' triggers (Alexandre, 01/11): `#` opens commands, at the start of the message only, and `/` opens
+  /// snippets, which he uses more and `/` costs fewer taps on the iPhone keyboard. Only the typed glyph changed: a
+  /// command still runs by its name and a snippet still expands to its content; the server sees no difference. The
+  /// web and the TUI keep `/` and `#`.
+  public static let command = "#"
+  public static let snippet = "/"
+  /// A snippet's name or alias: letters, digits, `-` and `_` (the plugin's rule). A `/` query with anything else (a
+  /// path's next `/`, a `.`, a `:`) is not a snippet, so typing `/tmp/x` or `/Users/a.txt` closes the panel.
+  private static let snippetQuery = try! NSRegularExpression(pattern: #"^[\p{L}\p{M}\p{N}_-]*$"#)
   private static let expression = try! NSRegularExpression(pattern: #"(^|[\s(\[{\"'])\s*([@/$#&])([^\s@$#]*)$"#)
   public let character: String
   public let query: String
@@ -199,7 +208,7 @@ public struct ComposerTrigger: Sendable, Equatable {
     }
     let word = text.substring(with: NSRange(location: start, length: cursor - start))
     guard let trigger = detect(in: ComposerDocument(text: word), cursor: word.utf16.count),
-      trigger.character != "/" || start + trigger.range.location == 0,
+      trigger.character != command || start + trigger.range.location == 0,
       // A word begins after a token too; `&` right after a token is prose ("@build&").
       trigger.character != "&" || trigger.range.location > 0 || start == 0
         || text.character(at: start - 1) != 0xFFFC
@@ -218,7 +227,10 @@ public struct ComposerTrigger: Sendable, Equatable {
     let marker = (prefix as NSString).substring(with: match.range(at: 2))
     let start = match.range(at: 2).location
     let query = (prefix as NSString).substring(with: match.range(at: 3))
-    guard marker != "/" || start == 0 else { return nil }
+    guard marker != command || start == 0 else { return nil }
+    guard marker != snippet
+      || snippetQuery.firstMatch(in: query, range: NSRange(location: 0, length: (query as NSString).length)) != nil
+    else { return nil }
     guard marker != "&" || filesTrigger(prefix as NSString, start: start, query: query) else { return nil }
     return Self(character: marker, query: query, range: NSRange(location: start, length: cursor - start))
   }

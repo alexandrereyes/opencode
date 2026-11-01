@@ -1757,11 +1757,11 @@ import SwiftUI
     shot("fim")
   }
 
-  // MARK: Snippets — Ajustes ▸ Snippets, the # panel and Salvar como snippet (rev. 2026-10-30)
+  // MARK: Snippets — Ajustes ▸ Snippets, the / panel and Salvar como snippet (rev. 2026-10-30; `/` since 01/11)
 
   /// One launch (`-OpenCodeMacSettings snippets` opens the tab off-screen): the empty catalog, live validation, five
   /// snippets in three scopes, a project one that replaces a global one, edit, Reverter, Duplicar, Apagar through its
-  /// confirmation, another client's save reaching the open conversation's `#`, the panel with its two actions and
+  /// confirmation, another client's save reaching the open conversation's `/`, the panel with its two actions and
   /// ⌘N, and Salvar como snippet from a composer selection and from a sent message.
   private static func snippets(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String,
     shot: (String) -> Void) async throws
@@ -1803,7 +1803,7 @@ import SwiftUI
       board.edited(.content)
       await board.save()
       try check(board.selectedID == snippet.id && !board.dirty
-        && MacFixtureSnippets.shared.all.contains { $0.id == snippet.id }, "não salvou #\(snippet.name): \(board.issues)")
+        && MacFixtureSnippets.shared.all.contains { $0.id == snippet.id }, "não salvou /\(snippet.name): \(board.issues)")
     }
     let revisar = Snippet(name: "revisar", aliases: ["review", "cr"], description: "Revisa o diff e aponta riscos",
       content: "Revise o diff atual.\n- Aponte bugs e riscos de regressão.\n- Responda em pt-BR, em tópicos curtos.")
@@ -1827,7 +1827,7 @@ import SwiftUI
     board.startNew()
     board.draft?.name = "Review"
     board.draft?.content = "x"
-    try check(board.issues.map(\.message) == ["“Review” já é atalho de #revisar nos globais."] && !board.canSave,
+    try check(board.issues.map(\.message) == ["“Review” já é atalho de /revisar nos globais."] && !board.canSave,
       "conflito: \(board.issues.map(\.message))")
     board.revert()
     board.revert()
@@ -1869,14 +1869,19 @@ import SwiftUI
       from: Data(#"{"type":"rpc.custom.snippets.updated","data":{}}"#.utf8))))
     try await wait("recarga pelo evento") { catalog.items.contains { $0.id == "fx_ios" } ? true : nil }
     func offered(_ text: String) async throws -> [ComposerSuggestion] {
-      let trigger = try require(ComposerTrigger.detect(in: ComposerDocument(text: text), cursor: text.utf16.count), "#")
+      let trigger = try require(ComposerTrigger.detect(in: ComposerDocument(text: text), cursor: text.utf16.count), text)
       return try await conversation.suggestions(trigger)
     }
-    try check(try await offered("#ios").map(\.title) == ["#ios-capturas"], "# não viu o snippet novo")
-    try check(try await offered("#revisar").first?.token.value == "Revise o diff seguindo as regras do custom.",
-      "# não usou o snippet do projeto")
+    try check(try await offered("/ios").map(\.title) == ["/ios-capturas"], "/ não viu o snippet novo")
+    try check(try await offered("/revisar").first?.token.value == "Revise o diff seguindo as regras do custom.",
+      "/ não usou o snippet do projeto")
+    // `#` at the start lists the server's commands, never snippets; mid-message it is prose.
+    let commands = try await offered("#rev")
+    try check(commands.first?.token == ComposerToken(kind: .command, id: "review", text: "#review", value: "backend")
+      && !commands.contains { $0.token.kind == .snippet }, "# não listou o comando review")
+    try check(ComposerTrigger.detect(in: ComposerDocument(text: "Veja #rev"), cursor: 9) == nil, "# no meio virou gatilho")
 
-    // The # panel: its two actions; ⌘N while it is open makes a snippet in the conversation's project.
+    // The / panel: its two actions; ⌘N while it is open makes a snippet in the conversation's project.
     let draft = runtime.input(conversation).draft
     let text = try await wait("editor") {
       views(window).compactMap { $0 as? ComposerTextNSView }.first { $0.window != nil && $0.input?.representedDraft === draft }
@@ -1888,8 +1893,8 @@ import SwiftUI
       try await Task.sleep(for: .milliseconds(900))
       window.makeFirstResponder(text)
     }
-    try await type("#")
-    try await wait("painel do #") { text.newSnippet != nil ? true : nil }
+    try await type("/")
+    try await wait("painel do /") { text.newSnippet != nil ? true : nil }
     shot("painel")
     _ = window.performKeyEquivalent(with: key("n", code: 45, flags: [.command], window: window))
     try check(board.isNew && board.draft?.project == project
@@ -1898,6 +1903,21 @@ import SwiftUI
     MacSnippets.manage(project: project)
     try check(board.focusProject == project && board.selectedID.flatMap { id in catalog.items.first { $0.id == id } }?
       .project == project, "Gerenciar snippets… não abriu no projeto")
+
+    // Return picks the first item: `/ios` becomes the snippet's token and `#rev` the command's, caret after it.
+    for (typed, expected) in [("/ios", ComposerToken(kind: .snippet, id: "fx_ios", text: "/ios-capturas",
+      value: "Capture as telas no simulador.")), ("#rev", ComposerToken(kind: .command, id: "review", text: "#review",
+      value: "backend"))] {
+      try await type(typed)
+      try await wait("painel de \(typed)") { text.firstSuggestion?() != nil ? true : nil }
+      shot("gatilho-" + (typed.hasPrefix("/") ? "snippet" : "comando"))
+      window.sendEvent(key("\r", code: 36, window: window))
+      try await wait("\(typed) virou token") { draft.document.validTokens.first?.token == expected ? true : nil }
+      let tokenEnd = draft.document.validTokens[0].end
+      try check(draft.trigger == nil && draft.document.text.hasPrefix(expected.text)
+        && draft.document.documentOffset(draft.selection.location) >= tokenEnd,
+        "\(typed): texto \(draft.document.text.debugDescription), cursor \(draft.selection.location)")
+    }
 
     // Salvar como snippet on a selection: the editor with its text; the composer keeps it.
     let sentence = "Revise o diff atual e aponte riscos de regressão."

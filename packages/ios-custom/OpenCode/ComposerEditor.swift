@@ -4,7 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// A quote comment edits its own ephemeral draft in this same editor (see QuoteCommentEditor):
-/// no model, MCP or agent selectors and no `/` commands, which only run from the message itself;
+/// no model, MCP or agent selectors and no `#` commands, which only run from the message itself;
 /// no fullscreen (its sheet already rises with the keyboard), and submitting commits the comment
 /// to the quote instead of sending.
 struct ComposerComment {
@@ -47,7 +47,7 @@ struct ComposerEditor: View {
   }
   /// Only the message composer of a conversation that knows its catalog opens the snippet editor.
   private var canEditSnippets: Bool { comment == nil && snippets != nil }
-  /// From the composer (the `#` panel, a selection), it returns to the composer as it was, where `#` now lists the
+  /// From the composer (the `/` panel, a selection), it returns to the composer as it was, where `/` now lists the
   /// new snippet.
   private func openSnippetEditor(_ launch: SnippetEditorLaunch) {
     snippetRefocus = true
@@ -81,14 +81,14 @@ struct ComposerEditor: View {
   }
   /// Return's pick: the panel's first item, only if it was loaded for the trigger still being typed.
   private func firstSuggestion() -> (() -> Void)? {
-    guard let trigger = draft.trigger, comment == nil || trigger.character != "/",
+    guard let trigger = draft.trigger, comment == nil || trigger.character != ComposerTrigger.command,
       let first = suggestionReturn.first, first.trigger == trigger
     else { return nil }
     return { choose(first.item, replacing: trigger) }
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
-      if let trigger = draft.trigger, comment == nil || trigger.character != "/" {
+      if let trigger = draft.trigger, comment == nil || trigger.character != ComposerTrigger.command {
         ComposerSuggestions(
           store: store, trigger: trigger, ready: suggestionReturn,
           snippetActions: canEditSnippets
@@ -198,7 +198,7 @@ struct ComposerEditor: View {
     .sheet(item: comment == nil ? $store.sideQuestion : .constant(nil)) { launch in
       SideQuestionSheet(store: store, launch: launch).sessionAlertOverlay()
     }
-    // "Novo snippet" and "Salvar como snippet" leave the draft as it is; the new snippet reaches `#` through the
+    // "Novo snippet" and "Salvar como snippet" leave the draft as it is; the new snippet reaches `/` through the
     // catalog's reload.
     .sheet(item: canEditSnippets ? $store.snippetEditor : .constant(nil), onDismiss: {
       if snippetRefocus { draft.focused = true }

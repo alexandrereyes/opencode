@@ -52,6 +52,7 @@ import XCTest
                            "-OpenCodeOpenSession", try XCTUnwrap(environment["OPENCODE_CASE_SESSION"])]
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(environment["OPENCODE_TEST_PASSWORD"])
     app.launch()
+    try app.requireSandbox()
     defer { app.terminate() }
     let editor = app.textViews["conversation-composer"]
     XCTAssertTrue(editor.waitForExistence(timeout: 30))
@@ -64,24 +65,24 @@ import XCTest
       ("&readme", "README.md"), ("&README", "README.md"), ("&SAFARIBRIDGE", "src/SafariBridge.ts"),
       ("@especial", target), ("@ESPECIAL", target), ("@SESSÃO", target), ("@sessão", target),
       ("@" + agent.uppercased(), agent), ("$" + skill.uppercased(), skill), ("$" + skill.capitalized, skill),
-      ("#COMMIT", "snip-commit"), ("#Commit", "snip-commit"), ("#commit", "snip-commit"),
-      ("/" + command.uppercased(), command), ("/" + command.capitalized, command),
+      ("/COMMIT", "snip-commit"), ("/Commit", "snip-commit"), ("/commit", "snip-commit"),
+      ("#" + command.uppercased(), command), ("#" + command.capitalized, command),
     ]
     for (query, id) in cases {
       editor.typeText(query)
       XCTAssertTrue(app.buttons["suggestion-" + id].waitForExistence(timeout: 10), "\(query) should offer \(id)")
-      if query == "@SESSÃO" || query == "#COMMIT" { shot("case-" + query.dropFirst().lowercased()) }
+      if query == "@SESSÃO" || query == "/COMMIT" { shot("case-" + query.dropFirst().lowercased()) }
       editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: query.count))
       XCTAssertTrue(app.buttons["suggestion-" + id].waitForNonExistence(timeout: 10))
     }
     // Return still picks the first, already loaded suggestion.
-    editor.typeText("#COMMIT")
+    editor.typeText("/COMMIT")
     XCTAssertTrue(app.buttons["suggestion-snip-commit"].waitForExistence(timeout: 10))
     editor.typeText("\n")
     XCTAssertTrue(app.buttons["suggestion-snip-commit"].waitForNonExistence(timeout: 5))
     XCTAssertEqual(
       XCTWaiter.wait(
-        for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "NOT (value CONTAINS %@)", "#COMMIT"), object: editor)],
+        for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "NOT (value CONTAINS %@)", "/COMMIT"), object: editor)],
         timeout: 5), .completed)
     shot("case-return")
     editor.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))

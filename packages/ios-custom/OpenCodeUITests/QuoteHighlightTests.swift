@@ -156,7 +156,7 @@ import XCTest
     }
     screenshot("comment-composer-empty")
     // Commands only run from the message itself, like the web's comment editor.
-    editor.typeText("/")
+    editor.typeText("#")
     XCTAssertFalse(app.staticTexts["Comandos"].waitForExistence(timeout: 3))
     editor.typeText(XCUIKeyboardKey.delete.rawValue + "Comentário descartado $")
     XCTAssertTrue(app.staticTexts["Skills"].waitForExistence(timeout: 10))
