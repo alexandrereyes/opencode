@@ -2708,6 +2708,8 @@ composer, sheets and overlays stay SwiftUI; `TranscriptHost` mounts the view con
   row heights are cached by shown text, Markdown, font size, wrapping and width (`ResponseTableMeasurements`, 256
   entries), and cell text views come from a shared pool keyed by their table cell (`ResponseTableCellPool`, 128 views),
   so a table scrolling back takes its own views, already styled and laid out. Both are emptied on memory warnings.
+  Pooled cell views come from `SelectableResponseText.makeTextView`, so a tap on a quoted cell's text opens its
+  comment as in prose (`OpenCodeUITests/ResponseTableQuoteTests`).
   Item estimates are computed once per item content and width, not on every streamed batch. Simulator, Debug `-O`,
   a private synthetic fixture shaped like a 1,090-message session with 208 tables, frames over 50 ms per 12 s
   (medians of three, before → after): first history 14 → 4, paging 7 → 2, revisits 8 → 2, scrolling while a

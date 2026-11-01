@@ -364,7 +364,7 @@ final class ResponseTableView: UIScrollView {
 }
 
 /// Cell text views reused across tables: creating a selectable `UITextView` costs more than configuring one.
-/// Each view keeps its coordinator and the cell it last showed, so a table
+/// Each view keeps its coordinator (its delegate and quote-tap target) and the cell it last showed, so a table
 /// that comes back takes its own views and is neither styled nor laid out again. Bounded (oldest first out);
 /// emptied on memory warnings.
 @MainActor enum ResponseTableCellPool {
@@ -379,13 +379,9 @@ final class ResponseTableView: UIScrollView {
       let reused = views.remove(at: index)
       return (reused.view, reused.coordinator)
     }
-    let view = ResponseTextView(frame: .zero, textContainer: nil)
-    view.isEditable = false
-    view.isSelectable = true
-    view.isScrollEnabled = false
-    view.backgroundColor = .clear
-    view.textContainer.lineFragmentPadding = 0
-    return (view, SelectableResponseText.Coordinator())
+    // The response text's own factory: its tap opens a quote mark's comment, as in prose.
+    let coordinator = SelectableResponseText.Coordinator()
+    return (SelectableResponseText.makeTextView(coordinator: coordinator), coordinator)
   }
 
   static func give(_ view: ResponseTextView, _ coordinator: SelectableResponseText.Coordinator, key: String) {
