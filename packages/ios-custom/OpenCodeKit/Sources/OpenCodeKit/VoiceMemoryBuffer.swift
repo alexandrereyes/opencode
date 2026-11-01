@@ -2,8 +2,15 @@ import CryptoKit
 import Foundation
 
 public enum VoiceMemoryOperation: Codable, Sendable, Equatable, Identifiable {
-  case turn(VoiceMemoryTurn), end(String)
-  public var id: String { switch self { case .turn(let turn): turn.id; case .end(let id): "end:" + id } }
+  /// `reset`: `custom.voice` → `reset`, after the service moderated a call.
+  case turn(VoiceMemoryTurn), end(String), reset(String)
+  public var id: String {
+    switch self {
+    case .turn(let turn): turn.id
+    case .end(let id): "end:" + id
+    case .reset(let id): "reset:" + id
+    }
+  }
 }
 
 public struct VoiceMemorySnapshot: Codable, Sendable, Equatable {
@@ -56,10 +63,29 @@ public actor VoiceMemoryBuffer {
     value.pending.append(operation)
     try save(value)
   }
+  /// Clears the conversation kept here and queues the server reset. Turns not sent yet are dropped (they are the
+  /// cleared conversation); call ends already queued stay, before the reset. Seen IDs stay, so a turn of the cleared
+  /// call captured late is still a duplicate.
+  public func reset(_ id: String) throws {
+    var value = try snapshot()
+    let operation = VoiceMemoryOperation.reset(id)
+    guard value.seenIDs.insert(operation.id).inserted else { return }
+    value.pending.removeAll { if case .turn = $0 { true } else { false } }
+    value.pending.append(operation)
+    value.context = VoiceMemoryContext()
+    try save(value)
+  }
+  /// Whether a reset is still waiting for the server: until it goes, the server's memory is the cleared one.
+  public func resetting() throws -> Bool {
+    try snapshot().pending.contains { if case .reset = $0 { true } else { false } }
+  }
   public func acknowledge(_ ids: [String]) throws {
     var value = try snapshot()
-    guard Array(value.pending.prefix(ids.count).map(\.id)) == ids else { throw VoiceMemoryBufferError.order }
-    value.pending.removeFirst(ids.count)
+    // A pending reset may have dropped turns already on their way to the server; the rest stays in order.
+    let resetting = value.pending.contains { if case .reset = $0 { true } else { false } }
+    let present = resetting ? ids.filter { id in value.pending.contains { $0.id == id } } : ids
+    guard Array(value.pending.prefix(present.count).map(\.id)) == present else { throw VoiceMemoryBufferError.order }
+    value.pending.removeFirst(present.count)
     try save(value)
   }
   public func cache(_ context: VoiceMemoryContext, observedIDs: Set<String>? = nil) throws {
@@ -97,6 +123,8 @@ public actor VoiceMemoryService {
   public func prepare() async -> VoiceMemoryContext? {
     do {
       guard try await probe(force: true) else { return nil }
+      // The server still has the conversation a pending reset clears: what this device has is the memory.
+      if try await buffer.resetting() { return try await buffer.snapshot().context }
       let observed = Set(try await buffer.snapshot().context.turns.map(\.id))
       let context = try await client.voiceMemoryContext()
       guard context.version == 2, context.scope == "global" else { supported = false; status = .unsupported; return nil }
@@ -130,6 +158,11 @@ public actor VoiceMemoryService {
         switch first {
         case .end:
           try await client.endVoiceMemory()
+          try await buffer.acknowledge([first.id])
+        case .reset:
+          do { try await client.resetVoiceMemory() } catch ClientError.rpc("rpc.method_not_found") {
+            // A server without `reset` keeps its memory; this device cleared its own and moves on.
+          }
           try await buffer.acknowledge([first.id])
         case .turn:
           let pending = try await buffer.snapshot().pending

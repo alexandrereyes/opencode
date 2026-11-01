@@ -83,6 +83,21 @@ struct VoiceTests {
       #"{"type":"error"}"#,
     ] { #expect(!VoiceProtocol.endsSession(try code(json))) }
   }
+  /// Moderation is recognized only by the error's structured type/code, never by text.
+  @Test func moderationIsTheStructuredContentFilterOnly() throws {
+    func code(_ json: String) throws -> String? {
+      guard case .failure(let code, _) = try VoiceProtocol.decode(Data(json.utf8)) else { return "not a failure" }
+      return code
+    }
+    #expect(VoiceProtocol.isModeration(try code(#"{"type":"error","error":{"type":"content_filter","code":"content_filter","message":"The generation was stopped due to moderation."}}"#)))
+    #expect(VoiceProtocol.isModeration(try code(#"{"type":"error","code":"content_filter"}"#)))
+    for json in [
+      #"{"type":"error","error":{"type":"invalid_request_error","code":"invalid_value","message":"content_filter"}}"#,
+      #"{"type":"error","error":{"type":"server_error","code":"internal"}}"#,
+      #"{"type":"error","error":"content_filter"}"#,
+      #"{"type":"error"}"#,
+    ] { #expect(!VoiceProtocol.isModeration(try code(json))) }
+  }
   @Test func callContextGoesInChunksWithoutADelegation() throws {
     let text = String(repeating: "Resultado: ação concluída. ", count: 40)
     let frames = try VoiceProtocol.contextAppend(text)

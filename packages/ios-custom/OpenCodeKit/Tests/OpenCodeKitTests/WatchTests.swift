@@ -200,6 +200,8 @@ private let stateJSON = """
     #expect(WatchVoiceEnd.message(for: "max_duration")?.contains("30 minutos") == true)
     // A batch that only says `ended` gets the generic notice.
     #expect(WatchVoiceEnd.message(for: "ended") == "A conversa foi encerrada pelo servidor.")
+    #expect(WatchVoiceEnd.message(for: "context_reset")?.hasPrefix("Limpou o contexto") == true)
+    #expect(WatchVoiceEnd.message(for: "moderation")?.contains("mesmo sem histórico") == true)
     #expect(WatchVoiceEnd.message(for: "client_end") == nil)
     #expect(WatchVoiceEnd.message(for: "replaced") == nil)
   }

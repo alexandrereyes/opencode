@@ -14,11 +14,15 @@ public struct VoiceBarState: Equatable, Sendable {
   public var expanded: Bool
   public var error: String?
   public var busy: Bool
+  /// The service moderated this call and its voice memory was cleared; stays until the bar leaves.
+  public var contextCleared: Bool
+  public static let contextClearedNotice = "Limpou o contexto"
 
   public init(phase: Phase, elapsed: TimeInterval = 0, transcript: String? = nil,
               masterProgress: String? = nil, muted: Bool = false, expanded: Bool = false,
-              error: String? = nil, busy: Bool = false) {
+              error: String? = nil, busy: Bool = false, contextCleared: Bool = false) {
     self.phase = phase
+    self.contextCleared = contextCleared
     self.elapsed = elapsed
     self.transcript = transcript
     self.masterProgress = masterProgress
@@ -41,7 +45,8 @@ public struct VoiceBarState: Equatable, Sendable {
     }
     self.init(phase: phase, elapsed: elapsed, transcript: transcript,
               masterProgress: voice.masterWorking ? masterProgress : nil,
-              muted: voice.muted, expanded: expanded, error: voice.error, busy: busy)
+              muted: voice.muted, expanded: expanded, error: voice.error, busy: busy,
+              contextCleared: voice.contextCleared)
   }
 
   public var label: String {
@@ -80,7 +85,10 @@ public struct VoiceBarState: Equatable, Sendable {
       .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
       .joined(separator: " e ").nilIfEmpty ?? "0 segundos"
   }
-  public var accessibilityLabel: String { "Conversa por voz, \(label.lowercased()), \(spokenTime)" }
+  public var accessibilityLabel: String {
+    "Conversa por voz, \(label.lowercased()), \(spokenTime)"
+      + (contextCleared ? ", " + Self.contextClearedNotice.lowercased() : "")
+  }
   public var spokenLine: String? { (phase == .failed ? error : transcript)?.nilIfEmpty }
   public var progressLine: String? {
     masterProgress?.nilIfEmpty.map { "Sessão mestra · " + $0 }

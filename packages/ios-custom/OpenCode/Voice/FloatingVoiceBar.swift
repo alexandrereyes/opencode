@@ -46,6 +46,14 @@ struct FloatingVoiceBar: View {
           }.disabled(state.busy)
         }.appSymbol(.action).buttonStyle(.plain)
       }
+      if state.contextCleared {
+        // Shape and words, not only color: the dot sits before the text in every phase until the call ends.
+        HStack(spacing: 6) {
+          Image(systemName: "exclamationmark.circle.fill").foregroundStyle(theme.color(.error))
+          Text(VoiceBarState.contextClearedNotice).foregroundStyle(theme.color(.textStrong))
+        }.appFont(.footnote, weight: .medium).lineLimit(1)
+          .accessibilityIdentifier("voice-context-cleared")
+      }
       if state.expanded {
         if let line = state.spokenLine {
           Text(line).appFont(.secondary)

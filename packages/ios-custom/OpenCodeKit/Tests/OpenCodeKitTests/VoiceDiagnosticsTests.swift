@@ -47,6 +47,7 @@ struct VoiceDiagnosticsTests {
       (.audioInterrupted, "audio_interrupted"), (.userEnd, "user_end"), (.recoveryExhausted, "recovery_exhausted"),
       (.microphoneDenied, "microphone_denied"), (.delegationOverflow, "delegation_overflow"),
       (.startFailed(URLError(.timedOut)), "start_failed"), (.reconnectFailed(ClientError.http(401)), "reconnect_failed"),
+      (.contextReset("content_filter/content_filter"), "context_reset"), (.moderated("content_filter/content_filter"), "moderated"),
     ]
     for (reason, category) in reasons { #expect(reason.category == category) }
     #expect(Set(reasons.map(\.1)).count == reasons.count)

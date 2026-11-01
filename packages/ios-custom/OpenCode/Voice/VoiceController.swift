@@ -83,6 +83,14 @@ import UIKit
   @ObservationIgnored private var contextRejected = false
   /// The type of the last command sent on the data channel, for diagnostics.
   @ObservationIgnored private var lastSent: (type: String, at: TimeInterval)?
+  /// After a moderation reset: links open without memory or carried requests until one connects.
+  @ObservationIgnored private var freshContext = false
+  /// Whether the current link started with memory or carried requests, and whether it answered normally since: a
+  /// moderated link with neither has nothing to clear, so it fails instead of resetting again.
+  @ObservationIgnored private var linkHadContext = false
+  @ObservationIgnored private var linkAnswered = false
+  /// Master updates of requests from before a reset are not heard in the empty call.
+  @ObservationIgnored private var masterStale = false
   @ObservationIgnored private var currentDelegation: String?
   @ObservationIgnored private var handled: Set<String> = []
   /// A delegation waiting for the master; a screen capture starts when GPT Live delegates, not when sent.
@@ -179,6 +187,7 @@ import UIKit
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false; recentSpeech = []
     trail = VoiceEventTrail(); lastSent = nil
+    freshContext = false; linkHadContext = false; linkAnswered = false; masterStale = false
     graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; contextAppend = nil; contextRejected = false
     state.apply(.start); detail = "Preparando o microfone"; publish()
     inputItemID = nil; outputItemID = nil; interruptedAssistant = false; interruptedUser = false; capturedTurns = []
@@ -302,13 +311,17 @@ import UIKit
     await memoryEvents?.value
     guard epoch == token, link == current else { throw CancellationError() }
     // Local factory/audio setup overlaps the reservation, but no provider call is speculative.
+    let fresh = freshContext
     async let offer = transport.offer()
-    async let history = memory?.prepare()
+    async let history = fresh ? nil : memory?.prepare()
     try await renew(signal, method: "POST")
     guard epoch == token, link == current else { throw CancellationError() }
     beginRenewal(signal, token: token, link: current)
-    let answer = try await signal.createCall(sdp: await offer, instructions: instructions, voice: callVoice, history: await history,
-      resuming: continuity.item, request: { [self] in try await perform($0) })
+    let memory = await history, resuming = fresh ? nil : continuity.item
+    linkHadContext = resuming != nil || memory.map { !$0.summary.isEmpty || !$0.turns.isEmpty || $0.master != nil } == true
+    linkAnswered = false
+    let answer = try await signal.createCall(sdp: await offer, instructions: instructions, voice: callVoice, history: memory,
+      resuming: resuming, request: { [self] in try await perform($0) })
     try Task.checkCancellation()
     guard epoch == token, link == current else { throw CancellationError() }
     callVoice = answer.voice
@@ -458,6 +471,7 @@ import UIKit
     #endif
     if connectedAt == nil { connectedAt = .now; VoiceFeedback.ready() }
     watchdog?.cancel(); watchdog = nil
+    freshContext = false
     if recovery.active {
       report(.tolerated, .reconnected(attempts: recovery.attempts))
       recovery.restore(); cues.play(.restored)
@@ -491,9 +505,15 @@ import UIKit
       state.apply(.speech); publish()
     case .turnDone(let turn):
       capture(turn)
-      if turn.role == .assistant { state.apply(.silence); outputItemID = nil; interruptedAssistant = false }
+      if turn.role == .assistant {
+        if !turn.interrupted { linkAnswered = true }
+        state.apply(.silence); outputItemID = nil; interruptedAssistant = false
+      }
       else { userUntil = ProcessInfo.processInfo.systemUptime + 1; inputItemID = nil; interruptedUser = false }
       publish()
+    case .failure(let code, let detail) where VoiceProtocol.isModeration(code):
+      VoiceTransport.log.notice("phase=moderated")
+      clearContext(code: code, detail: detail)
     case .failure(let code, let detail):
       VoiceTransport.log.notice("phase=service-error")
       if let sent = contextAppend, Self.now - sent.at < 3 {
@@ -591,6 +611,7 @@ import UIKit
         guard epoch == token else { return }
       }
       state.masterWorking = true; detail = "Enviando à Sessão mestra…"; publish()
+      masterStale = false
       do {
         try await master?.ask(request, screen: screen)
         if let notice = screen?.notice { announceScreen(notice) }
@@ -635,6 +656,7 @@ import UIKit
     publish()
   }
   private func receive(_ update: VoiceMasterUpdate) {
+    guard !masterStale else { return }
     switch update {
     case .progress(let text, let narrate):
       state.masterWorking = true; detail = text; masterProgressLine = text
@@ -788,11 +810,31 @@ import UIKit
     #endif
   }
 
+  // MARK: Moderation
+
+  /// GPT Live moderated the call (`content_filter`), which also ends its session. Its voice memory, the requests a
+  /// rebuilt call would carry and results not yet heard are cleared, and an empty call starts: once per reset. Moderated
+  /// again on a link that started empty and has not answered normally, it fails instead of clearing again. Work the
+  /// Mestra already has goes on; only its updates are no longer narrated.
+  private func clearContext(code: String?, detail: String?) {
+    guard state.visible, state.phase != .failed, !busy else { return }
+    guard connectedAt != nil, linkHadContext || linkAnswered else {
+      Task { await fail("O serviço de voz interrompeu a conversa por moderação, mesmo sem histórico. Tente de novo mais tarde.",
+        .moderated(code, detail: detail)) }
+      return
+    }
+    freshContext = true; masterStale = true
+    continuity = VoiceContinuity(); delegationQueue = []
+    state.apply(.contextCleared)
+    cues.play(.contextCleared)
+    lose("Limpando o contexto da voz…", .contextReset(code, detail: detail), clearing: true)
+  }
+
   // MARK: Network recovery
 
   /// The current link is gone. An established conversation rebuilds the call with memory, within the
   /// recovery window; a call that never connected fails as before.
-  private func lose(_ message: String, _ reason: VoiceFailureReason) {
+  private func lose(_ message: String, _ reason: VoiceFailureReason, clearing: Bool = false) {
     guard state.visible, state.phase != .failed, !busy else { return }
     guard connectedAt != nil else { Task { await fail(message, reason) }; return }
     let token = epoch
@@ -806,7 +848,7 @@ import UIKit
     if inputItemID != nil { interruptedUser = true }
     // Delegation items belong to the old call; the next call learns the master's state from memory and the
     // requests still running from `continuity`. Stale progress is dropped, but a result not yet heard is kept.
-    let unheard = finalNarration ? narration.waiting : nil
+    let unheard = finalNarration && !clearing ? narration.waiting : nil
     currentDelegation = nil; narration = VoiceNarration(); finalNarration = false
     if let unheard { narration.retry(unheard); finalNarration = true }
     ready = false; mediaConnected = false; graceUntil = nil; contextAppend = nil
@@ -816,13 +858,19 @@ import UIKit
     detail = network.current.satisfied ? "Reconectando a voz…" : "Sem conexão. Aguardando a rede…"
     publish()
     // The waiting tone holds the audio session before the old transport releases its own credit.
-    if first { cues.play(.lost) }
+    if first, !clearing { cues.play(.lost) }
     let transport = transport; self.transport = nil
     let signal = signaling; signaling = nil
     recoveryTask?.cancel()
+    let memory = memory
     recoveryTask = Task { [weak self] in
       await transport?.close()
       guard let self else { return }
+      if clearing {
+        // Turns already captured go first, then the reset drops them with the rest of the conversation.
+        await memoryEvents?.value
+        await memory?.reset()
+      }
       if let signal, let request = try? signal.leaseRequest(method: "DELETE") {
         // Best effort without blocking recovery; an unreachable proxy expires the lease itself.
         Task { _ = try? await self.perform(request) }

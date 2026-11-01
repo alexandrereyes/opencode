@@ -23,6 +23,28 @@ struct VoiceBarStateTests {
     voice.apply(.failure("Sem rede"))
     #expect(VoiceBarState(voice: voice, elapsed: 1).spokenLine == "Sem rede")
   }
+  /// "Limpou o contexto" stays through every phase of the call that was reset, failure included, and is gone when
+  /// the call ends or another starts.
+  @Test func contextClearedStaysUntilTheCallEnds() {
+    var voice = VoiceState()
+    voice.apply(.start); voice.apply(.connected)
+    #expect(!VoiceBarState(voice: voice, elapsed: 0).contextCleared)
+    voice.masterWorking = true
+    voice.apply(.contextCleared)
+    #expect(!voice.masterWorking)
+    for event: VoiceState.Event in [.reconnect, .connected, .speech, .silence, .bargeIn, .interruption, .resume,
+      .offline, .reconnect, .connected, .failure("Moderado de novo")] {
+      voice.apply(event)
+      let bar = VoiceBarState(voice: voice, elapsed: 5)
+      #expect(bar.contextCleared)
+      #expect(bar.accessibilityLabel.hasSuffix(", limpou o contexto"))
+    }
+    voice.apply(.end)
+    #expect(!VoiceBarState(voice: voice, elapsed: 0).contextCleared)
+    voice.apply(.contextCleared); voice.apply(.start)
+    #expect(!voice.contextCleared, "a call started later does not inherit it")
+    #expect(VoiceBarState.contextClearedNotice == "Limpou o contexto")
+  }
   @Test func idleMasterHasNoProgressAndMuteFlattensWaveform() {
     var voice = VoiceState()
     voice.apply(.start); voice.apply(.connected)

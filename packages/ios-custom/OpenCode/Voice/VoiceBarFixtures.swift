@@ -3,7 +3,7 @@ import Foundation
 import OpenCodeKit
 
 enum VoiceBarFixtures {
-  static let names = ["listening", "speaking", "thinking", "connecting", "reconnecting", "offline", "muted", "error", "idle", "long", "interrupted"]
+  static let names = ["listening", "speaking", "thinking", "connecting", "reconnecting", "offline", "muted", "error", "idle", "long", "interrupted", "contextCleared"]
   static let launchState: VoiceBarState? = {
     let arguments = ProcessInfo.processInfo.arguments
     guard let server = arguments.firstIndex(of: "-OpenCodeServerURL"), arguments.indices.contains(server + 1),
@@ -30,7 +30,8 @@ enum VoiceBarFixtures {
         ? String(repeating: "Três sessões esperam você. Posso abrir a primeira para conferir os detalhes? ", count: 8)
         : "Três sessões esperam você. Abro a primeira?",
       masterProgress: ["speaking", "thinking", "long"].contains(name) ? "lendo 3 sessões…" : nil,
-      muted: name == "muted", error: name == "error" ? "A conexão caiu. Confira sua rede e tente novamente." : nil)
+      muted: name == "muted", error: name == "error" ? "A conexão caiu. Confira sua rede e tente novamente." : nil,
+      contextCleared: name == "contextCleared")
   }
 }
 #endif

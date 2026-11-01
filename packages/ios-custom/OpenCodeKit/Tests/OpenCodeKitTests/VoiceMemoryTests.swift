@@ -25,7 +25,7 @@ private actor MemoryHTTP {
       #expect(input?["scope"]?.string == "global")
       if failNextAppend { failNextAppend = false; status = 503 }
       output = .object([:])
-    case "end": output = .object([:])
+    case "end", "reset": output = .object([:])
     default: throw ClientError.operation("Unexpected memory request")
     }
     return (try JSONEncoder().encode(JSONValue.object(["output": output])),
@@ -108,6 +108,39 @@ struct VoiceMemoryTests {
     #expect(await retry.flush())
     #expect(try await recovered.snapshot().pending.isEmpty)
     #expect(await http.calls == ["info", "append:one,two", "info", "append:one,two", "end", "append:three", "end"])
+  }
+
+  /// A moderation reset drops the turns not sent yet, keeps call ends before it, and goes to the server in order; the
+  /// server's (old) memory is not read back while it waits, and an append already on its way acknowledges cleanly.
+  @Test func resetDropsTheUnsentConversationAndGoesInOrder() async throws {
+    let root = root()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let buffer = VoiceMemoryBuffer(server: "test", root: root)
+    try await buffer.append(turn("sent"))
+    try await buffer.end("old-call")
+    try await buffer.append(turn("unsent", role: .assistant))
+    try await buffer.reset("r1")
+    var snapshot = try await buffer.snapshot()
+    #expect(snapshot.pending.map(\.id) == ["end:old-call", "reset:r1"])
+    #expect(snapshot.context == VoiceMemoryContext())
+    #expect(try await buffer.resetting())
+    // "sent" was on its way when the reset dropped it: its acknowledgement does not break the order.
+    try await buffer.acknowledge(["sent"])
+    // A late capture of the cleared call is still a duplicate.
+    try await buffer.append(turn("unsent", role: .assistant))
+    try await buffer.append(turn("fresh"))
+    snapshot = try await buffer.snapshot()
+    #expect(snapshot.pending.map(\.id) == ["end:old-call", "reset:r1", "fresh"])
+    #expect(snapshot.context.turns == [turn("fresh")])
+    let http = MemoryHTTP()
+    let service = VoiceMemoryService(client: client(http), buffer: buffer)
+    #expect(await service.prepare()?.turns == [turn("fresh")])
+    #expect(await http.calls == ["info"], "the server's memory is not read while the reset waits")
+    #expect(await service.flush())
+    #expect(await http.calls == ["info", "end", "reset", "append:fresh"])
+    #expect(try await buffer.resetting() == false)
+    _ = await service.prepare()
+    #expect(await http.calls.last == "context")
   }
 
   @Test func unsupportedVersionFallsBackWithoutDiscardingTheLocalBuffer() async throws {

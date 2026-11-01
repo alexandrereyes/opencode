@@ -207,6 +207,30 @@ alto-falante padrão. Mudanças de rota revalidam ativação; iOS 27 usa `didBec
 e `resumptionRecommendationNotification`. Sem recomendação de retomada, o controle **Retomar
 áudio** é explícito. Media-services reset exige nova conexão. Quedas de rede seguem a seção abaixo.
 
+## Moderação: limpar o contexto (01/11)
+
+Quando o GPT Live manda `error` com `type` ou `code` `content_filter` (o `VoiceProtocol.isModeration`, nunca pelo
+texto da mensagem), o serviço encerra aquela sessão. O app então:
+
+1. descarta a chamada moderada (o link muda antes de tudo, então eventos, falas e áudio dela são ignorados), fecha o
+   transporte e libera a lease;
+2. limpa a memória de voz: no aparelho, `VoiceMemoryBuffer.reset` tira os turnos ainda não enviados e o contexto em
+   cache e enfileira `custom.voice` → `reset` depois do que já foi enviado; enquanto ele não chega ao servidor, a
+   memória do servidor não é lida de volta;
+3. esquece os pedidos que a chamada reconstruída levaria (`VoiceContinuity`), os pedidos ainda não entregues à mestra
+   e os resultados não ouvidos; atualizações da mestra sobre pedidos anteriores deixam de ser narradas até um pedido
+   novo. O trabalho que a mestra já tem continua;
+4. abre uma chamada nova com as mesmas instruções e janela vazia (sem resumo, turnos, pedidos ou resultados), sem
+   criar sessão OpenCode.
+
+Uma vez por reset toca um som curto do sistema (iPhone: som do sistema 1052 e vibração de aviso, silenciados pela
+chave de silêncio e pelo volume; Mac: `NSSound` "Funk", no volume de alertas) e, durante a reconstrução, o tique de
+espera de sempre. A faixa mostra "Limpou o contexto" com um ícone de atenção, em todas as fases e na falha, até a
+chamada terminar; o VoiceOver lê o mesmo no rótulo da faixa. Se a chamada vazia for moderada antes de responder
+normalmente, ou se a chamada não tinha memória, ela falha com uma mensagem clara: sem segundo reset nem laço. Depois
+de uma resposta normal, uma nova moderação pode limpar de novo. Recomeçar sem histórico não garante que o serviço
+aceite a próxima fala.
+
 ## Recuperação de rede
 
 Uma conversa já conectada sobrevive a túnel, elevador, troca de antena, Wi-Fi→5G e falhas passageiras do

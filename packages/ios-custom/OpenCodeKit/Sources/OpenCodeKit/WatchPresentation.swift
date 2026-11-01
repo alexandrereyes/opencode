@@ -131,6 +131,9 @@ public enum WatchVoiceEnd {
     case "lease_refused", "lease_lost": "A conversa foi encerrada porque o serviço de voz não manteve a chamada."
     case "max_duration": "A conversa chegou ao limite de 30 minutos."
     case "shutdown": "A conversa foi encerrada porque o servidor do OpenCode reiniciou."
+    // The service moderated the call; the server cleared voice memory, so "Tentar de novo" starts an empty call.
+    case "context_reset": "Limpou o contexto: o serviço de voz interrompeu a conversa por moderação. Tente de novo para recomeçar sem histórico."
+    case "moderation": "O serviço de voz interrompeu a conversa por moderação, mesmo sem histórico."
     default: "A conversa foi encerrada pelo servidor."
     }
   }

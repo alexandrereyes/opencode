@@ -480,7 +480,9 @@ private actor LiveMemoryHTTP {
     XCTAssertEqual(report.platform, "ios")
     XCTAssertEqual(Array(report.events.suffix(2)), ["output_transcript.added", "error"])
     let json = String(decoding: try JSONEncoder().encode(report), as: UTF8.self)
-    XCTAssertFalse(json.contains("jabuticaba") || json.contains("Mensagem"))
+    // Speech never; the provider's error message only as the sanitized `detail` (since f67b3a9c4b).
+    XCTAssertFalse(json.contains("jabuticaba"))
+    XCTAssertEqual(report.detail, "Mensagem do provedor")
     await controller.end()
     let ended = await until { await outbox.pending().last?.reason == "user_end" }
     XCTAssertTrue(ended)
@@ -897,6 +899,7 @@ private actor LiveMemoryHTTP {
     XCTAssertTrue(logged)
     let errors = await call.reports("service_error")
     XCTAssertEqual(errors.map(\.code), ["server_error/internal", "invalid_request_error/conversation_already_has_active_response", nil])
+    XCTAssertFalse(call.controller.state.contextCleared, "only moderation clears the context")
     XCTAssertTrue(errors.allSatisfy { $0.kind == .tolerated })
     XCTAssertEqual(call.controller.state.phase, .listening)
     XCTAssertEqual(call.pool.transports.count, 1)
@@ -1033,6 +1036,164 @@ private actor LiveMemoryHTTP {
     call.pool.transports[1].event?(delegation("c", "Confira a sessão do Abacato."))
     await fulfillment(of: [again], timeout: 3)
     XCTAssertEqual(call.master.requests.count, 2)
+    await call.controller.end()
+  }
+
+  // MARK: Moderation reset (01/11)
+
+  /// A voice memory server that records its RPCs and answers `context` with what it holds.
+  private actor ModerationMemoryServer {
+    var calls: [String] = []
+    var summary = "Memória sintética antiga: palavra jambo."
+    func respond(_ request: URLRequest) throws -> (Data, URLResponse) {
+      let method = request.url!.lastPathComponent
+      calls.append(method)
+      if method == "reset" { summary = "" }
+      let body = switch method {
+      case "info": #"{"output":{"version":2,"storage":"kv","contextFormat":"initial_items","scopes":["global"]}}"#
+      case "context":
+        #"{"output":{"version":2,"scope":"global","summary":"\#(summary)","turns":[],"approxTokens":30,"updatedAt":0,"truncated":false}}"#
+      default: #"{"output":{}}"#
+      }
+      return (Data(body.utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+    }
+  }
+  private struct Moderated {
+    let controller: VoiceController
+    let pool: VoiceTransportPool
+    let master: VoiceTestMaster
+    let http: VoiceFlakyHTTP
+    let cues: VoiceTestCues
+    let outbox: VoiceDiagnosticsOutbox
+    let server: ModerationMemoryServer
+    let memory: VoiceMemoryStore
+    let root: URL
+    func texts(_ offer: Int) async throws -> [String] {
+      let offers = await http.requests.filter { $0.url?.path.hasSuffix("/calls") == true }
+      let session = try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap(offers[offer].httpBody)).object?["session"]?.object
+      return session?["initial_items"]?.array?.flatMap { $0.object?["content"]?.array ?? [] }
+        .compactMap { $0.object?["text"]?.string } ?? []
+    }
+    func reports(_ reason: String) async -> [VoiceDiagnostic] { await outbox.pending().filter { $0.reason == reason } }
+  }
+  private func moderated() async throws -> Moderated {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("opencode/voice-moderation-" + UUID().uuidString)
+    let server = ModerationMemoryServer()
+    let configuration = ServerConfiguration(url: URL(string: "http://127.0.0.1:4180")!)
+    let memory = VoiceMemoryStore(client: OpenCodeClient(configuration: configuration, transport: { try await server.respond($0) }),
+      root: root)
+    let http = VoiceFlakyHTTP(), pool = VoiceTransportPool(), master = VoiceTestMaster(), cues = VoiceTestCues()
+    let outbox = VoiceDiagnosticsOutbox(url: FileManager.default.temporaryDirectory.appending(path: "voice-diagnostics-\(UUID()).json"))
+    let controller = VoiceController(testing: .init(transport: { pool.make($0) },
+      master: { update in master.update = update; return master }, request: { try await http.respond($0) },
+      memory: memory, policy: .init(backoff: [0.05]), network: VoiceTestPath(), cues: cues, diagnostics: outbox))
+    controller.start(sessions: SessionStore(configuration: configuration))
+    let ready = await until { controller.state.phase == .listening }
+    XCTAssertTrue(ready)
+    return Moderated(controller: controller, pool: pool, master: master, http: http, cues: cues, outbox: outbox,
+      server: server, memory: memory, root: root)
+  }
+  private let moderation = Data(#"{"type":"error","error":{"type":"content_filter","code":"content_filter","message":"The generation was stopped due to moderation."}}"#.utf8)
+
+  /// content_filter clears voice memory (here and on the server) and what a rebuilt call would carry, and starts one
+  /// empty call: the same instructions, no history, no carried request, no old result. One sound; the notice stays
+  /// through every phase until the call ends.
+  func testModerationClearsTheContextOnceAndStartsAnEmptyCall() async throws {
+    let call = try await moderated()
+    defer { try? FileManager.default.removeItem(at: call.root) }
+    let initial = try await call.texts(0)
+    XCTAssertTrue(initial.contains { $0.contains("palavra jambo") })
+    let asked = expectation(description: "asked")
+    call.master.asked = { asked.fulfill() }
+    let first = call.pool.transports[0]
+    first.event?(delegation("a", "Pedido da conversa antiga"))
+    await fulfillment(of: [asked], timeout: 3)
+    first.event?(.data(Data(#"{"type":"turn.done","turn":{"id":"before","role":"user","transcript":"Fala antiga."}}"#.utf8)))
+    first.event?(.data(moderation))
+    // Events of the moderated call after the error are dropped with it.
+    first.event?(.data(Data(#"{"type":"turn.done","turn":{"id":"after","role":"assistant","transcript":"Fala moderada."}}"#.utf8)))
+    XCTAssertTrue(call.controller.state.contextCleared)
+    let rebuilt = await until(5) { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    XCTAssertTrue(first.closed)
+    let released = await until { await call.http.count("DELETE") >= 1 }
+    XCTAssertTrue(released, "the moderated call's lease is released")
+    let calls = await call.server.calls
+    XCTAssertEqual(calls.filter { $0 == "reset" }.count, 1)
+    let fresh = try await call.texts(1)
+    XCTAssertTrue(fresh.isEmpty, "the new call starts with an empty window")
+    let offers = await call.http.requests.filter { $0.url?.path.hasSuffix("/calls") == true }
+    let instructions = try offers.map {
+      try JSONDecoder().decode(JSONValue.self, from: XCTUnwrap($0.httpBody)).object?["session"]?.object?["instructions"]?.string
+    }
+    XCTAssertEqual(instructions[0], instructions[1], "the service instructions stay")
+    // The old request's result is not narrated into the empty call; the Mestra is not stopped or asked again.
+    call.master.update?(.finished("Resultado da conversa antiga."))
+    try await Task.sleep(for: .milliseconds(700))
+    XCTAssertTrue(call.pool.transports[1].frames.isEmpty)
+    XCTAssertEqual(call.master.requests.count, 1)
+    XCTAssertFalse(call.master.stopped)
+    // One sound for the reset; the restore tone is the rebuilt call's.
+    XCTAssertEqual(call.cues.played, [.contextCleared, .restored])
+    let reset = await call.reports("context_reset")
+    XCTAssertEqual(reset.map(\.kind), [.lost])
+    XCTAssertEqual(reset.first?.code, "content_filter/content_filter")
+    // The notice stays through the new call's phases.
+    call.pool.transports[1].event?(.data(Data(#"{"type":"output_transcript.added","item":{"id":"o","text":"Oi."}}"#.utf8)))
+    XCTAssertEqual(call.controller.state.phase, .speaking)
+    XCTAssertTrue(VoiceBarState(voice: call.controller.state, elapsed: 1).contextCleared)
+    // Nothing of the old conversation is left to send.
+    await call.memory.stop()
+    let buffer = try await VoiceMemoryBuffer(server: "http://127.0.0.1:4180", root: call.root).snapshot()
+    XCTAssertFalse(buffer.pending.contains { $0.id.hasSuffix(":before") || $0.id.hasSuffix(":after") })
+    XCTAssertTrue(buffer.context.turns.isEmpty)
+    await call.controller.end()
+    XCTAssertFalse(call.controller.state.contextCleared, "it leaves with the call")
+  }
+
+  /// Moderated again on the empty call before it answered normally: no second reset or rebuild, a clear failure.
+  func testModerationOfTheEmptyCallFailsInsteadOfLooping() async throws {
+    let call = try await moderated()
+    defer { try? FileManager.default.removeItem(at: call.root) }
+    call.pool.transports[0].event?(.data(moderation))
+    let rebuilt = await until(5) { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    call.pool.transports[1].event?(.data(moderation))
+    let failed = await until { call.controller.state.phase == .failed }
+    XCTAssertTrue(failed)
+    XCTAssertTrue(call.controller.state.contextCleared, "the notice stays with the failure")
+    try await Task.sleep(for: .milliseconds(300))
+    XCTAssertEqual(call.pool.transports.count, 2)
+    let calls = await call.server.calls
+    XCTAssertEqual(calls.filter { $0 == "reset" }.count, 1)
+    XCTAssertEqual(call.cues.played.filter { $0 == .contextCleared }.count, 1)
+    let repeated = await until { await !call.reports("moderated").isEmpty }
+    XCTAssertTrue(repeated)
+    await call.controller.end()
+  }
+
+  /// After the empty call answered normally, a later moderation may clear again (its own new context).
+  func testModerationAfterANormalAnswerClearsAgain() async throws {
+    let call = try await moderated()
+    defer { try? FileManager.default.removeItem(at: call.root) }
+    call.pool.transports[0].event?(.data(moderation))
+    _ = await until(5) { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    call.pool.transports[1].event?(.data(Data(#"{"type":"turn.done","turn":{"id":"ok","role":"assistant","transcript":"Resposta normal."}}"#.utf8)))
+    call.pool.transports[1].event?(.data(moderation))
+    let again = await until(5) { call.pool.transports.count == 3 && call.controller.state.phase == .listening }
+    XCTAssertTrue(again)
+    XCTAssertEqual(call.cues.played.filter { $0 == .contextCleared }.count, 2)
+    await call.controller.end()
+  }
+
+  /// Without memory or carried requests there is nothing to clear: moderation fails the call at once.
+  func testModerationWithoutContextFails() async throws {
+    let call = await resilient()
+    call.pool.transports[0].event?(.data(moderation))
+    let failed = await until { call.controller.state.phase == .failed }
+    XCTAssertTrue(failed)
+    XCTAssertFalse(call.controller.state.contextCleared)
+    XCTAssertEqual(call.pool.transports.count, 1)
     await call.controller.end()
   }
 

@@ -3,7 +3,8 @@ import Foundation
 @preconcurrency import WebRTC
 
 enum VoiceCue: Sendable {
-  case lost, restored, failed
+  /// `contextCleared`: a moderation reset; one system sound, then the waiting tick of a rebuild.
+  case lost, restored, failed, contextCleared
   #if os(macOS)
   case started, ended
   #endif
@@ -41,6 +42,11 @@ enum VoiceCue: Sendable {
       guard start() else { return }
       waiting = true; finishing = false
       schedule(Self.tone([(660, 0.12), (440, 0.18)]))
+      schedule(Self.tone([(880, 0.05), (0, 2.95)], level: 0.08), options: .loops)
+    case .contextCleared:
+      VoiceFeedback.contextCleared()
+      guard start() else { return }
+      waiting = true; finishing = false
       schedule(Self.tone([(880, 0.05), (0, 2.95)], level: 0.08), options: .loops)
     case .restored:
       VoiceFeedback.restored()

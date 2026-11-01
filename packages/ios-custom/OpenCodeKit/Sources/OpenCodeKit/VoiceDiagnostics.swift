@@ -28,6 +28,14 @@ public struct VoiceFailureReason: Equatable, Sendable {
   public static func leaseRefused(_ error: any Error) -> Self { Self("lease_refused", code: errorCode(error)) }
   /// The confirmed lease ran out with no renewal getting through.
   public static let leaseExpired = Self("lease_expired")
+  /// GPT Live moderated the call (`content_filter`): voice memory was cleared and an empty call started.
+  public static func contextReset(_ code: String?, detail: String? = nil) -> Self {
+    Self("context_reset", code: code, detail: detail)
+  }
+  /// Moderated again before the empty call answered normally: no second reset, the call fails.
+  public static func moderated(_ code: String?, detail: String? = nil) -> Self {
+    Self("moderated", code: code, detail: detail)
+  }
   /// An update could not go out on the data channel.
   public static let sendFailed = Self("send_failed")
   public static let iceFailed = Self("ice_failed")

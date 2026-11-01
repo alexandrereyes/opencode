@@ -20,11 +20,15 @@ public struct VoiceState: Equatable, Sendable {
   public enum Event: Sendable {
     case start, connected, speech, silence, bargeIn, interruption, resume, reconnect, offline, end
     case failure(String)
+    /// The service moderated the call and its voice memory was cleared; shown until the call ends.
+    case contextCleared
   }
   public private(set) var phase: VoicePhase = .idle
   public private(set) var error: String?
   public var muted = false
   public var masterWorking = false
+  /// Kept through every phase of this call, failure included; a new call (`start`) or the end clears it.
+  public private(set) var contextCleared = false
   public init() {}
   public var visible: Bool { phase != .idle }
   public var label: String {
@@ -36,6 +40,7 @@ public struct VoiceState: Equatable, Sendable {
     case .start: self = Self(); phase = .connecting
     case .end: self = Self()
     case .failure(let message): error = message; phase = .failed; masterWorking = false
+    case .contextCleared: contextCleared = true; masterWorking = false
     case .reconnect where [.listening, .speaking, .interrupted, .offline].contains(phase): phase = .reconnecting
     case .offline where [.listening, .speaking, .interrupted, .reconnecting].contains(phase): phase = .offline
     case .connected where [.connecting, .reconnecting, .offline].contains(phase): phase = .listening
@@ -183,6 +188,12 @@ public enum VoiceProtocol {
   /// closes. The one that kills it is `session_expired`, sent when the session reaches its maximum duration.
   public static func endsSession(_ code: String?) -> Bool {
     code?.split(separator: "/").contains("session_expired") == true
+  }
+
+  /// GPT Live's moderation stop (`content_filter`), by the error's structured `type/code` only, never its message: the
+  /// service ends that session (31/10 and 01/11, data channel closed within a second).
+  public static func isModeration(_ code: String?) -> Bool {
+    code?.split(separator: "/").contains("content_filter") == true
   }
 
   public static func append(id: String, text: String) throws -> [Data] {
