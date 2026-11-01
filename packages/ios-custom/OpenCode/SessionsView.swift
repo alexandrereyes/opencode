@@ -33,7 +33,7 @@ struct SessionsView: View {
       ScrollViewReader { proxy in
       List {
         VStack(spacing: 16) {
-          SessionQuotaRings(quota: store.quota) { proxyProvider = $0 }
+          SessionQuotaMarks(quota: store.quota) { proxyProvider = $0 }
           SessionChips(store: store) { name, intent in
             projectAction = ProjectAction(name: name, intent: intent)
           } add: {

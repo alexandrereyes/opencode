@@ -189,10 +189,9 @@ app, without the web's "Projetos" and "Worktrees" groups.
   settings action (settings stay in Você), so the gear is hidden; the Mac passes one. A soft gradient below the
   header fades rows out as they scroll under the title. At accessibility sizes the title takes its own line below the
   buttons. `-OpenCodeCatalogSettingsButton` (DEBUG catalog only) renders the Mac variant, opening Você.
-- **Quota rings:** one ring per `store.quota.providers` entry showing `summary.remaining` (the former bar's value),
-  "Codex 42%" and "renova 5,9d" (`SubscriptionFormat.countdown`). The ring uses `primary`, or `warning` when the pool
-  is not ready; it opens `SubscriptionDetailSheet`; rings stack at accessibility sizes; VoiceOver reads provider,
-  percentage and renewal.
+- **Quota marks** (rev. 2026-11-01, replacing the rings): per `store.quota.providers` entry, its small icon and every
+  enabled subscription as one mark grouped by plan, with "4 prontas · +1 às 10:30"; it opens
+  `SubscriptionDetailSheet`. See [Sessões strip: one mark per subscription](#sessões-strip-one-mark-per-subscription--1-november).
 - **Chips:** unchanged. The state filter and the selected chip narrow the rows **before** grouping.
 - **Sections** (`SessionSections.group` in OpenCodeKit), each with a dot, its name, its count and a chevron. Collapsed
   sections are saved on the device (`OpenCodeSessionSections`, only choices that differ from the default); empty
@@ -256,7 +255,7 @@ files in `OpenCode/SessionColumn/` import only SwiftUI and OpenCodeKit and use n
 | File | Contents |
 | --- | --- |
 | `SessionColumnHeader.swift` | Title, voice, optional Configurações (`settings: (() -> Void)?`) and Nova sessão |
-| `SessionQuotaRings.swift` | The provider rings |
+| `SessionQuotaMarks.swift` | The provider quota marks (shared with the Mac), and the Mac proxy sidebar's `QuotaRing` |
 | `SessionChips.swift` | Filter chips (moved unchanged from `SessionsView`) |
 | `SessionColumnSections.swift` | Section headers, rows by section, Negar/Permitir, first-load progress and "Arquivadas N"; a `decorate` closure lets the host add platform actions |
 | `SessionRowView.swift` | Three-line and compact rows, avatar and running arc |
@@ -2500,7 +2499,7 @@ public UIKit keyboard layout guide/did-hide notification rather than a fixed del
 native sheet. Codex and Claude use the approved A3 layout: provider balance, combined weekly quota, capacity and
 renewal; tier groups; account state, stacked independent 5-hour/weekly windows, paired renewal dates and
 **Mostrar no resumo**. Other tiers remain visible outside the headline balance. Real proxy display names are shown.
-The strip retains its existing styling; a selected account name truncates rather than increasing its height.
+Since 1 November the Sessões strip shows one mark per subscription instead of rings (section below).
 
 - **Data and compatibility:** the full hand-written `Subscriptions` contract mirrors `custom.subscriptions/list`,
   `setAutomation` and `consumeReset`, without Location or direct proxy-admin access. All three contracts and their
@@ -2521,8 +2520,9 @@ The strip retains its existing styling; a selected account name truncates rather
   honest unavailable state. Runtime shutdown cancels requests/actions and invalidates their generation before the next
   server runtime exists, so late old-server results are discarded. Observation times remain backend measurement times.
 - **Selection:** IDs only are persisted in `OpenCodeSubscriptionSelection.v1`, scoped by server URL/provider. Selecting
-  again restores the pool; a successful list removes vanished IDs. Both compact surfaces use that account while the
-  large detail header always remains the pool. No model, request routing or backend preference is changed.
+  again restores the pool; a successful list removes vanished IDs. The Sessões strip rings that account's mark among
+  all the others (it no longer shows it alone); the Você row still uses it, and the large detail header always
+  remains the pool. No model, request routing or backend preference is changed.
 - **Actions:** automatic resets and consuming one banked reset require a native confirmation alert with Cancel. Pending
   automation is provider-specific; pending reset is account-specific and prevents duplicates. Every action refetches;
   failures roll back optimistic automation and distinguish `no_credit`, `busy`, `consume_failed`, `update_failed` and
@@ -2553,6 +2553,46 @@ app-hosted regressions in both themes. Existing read-only continuity/details/sea
 cases also pass; the unread-jump check correctly skips after its viewed watermark has advanced. Settings tests now
 reveal links displaced by the new section and wait for the delayed AutoFill overlay before cancelling it. Use the
 normal simulator signing configuration when running Keychain/server regressions, not `CODE_SIGNING_ALLOWED=NO`.
+
+### Sessões strip: one mark per subscription — 1 November
+
+The rings averaged the weekly percent of one plan per provider (Codex: Pro/Pro Max; Claude: Max 20x only) or showed the
+"Mostrar no resumo" account alone, so Claude read 0% while four Max 5x accounts were usable. The iPhone and the Mac
+now share one strip, `SessionQuotaMarks` (`OpenCode/SessionColumn/SessionQuotaMarks.swift`, already compiled into both
+targets), over one projection, `SubscriptionMarks` (OpenCodeKit, `SubscriptionStore.marks(_:)`). It stays within the
+rings' row (38 pt): measured 33 pt on iPhone 17 Pro, 35 pt on iPhone SE, 32–33 pt on the Mac.
+
+- **What it shows:** each provider's small icon (`ProxyAnthropic`/`ProxyOpenAI`; the name is in VoiceOver), its enabled
+  accounts grouped by the plan the proxy reports, in the proxy's order, and one mark per account: ● ready, clock
+  stopped for a while, ⊘ week exhausted, ? not measured, warning sign needs login. Groups whose accounts are all
+  unmeasured (Free accounts the proxy accepts without measuring) go last, as `Free ?2`. Below: `4 prontas · +1 às
+  10:30`. The "Mostrar no resumo" account gets a ring around its mark. A tap opens the details, as before.
+- **States** (`SubscriptionMark`): disabled accounts stay out. No login → needs login. A fresh measurement with the
+  proxy refusing and the weekly window at 0 → exhausted. A proxy wait → stopped. No fresh measurement (stale, null
+  capacity, a renewal passed since the observation, or no window reported at all) → not measured, never 0% or ready.
+  Capacity allowed → ready, even with a rounded 0%. Otherwise stopped. Availability (`hasCapacity`) and measured
+  balance stay separate facts: an account accepted but never measured is not ready.
+- **Release (`+N às HH:mm`):** only when every known blocker reports its end (the wait's end, the 5-hour reset when
+  that window is at 0), the latest of them; a refusal the windows do not explain, or a blocker without a time, has
+  none. A weekly renewal never becomes a release, and a weekly window the proxy does not report (Max 5x today) is not a
+  blocker. `N` counts accounts back within that minute.
+- **No aggregation:** counts are of subscriptions, never of quota; no percent is summed or averaged; plans only
+  identify (short label: the multiplier of `Subscriptions.planLabel`, else that label, else the proxy's identifier
+  capitalized, `Outro` without a plan). There is no hard-coded list of plans in the strip.
+- **Fit:** side by side on two lines; else one line each with the release; else one line each without it; else counts
+  by state per plan (`5x ●4 ◷1`), the ready share per plan (`4/5`), and finally the provider's counts by state. Each
+  provider gets room in proportion to what it needs (`SessionQuotaRow`). Accessibility sizes stack the providers, as
+  the rings did. The Mac adds a tooltip per mark (account · plan · state) and per plan.
+- **Data limits:** the proxy reports no per-model limit and no capacity equivalence between plans; Max 5x accounts
+  report no weekly window today; Free accounts report no window at all; the proxy's wait does not say which window
+  caused it. The details of the LLM proxy keep their current design (A3) until new mockups are approved.
+
+Verification: `SubscriptionMarksTests` (Swift Testing, every state, releases, unmeasured groups, unknown plans);
+`OpenCodeUITests/SessionQuotaMarksTests` with `OPENCODE_PROXY_STUB=marks|many` (shared `SubscriptionMarksFixture`):
+every account's mark per plan, VoiceOver text, geometry under the header and above the chips inside the margins,
+large text, details opening, in both themes and on iPhone SE; run with `script/test-subscriptions.py
+OpenCodeUITests/SessionQuotaMarksTests` and an explicit sandbox. Mac: `script/test-mac-ajustes.sh cotas` checks the
+fixture window and renders the production strip at 272, 302 and 452 pt in both themes (height and right edge).
 
 ## Offline scrolling fixtures and performance checks
 
@@ -3558,7 +3598,7 @@ catalog capture was regenerated and compared):
 | --- | --- |
 | `SubscriptionGroup` (plan groups, "Outros planos", search, focus), `SubscriptionAccountRow` (row values, sort keys, `renewalLabel`), `SubscriptionPane` + `SubscriptionStore.sidebar`/`pane(_:)`, `SubscriptionProjection.freshness(now:)`, `SubscriptionStore.Confirmation.title/action/message` | OpenCodeKit `SubscriptionTable.swift`, covered by `SubscriptionTableTests` |
 | `ProxyPoolHeader` (with `wide`), `ProxyPoolState`, `ProxyResetsCard`, `ProxyAutomationToggle`, `proxyActions`, `ProxyAccountCard`, `ProxyQuotaBar`, `ProxyProviderIcon`, `proxyCard`/`proxyBadge`/`proxyRole` | `OpenCode/SubscriptionViews.swift`, extracted from `SubscriptionDetailSheet` (which now composes them) |
-| `QuotaRing` | `OpenCode/SessionColumn/SessionQuotaRings.swift` |
+| `QuotaRing` | `OpenCode/SessionColumn/SessionQuotaMarks.swift` |
 
 ### Parity outside the chat (stage 4)
 

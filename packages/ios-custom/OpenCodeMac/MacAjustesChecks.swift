@@ -4,7 +4,7 @@ import OpenCodeKit
 import SwiftUI
 
 /// Offline checks of the adjustment round (A1–A20) on the production views, driven through AppKit events in the
-/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos|servidores|recursos|snippets`. Each
+/// closed fixture: `-OpenCodeMacAjustes composer|question|quote|image|viewer|archived|numbers|width|dictation|divider|edge|markdown|arquivos|ampliar|progresso|contexto|caminhos|servidores|recursos|snippets|cotas`. Each
 /// writes its pictures (`<name>-<step>.png`) and prints `MacAjustes <mode> ok`, or exits 1 with the failure.
 /// The clipboard is restored after the image checks.
 @MainActor enum MacAjustesChecks {
@@ -69,6 +69,7 @@ import SwiftUI
       case "recursos": try await recursos(window: window, runtime: runtime, shot: shot)
       case "recursos-ao-vivo": try await recursosAoVivo(window: window, runtime: runtime, shot: shot)
       case "snippets": try await snippets(window: window, runtime: runtime, theme: theme, folder: folder, shot: shot)
+      case "cotas": try await cotas(window: window, runtime: runtime, theme: theme, folder: folder, shot: shot)
       default: throw Failure(description: "modo desconhecido")
       }
       print("MacAjustes \(mode) ok")
@@ -1755,6 +1756,86 @@ import SwiftUI
     }
     try await Task.sleep(for: .milliseconds(600))
     shot("fim")
+  }
+
+  // MARK: Cotas — the Sessões strip of subscription marks (rev. 2026-11-01)
+
+  /// `-OpenCodeMacProxyScenario marks`: every account of every plan in its group with the projection's mark, then the
+  /// production strip (`SessionQuotaMarks`) of that fixture and of a second store with the `many` fixture, rendered
+  /// at the narrowest, default and widest Sessões column in both themes: never taller than the old ring row (38 pt) and
+  /// nothing drawn against the right edge.
+  private static func cotas(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String,
+    shot: (String) -> Void) async throws
+  {
+    let quota = try require(runtime.store, "sessões").quota
+    try await wait("cotas do fixture", timeout: 12) { (quota.marks(.anthropic)?.total ?? 0) > 0 ? true : nil }
+    func plans(_ marks: SubscriptionMarks?) -> String {
+      (marks?.groups ?? []).map { group in
+        group.label + ":" + group.accounts.map { account in
+          switch SubscriptionMarks.Kind(account.mark) {
+          case .ready: "R"
+          case .blocked: "B"
+          case .exhausted: "E"
+          case .unmeasured: "?"
+          case .attention: "!"
+          }
+        }.joined()
+      }.joined(separator: "|")
+    }
+    let claude = plans(quota.marks(.anthropic))
+    let codex = plans(quota.marks(.codex))
+    print("MacAjustes cotas: Claude \(claude) · Codex \(codex)")
+    guard claude == "5x:RRRRB|20x:EE", codex == "Pro Max:R|5x:BE|Free:??",
+      quota.marks(.anthropic)?.release?.count == 1, quota.marks(.codex)?.release?.count == 1 else {
+      throw Failure(description: "marcas: Claude \(claude) · Codex \(codex)")
+    }
+    let many = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(),
+      defaults: UserDefaults(suiteName: "br.com.alexandrem.opencode.mac.ajustes.cotas") ?? .standard)
+    await many.refresh()
+    try await Task.sleep(for: .milliseconds(800))
+    shot("coluna")
+    let other = AppTheme.load(theme.dark ? "openchamber-light" : "openchamber-dark")
+    for (name, source) in [("varias", quota), ("muitas", many)] {
+      for width in [272.0, 302.0, 452.0] {
+        for variant in [theme, other] {
+          let content = SessionQuotaMarks(quota: source) { _ in }
+            .frame(width: width)
+            .background(variant.color(.background))
+            .environment(\.appTheme, variant)
+            .environment(\.locale, Locale(identifier: "pt_BR"))
+            .environment(\.colorScheme, variant.dark ? .dark : .light)
+          let renderer = ImageRenderer(content: content)
+          renderer.scale = 2
+          let image = try require(renderer.cgImage, "imagem da faixa")
+          let bitmap = NSBitmapImageRep(cgImage: image)
+          let height = Double(image.height) / 2
+          let background = bitmap.colorAt(x: 0, y: 0)
+          let inked = (0..<image.height).contains { y in
+            (image.width - 3..<image.width).contains { x in
+              guard let pixel = bitmap.colorAt(x: x, y: y), let background else { return false }
+              return abs(pixel.redComponent - background.redComponent) + abs(pixel.greenComponent - background.greenComponent)
+                + abs(pixel.blueComponent - background.blueComponent) > 0.12
+            }
+          }
+          let step = "\(name)-\(Int(width))-\(variant.dark ? "escuro" : "claro")"
+          try? bitmap.representation(using: .png, properties: [:])?
+            .write(to: URL(fileURLWithPath: folder + "/\(MacCapture.name)-\(step).png"))
+          print("MacAjustes cotas \(step): altura \(height) pt · borda direita \(inked ? "tocada" : "livre")")
+          guard height <= 38.5, !inked else { throw Failure(description: "\(step): altura \(height), borda \(inked)") }
+        }
+      }
+    }
+  }
+
+  /// The `many` fixture for a second store, read once; actions never reach a proxy.
+  private struct StripClient: SubscriptionClient {
+    func subscriptions() async throws -> Subscriptions { SubscriptionMarksFixture.snapshot(many: true, now: .now) }
+    func setSubscriptionAutomation(_ provider: SubscriptionProvider, enabled: Bool) async throws -> Subscriptions.Automation {
+      throw SubscriptionActionFailure.unsupported
+    }
+    func consumeSubscriptionReset(_ provider: SubscriptionProvider, accountID: String) async throws -> SubscriptionResetResult {
+      throw SubscriptionActionFailure.unsupported
+    }
   }
 
   // MARK: Snippets — Ajustes ▸ Snippets, the / panel and Salvar como snippet (rev. 2026-10-30; `/` since 01/11)

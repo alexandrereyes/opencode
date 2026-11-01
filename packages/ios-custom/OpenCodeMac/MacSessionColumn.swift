@@ -50,7 +50,7 @@ struct MacSessionColumn: View {
 
   private var sessionList: some View {
     List {
-      MacQuotaRings(quota: store.quota, runtime: runtime)
+      MacQuotaMarks(quota: store.quota, runtime: runtime)
       .padding(.horizontal, AppLayout.margin)
       .padding(.top, 10).padding(.bottom, 6)
       .macThinScrollers()
@@ -349,14 +349,15 @@ private struct MacSessionRowCell<Menu: View>: View {
   }
 }
 
-/// The LLM proxy rings atop Sessões. Built here, from references only, so a list change re-evaluating the column
-/// does not rebuild them: a new `open` closure would, and each ring projects every account's quota.
-private struct MacQuotaRings: View {
+/// The LLM proxy marks atop Sessões, the same strip as the iPhone's. Built here, from references only, so a list
+/// change re-evaluating the column does not rebuild them: a new `open` closure would, and each provider projects
+/// every account.
+private struct MacQuotaMarks: View {
   let quota: SubscriptionStore
   let runtime: MacWindowRuntime
 
   var body: some View {
-    SessionQuotaRings(quota: quota) { provider in runtime.showProxy(.provider(provider)) }
+    SessionQuotaMarks(quota: quota) { provider in runtime.showProxy(.provider(provider)) }
   }
 }
 

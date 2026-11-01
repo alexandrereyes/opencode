@@ -9,7 +9,7 @@
 # Pass the modes of what changed. `--all` runs every mode, one app launch each: agents use it only when Alexandre
 # asks for the whole battery.
 set -euo pipefail
-all=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos servidores recursos snippets)
+all=(composer question quote image viewer archived numbers width dictation jump master divider markdown arquivos ampliar progresso contexto caminhos servidores recursos snippets cotas)
 if (( $# == 0 )); then
   print -u2 "Informe os modos a rodar (os do que foi alterado), ou --all para a bateria inteira (só quando o Alexandre pedir)."
   print -u2 "Modos: ${all[*]} (e edge, fora do --all)"
@@ -55,6 +55,8 @@ for mode in $modes; do
     ampliar) extra=(-OpenCodeMacCaptureSize 1800x1000) ;;
     # Ajustes ▸ Snippets opens off-screen at launch; the fixture's catalog starts empty.
     snippets) extra=(-OpenCodeMacSettings snippets) ;;
+    # The Sessões strip: the marks fixture in the window, then narrow and wide renders of it and of the many fixture.
+    cotas) extra=(-OpenCodeMacProxyScenario marks) ;;
     # Wide and narrow Contexto, its first line's worktree and branch (from the core's VCS, live on a checkout, "—"
     # on a detached HEAD), a subagent open over the root, its own subagent and the way back, in one launch.
     contexto) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
