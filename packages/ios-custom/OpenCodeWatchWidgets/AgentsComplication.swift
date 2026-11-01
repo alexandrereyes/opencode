@@ -2,25 +2,74 @@ import OpenCodeKit
 import SwiftUI
 import WidgetKit
 
+/// Both complications are offered in the face's gallery; Alexandre places them himself.
 @main
 struct OpenCodeWatchWidgets: WidgetBundle {
-  var body: some Widget { AgentsComplication() }
+  var body: some Widget {
+    AgentsComplication()
+    VoiceShortcutComplication()
+  }
 }
 
-/// Complications (`opcao-1-anel-estados.png`): the ring, the corner count and one rectangular line with the age of
-/// the state. The timeline reads `/watch/v1/state` (as `widget`), keeps the last good state in the shared Keychain
-/// group and reloads on WidgetKit push, when the app's background refresh sees a change, and otherwise every hour.
-/// Every one of those reloads counts against the WidgetKit budget. Tapping opens the app on the dashboard.
+/// The attention complication (rev. 2026-11-01): the kinds of priority attention waiting, never a count (see
+/// `WatchAttention`). The timeline reads `/watch/v1/state` (as `widget`), keeps the last good state in the shared
+/// Keychain group and reloads on WidgetKit push (the server pushes only a kind appearing or clearing), when the app's
+/// background refresh sees one, and otherwise every hour. Every one of those reloads counts against the WidgetKit
+/// budget. Tapping opens the app on the Painel.
 struct AgentsComplication: Widget {
   var body: some WidgetConfiguration {
     StaticConfiguration(kind: WatchShared.widgetKind, provider: AgentsProvider()) { entry in
       AgentsComplicationView(entry: entry)
         .containerBackground(for: .widget) { Color.clear }
+        .widgetURL(WatchLaunch.dashboard.url)
     }
     .configurationDisplayName("OpenCode")
-    .description("Sessões ativas e o que precisa de você.")
+    .description("Pergunta, permissão ou erro esperando por você.")
     .supportedFamilies([.accessoryCircular, .accessoryCorner, .accessoryRectangular])
     .pushHandler(AgentsPushHandler.self)
+  }
+}
+
+/// "Falar" (rev. 2026-11-01): a static microphone. It reads no state and has no push handler, and its only entry
+/// never expires, so it spends nothing of the WidgetKit budget. Tapping opens Voz, which starts a call on the watch.
+struct VoiceShortcutComplication: Widget {
+  var body: some WidgetConfiguration {
+    StaticConfiguration(kind: WatchShared.voiceWidgetKind, provider: VoiceShortcutProvider()) { _ in
+      VoiceShortcutView()
+        .containerBackground(for: .widget) { Color.clear }
+        .widgetURL(WatchLaunch.voice.url)
+    }
+    .configurationDisplayName("Falar")
+    .description("Começa a conversa por voz com a Sessão mestra no relógio.")
+    .supportedFamilies([.accessoryCircular, .accessoryCorner, .accessoryRectangular])
+  }
+}
+
+struct VoiceShortcutEntry: TimelineEntry {
+  let date: Date
+}
+
+struct VoiceShortcutProvider: TimelineProvider {
+  func placeholder(in context: Context) -> VoiceShortcutEntry { VoiceShortcutEntry(date: Date()) }
+
+  func getSnapshot(in context: Context, completion: @escaping @Sendable (VoiceShortcutEntry) -> Void) {
+    completion(VoiceShortcutEntry(date: Date()))
+  }
+
+  func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<VoiceShortcutEntry>) -> Void) {
+    completion(Timeline(entries: [VoiceShortcutEntry(date: Date())], policy: .never))
+  }
+}
+
+struct VoiceShortcutView: View {
+  @Environment(\.widgetFamily) private var family
+
+  var body: some View {
+    switch family {
+    case .accessoryCorner: VoiceComplicationCorner()
+    case .accessoryRectangular: VoiceComplicationRectangular()
+    default: VoiceComplicationCircular()
+    }
   }
 }
 

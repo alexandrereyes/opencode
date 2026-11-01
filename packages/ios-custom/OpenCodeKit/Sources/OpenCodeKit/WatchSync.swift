@@ -1,17 +1,14 @@
 import Foundation
 
-/// What the complication draws from a state: the ring's counts and the two totals. A background refresh reloads the
-/// complication only when this changes, because WidgetKit counts those reloads against a daily budget (40 to 70 for
-/// a widget looked at often). Mirrors the plugin's `watch/widget.ts` key.
+/// What the complication draws from a state: the kinds of priority attention waiting (rev. 2026-11-01; the ring's
+/// counts and the two totals before). A background refresh reloads the complication only when this changes, because
+/// WidgetKit counts those reloads against a daily budget (40 to 70 for a widget looked at often). Mirrors the
+/// plugin's `watch/widget.ts` key.
 public struct WatchComplicationKey: Equatable, Sendable {
-  let counts: AgentsState.Counts?
-  let active: Int
-  let attention: Int
+  let kinds: [WatchAttention.Kind]
 
   public init(_ state: AgentsState?) {
-    counts = state?.counts
-    active = state?.activeTotal ?? 0
-    attention = state?.attentionTotal ?? 0
+    kinds = WatchAttention(state).kinds
   }
 }
 
@@ -62,9 +59,9 @@ public struct WatchStateSync: Sendable {
 }
 
 /// Background app refresh of the watch app (`WKApplication.scheduleBackgroundRefresh`): about every 30 minutes it
-/// reads the state into the cache and reloads the complication only when what it draws changed. The server folds
-/// routine changes into one WidgetKit push per 30 minutes too, and skips states the watch already read, so the two
-/// together spend about two budgeted reloads an hour on routine changes.
+/// reads the state into the cache and reloads the complication only when what it draws changed. The server pushes
+/// only those changes too (rev. 2026-11-01), and skips states the watch already read, so routine work spends no
+/// budgeted reload.
 public enum WatchBackgroundRefresh {
   /// `userInfo` of the scheduled task.
   public static let identifier = "br.com.alexandrem.opencode.watch.state"

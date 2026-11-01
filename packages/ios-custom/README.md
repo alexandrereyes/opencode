@@ -4871,13 +4871,36 @@ watch's own Wi-Fi or cellular. The contract with the backend is
   word either. Captures:
   `script/capture-watch.sh` with `OPENCODE_WATCH_COMBO=nothing|one|working-unread|many` and `OPENCODE_WATCH_VOICE=live`,
   fixtures `dashboard` and `dashboard-end` (scrolled to the true end).
-- **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`): `accessoryCircular` (proportional ring with the
-  mascot), `accessoryCorner` and `accessoryRectangular`. The timeline fetches `/watch/v1/state`, caches the last good
-  state in the same Keychain group and reloads on WidgetKit push, when the app updates it, and otherwise every hour.
+- **Complications** (`WatchShared/`, `OpenCodeWatchWidgets/`), each in `accessoryCircular`, `accessoryCorner` and
+  `accessoryRectangular`, placed by Alexandre from the face's gallery. The timeline of **OpenCode** fetches
+  `/watch/v1/state`, caches the last good state in the same Keychain group and reloads on WidgetKit push, when the app
+  updates it, and otherwise every hour.
+- **Attention only (rev. 01/11, `.agent-artifacts/watch-entry-points/complicacao-atencao-estados.png`):** OpenCode
+  shows which kinds of priority attention wait, never how many (`WatchAttention`, OpenCodeKit): a question
+  (`questionmark.bubble.fill`, lavender), a permission (`hand.raised.fill`, amber) or a failure
+  (`exclamationmark.triangle.fill`, red) inside a ring of its color, the first in the precedence question >
+  permission > failed on the circular and the corner (curved label `Pergunta`/`Permissão`/`Erro`/`OpenCode`), and on
+  the rectangular `Pergunta esperando`, `Pergunta · Erro` or `Nada para você` beside the age. With nothing waiting,
+  the gray mascot in a gray track. Work, unread answers and totals left the complication: its counts went stale
+  within WidgetKit's budget, and they stay in the Painel and the Live Activity, unchanged. Shape, words and the
+  accessibility label tell the kinds apart without color.
+- **Falar (rev. 01/11):** a second, static complication (`VoiceShortcutComplication`, kind
+  `br.com.alexandrem.opencode.watch.voice`): a microphone, no state, no push handler, one entry with `.never`, so it
+  costs no budget. Touch and hold on the face is the system's (edit the face); no complication runs code on touch.
+- **Launch (rev. 01/11, `WatchLaunch` in OpenCodeKit, `DashboardView.open`):** OpenCode's `widgetURL`
+  (`br.com.alexandrem.opencode.watch://painel`, scheme in the watch's `CFBundleURLTypes`) and the agents Live Activity
+  open the Painel, closing Responder; Falar's (`…://voz`) opens Voz and starts a call with `VoiceCall.retry`, the
+  "Tentar de novo" start, or returns to the call in progress. A call connecting, live or showing why it ended is never
+  interrupted. The watch's `Info.plist` lists `AgentsActivityAttributes` in
+  `WKSupportsLiveActivityLaunchAttributeTypes` (watchOS 11.1+; `WatchLaunchPlistTests` checks the watch app embedded
+  in the built iPhone app), so the Smart Stack card opens the watch app instead of "open on iPhone"; the voice Live
+  Activity is not listed. Apple documents only `NSUserActivityTypeLiveActivity` for that launch, so the watch also
+  treats the card's iPhone URL as the Painel and posts every external launch to `/watch/v1/diagnostics` (`launch`),
+  which the physical watch has to confirm.
 - **Attention first (29/10, Option A of `.agent-artifacts/atencao/watch-atencao.png`):** while `counts.forYou` is
-  above zero, the ring's number is that count in orange (the ring itself is the state ring since 30/10); the
-  rectangular line reads `N para você` over a dimmed `1 pergunta · 2 não lidas · 6 trabalhando`; the corner shows the
-  same number. Otherwise the green ring and `N trabalhando · nada para você`. The Painel lists `needs` first (requests
+  above zero, the Painel's ring number is that count in orange (the ring itself is the state ring since 30/10), over
+  `1 pergunta · 2 não lidas · 6 trabalhando` (the complications drew the same until 01/11). Otherwise the green ring
+  and `N trabalhando · nada para você`. The Painel lists `needs` first (requests
   still open Responder; failures and answers show their kind and time) and then a collapsed `Trabalhando N` that
   expands to the working sessions. The gateway now answers a state while only unread answers wait, so the watch counts
   what Sessões counts. The thin inner work arc of the mock was left out.
@@ -4886,17 +4909,17 @@ watch's own Wi-Fi or cellular. The contract with the backend is
   server's 150 pushes a day plus a 15-minute timeline exhausted it, so only opening the app updated the complication.
   Now `WatchStateSync` (OpenCodeKit) is the one read for the app, the background refresh and the complication: it
   writes the shared cache and says whether anything changed and whether what the complication draws changed
-  (`WatchComplicationKey`: the ring's counts and the two totals). The app in front reloads on any change (not
+  (`WatchComplicationKey`: the kinds of attention since 01/11). The app in front reloads on any change (not
   budgeted); the **background app refresh** (`BackgroundRefresh` and `WatchAppDelegate` in `OpenCodeWatchApp.swift`,
   `WatchBackgroundRefresh`: about every 30 minutes, an 8 s read, rescheduled after each run and whenever the app leaves
   the screen) reloads only when the drawing changed; the timeline policy is 60 minutes. watchOS crashes the app on
   `scheduleBackgroundRefresh` unless the application delegate implements `handle(_:)` (seen in the simulator: SwiftUI's
   `.backgroundTask` alone is not enough), so a `WKApplicationDelegateAdaptor` receives every background task, completing
   WatchConnectivity's only once nothing is pending. Every read sends `X-Watch-Client: app|background|widget`, which the gateway counts (`custom.watch` →
-  `stats`) and uses to skip pushes for a state the watch already read; the server pushes at once (at most one a minute,
-  priority 10) only for a new question, permission, failure or unread answer (rev. 30/10) or for the active total
-  reaching or leaving zero, folds the rest into one push per 30 minutes, and caps pushes at 50 a day
-  ([`watch.md`](../plugin-app-custom/docs/watch.md), "Budget"). The
+  `stats`) and uses to skip pushes for a state the watch already read; since 01/11 the server pushes only when a kind
+  of attention appears or clears, at once (at most one a minute, priority 10), capped at 50 a day
+  ([`watch.md`](../plugin-app-custom/docs/watch.md), "Budget"; rollout: TestFlight on the watch first, then the
+  server, which cannot tell the builds apart). The
   rectangular complication shows the age of the state next to `OpenCode` (`agora`, then `há N min.`; a second timeline
   entry makes the switch without a reload); the circular and corner families have no room. DEBUG builds accept
   `-OpenCodeWatchRefreshSeconds N` (a shorter refresh) and the `OpenCodeWatchPairing` default (base64 JSON pairing,
@@ -4929,8 +4952,10 @@ watch's own Wi-Fi or cellular. The contract with the backend is
   `script/build-watch-rtc.sh`, which builds the current platform's slices in a clean environment and reuses finished
   archives from `~/.local/share/opencode-ios/watch-rtc-cache` by content fingerprint.
 - **Simulator:** `script/capture-watch.sh <udid> <dir>` builds for the watchOS simulator and captures the DEBUG
-  fixtures (`-OpenCodeWatchFixture dashboard|question|permission|voice|complications|offline|unpaired`), which never
-  touch the network, Keychain or cache. The simulator has no CallKit and always allows UDP, so it proves neither the
+  fixtures (`-OpenCodeWatchFixture dashboard|question|permission|voice|complications|complications-voice|offline|
+  unpaired`), which never touch the network, Keychain or cache; `complications` follows `OPENCODE_WATCH_COMBO`
+  (`nothing`, `working-unread`, `question-working-unread`, `permission`, `failed`, `many` for its states). A
+  complication's curved corner label only draws on a face, so the capture writes it below the circle. The simulator has no CallKit and always allows UDP, so it proves neither the
   call nor the TN3135 policy; voice needs the physical watch.
 
 ## Technical direction

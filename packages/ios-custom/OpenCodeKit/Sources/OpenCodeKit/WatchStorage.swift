@@ -5,7 +5,10 @@ public enum WatchShared {
   /// Keychain access group shared by the watch app and its complication extension (`keychain-access-groups`,
   /// team prefix + this suffix). It needs no developer-portal capability, unlike an App Group.
   public static let keychainGroup = "ERRYZ68LX5.br.com.alexandrem.opencode.watch"
+  /// The attention complication: the only one that reads the state and takes WidgetKit pushes.
   public static let widgetKind = "br.com.alexandrem.opencode.watch.agents"
+  /// The static "Falar" complication (rev. 2026-11-01).
+  public static let voiceWidgetKind = "br.com.alexandrem.opencode.watch.voice"
 }
 
 /// Small items in the watch's Keychain, readable by the app and the complication. Never synchronized to iCloud

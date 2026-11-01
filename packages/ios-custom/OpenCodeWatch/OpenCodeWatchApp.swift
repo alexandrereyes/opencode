@@ -48,7 +48,9 @@ struct OpenCodeWatchApp: App {
     case .voice?:
       NavigationStack { VoiceView(call: voice, pairing: nil) }
     case .complications?:
-      ComplicationsPreview(entry: model.entry)
+      ComplicationsPreview(entry: model.entry, voice: false)
+    case .complicationsVoice?:
+      ComplicationsPreview(entry: nil, voice: true)
     default:
       DashboardView(model: model, voice: voice)
     }
@@ -121,24 +123,44 @@ enum BackgroundRefresh {
   }
 }
 
-/// DEBUG capture of the three complication families at their device sizes (Ultra 49 mm).
+/// DEBUG capture of the three complication families at their device sizes (Ultra 49 mm): the attention complication
+/// for the fixture's state (`-OpenCodeWatchCombo`), or "Falar". The corner's curved label only draws on a watch face,
+/// so it is written below its circle; the last line is what VoiceOver reads.
 private struct ComplicationsPreview: View {
   let entry: WatchStateCache.Entry?
+  let voice: Bool
+
   var body: some View {
+    let attention = WatchAttention(entry?.snapshot.state)
     ScrollView {
       VStack(spacing: 10) {
-        // The corner's circle (its curved label only draws on a watch face) and the empty ring for comparison.
-        HStack(spacing: 14) {
-          ComplicationCircular(state: entry?.snapshot.state).frame(width: 58, height: 58)
-          ComplicationCorner(state: entry?.snapshot.state).frame(width: 40, height: 40)
-          ComplicationCircular(state: nil).frame(width: 58, height: 58)
+        HStack(spacing: 18) {
+          Group {
+            if voice { VoiceComplicationCircular() } else { ComplicationCircular(state: entry?.snapshot.state) }
+          }
+          .frame(width: 58, height: 58)
+          VStack(spacing: 3) {
+            Group {
+              if voice { VoiceComplicationCorner() } else { ComplicationCorner(state: entry?.snapshot.state) }
+            }
+            .frame(width: 40, height: 40)
+            Text(voice ? "Falar" : attention.cornerLabel).font(.system(size: 11, weight: .semibold))
+              .foregroundStyle(Color.watch(voice ? .primary : attention.top?.role ?? .textSecondary))
+          }
         }
         TimelineView(.periodic(from: entry?.fetched ?? .now, by: WatchAge.fresh)) { context in
-          ComplicationRectangular(state: entry?.snapshot.state, fetched: entry?.fetched, now: context.date)
-            .frame(width: 180, height: 66).padding(6)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
+          Group {
+            if voice {
+              VoiceComplicationRectangular()
+            } else {
+              ComplicationRectangular(state: entry?.snapshot.state, fetched: entry?.fetched, now: context.date)
+            }
+          }
+          .frame(width: 180, height: 66).padding(6)
+          .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
         }
-        Text(entry?.snapshot.state?.complicationLine ?? "").font(.caption2).foregroundStyle(.secondary)
+        Text(voice ? VoiceComplicationCircular.label : attention.accessibilityLabel).font(.caption2)
+          .foregroundStyle(.secondary).multilineTextAlignment(.center)
       }
     }
   }

@@ -419,7 +419,7 @@ private final class OnceFlag: @unchecked Sendable {
     }
     #expect(store.entry == entry)
     #expect(entry.fetched == now)
-    // A newer `updatedAt`, other rows and titles: the ring and the totals are the same.
+    // A newer `updatedAt`, other rows and titles: the same kinds of attention.
     let later = try snapshot { state in
       state.updatedAt += 60_000
       state.sessions.removeLast()
@@ -429,16 +429,24 @@ private final class OnceFlag: @unchecked Sendable {
       Issue.record("same drawing must not redraw"); return
     }
     #expect(store.entry?.fetched == now + 60)
-    // A session that finishes unread moves the ring.
-    let unread = try snapshot { state in
-      state.counts.working = 1
-      state.counts.unread = 1
+    // More work, an unread answer and more questions of the same kind (rev. 2026-11-01): no budgeted reload.
+    let busier = try snapshot { state in
+      state.counts.working = 5
+      state.counts.unread = 2
+      state.counts.question = 3
+      state.activeTotal = 9
+      state.attentionTotal = 4
     }
-    guard case .fetched(_, true, true) = await sync(store, { unread }).run(now: now + 120) else {
-      Issue.record("other counts must redraw"); return
+    guard case .fetched(_, true, false) = await sync(store, { busier }).run(now: now + 120) else {
+      Issue.record("counts of the same kinds must not redraw"); return
+    }
+    // A failure joins the question and the permission.
+    let failed = try snapshot { state in state.counts.failed = 1 }
+    guard case .fetched(_, true, true) = await sync(store, { failed }).run(now: now + 180) else {
+      Issue.record("a new kind must redraw"); return
     }
     // The very same snapshot: nothing changed at all.
-    guard case .fetched(_, false, false) = await sync(store, { unread }).run(now: now + 180) else {
+    guard case .fetched(_, false, false) = await sync(store, { failed }).run(now: now + 240) else {
       Issue.record("same snapshot is unchanged"); return
     }
   }
@@ -472,6 +480,85 @@ private final class OnceFlag: @unchecked Sendable {
 }
 
 // MARK: Widget push token
+
+// MARK: Complications and launches (rev. 2026-11-01)
+
+@Suite struct WatchComplicationTests {
+  private func state(question: Int = 0, permission: Int = 0, failed: Int = 0) throws -> AgentsState {
+    var state = try #require(try JSONDecoder().decode(WatchStateSnapshot.self, from: Data(stateJSON.utf8)).state)
+    state.counts = AgentsState.Counts(working: 4, question: question, permission: permission, failed: failed, idle: 1,
+      unread: 3)
+    return state
+  }
+
+  @Test func nothingWaitingIsTheNeutralMascotWhateverTheWork() throws {
+    let nothing = WatchAttention(try state())
+    #expect(nothing.kinds.isEmpty && nothing.top == nil)
+    #expect(nothing == WatchAttention(nil))
+    #expect(nothing.line == "Nada para você")
+    #expect(nothing.cornerLabel == "OpenCode")
+    #expect(nothing.accessibilityLabel == "OpenCode: nada precisa de você")
+  }
+
+  @Test func eachKindHasItsOwnSymbolColorAndWords() throws {
+    let expected: [(WatchAttention, String, ThemeRole, String, String, String)] = [
+      (WatchAttention(try state(question: 1)), "questionmark.bubble.fill", .accent, "Pergunta", "Pergunta esperando",
+       "OpenCode: pergunta esperando"),
+      (WatchAttention(try state(permission: 1)), "hand.raised.fill", .warning, "Permissão", "Permissão pendente",
+       "OpenCode: permissão pendente"),
+      (WatchAttention(try state(failed: 1)), "exclamationmark.triangle.fill", .error, "Erro", "Sessão com erro",
+       "OpenCode: sessão com erro"),
+    ]
+    for (attention, symbol, role, corner, line, spoken) in expected {
+      let top = try #require(attention.top)
+      #expect(attention.kinds == [top])
+      #expect(top.symbol == symbol && top.role == role)
+      #expect(attention.cornerLabel == corner && attention.line == line && attention.accessibilityLabel == spoken)
+    }
+    #expect(Set(WatchAttention.Kind.allCases.map(\.symbol)).count == 3)
+  }
+
+  @Test func howManyNeverChangesWhatItDraws() throws {
+    #expect(WatchAttention(try state(question: 1)) == WatchAttention(try state(question: 4)))
+    #expect(WatchComplicationKey(try state(failed: 1)) == WatchComplicationKey(try state(failed: 2)))
+    #expect(WatchComplicationKey(try state(failed: 1)) != WatchComplicationKey(try state(question: 1, failed: 1)))
+  }
+
+  @Test func severalKindsShowTheFirstInPrecedenceAndListTheRest() throws {
+    let two = WatchAttention(try state(question: 2, failed: 1))
+    #expect(two.top == .question && two.cornerLabel == "Pergunta")
+    #expect(two.line == "Pergunta · Erro")
+    #expect(two.accessibilityLabel == "OpenCode: pergunta e erro")
+    let all = WatchAttention(try state(question: 1, permission: 3, failed: 1))
+    #expect(all.kinds == [.question, .permission, .failed])
+    #expect(all.line == "Pergunta · Permissão · Erro")
+    #expect(all.accessibilityLabel == "OpenCode: pergunta, permissão e erro")
+    #expect(WatchAttention(try state(permission: 1, failed: 1)).top == .permission)
+  }
+
+  @Test func onlyFalarOpensVoz() throws {
+    #expect(WatchShared.voiceWidgetKind != WatchShared.widgetKind)
+    #expect(WatchLaunch.voice.url.absoluteString == "br.com.alexandrem.opencode.watch://voz")
+    #expect(WatchLaunch.dashboard.url.absoluteString == "br.com.alexandrem.opencode.watch://painel")
+    #expect(WatchLaunch(url: WatchLaunch.voice.url) == .voice)
+    #expect(WatchLaunch(url: WatchLaunch.dashboard.url) == .dashboard)
+    // The iPhone deep link the agents Live Activity carries, and `voz` under the iPhone's scheme.
+    #expect(WatchLaunch(url: AgentsDeepLink.session(serverKey: "k", sessionID: "s", directory: "/r").url) == .dashboard)
+    #expect(WatchLaunch(url: try #require(URL(string: "\(AgentsDeepLink.scheme)://voz"))) == .dashboard)
+  }
+
+  @Test func aLaunchNeverInterruptsNorDuplicatesACall() {
+    #expect(WatchLaunch.dashboard.action(call: .idle, paired: true) == .dashboard)
+    #expect(WatchLaunch.dashboard.action(call: .idle, paired: false) == .dashboard)
+    #expect(WatchLaunch.dashboard.action(call: .active, paired: true) == .showCall)
+    // The notice of a call that ended stays until it is closed.
+    #expect(WatchLaunch.dashboard.action(call: .finished, paired: true) == .showCall)
+    #expect(WatchLaunch.voice.action(call: .idle, paired: true) == .startCall)
+    #expect(WatchLaunch.voice.action(call: .finished, paired: true) == .startCall)
+    #expect(WatchLaunch.voice.action(call: .active, paired: true) == .showCall)
+    #expect(WatchLaunch.voice.action(call: .idle, paired: false) == .dashboard)
+  }
+}
 
 @Suite struct WatchWidgetTokenTests {
   final class Fake: @unchecked Sendable {

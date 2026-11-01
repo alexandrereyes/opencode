@@ -2,12 +2,15 @@ import Foundation
 import OpenCodeKit
 
 /// DEBUG-only screens for captures: `-OpenCodeWatchFixture dashboard|question|permission|voice|unpaired|offline|
-/// complications`, optionally with `-OpenCodeWatchCombo working|working-unread|question-working-unread|nothing|
-/// progress` for the state ring's combinations. Fixtures never touch the network, the Keychain or the shared cache.
+/// complications|complications-voice`, optionally with `-OpenCodeWatchCombo working|working-unread|
+/// question-working-unread|nothing|progress|permission|failed|many` for the state's combinations. Fixtures never touch
+/// the network, the Keychain or the shared cache.
 struct WatchFixture {
   enum Screen: String {
     case dashboard, question, permission, voice, unpaired, offline, complications
     case dashboardEnd = "dashboard-end"
+    /// The "Falar" complication (rev. 2026-11-01).
+    case complicationsVoice = "complications-voice"
   }
 
   let screen: Screen
@@ -56,6 +59,8 @@ struct WatchFixture {
     /// One session (an unread answer), and many: a question, a failure, two unread and three working, expanded, for
     /// the full-screen list under the floating microphone (rev. 30/10).
     case one, many
+    /// Only a permission, and only a failure, beside work: the attention complication's other states (rev. 2026-11-01).
+    case permission, failed
 
     func state(now: Int) -> String {
       let work = """
@@ -102,6 +107,15 @@ struct WatchFixture {
              + #"{"sessionID":"s3","title":"Deploy no Swarm","project":"infra","directory":"/r/infra","status":"working"},"#
              + row("s4", "Revisar contrato do relógio", "working") + "," + row("s5", "QA Autonomo!", "idle") + ","
              + row("s6", "Anel do relógio", "idle"))
+        case .permission:
+          (#""working":2,"question":0,"permission":1,"failed":0,"idle":0,"unread":0"#, 3,
+           #"{"sessionID":"s8","title":"Rodar testes do OAuth","project":"core","directory":"/r/core","kind":"permission","since":\#(now - 60_000),"requestID":"fixture-permission"}"#,
+           #"{"sessionID":"s8","title":"Rodar testes do OAuth","project":"core","directory":"/r/core","kind":"permission","since":\#(now - 60_000)}"#,
+           row("s8", "Rodar testes do OAuth", "permission") + "," + work)
+        case .failed:
+          (#""working":2,"question":0,"permission":0,"failed":1,"idle":0,"unread":0"#, 2, "",
+           #"{"sessionID":"s7","title":"Migrar o banco de dados","project":"core","directory":"/r/core","kind":"failed","since":\#(now - 900_000)}"#,
+           row("s7", "Migrar o banco de dados", "failed") + "," + work)
         case .progress:
           (#""working":2,"question":0,"permission":0,"failed":0,"idle":0,"unread":0"#, 2, "", "",
            #"{"sessionID":"s2","title":"Live Activity no iOS","project":"ios","directory":"/r/ios","status":"working","#

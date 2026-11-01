@@ -72,29 +72,51 @@ struct WatchRingView: View {
 
 // MARK: Complications
 
+/// The attention complication (rev. 2026-11-01, `.agent-artifacts/watch-entry-points/complicacao-atencao-estados.png`):
+/// the first kind of attention waiting, in the backend's precedence, as its symbol inside a ring of its color; with
+/// nothing waiting, the gray mascot inside a gray track. Never a count, so only a kind appearing or clearing reloads it.
 struct ComplicationCircular: View {
   let state: AgentsState?
   var body: some View {
-    WatchRingView(state: state, lineWidth: 4.5, numberSize: 19).padding(1)
+    let attention = WatchAttention(state)
+    AttentionBadge(kind: attention.top, lineWidth: 4.5).padding(1)
+      .accessibilityElement(children: .ignore).accessibilityLabel(attention.accessibilityLabel)
   }
 }
 
-/// The corner's circle: the closed state ring around the number, or around the mascot when nothing is active.
+/// The corner's circle, with the kind (or `OpenCode`) along the bezel.
 struct ComplicationCorner: View {
   let state: AgentsState?
   var body: some View {
-    let ring = AgentsStatusRing(counts: state?.counts)
-    ZStack {
-      AgentsStatusRingView(ring: ring, color: Color.watch, lineWidth: 3, gap: 2, accentable: true)
-      if ring.number > 0 {
-        Text(verbatim: "\(ring.number)").font(.system(size: 17, weight: .bold, design: .rounded)).monospacedDigit()
-          .foregroundStyle(Color.watch(ring.forYou ? .primary : .textStrong)).minimumScaleFactor(0.6).padding(4)
-      } else {
-        WatchMascot().padding(8)
+    let attention = WatchAttention(state)
+    AttentionBadge(kind: attention.top, lineWidth: 3)
+      .widgetLabel {
+        Text(attention.cornerLabel).foregroundStyle(Color.watch(attention.top?.role ?? .textSecondary))
       }
-    }
-    .widgetLabel {
-      Text(state?.complicationLine ?? "OpenCode")
+      .accessibilityElement(children: .ignore).accessibilityLabel(attention.accessibilityLabel)
+  }
+}
+
+/// The symbol of a kind of attention inside a ring of its color, or the gray mascot inside a gray track. The symbol
+/// and the ring take the face's tint; the shape alone tells the kinds apart there.
+struct AttentionBadge: View {
+  let kind: WatchAttention.Kind?
+  let lineWidth: CGFloat
+  var body: some View {
+    GeometryReader { proxy in
+      let side = min(proxy.size.width, proxy.size.height)
+      ZStack {
+        Circle().strokeBorder(Color.watch(kind?.role ?? .textWeak), lineWidth: lineWidth)
+          .opacity(kind == nil ? 0.7 : 1).widgetAccentable(kind != nil)
+        if let kind {
+          Image(systemName: kind.symbol).resizable().scaledToFit().fontWeight(.semibold)
+            .foregroundStyle(Color.watch(kind.role)).frame(width: side * 0.5, height: side * 0.46).widgetAccentable()
+        } else {
+          WatchMascot().grayscale(1).opacity(0.8).frame(width: side * 0.56)
+        }
+      }
+      .frame(width: side, height: side)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
   }
 }
@@ -119,9 +141,10 @@ struct ComplicationRectangular: View {
   let fetched: Date?
   let now: Date
   var body: some View {
+    let attention = WatchAttention(state)
     HStack(spacing: 8) {
-      WatchRingView(state: state, lineWidth: 3.5, numberSize: 15).frame(width: 46, height: 46)
-      VStack(alignment: .leading, spacing: 1) {
+      AttentionBadge(kind: attention.top, lineWidth: 3).frame(width: 40, height: 40)
+      VStack(alignment: .leading, spacing: 2) {
         // The brand keeps its width; the age, smaller, shrinks first.
         HStack(alignment: .firstTextBaseline, spacing: 4) {
           Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.watch(.primary))
@@ -132,15 +155,62 @@ struct ComplicationRectangular: View {
               .foregroundStyle(Color.watch(.textSecondary)).lineLimit(1).minimumScaleFactor(0.7)
           }
         }
-        Text(state.map(\.complicationLine) ?? "Nenhuma sessão ativa")
-          .font(.system(size: 13, weight: .medium)).foregroundStyle(Color.watch(.textStrong))
-          .lineLimit(state?.complicationDetail == nil ? 2 : 1).minimumScaleFactor(0.8)
-        if let detail = state?.complicationDetail {
-          Text(detail).font(.system(size: 11)).foregroundStyle(Color.watch(.textSecondary))
-            .lineLimit(2).minimumScaleFactor(0.7)
-        }
+        line(attention).font(.system(size: 14, weight: .semibold)).lineLimit(2).minimumScaleFactor(0.8)
       }
       Spacer(minLength: 0)
     }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(attention.accessibilityLabel)
+  }
+
+  /// One kind in its color (`Pergunta esperando`), several each in its own (`Pergunta · Erro`).
+  private func line(_ attention: WatchAttention) -> Text {
+    guard attention.kinds.count > 1 else {
+      return Text(attention.line).foregroundStyle(Color.watch(attention.top?.role ?? .textSecondary))
+    }
+    return attention.kinds.enumerated().reduce(Text(verbatim: "")) { text, item in
+      let separator = Text(verbatim: item.offset == 0 ? "" : " · ").foregroundStyle(Color.watch(.textSecondary))
+      return Text("\(text)\(separator)\(Text(item.element.label).foregroundStyle(Color.watch(item.element.role)))")
+    }
+  }
+}
+
+/// The "Falar" complication (rev. 2026-11-01): a static microphone that opens Voz and starts a call on the watch. It
+/// draws no state, so it never reloads.
+struct VoiceComplicationCircular: View {
+  static let label = "Falar com a Sessão mestra"
+  var body: some View {
+    ZStack {
+      Circle().fill(Color.watch(.primary).opacity(0.2))
+      Image(systemName: "mic.fill").font(.system(size: 22, weight: .semibold))
+        .foregroundStyle(Color.watch(.primary)).widgetAccentable()
+    }
+    .padding(1)
+    .accessibilityElement(children: .ignore).accessibilityLabel(Self.label)
+  }
+}
+
+struct VoiceComplicationCorner: View {
+  var body: some View {
+    Image(systemName: "mic.fill").font(.system(size: 20, weight: .semibold))
+      .foregroundStyle(Color.watch(.primary)).widgetAccentable()
+      .widgetLabel { Text("Falar").foregroundStyle(Color.watch(.primary)) }
+      .accessibilityElement(children: .ignore).accessibilityLabel(VoiceComplicationCircular.label)
+  }
+}
+
+struct VoiceComplicationRectangular: View {
+  var body: some View {
+    HStack(spacing: 8) {
+      VoiceComplicationCircular().frame(width: 40, height: 40)
+      VStack(alignment: .leading, spacing: 2) {
+        Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.watch(.primary))
+          .widgetAccentable().lineLimit(1)
+        Text("Falar com a mestra").font(.system(size: 14, weight: .semibold))
+          .foregroundStyle(Color.watch(.textStrong)).lineLimit(2).minimumScaleFactor(0.8)
+      }
+      Spacer(minLength: 0)
+    }
+    .accessibilityElement(children: .ignore).accessibilityLabel(VoiceComplicationCircular.label)
   }
 }

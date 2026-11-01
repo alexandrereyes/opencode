@@ -1,6 +1,7 @@
 import OpenCodeKit
 import SwiftUI
 import WatchKit
+import WidgetKit
 
 /// Painel (`app-1-painel.png`, Option A of 29/10): ring and counts with the age of the state, then "Precisa de
 /// você" (requests open Responder) and a collapsed `Trabalhando N` that lists the working sessions; the microphone
@@ -41,6 +42,33 @@ struct DashboardView: View {
     .onChange(of: voice.phase) { _, phase in
       if phase != .idle { showVoice = true }
     }
+    // The complications set a URL; the agents Live Activity's launch is not documented beyond the user activity, and
+    // it may also bring the iPhone deep link of its card (rev. 2026-11-01).
+    .onOpenURL { url in open(WatchLaunch(url: url), from: "url \(url.scheme ?? "")://\(url.host ?? "")") }
+    .onContinueUserActivity(NSUserActivityTypeLiveActivity) { _ in open(.dashboard, from: "live-activity") }
+    .onContinueUserActivity(WatchShared.widgetKind) { _ in open(.dashboard, from: "widget") }
+    .onContinueUserActivity(WatchShared.voiceWidgetKind) { _ in open(.voice, from: "widget") }
+  }
+
+  /// Opened from a complication or the agents Live Activity: the Painel (it refreshes as the app comes to the front),
+  /// or Voz for "Falar", never interrupting or duplicating a call (`WatchLaunch.action`). Each launch goes to the
+  /// gateway's diagnostics, so the watch's own log says what the system delivered.
+  private func open(_ launch: WatchLaunch, from source: String) {
+    let action = launch.action(call: voice.phase.launchCall, paired: model.pairing != nil)
+    switch action {
+    case .dashboard:
+      reply = nil
+      showVoice = false
+    case .showCall:
+      showVoice = true
+    case .startCall:
+      // "Tentar de novo"'s start: a plain start from idle, which also clears the notice of a call that ended.
+      voice.retry(pairing: model.pairing)
+      showVoice = true
+    }
+    guard !model.fixture, let client = model.client else { return }
+    let event = ["type": "launch", "source": source, "target": launch.rawValue, "action": action.rawValue]
+    Task { try? await client.diagnostics([event]) }
   }
 
   @ViewBuilder private var content: some View {
@@ -176,6 +204,16 @@ struct DashboardView: View {
 
 struct ReplyRoute: Hashable {
   let attention: AgentsState.Attention
+}
+
+private extension VoiceCall.Phase {
+  var launchCall: WatchLaunch.Call {
+    switch self {
+    case .idle: .idle
+    case .connecting, .live: .active
+    case .failed, .ended: .finished
+    }
+  }
 }
 
 private struct Card: View {
