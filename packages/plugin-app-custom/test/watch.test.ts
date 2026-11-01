@@ -692,6 +692,55 @@ it.effect("a cold Mestra never holds the sideband reader; admissions and memory 
   }).pipe(Effect.map(() => undefined)),
 )
 
+it.effect("moderation clears voice memory once, ends the call as context_reset and keeps its late events out", () =>
+  Effect.gen(function* () {
+    const { sidebands, server, json } = yield* setup()
+    const sessionsBefore = [...server.sessions.keys()]
+    const created = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    const socket = sidebands.opened[0]
+    socket?.deliver({ type: "session.started" })
+    socket?.deliver({ type: "turn.done", turn: { id: "turn_1", role: "user", transcript: "Antes do erro." } })
+    socket?.deliver({ type: "error", error: { type: "content_filter", code: "content_filter", message: "Stopped." } })
+    // After the error: the moderated turn and a request of the cleared conversation.
+    socket?.deliver({ type: "turn.done", turn: { id: "turn_2", role: "assistant", transcript: "Fala moderada." } })
+    delegate(socket, "item_late", "Pedido depois do erro.")
+    yield* settled
+    const page = yield* json("GET", `/voice/calls/${created.callID}/events?after=0`)
+    expect(page.events.at(-1)).toMatchObject({ type: "status", status: "ended", reason: "context_reset" })
+    expect(server.memory.resets).toBe(1)
+    expect(server.memory.appended.map((turn) => turn.id)).toEqual([`${created.callID}:turn_1`])
+    expect(server.prompts).toEqual([])
+    expect(server.masters.ensured).toBe(0)
+    expect([...server.sessions.keys()]).toEqual(sessionsBefore)
+    // Ended by us, not by the service.
+    expect(sidebands.opened[0]?.sent).toContain(JSON.stringify({ type: "session.close" }))
+  }).pipe(Effect.map(() => undefined)),
+)
+
+it.effect("moderation of a call that started empty does not clear again; other errors clear nothing", () =>
+  Effect.gen(function* () {
+    const { sidebands, server, json } = yield* setup()
+    const first = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    // Not moderation: by type/code only, never by the message text.
+    for (const error of [
+      { type: "server_error", code: "internal" },
+      { type: "invalid_request_error", code: "invalid_value", message: "content_filter" },
+    ])
+      sidebands.opened[0]?.deliver({ type: "error", error })
+    yield* settled
+    expect((yield* json("GET", `/voice/calls/${first.callID}/events?after=0`)).ended).toBe(false)
+    expect(server.memory.resets).toBe(0)
+    yield* json("DELETE", `/voice/calls/${first.callID}`)
+    server.memory.context = { ...server.memory.context, summary: "", turns: [] }
+    const empty = yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    sidebands.opened[1]?.deliver({ type: "error", code: "content_filter", message: "Stopped." })
+    yield* settled
+    const page = yield* json("GET", `/voice/calls/${empty.callID}/events?after=0`)
+    expect(page.events.at(-1)).toMatchObject({ status: "ended", reason: "moderation" })
+    expect(server.memory.resets).toBe(0)
+  }).pipe(Effect.map(() => undefined)),
+)
+
 it.effect("a Mestra reply that arrives after the call ends reaches voice memory once and is not asked again", () =>
   Effect.gen(function* () {
     const { sidebands, server, proxy, json } = yield* setup()
@@ -709,6 +758,7 @@ it.effect("a Mestra reply that arrives after the call ends reaches voice memory 
       context: () => voice.context("global"),
       append: (turns) => voice.append({ version: Voice.version, scope: "global", turns }),
       end: () => voice.settle(),
+      reset: () => voice.reset("global"),
     }
     server.ctx.ensureMaster = () =>
       VoiceWindow.open(server.shared, server.masters.id).pipe(Effect.as(server.masters.id))

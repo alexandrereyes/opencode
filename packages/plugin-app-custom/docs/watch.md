@@ -278,6 +278,15 @@ events stay readable for 60 s. A new call ends the device's previous one (`reaso
 Tentar de novo, and reports it in its diagnostics as `voice.failed` with `stage: ended`. When the media ends first
 (`sessionEnded`), it waits 3 s for that reason before showing the generic service notice.
 
+**Moderation (rev. 2026-11-01).** An upstream `error` whose structured `type` or `code` is `content_filter` (never
+its message) stops the call's reader: later events, turns and requests not yet admitted are dropped. Off the reader,
+an admission already in flight finishes (its late-reply window opens before the reset takes it); then a call that
+started with memory calls `custom.voice.reset` and ends as `context_reset`, and one that started empty ends as
+`moderation` without clearing again. Watch turns carry the time they were received, so a memory lane that runs after
+the reset cannot bring them back. The watch shows "Limpou o contexto…" (or the moderation notice) with Fechar and
+Tentar de novo; its retry is a new, empty call. The watch does not reconnect by itself: that would need a new offer
+from its media engine, a separate flow.
+
 **Voice diagnostics (rev. 2026-10-31).** Three log lines, never a transcript or speech; every service text goes
 through `sanitize` (`src/voice/sanitize.ts`: control characters out, quoted spans over 32 characters as `"…"`,
 whitespace collapsed, bounded), since an error message can quote the request it rejects:

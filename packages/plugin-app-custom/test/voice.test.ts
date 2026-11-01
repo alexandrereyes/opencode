@@ -76,7 +76,15 @@ function fixture(initial?: Voice.Record) {
 
 test("KV protocol replaces the eco contract, validates batches and reserves future scopes", () => {
   expect(Voice.version).toBe(2)
-  expect(Object.keys(Voice.Definition.methods)).toEqual(["info", "instructions", "append", "context", "end", "diagnostics"])
+  expect(Object.keys(Voice.Definition.methods)).toEqual([
+    "info",
+    "instructions",
+    "append",
+    "context",
+    "end",
+    "reset",
+    "diagnostics",
+  ])
   expect(key("global")).toBe("voice/transcript/global")
   for (const input of [
     { version: 1, scope: "global", turns: [turn("id")] },
@@ -523,6 +531,70 @@ it.effect("the call's end takes its window once and records after the Mestra goe
     yield* TestClock.adjust(limits.latePollMs)
     yield* settled
     expect(busy.read().turns).toEqual([])
+  }),
+)
+
+it.effect("reset clears what GPT Live gets back and keeps the old conversation from coming back", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    yield* TestClock.setTime(10_000)
+    const messages = [
+      mestraReply("msg_reply", "Resposta antiga.", 20_000),
+      mestraUser("msg_req", "Pedido antigo.", 9_000),
+    ]
+    const f = lateFixture(
+      record([turn("old-1"), { ...turn("old-2", "Fala antiga.", "assistant"), at: 9_500 }], "Resumo antigo."),
+      messages,
+    )
+    f.values.set(VoiceWindow.key, { sessionID: "ses_m", since: 8_000 })
+    // Everything else in the plugin's storage (the Mestra pointer, drafts…) stays as it was.
+    f.values.set("preferences:profile", { data: { masterSessions: { local: "ses_m" } } })
+    f.values.set("question-drafts:ses_x", { answers: ["rascunho"] })
+    const voice = makeVoice(f.ctx, scope)
+    expect(yield* voice.reset("global")).toBe(10_000)
+    expect(f.values.get("preferences:profile")).toEqual({ data: { masterSessions: { local: "ses_m" } } })
+    expect(f.values.get("question-drafts:ses_x")).toEqual({ answers: ["rascunho"] })
+    expect(f.read()).toMatchObject({ summary: "", turns: [], approxTokens: 0, resetAt: 10_000 })
+    // Retry identities stay: the cleared conversation is still a duplicate.
+    expect(f.read().seenTurnIDs).toEqual(["old-1", "old-2"])
+    // The late-reply window of the cleared call is gone, and an older one cannot record either.
+    expect(f.values.get(VoiceWindow.key)).toBeNull()
+    expect(yield* voice.recordLate({ sessionID: "ses_m", since: 8_000 }, 10_000)).toBe(0)
+    // A straggler of the old call (spoken before the reset) stays out; the new call's speech goes in.
+    const late = yield* voice.append({ version: 2, scope: "global", turns: [{ ...turn("straggler"), at: 9_900 }] })
+    expect(late.appended).toBe(0)
+    yield* TestClock.adjust(5_000)
+    const fresh = yield* voice.append({ version: 2, scope: "global", turns: [{ ...turn("new-1", "Oi."), at: 15_000 }] })
+    expect(fresh.appended).toBe(1)
+    expect(f.read().turns.map((item) => item.id)).toEqual(["new-1"])
+  }),
+)
+
+it.effect("a summary computed from the old turns is dropped when a reset happened meanwhile", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = fixture(record(turns(121)))
+    const generating = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const voice = makeVoice(
+      {
+        ...f.ctx,
+        generate: {
+          text: () =>
+            Deferred.succeed(generating, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as({ text: "Resumo da conversa apagada." }),
+            ),
+        },
+      },
+      scope,
+    )
+    const compaction = yield* voice.compact("global").pipe(Effect.forkChild({ startImmediately: true }))
+    yield* Deferred.await(generating)
+    yield* voice.reset("global")
+    yield* Deferred.succeed(release, undefined)
+    yield* Fiber.join(compaction)
+    expect(f.read()).toMatchObject({ summary: "", turns: [] })
   }),
 )
 

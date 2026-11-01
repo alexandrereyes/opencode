@@ -102,6 +102,20 @@ authenticated normal plugin transport, for example
   the new fields. The app keeps up to 20 unsent reports and sends them on the next event-stream connection. Read
   them with `grep 'Voice diagnostics' ~/.local/share/opencode/log/opencode.log`.
 
+### Reset after moderation (rev. 2026-11-01)
+
+- **`reset({version:2, scope:"global"})`** clears what GPT Live is given back after the service moderated a call
+  (`content_filter`, which also ends that session): the summary, every turn and the open late-reply window
+  (`voice/window`). It returns `resetAt` (server time) and keeps `seenTurnIDs`. Nothing else is touched: the Mestra,
+  its messages, other sessions, drafts, questions and settings stay; work already admitted to the Mestra goes on.
+- What keeps the cleared conversation from coming back is `resetAt` in the record, the smallest mark the KV record
+  allows: an `append` drops turns spoken before it (`at < resetAt`, a late append of the old call), `recordLate` skips
+  a window opened before it (a late reply of the old call), and compaction drops a summary computed from turns read
+  before it. Retried IDs of the old call stay duplicates. Turn times come from each client's clock: an iPhone whose
+  clock runs behind the Mac by more than the seconds a new call takes to connect could see its first new turn dropped.
+- Clients: the iPhone and the Mac call it (in order, after what they already sent) and start a new, empty call; the
+  watch's server-side call calls it and ends as `context_reset` (`docs/watch.md`).
+
 ### Late Mestra replies (rev. 2026-10-31)
 
 A request a call delegates can be answered after the call ended (or dropped). Without a record of that answer, the

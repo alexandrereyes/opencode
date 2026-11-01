@@ -87,6 +87,7 @@ export const registerWatch = Effect.fn("Watch.register")(function* (ctx: Context
         context: () => ctx.rpc(Voice.Definition).context({ version: Voice.version, scope: "global" }),
         append: (turns) => ctx.rpc(Voice.Definition).append({ version: Voice.version, scope: "global", turns }),
         end: () => ctx.rpc(Voice.Definition).end({ version: Voice.version, scope: "global" }),
+        reset: () => ctx.rpc(Voice.Definition).reset({ version: Voice.version, scope: "global" }),
       },
     },
   })

@@ -23,6 +23,8 @@ export const Record = Schema.Struct({
   updatedAt: Schema.Number,
   // Compaction removes old verbatim turns, not their retry identities.
   seenTurnIDs: Schema.optionalKey(Schema.Array(ID)),
+  /** When `reset` cleared the record: turns spoken before it, late replies and summaries of older calls stay out. */
+  resetAt: Schema.optionalKey(Schema.Number),
 })
 export type Record = typeof Record.Type
 export const Target = Schema.Struct({ version: Schema.Literal(version), scope: Scope })
@@ -124,6 +126,11 @@ export const Definition = Rpc.define({
     end: {
       input: Schema.toStandardSchemaV1(Target),
       output: Schema.toStandardSchemaV1(Schema.Struct({ ...Target.fields, compactionScheduled: Schema.Boolean })),
+      errors,
+    },
+    reset: {
+      input: Schema.toStandardSchemaV1(Target),
+      output: Schema.toStandardSchemaV1(Schema.Struct({ ...Target.fields, resetAt: Schema.Number })),
       errors,
     },
     diagnostics: {

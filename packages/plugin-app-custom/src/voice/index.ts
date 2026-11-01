@@ -76,6 +76,11 @@ export const registerVoice = Effect.fn("Voice.register")(function* (ctx: Context
           Effect.map((compactionScheduled) => ({ ...input, compactionScheduled })),
           Effect.mapError((cause) => failure(context.error, cause)),
         ),
+      reset: (input, context) =>
+        voice.reset(input.scope).pipe(
+          Effect.map((resetAt) => ({ ...input, resetAt })),
+          Effect.mapError((cause) => failure(context.error, cause)),
+        ),
       diagnostics: logDiagnostics,
     })
     .pipe(Effect.orDie)
@@ -162,6 +167,7 @@ export function makeVoice(ctx: VoiceContext, scope: Scope.Scope) {
         // Appends may arrive while generation runs. Replace only the exact old
         // prefix; retain every concurrently appended turn and all dedup IDs.
         if (
+          current.resetAt !== snapshot.resetAt ||
           current.summary !== snapshot.summary ||
           current.turns.length < older.length ||
           older.some((turn, index) => current.turns[index].id !== turn.id)
@@ -205,6 +211,8 @@ export function makeVoice(ctx: VoiceContext, scope: Scope.Scope) {
       const current = decode(value ?? empty)
       const seen = new Set(current.seenTurnIDs ?? current.turns.map((turn) => turn.id))
       const added = input.turns.filter((turn) => {
+        // Spoken before a reset: a late append of the cleared conversation.
+        if (current.resetAt !== undefined && turn.at < current.resetAt) return false
         if (seen.has(turn.id)) return false
         seen.add(turn.id)
         return true
@@ -239,6 +247,8 @@ export function makeVoice(ctx: VoiceContext, scope: Scope.Scope) {
     const page = yield* ctx.message.list({ sessionID: Session.ID.make(window.sessionID), order: "desc", limit: 50 })
     const messages = page.data.toReversed()
     const record = yield* read("global")
+    // The call this window belongs to was cleared; its replies must not bring the old conversation back.
+    if (record.resetAt !== undefined && window.since < record.resetAt) return 0
     const at = yield* Clock.currentTimeMillis
     const turns = messages.flatMap((message, index) => {
       if (message.type !== "user") return []
@@ -282,6 +292,28 @@ export function makeVoice(ctx: VoiceContext, scope: Scope.Scope) {
     schedule,
     append,
     recordLate,
+    /**
+     * Clears what GPT Live is given back (summary, turns and the open late-reply window) after the service moderated
+     * a call. Only voice memory: the Mestra, its messages and every other session stay. Retry IDs stay too, so a
+     * retried append of the cleared conversation is still a duplicate; `resetAt` keeps out whatever was spoken
+     * before it, a late reply of an earlier call and a summary computed from the old turns.
+     */
+    reset: Effect.fn("Voice.reset")(function* (target: Voice.Scope) {
+      const now = yield* Clock.currentTimeMillis
+      yield* VoiceWindow.take(ctx.storage)
+      yield* ctx.storage.update(key(target), (value) => {
+        const current = decode(value ?? empty)
+        const record: Voice.Record = {
+          ...empty,
+          updatedAt: Math.max(current.updatedAt, now),
+          seenTurnIDs: current.seenTurnIDs ?? current.turns.map((turn) => turn.id),
+          resetAt: now,
+        }
+        return [encode(record), undefined]
+      })
+      yield* Effect.logInfo("Voice memory cleared after moderation", { scope: target })
+      return now
+    }),
     /** The call's memory `end`: takes its window and settles its late replies in the background. */
     settle: Effect.fn("Voice.settle")(function* () {
       const window = yield* VoiceWindow.take(ctx.storage)

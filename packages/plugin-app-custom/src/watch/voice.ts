@@ -62,6 +62,8 @@ export type Memory = {
   readonly context: () => Effect.Effect<typeof Voice.Context.Type, unknown>
   readonly append: (turns: readonly Voice.Turn[]) => Effect.Effect<unknown, unknown>
   readonly end: () => Effect.Effect<unknown, unknown>
+  /** Clears what GPT Live is given back (`custom.voice` → `reset`), after the service moderated a call. */
+  readonly reset: () => Effect.Effect<unknown, unknown>
 }
 
 export type VoiceContext = DelegationContext & {
@@ -97,6 +99,10 @@ type Call = {
   /** Correlation for diagnostics: the last command sent (type only) and the latest received event types. */
   lastSent?: { readonly type: string; readonly at: number }
   recent: string[]
+  /** How many memory items the call started with: with none, clearing memory cannot help a moderated call. */
+  contextItems: number
+  /** The service moderated the call: later events are ignored while it clears memory and ends. */
+  moderated?: boolean
   /** Set when this server asked the sideband to close; a close without it came from the other side. */
   closingAt?: number
   sidebandClose?: SidebandClose & { readonly by: "local" | "remote" }
@@ -203,6 +209,7 @@ export function makeVoice(input: {
       changed: Deferred.makeUnsafe<void>(),
       captions: { user: "", assistant: "" },
       recent: [],
+      contextItems: 0,
     }
     calls.set(call.id, call)
     active.set(deviceID, call.id)
@@ -232,6 +239,7 @@ export function makeVoice(input: {
     const confirmed = yield* confirm(call, lease, reserved)
     if (!confirmed) return yield* fail(502, "lease_failed", "O serviço de voz recusou a chamada.")
     const memory = yield* initialItems(ctx)
+    call.contextItems = memory.length
     const voices = [...new Set([offer.voiceID ?? Watch.defaultVoiceID, "rio", "cove"])]
     const answer = yield* createCall(call, offer.sdp, voices, memory, instructions)
     if (!/^a=ice-lite\s*$/m.test(answer) || !answer.split(/\r?\n/).some(isUdpCandidate))
@@ -342,7 +350,7 @@ export function makeVoice(input: {
     const event = Option.getOrUndefined(decodeEvent(text))
     call.recent.push(event?.type ?? Option.getOrUndefined(decodeType(text))?.type ?? "unreadable")
     if (call.recent.length > limits.recentEvents) call.recent.splice(0, call.recent.length - limits.recentEvents)
-    if (!event || call.ended) return
+    if (!event || call.ended || call.moderated) return
     switch (event.type) {
       case "session.started":
         return yield* emit(call, { type: "status", status: "live" })
@@ -366,6 +374,8 @@ export function makeVoice(input: {
             id: `${call.id}:${event.turn?.id ?? call.seq}`,
             role,
             text: spoken,
+            // When it was said, not when the lane gets to it: a reset in between keeps it out.
+            at: yield* Clock.currentTimeMillis,
             interrupted:
               event.turn?.interrupted === true || ["interrupted", "cancelled"].includes(event.turn?.status ?? ""),
           }),
@@ -383,16 +393,21 @@ export function makeVoice(input: {
         return yield* lane(
           call,
           "delegationTail",
-          delegator(call).pipe(Effect.flatMap((delegate) => (delegate ? delegate.ask(id, request) : Effect.void))),
+          // A request still waiting when the call was moderated belongs to the cleared conversation.
+          delegator(call).pipe(
+            Effect.flatMap((delegate) => (delegate && !call.moderated ? delegate.ask(id, request) : Effect.void)),
+          ),
         )
       }
       case "error": {
         // Most errors leave the session open; it ends when the service closes the sideband.
+        const error = upstreamError(event)
         yield* Effect.logWarning("Watch call upstream error", {
           call: call.id,
-          ...upstreamError(event),
+          ...error,
           ...(yield* correlation(call)),
         })
+        if (moderated(error)) return yield* moderate(call)
         return yield* emit(call, { type: "error", code: "voice_error", message: "O serviço de voz informou um erro." })
       }
       case "session.closed":
@@ -401,6 +416,27 @@ export function makeVoice(input: {
         return yield* end(call, "sideband_closed")
     }
   })
+
+  /**
+   * The service moderated the call (`content_filter`). A call that started with memory clears it, as the iPhone and the
+   * Mac do, and ends as `context_reset`: the watch says so and its retry starts an empty call. A call that started
+   * empty has nothing to clear and ends as `moderation`. Off the reader: an admission in flight finishes first, so its
+   * late-reply window is opened before the reset takes it.
+   */
+  const moderate = (call: Call) =>
+    Effect.gen(function* () {
+      call.moderated = true
+      yield* Effect.gen(function* () {
+        yield* settleLane(call.delegationTail, limits.admissionMs)
+        const ctx = input.ctx()
+        const clear = call.contextItems > 0 && ctx !== undefined
+        if (clear)
+          yield* ctx.memory
+            .reset()
+            .pipe(Effect.catchCause((cause) => Effect.logWarning("Watch call could not clear voice memory", { cause })))
+        yield* end(call, clear ? "context_reset" : "moderation")
+      }).pipe(Effect.forkIn(input.scope, { startImmediately: true }))
+    })
 
   /** Runs `work` after the lane's previous job, in the gateway scope: ending the call never cuts it midway. */
   const lane = (call: Call, name: "memoryTail" | "delegationTail", work: Effect.Effect<void>) =>
@@ -463,14 +499,19 @@ export function makeVoice(input: {
       return created
     })
 
-  const remember = (call: Call, turn: Omit<Voice.Turn, "at">) =>
+  const remember = (call: Call, turn: Voice.Turn) =>
     Effect.gen(function* () {
       const ctx = input.ctx()
       if (!ctx) return
-      const at = yield* Clock.currentTimeMillis
       yield* ctx.memory
         .append([
-          { id: turn.id, role: turn.role, text: turn.text, at, ...(turn.interrupted ? { interrupted: true } : {}) },
+          {
+            id: turn.id,
+            role: turn.role,
+            text: turn.text,
+            at: turn.at,
+            ...(turn.interrupted ? { interrupted: true } : {}),
+          },
         ])
         .pipe(Effect.catchCause(() => Effect.logWarning("Watch voice memory append failed")))
     })
@@ -614,6 +655,11 @@ const ErrorFields = Schema.Struct({
   event_id: Schema.optionalKey(Schema.Unknown),
 })
 const decodeErrorFields = Schema.decodeUnknownOption(ErrorFields)
+
+/** The service's moderation error, by its structured `type` or `code`; never by its message. */
+export function moderated(error: ReturnType<typeof upstreamError>) {
+  return error.type === "content_filter" || error.code === "content_filter"
+}
 
 /**
  * An upstream `error` event's fields for the log, from `error.*` or else the top level (a string `error` is its

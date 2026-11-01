@@ -102,6 +102,7 @@ export function world() {
   const memory = {
     appended: [] as Voice.Turn[],
     ended: 0,
+    resets: 0,
     context: {
       version: 2 as const,
       scope: "global" as const,
@@ -194,6 +195,7 @@ export function world() {
       context: () => Effect.succeed(memory.context),
       append: (turns) => Effect.sync(() => memory.appended.push(...turns)),
       end: () => Effect.sync(() => (memory.ended += 1)),
+      reset: () => Effect.sync(() => (memory.resets += 1)),
     },
   }
   return {
