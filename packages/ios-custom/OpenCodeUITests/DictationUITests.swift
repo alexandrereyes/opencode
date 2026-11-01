@@ -118,6 +118,73 @@ import XCTest
     XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Confira as sessões em andamento'")).firstMatch.waitForExistence(timeout: 5))
     capture("comment-dictation-committed")
   }
+  /// Concluir and the comment's ✓ wait for the dictation (Alexandre, 01/11): while recording, paused with its audio,
+  /// transcribing and "Ajustando texto…" they are disabled, and neither a press nor Shift+Return closes the sheet or
+  /// loses the text. Once the transcription lands, or the recording is discarded, both work again without
+  /// concluding by themselves.
+  func testCommentConcluirWaitsForTheDictation() throws {
+    open(extra: ["-OpenCodeDictationComment", "-OpenCodeDictationTranscribe", "2500", "-OpenCodeDictationReview", "15000"])
+    try app.requireSandbox()
+    let editor = app.textViews["comment-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 10))
+    editor.tap()
+    editor.typeText("Já escrito.")
+    let concluir = app.navigationBars["Comentário"].buttons["Concluir"]
+    let done = app.buttons["comment-done"]
+    XCTAssertTrue(done.waitForExistence(timeout: 5))
+    XCTAssertTrue(concluir.isEnabled)
+    XCTAssertTrue(done.isEnabled)
+    func blocked(_ state: String) {
+      XCTAssertFalse(concluir.isEnabled, "Concluir \(state)")
+      concluir.tap()
+      if done.exists {
+        XCTAssertFalse(done.isEnabled, "✓ \(state)")
+        done.tap()
+      }
+      app.typeKey("\r", modifierFlags: .shift)
+      XCTAssertFalse(editor.waitForNonExistence(timeout: 1), "the sheet closed \(state)")
+      XCTAssertTrue((editor.value as? String ?? "").hasPrefix("Já escrito."), "\(state): \(String(describing: editor.value))")
+      XCTAssertTrue(app.descendants(matching: .any)["dictation-pending"].exists || app.buttons["dictation-stop"].exists,
+        "the dictation is gone \(state)")
+      capture("comment-conclude-blocked-" + state)
+    }
+    let compact = app.buttons.matching(identifier: "composer-microphone").allElementsBoundByIndex.last(where: \.isHittable)
+    XCTAssertNotNil(compact, app.debugDescription)
+    compact?.tap()
+    XCTAssertTrue(app.buttons["dictation-stop"].waitForExistence(timeout: 5))
+    Thread.sleep(forTimeInterval: 1.2)
+    blocked("gravando")
+    app.buttons["dictation-pause-resume"].tap()
+    XCTAssertTrue(app.buttons["dictation-preview"].waitForExistence(timeout: 5))
+    blocked("pausado")
+    app.buttons["dictation-stop"].tap()
+    XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Transcrevendo'")).firstMatch
+      .waitForExistence(timeout: 5), app.debugDescription)
+    blocked("transcrevendo")
+    XCTAssertTrue(app.staticTexts["dictation-reviewing"].waitForExistence(timeout: 10), app.debugDescription)
+    blocked("ajustando")
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "value CONTAINS 'Confira as sessões em andamento'"), evaluatedWith: editor)], timeout: 30), .completed)
+    XCTAssertTrue((editor.value as? String ?? "").hasPrefix("Já escrito."))
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: concluir)], timeout: 5), .completed)
+    XCTAssertTrue(done.isEnabled)
+    XCTAssertFalse(editor.waitForNonExistence(timeout: 1), "the sheet concluded by itself")
+    capture("comment-conclude-after-text")
+    // Discarded: both come back and the text stays as it was.
+    let text = editor.value as? String
+    let again = app.buttons.matching(identifier: "composer-microphone").allElementsBoundByIndex.last(where: \.isHittable)
+    again?.tap()
+    XCTAssertTrue(app.buttons["dictation-stop"].waitForExistence(timeout: 5))
+    blocked("gravando-de-novo")
+    app.buttons["dictation-discard"].tap()
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: concluir)], timeout: 5), .completed)
+    XCTAssertTrue(done.waitForExistence(timeout: 5))
+    XCTAssertTrue(done.isEnabled)
+    XCTAssertEqual(editor.value as? String, text)
+    XCTAssertFalse(editor.waitForNonExistence(timeout: 1), "the sheet concluded by itself after discarding")
+    concluir.tap()
+    XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
+    XCTAssertTrue(app.buttons["draft-quotes"].waitForExistence(timeout: 5))
+  }
   /// Inside the comment sheet a hold on the microphone owns the upward lock drag: the sheet neither moves
   /// nor closes. Elsewhere in the sheet a drag still moves and closes it.
   func testCommentSheetMicrophoneDragUpLocksWithoutMovingTheSheet() {

@@ -816,10 +816,30 @@ import SwiftUI
     option(true, false); option(false, false)
     try await wait("gravou na folha \(name) (revisão)") { draft.recording.capturing ? true : nil }
     try await Task.sleep(for: .seconds(1.2))
+    // The comment concludes only once the dictation settles: Concluir and Return read the sheet draft's `settled`
+    // (the background copy has no accessibility tree to press the SwiftUI button), and Return keeps the sheet.
+    func conclude(blocked: Bool, _ step: String) async throws {
+      guard name == "comentario" else { return }
+      guard draft.settled != blocked else {
+        throw Failure(description: "Concluir \(blocked ? "habilitado" : "desabilitado") \(step)")
+      }
+      guard blocked else { return }
+      NSApp.postEvent(key("\r", code: 36, window: sheet), atStart: false)
+      try await Task.sleep(for: .milliseconds(500))
+      guard window.attachedSheet === sheet, draft.recording.visible, field.string.hasPrefix("Texto da folha") else {
+        throw Failure(description: "Concluir \(step) fechou a folha ou perdeu o ditado")
+      }
+    }
+    try await conclude(blocked: true, "gravando")
     option(true, false); option(false, false)
+    try await wait("ajustando na folha \(name)") { draft.recording.revision.reviewing != nil ? true : nil }
+    try await conclude(blocked: true, "ajustando o texto")
     try await wait("revisado na folha \(name)", timeout: 15) {
       field.string.contains(DictationFixtures.text) ? true : nil
     }
+    try await Task.sleep(for: .milliseconds(300))
+    try await conclude(blocked: false, "com o texto inserido")
+    guard window.attachedSheet === sheet else { throw Failure(description: "a folha \(name) fechou sozinha") }
     let context = DictationReviewFixture.contexts.last.flatMap { $0 } ?? ""
     guard context.hasSuffix("Draft:\nTexto da folha"), expected(context) else {
       throw Failure(description: "contexto da folha \(name): \(context.prefix(300).debugDescription)")

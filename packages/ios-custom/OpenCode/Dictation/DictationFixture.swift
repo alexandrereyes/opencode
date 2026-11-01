@@ -142,9 +142,17 @@ final class DictationFixtureSource: TranscriptionModelSource, @unchecked Sendabl
   func start(cellular: Bool) {}
   func stop() async {}
 }
+/// Transcribes at once, or after `-OpenCodeDictationTranscribe <milliseconds>` so a check can see "Transcrevendo".
 actor DictationFixtureEngine: TranscriptionEngine {
   func load(from directory: URL) async throws {}
-  func transcribe(_ samples: [Float]) async throws -> String { DictationFixtures.raw }
+  func transcribe(_ samples: [Float]) async throws -> String {
+    let args = ProcessInfo.processInfo.arguments
+    if let index = args.firstIndex(of: "-OpenCodeDictationTranscribe"), args.indices.contains(index + 1),
+      let delay = Int(args[index + 1]) {
+      try await Task.sleep(for: .milliseconds(delay))
+    }
+    return DictationFixtures.raw
+  }
   func unload() async {}
 }
 

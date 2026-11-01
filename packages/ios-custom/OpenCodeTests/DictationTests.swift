@@ -88,6 +88,60 @@ import os
     XCTAssertEqual(draft.document.text, "$sample Fora da tela Final No fim")
     XCTAssertEqual(draft.document.validTokens.map(\.token), [token])
   }
+  /// A quote comment concludes only once its dictation settles: recording, paused with its audio, waiting for the
+  /// model and "Ajustando texto…" keep `settled` false; the inserted text or Descartar make it true again, and the
+  /// text already typed stays.
+  func testDraftSettlesOnlyAfterTheDictationLandsOrIsDiscarded() async throws {
+    let source = DictationTestSource()
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer {
+      try? FileManager.default.removeItem(at: root)
+      try? FileManager.default.removeItem(at: source.files.root)
+    }
+    let transcription = TranscriptionController(source: source, engine: DictationTestEngine(), monitorsNetwork: false,
+      decode: { _ in [0.25] })
+    let capture = DictationTestCapture()
+    capture.waits = false; capture.granted = true; capture.writesFixture = true
+    let draft = ConversationDraft(server: "dictation-test", id: UUID().uuidString)
+    draft.recordingFactory = { _ in
+      VoiceRecordingComposer(file: root.appending(path: "dictation.caf"), capture: capture, transcription: transcription)
+    }
+    draft.text = NSAttributedString(string: "Já escrito.")
+    let recording = draft.recording
+    defer { recording.discard() }
+    var answer: CheckedContinuation<Void, Never>?
+    recording.reviser = { _ in
+      await withCheckedContinuation { answer = $0 }
+      return "Texto revisado."
+    }
+    XCTAssertTrue(draft.settled)
+    recording.handle(.began); recording.handle(.ended)
+    try await wait { recording.state == .recording }
+    XCTAssertFalse(draft.settled, "gravando")
+    recording.pause()
+    try await wait { recording.state == .paused }
+    XCTAssertFalse(draft.settled, "pausado com o áudio")
+    recording.finish()
+    try await wait { recording.state == .pending }
+    XCTAssertFalse(draft.settled, "aguardando o modelo")
+    source.install()
+    try await wait { answer != nil }
+    XCTAssertNotNil(recording.revision.reviewing)
+    XCTAssertFalse(draft.settled, "ajustando o texto")
+    answer?.resume(); answer = nil
+    try await wait { recording.state == .idle }
+    XCTAssertTrue(draft.settled, "texto inserido")
+    XCTAssertTrue(draft.text.string.hasPrefix("Já escrito."), draft.text.string)
+    XCTAssertTrue(draft.text.string.contains("Texto revisado."), draft.text.string)
+    let inserted = draft.text.string
+    recording.handle(.began); recording.handle(.ended)
+    try await wait { recording.state == .recording }
+    XCTAssertFalse(draft.settled, "gravando de novo")
+    recording.discard()
+    XCTAssertTrue(draft.settled, "descartado")
+    XCTAssertEqual(draft.text.string, inserted)
+  }
   /// The AI review: on at every recording, its reply as a second undo step; off, failed, Usar original or the
   /// sparkles during "Ajustando texto…" give the raw text; Descartar (Esc on the Mac) gives nothing.
   func testReviewIsPerRecordingAndEveryWayOutOfItIsRawOrNothing() async throws {

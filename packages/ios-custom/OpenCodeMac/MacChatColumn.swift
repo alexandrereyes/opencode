@@ -600,7 +600,7 @@ struct MacQuoteCommentSheet: View {
       Text(quote.text).appFont(.secondary).lineLimit(6).foregroundStyle(theme.color(.textSecondary))
         .padding(.leading, 12)
         .overlay(alignment: .leading) { Rectangle().fill(theme.color(.primary)).frame(width: 2) }
-      MacComposer(store: store, draft: editor, embedded: MacComposerEmbedding(canSubmit: lent && !editor.importing,
+      MacComposer(store: store, draft: editor, embedded: MacComposerEmbedding(canSubmit: lent && editor.settled,
         submit: commit, cancel: { dismiss() }), features: .comment)
       HStack(spacing: 16) {
         if let mark {
@@ -618,7 +618,7 @@ struct MacQuoteCommentSheet: View {
         }
         Spacer()
         Button(mark == nil ? "Cancelar" : "Fechar") { dismiss() }.keyboardShortcut(.cancelAction)
-        Button("Concluir", action: commit).disabled(!lent || editor.importing)
+        Button("Concluir", action: commit).disabled(!lent || !editor.settled)
         .keyboardShortcut(.defaultAction)
       }
       .buttonStyle(.plain).appFont(.secondary)
@@ -633,7 +633,7 @@ struct MacQuoteCommentSheet: View {
     .onDisappear { if !committed { Task { try? await editor.discard() } } }
   }
   private func commit() {
-    guard lent, !editor.importing, !committed else { return }
+    guard lent, editor.settled, !committed else { return }
     committed = true
     Task {
       await draft.commit(quote, from: editor)

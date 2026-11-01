@@ -204,6 +204,10 @@ extension ComposerTokenKind {
   var replacing: String? { didSet { changed() } }
   var sending = false
   var importing = false
+  /// Nothing is still on its way into the draft: no import and no dictation (recording, paused with its audio,
+  /// transcribing, waiting or "Ajustando texto…"). A quote comment concludes only then, by any of its buttons or
+  /// keys: closing its sheet earlier would lose the dictation.
+  var settled: Bool { !importing && !recording.visible }
   var error: String?
   var submission: PromptSubmission?
   var submissionDocument: DraftSnapshot?

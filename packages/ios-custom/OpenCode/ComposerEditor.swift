@@ -41,7 +41,7 @@ struct ComposerEditor: View {
       || !draft.attachments.isEmpty || !draft.quotes.isEmpty
   }
   private var canSubmit: Bool {
-    guard comment == nil else { return hasContent && !draft.importing && !draft.recording.visible }
+    guard comment == nil else { return hasContent && draft.settled }
     return hasContent && !draft.sending && !draft.importing && !draft.recording.visible && store.ready
       && store.selectedModel(draft) != nil
   }

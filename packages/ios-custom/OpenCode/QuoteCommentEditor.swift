@@ -40,7 +40,7 @@ struct QuoteCommentEditor: View {
         .toolbar {
           ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
           ToolbarItem(placement: .confirmationAction) {
-            Button("Concluir", action: commit).fontWeight(.semibold).disabled(editor.importing)
+            Button("Concluir", action: commit).fontWeight(.semibold).disabled(!editor.settled)
           }
         }
     }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
@@ -63,9 +63,8 @@ struct QuoteCommentEditor: View {
       }
   }
   private func commit() {
-    guard !committed, !editor.importing else { return }
+    guard !committed, editor.settled else { return }
     committed = true
-    editor.recording.suspend()
     Task {
       await draft.commit(quote, from: editor)
       try? await editor.discard()

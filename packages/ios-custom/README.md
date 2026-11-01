@@ -608,6 +608,19 @@ would add a second presentation for no extra room). The round action shows a che
 (`comment-done`), when there is content; Shift+Return does the same. **Concluir** in the bar stays the only commit and
 **Cancelar**/swipe-down still discard everything.
 
+**Alexandre, 01/11: Concluir espera o ditado.** While a dictation is still on its way into the comment (recording,
+paused with its audio, waiting for the model, transcribing or **Ajustando texto…**), **Concluir** in the bar is
+disabled and the ✓, Shift+Return and Return in the panel do nothing: closing the sheet then lost the recording. All of
+them read the draft's `settled` (`!importing && !recording.visible`, the recorder's own state), and `commit()` checks it
+too. Once the text lands, or the dictation is discarded, they work again and nothing concludes by itself; the typed text
+and attachments stay. The Mac comment sheet (`MacQuoteCommentSheet`, its **Concluir** and Return) uses the same guard.
+Cancelar, Remover and swipe-down still close the sheet and discard a dictation under way, as before.
+`DictationPipelineTests/testDraftSettlesOnlyAfterTheDictationLandsOrIsDiscarded`,
+`DictationUITests/testCommentConcluirWaitsForTheDictation` (`-OpenCodeDictationTranscribe 2500` slows the fake engine so
+"Transcrevendo" can be seen) and the comment step of `test-mac-ajustes.sh dictation` (the sheet draft's `settled`
+while recording and adjusting, Return keeping the sheet; the background copy has no accessibility tree to press the
+SwiftUI button) cover it.
+
 The sheet edits an ephemeral `ConversationDraft` (`commentEditor(_:)`) that never saves a snapshot; new attachment files
 wait in its own `tmp/QuoteComments/<uuid>` directory. Reopening a quote lends it clones of that quote's attachments
 (`lend(_:to:)`). Concluir (`commit(_:from:)`) moves new files into the message draft (`DraftPersistence.adopt`), stores
