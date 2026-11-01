@@ -41,8 +41,10 @@ import XCTest
       let size = view.fittingSize(width: 320)
       view.configureQuotes(.init(highlights: [.init(mark: mark, ranges: ChatQuoteAnchoring.sourceRanges(quote, source: source, blocks: [block]))]), block: block, theme: theme)
       XCTAssertEqual(view.measuredSizes[320], size)
+      XCTAssertTrue(view.becomeFirstResponder())
       view.selectedRange = NSRange(location: 0, length: 3)
-      XCTAssertNil(view.quote(at: CGPoint(x: 10, y: 10)), "A marked range must not intercept an existing selection")
+      XCTAssertNil(view.quote(at: CGPoint(x: 10, y: 10)), "A tap inside the selection keeps the native menu")
+      view.clearSelection()
       XCTAssertTrue(view.isSelectable)
       XCTAssertFalse(view.isEditable)
       XCTAssertEqual(view.sourceBlock?.copyText, block.text)
@@ -50,6 +52,61 @@ import XCTest
       view.copy(nil)
       XCTAssertEqual(UIPasteboard.general.string, block.copyText)
     }
+  }
+  /// A temporary selection never hides a saved quote: outside it, the mark and its number open the comment at once,
+  /// and a text that loses the focus keeps no hidden range that would block them.
+  func testSelectionElsewhereLetsTheMarkAndItsNumberOpenTheComment() throws {
+    let source = "Primeiro trecho marcado aqui. Depois vem um texto comum para selecionar longe da marca."
+    let block = try XCTUnwrap(MarkdownBlocks.parse(source).first)
+    let marked = (block.text as NSString).range(of: "Primeiro trecho marcado")
+    let quote = try XCTUnwrap(ChatQuote.selection(source: source, block: block, range: marked, messageID: "m", partID: "m:text:0"))
+    let mark = ChatQuoteMark(quote: quote, number: 1)
+    var opened: [String] = []
+    let text = SelectableResponseText(block: block, messageID: "m", partID: "m:text:0", theme: AppTheme.load("openchamber-dark"),
+      source: source, quotesOverride: .init(highlights: [.init(mark: mark, ranges: [marked])], open: { opened.append($0.id) }))
+    let window = UIWindow(windowScene: try XCTUnwrap(
+      UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first))
+    let host = UIHostingController(rootView: text)
+    window.rootViewController = host
+    window.makeKeyAndVisible()
+    window.layoutIfNeeded()
+    defer { window.isHidden = true; window.rootViewController = nil }
+    func response(in parent: UIView) -> ResponseTextView? {
+      (parent as? ResponseTextView) ?? parent.subviews.lazy.compactMap { response(in: $0) }.first
+    }
+    let view = try XCTUnwrap(response(in: host.view))
+    view.layoutIfNeeded()
+    func center(_ range: NSRange) throws -> CGPoint {
+      let rect = try XCTUnwrap(view.textRects(view.displayRange(range)).first)
+      return CGPoint(x: rect.midX, y: rect.midY)
+    }
+    let markPoint = try center(NSRange(location: marked.location + 2, length: 4))
+    let selected = view.displayRange((block.text as NSString).range(of: "texto comum"))
+    let selectedPoint = try center((block.text as NSString).range(of: "comum"))
+
+    XCTAssertTrue(view.becomeFirstResponder())
+    view.selectedRange = selected
+    XCTAssertTrue(view.hasSelection)
+    XCTAssertEqual(view.quote(at: markPoint)?.id, mark.id, "Uma marca fora da seleção abre com um toque")
+    XCTAssertNil(view.quote(at: selectedPoint), "Dentro da seleção, o toque continua nativo")
+
+    // Losing the focus (a tap or drag elsewhere, another text, reuse) drops the hidden range.
+    XCTAssertTrue(view.resignFirstResponder())
+    XCTAssertEqual(view.selectedRange.length, 0)
+    XCTAssertFalse(view.hasSelection)
+    // A range UIKit kept without the focus is not a selection either.
+    view.selectedRange = selected
+    XCTAssertEqual(view.quote(at: markPoint)?.id, mark.id)
+
+    XCTAssertTrue(view.becomeFirstResponder())
+    view.selectedRange = selected
+    let number = try XCTUnwrap(view.quoteButtons.first)
+    XCTAssertTrue(view.hitTest(CGPoint(x: number.frame.midX, y: number.frame.midY), with: nil) === number)
+    number.sendActions(for: .touchUpInside)
+    XCTAssertEqual(opened, [mark.id], "O número abre o comentário mesmo com uma seleção")
+    XCTAssertEqual(view.selectedRange.length, 0)
+    XCTAssertFalse(view.isFirstResponder)
+    XCTAssertEqual(view.quoteHighlights.map(\.mark.id), [mark.id], "Limpar a seleção não apaga a marcação")
   }
   func testSeveralInlineMarkersPreserveUTF16SourceSelectionAndCopy() throws {
     let source = "Antes 😀 trecho um; depois trecho dois e o fim."

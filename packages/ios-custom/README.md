@@ -4223,6 +4223,17 @@ project filter replacing the chips and the highlight of the open subagent.
   dismissal); and a question's field that takes the keyboard is scrolled into view (`revealAnswerField`). The Mac,
   without an on-screen keyboard, is unchanged (`leaveAnswerField` does nothing there). `QuestionFormUITests` covers
   option, card tap, Return to options only, Return to a hidden field, dragging and the composer afterwards.
+  **Selection versus saved comments (Alexandre, 01/11):** `endEditing(true)` also resigned a response's read-only
+  text, at the very lift that made a selection: the menu vanished and UIKit kept the range hidden, every later tap
+  showed and hid it again, and the quote guards (`selectedRange.length == 0`) never let the mark or its number open
+  the comment. The tap and the drag now resign only the field being edited (`editing(in:)`, a text field or an
+  editable text). In `ResponseTextView`, resigning drops the range (`resignFirstResponder`) and only a visible
+  selection (`hasSelection`) counts: a tap inside it stays native, while a tap on a mark outside it, or on a quote's
+  number, ends the selection and opens the comment with one tap; the mark itself is never touched. Texts built outside
+  `makeTextView` (table cells) get the same tap through `SelectableResponseText.installQuoteTap(_:coordinator:)`.
+  Checks: `QuoteDecorationTests/testSelectionElsewhereLetsTheMarkAndItsNumberOpenTheComment` and
+  `ResponseSelectionTests/testSelectionElsewhereNeverBlocksTheSavedComment` (offline Markdown fixture; it fails on
+  the previous code, whose word selection lost its menu), with the four keyboard cases of `QuestionFormUITests`.
   **Question drafts (Alexandre, 31/10):** the card's answers are no longer view state. They live in a
   `QuestionDraftSync` per form (`OpenCodeKit/QuestionDrafts.swift`), kept by the server's `QuestionDrafts` for the
   app's lifetime, saved on this device (Application Support `OpenCode/QuestionDrafts/<server hash>/`, one file per form,

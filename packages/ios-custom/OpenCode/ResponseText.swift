@@ -242,7 +242,8 @@ final class ResponseTextView: UITextView {
   }
   override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
     guard !isHidden, alpha > 0.01, isUserInteractionEnabled else { return nil }
-    if selectedRange.length == 0, let button = quoteButtons.filter({ $0.frame.contains(point) }).min(by: {
+    // A quote's number opens its comment even over a selection; dragging a handle still cancels the button.
+    if let button = quoteButtons.filter({ $0.frame.contains(point) }).min(by: {
       pow($0.frame.midX - point.x, 2) + pow($0.frame.midY - point.y, 2)
         < pow($1.frame.midX - point.x, 2) + pow($1.frame.midY - point.y, 2)
     }) { return button }
@@ -286,6 +287,15 @@ final class ResponseTextView: UITextView {
   func clearSelection() {
     selectedRange = NSRange(location: 0, length: 0)
     resignFirstResponder()
+  }
+  /// The native selection the reader sees. A text that resigns keeps its range but no longer shows it.
+  var hasSelection: Bool { isFirstResponder && selectedRange.length > 0 }
+  /// Another text, a sheet or reuse taking the focus leaves no hidden range behind: it would come back with the next
+  /// tap instead of letting that tap open a quote.
+  @discardableResult override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned, selectedRange.length > 0 { selectedRange = NSRange(location: selectedRange.location, length: 0) }
+    return resigned
   }
 }
 
@@ -373,14 +383,19 @@ struct SelectableResponseText: UIViewRepresentable {
     view.isSelectable = true
     view.isScrollEnabled = false
     view.delegate = coordinator
-    let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.openQuote(_:)))
-    tap.delegate = coordinator
-    view.addGestureRecognizer(tap)
+    installQuoteTap(view, coordinator: coordinator)
     view.backgroundColor = .clear
     view.textContainerInset = .zero
     view.textContainer.lineFragmentPadding = 0
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return view
+  }
+  /// One tap on a quote's marked text opens its comment. Texts built outside `makeTextView` (table cells) install it
+  /// with the coordinator that configures them.
+  static func installQuoteTap(_ view: ResponseTextView, coordinator: Coordinator) {
+    let tap = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.openQuote(_:)))
+    tap.delegate = coordinator
+    view.addGestureRecognizer(tap)
   }
   func updateUIView(_ container: ResponseTextContainer, context: Context) {
     configure(container.text, coordinator: context.coordinator)
@@ -505,12 +520,13 @@ struct SelectableResponseText: UIViewRepresentable {
   }
   final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-      guard let view = gestureRecognizer.view as? ResponseTextView, view.selectedRange.length == 0,
-        !(touch.view is UIControl) else { return false }
+      guard let view = gestureRecognizer.view as? ResponseTextView, !(touch.view is UIControl) else { return false }
       return view.quote(at: touch.location(in: view)) != nil
     }
     @objc func openQuote(_ gesture: UITapGestureRecognizer) {
       guard let view = gesture.view as? ResponseTextView, let mark = view.quote(at: gesture.location(in: view)) else { return }
+      // A selection elsewhere is temporary: the tap that opens the comment also ends it.
+      if view.selectedRange.length > 0 { view.clearSelection() }
       view.selectionChanged?()
       view.openQuote?(mark)
     }

@@ -56,6 +56,78 @@ import XCTest
     resetDraft()
   }
 
+  /// A saved quote stays one tap away while the reader selects other text (Alexandre, 01/11): the selection keeps its
+  /// menu, a tap inside it stays native, and a tap on the mark or its number ends the selection and opens the comment.
+  func testSelectionElsewhereNeverBlocksTheSavedComment() throws {
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
+      "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "top", "-OpenCodeMarkdownFixture"]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
+    launch()
+    if resetDraft() {
+      app.terminate()
+      launch()
+    }
+    defer { app.terminate() }
+    let response = app.textViews.matching(NSPredicate(format: "identifier BEGINSWITH 'response-' AND value BEGINSWITH %@", "✨ Formatação no OpenChamber")).firstMatch
+    XCTAssertTrue(response.waitForExistence(timeout: 10))
+    let origin = response.coordinate(withNormalizedOffset: .zero)
+    // The introduction's first line, below the title.
+    origin.withOffset(CGVector(dx: 40, dy: 52))
+      .press(forDuration: 1, thenDragTo: origin.withOffset(CGVector(dx: 300, dy: 52)), withVelocity: .slow, thenHoldForDuration: 0.3)
+    menu("Comentar").tap()
+    let editor = app.textViews["comment-composer"]
+    XCTAssertTrue(editor.waitForExistence(timeout: 5))
+    editor.typeText("Comentário salvo.")
+    app.buttons["Concluir"].tap()
+    let marker = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-marker-'")).firstMatch
+    XCTAssertTrue(marker.waitForExistence(timeout: 10))
+    let detail = app.staticTexts["quote-detail-comment"]
+    let marked = response.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 120, dy: 52))
+    let word = response.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 120, dy: 360))
+    func opensWithOneTap(_ target: XCUICoordinate, _ name: String) {
+      target.tap()
+      XCTAssertTrue(detail.waitForExistence(timeout: 3), "\(name): um toque abre o comentário")
+      XCTAssertEqual(detail.label, "Comentário salvo.")
+      capture("quote-one-tap-" + name)
+      app.buttons["Fechar"].tap()
+      XCTAssertTrue(detail.waitForNonExistence(timeout: 5))
+      XCTAssertTrue(marker.exists, "\(name): a marcação continua")
+    }
+    func selectWord() {
+      word.press(forDuration: 1)
+      let shown = app.menuItems["Comentar"].waitForExistence(timeout: 5)
+        || app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Comentar'"))
+          .allElementsBoundByIndex.contains { $0.elementType != .image && $0.isHittable }
+      XCTAssertTrue(shown, "A seleção mantém o menu nativo")
+    }
+
+    opensWithOneTap(marked, "sem-selecao")
+    selectWord()
+    capture("quote-selection-elsewhere")
+    opensWithOneTap(marked, "marca-com-selecao")
+    selectWord()
+    opensWithOneTap(marker.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)), "numero-com-selecao")
+    // A tap inside the selection keeps the native behavior and opens nothing.
+    selectWord()
+    word.tap()
+    XCTAssertFalse(detail.waitForExistence(timeout: 2), "Tocar dentro da seleção não abre o comentário")
+    opensWithOneTap(marked, "depois-de-tocar-na-selecao")
+    // Neither a tap outside the texts nor a drag of the conversation leaves a hidden selection behind.
+    selectWord()
+    let transcript = app.collectionViews["conversation-transcript"]
+    transcript.coordinate(withNormalizedOffset: .zero)
+      .withOffset(CGVector(dx: 6, dy: response.frame.minY + 200 - transcript.frame.minY)).tap()
+    opensWithOneTap(marked, "depois-da-margem")
+    selectWord()
+    transcript.swipeUp(velocity: .slow)
+    transcript.swipeDown(velocity: .slow)
+    XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: marker)], timeout: 5), .completed)
+    opensWithOneTap(response.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 120, dy: 52)), "depois-de-rolar")
+    app.terminate()
+    launch()
+    resetDraft()
+  }
+
   private func launch() {
     app.launch()
     let transcript = app.collectionViews["conversation-transcript"]

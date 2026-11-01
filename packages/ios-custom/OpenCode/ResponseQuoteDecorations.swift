@@ -94,7 +94,8 @@ extension ResponseTextView {
         button.accessibilityValue = insertion.mark.pending ? "rascunho" : "enviada"
         button.accessibilityIdentifier = "quote-marker-" + insertion.mark.id
         button.addAction(UIAction { [weak self] _ in
-          guard let self, selectedRange.length == 0 else { return }
+          guard let self else { return }
+          if selectedRange.length > 0 { clearSelection() }
           selectionChanged?()
           openQuote?(insertion.mark)
         }, for: .touchUpInside)
@@ -146,8 +147,10 @@ extension ResponseTextView {
       }
     }
   }
+  /// The mark under `point`, unless the point is inside the visible selection: a tap there keeps the native menu.
   func quote(at point: CGPoint) -> ChatQuoteMark? {
-    guard selectedRange.length == 0 else { return nil }
+    if hasSelection, let selection = selectedTextRange,
+      selectionRects(for: selection).contains(where: { $0.rect.contains(point) }) { return nil }
     if let position = closestPosition(to: point), let text = attributedText {
       let offset = offset(from: beginningOfDocument, to: position)
       if offset < text.length, text.attribute(.link, at: offset, effectiveRange: nil) != nil { return nil }

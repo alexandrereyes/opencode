@@ -924,7 +924,7 @@ import SwiftUI
   func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
     // Dragging the conversation leaves a question's answer field, so its keyboard goes; the composer is outside the
     // transcript and keeps the interactive dismissal.
-    scrollView.endEditing(true)
+    Self.editing(in: scrollView)?.resignFirstResponder()
     placedByReader = true
     layout.keepsEnd = false
     animating = nil
@@ -936,7 +936,9 @@ import SwiftUI
 
   // MARK: Question answer fields
 
-  @objc private func leaveAnswerField() { collectionView.endEditing(true) }
+  /// Only the field being edited resigns: `endEditing` would also resign a response's read-only text, hiding its
+  /// selection without clearing it.
+  @objc private func leaveAnswerField() { Self.editing(in: collectionView)?.resignFirstResponder() }
 
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
     // A tap on an editable field focuses it as usual.
@@ -956,7 +958,7 @@ import SwiftUI
   }
 
   private static func editing(in view: UIView) -> UIView? {
-    if view.isFirstResponder, view is UITextField { return view }
+    if view.isFirstResponder, view is UITextField || (view as? UITextView)?.isEditable == true { return view }
     return view.subviews.lazy.compactMap { editing(in: $0) }.first
   }
 
