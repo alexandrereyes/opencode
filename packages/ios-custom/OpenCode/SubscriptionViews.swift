@@ -50,84 +50,6 @@ struct SubscriptionCompactRow: View {
   }
 }
 
-struct SubscriptionDetailSheet: View {
-  @Environment(\.appTheme) private var theme
-  @Environment(\.dismiss) private var dismiss
-  @Bindable var store: SubscriptionStore
-  let initialProvider: SubscriptionProvider
-  @State private var provider = SubscriptionProvider.codex
-  private var activeProvider: SubscriptionProvider { store.providers.contains(provider) ? provider : .codex }
-  private var accounts: [Subscriptions.Account] {
-    SubscriptionProjection.sorted(store.snapshot?.pool(activeProvider).accounts ?? [], now: store.now)
-  }
-  var body: some View {
-    NavigationStack {
-      VStack(spacing: 0) {
-        HStack(spacing: 12) {
-          Text("LLM proxy").font(.largeTitle.bold()).foregroundStyle(theme.color(.textStrong))
-          Spacer(minLength: 0)
-          Button { Task { await store.refresh() } } label: {
-            if store.loading { ProgressView().frame(width: 26, height: 26) }
-            else { Image(systemName: "arrow.clockwise").frame(width: 26, height: 26) }
-          }.adaptiveGlassButtonStyle().buttonBorderShape(.circle).disabled(store.loading)
-            .accessibilityLabel("Atualizar LLM proxy").accessibilityIdentifier("proxy-refresh")
-          Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 26, height: 26) }
-            .adaptiveGlassButtonStyle(prominent: true).buttonBorderShape(.circle).tint(theme.color(.primary))
-            .foregroundStyle(theme.color(.onPrimary)).accessibilityLabel("Fechar").accessibilityIdentifier("proxy-close")
-        }.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-          .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 8)
-      ScrollView {
-        VStack(alignment: .leading, spacing: 18) {
-          if store.providers.count > 1 {
-            Picker("Provedor", selection: $provider) {
-              ForEach(store.providers) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).accessibilityIdentifier("proxy-provider")
-          }
-          content
-        }.padding(16)
-      }.background(theme.color(.background)).accessibilityIdentifier("proxy-detail")
-        .refreshable { await store.refresh() }
-      }.background(theme.color(.background))
-      #if os(iOS)
-        .toolbar(.hidden, for: .navigationBar)
-      #endif
-        .proxyActions(store)
-    }.presentationDetents([.large]).presentationDragIndicator(.visible)
-      .task { provider = initialProvider; await store.refresh(ifDue: true) }
-  }
-
-  @ViewBuilder private var content: some View {
-    if store.snapshot?.pool(activeProvider).status == "ok", !accounts.isEmpty {
-      ProxyPoolHeader(store: store, provider: activeProvider, accounts: accounts)
-      ForEach(SubscriptionGroup.groups(accounts, provider: activeProvider, now: store.now)) { group in
-        if group.opensOthers {
-          Text("Outros planos · fora do saldo acima").font(.headline)
-            .foregroundStyle(theme.color(.textSecondary)).padding(.top, 4)
-        }
-        HStack {
-          Text(Subscriptions.planLabel(group.plan).uppercased()).font(.caption.weight(.semibold))
-          Spacer()
-          Text("\(group.projection.ready)/\(group.count) disponíveis").font(.caption)
-        }.foregroundStyle(theme.color(.textSecondary))
-        ForEach(group.rows) { row in
-          ProxyAccountCard(store: store, provider: activeProvider, account: row.account) {
-            store.toggleSelection(row.account, provider: activeProvider)
-            Haptics.play(.selection)
-            dismiss()
-          }
-        }
-      }
-      Label("A seleção altera só o resumo, não a conta usada pelo modelo.", systemImage: "info.circle")
-        .font(.footnote).foregroundStyle(theme.color(.textSecondary))
-      ProxyResetsCard(store: store, provider: activeProvider)
-      Text(store.projection(activeProvider).freshness(now: store.now)).font(.caption).foregroundStyle(theme.color(.textWeak))
-        .accessibilityIdentifier("proxy-updated")
-    } else {
-      ProxyPoolState(store: store, provider: activeProvider)
-    }
-  }
-}
-
 /// Loading, an unconfigured or unavailable proxy, and a provider without accounts.
 struct ProxyPoolState: View {
   let store: SubscriptionStore
@@ -150,8 +72,8 @@ struct ProxyPoolState: View {
   }
 }
 
-/// The pool card: combined weekly balance, availability, next renewal, plans and paid credits. `wide` is the
-/// Mac window's layout, with the logo beside the text and the renewal on the right.
+/// The Mac window's pool card (`wide`): combined weekly balance, availability, next renewal, plans and paid credits.
+/// The iPhone details no longer use it (`SubscriptionDetailSheet`); the Mac keeps its design until its redesign.
 struct ProxyPoolHeader: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -325,8 +247,8 @@ private struct ProxyActions: ViewModifier {
   }
 }
 
-/// An account's card: windows, renewals, "Mostrar no resumo" and its banked resets. `wide` is the Mac window's
-/// panel under the table, with the status and the resets on the right.
+/// The Mac window's account panel under the table (`wide`): windows, renewals, "Mostrar no resumo" and its banked
+/// resets. The iPhone details use `ProxyAccountDetail` instead.
 struct ProxyAccountCard: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize

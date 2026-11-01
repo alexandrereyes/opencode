@@ -2499,7 +2499,8 @@ public UIKit keyboard layout guide/did-hide notification rather than a fixed del
 native sheet. Codex and Claude use the approved A3 layout: provider balance, combined weekly quota, capacity and
 renewal; tier groups; account state, stacked independent 5-hour/weekly windows, paired renewal dates and
 **Mostrar no resumo**. Other tiers remain visible outside the headline balance. Real proxy display names are shown.
-Since 1 November the Sessões strip shows one mark per subscription instead of rings (section below).
+Since 1 November the Sessões strip shows one mark per subscription instead of rings, and the iPhone details follow
+"Agora primeiro" (both sections below); the Mac window keeps the A3 design.
 
 - **Data and compatibility:** the full hand-written `Subscriptions` contract mirrors `custom.subscriptions/list`,
   `setAutomation` and `consumeReset`, without Location or direct proxy-admin access. All three contracts and their
@@ -2585,7 +2586,7 @@ rings' row (38 pt): measured 33 pt on iPhone 17 Pro, 35 pt on iPhone SE, 32–33
   the rings did. The Mac adds a tooltip per mark (account · plan · state) and per plan.
 - **Data limits:** the proxy reports no per-model limit and no capacity equivalence between plans; Max 5x accounts
   report no weekly window today; Free accounts report no window at all; the proxy's wait does not say which window
-  caused it. The details of the LLM proxy keep their current design (A3) until new mockups are approved.
+  caused it. The iPhone details follow "Agora primeiro" since 1 November (next section); the Mac window keeps A3.
 
 Verification: `SubscriptionMarksTests` (Swift Testing, every state, releases, unmeasured groups, unknown plans);
 `OpenCodeUITests/SessionQuotaMarksTests` with `OPENCODE_PROXY_STUB=marks|many` (shared `SubscriptionMarksFixture`):
@@ -2593,6 +2594,46 @@ every account's mark per plan, VoiceOver text, geometry under the header and abo
 large text, details opening, in both themes and on iPhone SE; run with `script/test-subscriptions.py
 OpenCodeUITests/SessionQuotaMarksTests` and an explicit sandbox. Mac: `script/test-mac-ajustes.sh cotas` checks the
 fixture window and renders the production strip at 272, 302 and 452 pt in both themes (height and right edge).
+
+### iPhone details: "Agora primeiro" — 1 November
+
+Approved mockup: option 1 of `.agent-artifacts/cotas-assinaturas/detalhes-polimento/` in the main checkout. The A3
+sheet led with "0,78 Pro 20x · Cota semanal combinada", a sum of one plan's weekly percents, and put every other plan
+under "Outros planos · fora do saldo acima", so usable accounts read as outside the balance. `SubscriptionDetailSheet`
+(`OpenCode/SubscriptionDetailSheet.swift`, iPhone only) now reads `SubscriptionDetails` (OpenCodeKit,
+`SubscriptionStore.details(_:)`), which builds on the strip's `SubscriptionMarks`: the same states, plan order and
+ready count, never a second definition of available.
+
+- **Header:** LLM proxy, Atualizar and Fechar as before, with the age of the oldest measurement below the title
+  (`Medição mais antiga há 4 min`). **Codex / Claude** is one tap: each button carries its ready count (`1 pronta`),
+  VoiceOver reads it, and the selection is a trait (`proxy-provider-codex|anthropic`).
+- **Agora:** `1 de 5 prontas` (accounts, not quota), the strip's marks by plan (counts by state past 12 accounts),
+  the **next release** with the account(s) and why (`Kauri · 11:15`, janela de 5 horas or espera do proxy; `sem
+  horário informado` when a stopped account has no known end) and, apart, the **next weekly renewal** with its
+  account (`Jade · ter 03/11 08:53`, or `não informada`). A renewal is never presented as a release.
+- **Plans:** every plan, in the strip's order (unmeasured plans last), with `1 de 1 pronta · +1 às 11:15`; no
+  "Outros planos". Each account: its mark, its name in 20 pt, its state in words (Pronta, Parada até 11:15, Semana
+  esgotada, Sem medição, Precisa de login, Desativada), then 5 horas and Semana in aligned columns (label, bar, percent,
+  time: `renova 13:10` today, `sáb 07/11 20:21` otherwise, `libera 11:15` in amber for the window that stops it). An
+  exhausted week hides the 5-hour row, as before. A stale or unconfirmed measurement shows `—` and an empty bar, never
+  an old value or 0%; a proxy wait or an unexplained refusal says so under the windows. Accessibility sizes stack
+  label, percent, bar and time.
+- **Free and other unmeasured accounts:** no window, credits or resets to show, so their names share one card after
+  the plan's other accounts, with `Sem medição` and the pin; the group reads `2 sem medição`.
+- **Disabled accounts** (left out of the strip) are listed in their plan with "Desativada" and never counted.
+- **Credits and resets belong to their account** (`Créditos pagos 21.877 · 0 redefinições`, `1 redefinição · expira em
+  5,2d` with "Usar redefinição"); the Redefinições card sums the inventories the accounts report (a count, with how many
+  report none) and keeps the automatic reset switch. Both actions keep their confirmation, pending and error behavior.
+- **"Destacar no resumo"** replaces "Mostrar no resumo" with the same preference (`OpenCodeSubscriptionSelection.v1`,
+  no migration): it rings the account's mark in the strip among the others, changes no model routing, and no longer
+  closes the sheet. The footnote says so.
+
+Verification: `SubscriptionDetailsTests` (Swift Testing: plan order, windows, freshness, release vs renewal, causes,
+disabled accounts, resets) and `OpenCodeUITests/SubscriptionDetailsTests` with `OPENCODE_PROXY_STUB=marks|many`
+(`SubscriptionMarksFixture`, which now also carries the Pro Max 5-hour window and credits, a banked reset and distinct
+weekly renewals): provider switch, marks, release and renewal, states, windows, Free without percent, pin, cancelled
+reset, refresh, large text and many accounts, in both themes, through `script/test-subscriptions.py` and an explicit
+sandbox. Catalog: `testSubscriptions` (`you-subscriptions-default`) now uses the `marks` stub.
 
 ## Offline scrolling fixtures and performance checks
 
@@ -3597,7 +3638,7 @@ catalog capture was regenerated and compared):
 | Piece | Where |
 | --- | --- |
 | `SubscriptionGroup` (plan groups, "Outros planos", search, focus), `SubscriptionAccountRow` (row values, sort keys, `renewalLabel`), `SubscriptionPane` + `SubscriptionStore.sidebar`/`pane(_:)`, `SubscriptionProjection.freshness(now:)`, `SubscriptionStore.Confirmation.title/action/message` | OpenCodeKit `SubscriptionTable.swift`, covered by `SubscriptionTableTests` |
-| `ProxyPoolHeader` (with `wide`), `ProxyPoolState`, `ProxyResetsCard`, `ProxyAutomationToggle`, `proxyActions`, `ProxyAccountCard`, `ProxyQuotaBar`, `ProxyProviderIcon`, `proxyCard`/`proxyBadge`/`proxyRole` | `OpenCode/SubscriptionViews.swift`, extracted from `SubscriptionDetailSheet` (which now composes them) |
+| `ProxyPoolHeader` (with `wide`), `ProxyPoolState`, `ProxyResetsCard`, `ProxyAutomationToggle`, `proxyActions`, `ProxyAccountCard`, `ProxyQuotaBar`, `ProxyProviderIcon`, `proxyCard`/`proxyBadge`/`proxyRole` | `OpenCode/SubscriptionViews.swift`, extracted from the A3 `SubscriptionDetailSheet`; since 1 November the iPhone sheet uses only `ProxyPoolState`, `ProxyAutomationToggle`, `proxyActions` and `ProxyProviderIcon` |
 | `QuotaRing` | `OpenCode/SessionColumn/SessionQuotaMarks.swift` |
 
 ### Parity outside the chat (stage 4)

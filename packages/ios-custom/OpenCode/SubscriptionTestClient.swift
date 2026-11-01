@@ -53,19 +53,22 @@ private actor SubscriptionTestClient: SubscriptionClient {
 /// (`-OpenCodeMacProxyScenario marks|many`). `marks`: Claude with five Max 5x (four ready, one stopped by the
 /// 5-hour window, whose weekly window is still open) and two Max 20x with the week exhausted; Codex with a ready Pro
 /// Max, a Pro 5x stopped by the 5-hour window, an exhausted Pro 5x and two Free accounts the proxy accepts without
-/// measuring. `many` adds enough accounts and plans for the strip to fall back to counts.
+/// measuring. The LLM proxy details read the same accounts: the Pro Max one also reports its 5-hour window and paid
+/// credits, the stopped Pro 5x a banked reset, the exhausted one renews first, and the stopped Max 5x is in the
+/// proxy's wait. `many` adds enough accounts and plans for the strip to fall back to counts.
 enum SubscriptionMarksFixture {
   static func snapshot(many: Bool, now: Date) -> Subscriptions {
     func at(_ offset: Double) -> String { ISO8601DateFormatter().string(from: now.addingTimeInterval(offset)) }
     func account(_ id: String, plan: String?, weekly: Double?, fiveHour: Double?, capacity: Bool? = true,
-                 fiveHourReset: Double = 3 * 3_600, cooldown: Double = 0) -> Subscriptions.Account {
+                 fiveHourReset: Double = 3 * 3_600, cooldown: Double = 0, weeklyReset: Double = 3 * 86_400,
+                 credits: Double? = nil, resets: Subscriptions.BankedResets? = nil) -> Subscriptions.Account {
       Subscriptions.Account(id: id, name: id.capitalized, plan: plan, remaining: weekly,
-        resetAt: weekly == nil ? nil : at(3 * 86_400), fiveHourRemaining: fiveHour,
+        resetAt: weekly == nil ? nil : at(weeklyReset), fiveHourRemaining: fiveHour,
         fiveHourResetAt: fiveHour == nil ? nil : at(fiveHourReset), observedAt: at(-300), hasCapacity: capacity,
-        cooldownSeconds: cooldown)
+        cooldownSeconds: cooldown, credits: credits, bankedResets: resets)
     }
     var claude = [
-      account("atlas", plan: "max5x", weekly: 72, fiveHour: 100),
+      account("atlas", plan: "max5x", weekly: 72, fiveHour: 100, resets: .init(available: 2, nonExpiring: 2)),
       account("brisa", plan: "max5x", weekly: nil, fiveHour: 100),
       account("cedro", plan: "max5x", weekly: 64, fiveHour: 92),
       account("duna", plan: "max5x", weekly: 41, fiveHour: 69),
@@ -74,9 +77,12 @@ enum SubscriptionMarksFixture {
       account("gavea", plan: "max20x", weekly: 0, fiveHour: nil, capacity: false),
     ]
     var codex = [
-      account("iris", plan: "promax", weekly: 81, fiveHour: nil),
-      account("kauri", plan: "prolite", weekly: 54, fiveHour: 0, capacity: false, fiveHourReset: 9_300),
-      account("jade", plan: "prolite", weekly: 0, fiveHour: nil, capacity: false),
+      account("iris", plan: "promax", weekly: 81, fiveHour: 64, fiveHourReset: 12_900, weeklyReset: 6.4 * 86_400,
+        credits: 21_877, resets: .init(available: 0)),
+      account("kauri", plan: "prolite", weekly: 54, fiveHour: 0, capacity: false, fiveHourReset: 9_300,
+        weeklyReset: 3.9 * 86_400, resets: .init(available: 1, earliestExpiresAt: at(5.2 * 86_400))),
+      account("jade", plan: "prolite", weekly: 0, fiveHour: nil, capacity: false, weeklyReset: 1.9 * 86_400,
+        resets: .init(available: 0)),
       account("lume", plan: "free", weekly: nil, fiveHour: nil),
       account("mira", plan: "free", weekly: nil, fiveHour: nil),
     ]

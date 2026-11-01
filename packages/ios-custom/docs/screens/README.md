@@ -80,7 +80,7 @@ a evidências temporárias de testes; este é o catálogo estável para mockups.
 | Snippets · vazio | Folha Você → Snippets sem nenhum snippet; Novo snippet | [PNG](you-snippets-empty-dark.png) | [PNG](you-snippets-empty-light.png) |
 | Temas | Folha Você → Tema | [PNG](you-themes-default-dark.png) | [PNG](you-themes-default-light.png) |
 | Dados do iPhone | Folha Você → Dados do iPhone; fontes e permissões do simulador | [PNG](you-iphone-data-default-dark.png) | [PNG](you-iphone-data-default-light.png) |
-| LLM proxy | Folha Você → Codex; contas e cotas sintéticas | [PNG](you-subscriptions-default-dark.png) | [PNG](you-subscriptions-default-light.png) |
+| LLM proxy | Folha Você → Codex, “Agora primeiro”: prontas agora com as marcas da faixa de Sessões, próxima liberação e renovação semanal, cada plano com as contas, estados e janelas (dados de `SubscriptionMarksFixture`) | [PNG](you-subscriptions-default-dark.png) | [PNG](you-subscriptions-default-light.png) |
 | Nova sessão · Chats | Sessões → +; destino inicial Chats | [PNG](new-session-chats-empty-dark.png) | [PNG](new-session-chats-empty-light.png) |
 | Nova sessão · projeto | Nova sessão → Projeto → Projeto Exemplo 0 | [PNG](new-session-project-empty-dark.png) | [PNG](new-session-project-empty-light.png) |
 | Nova sessão pelo chip | Sessões → chip Projeto Exemplo 0 → +; projeto herdado sem abrir a folha Projeto | [PNG](new-session-from-repository-chip-dark.png) | [PNG](new-session-from-repository-chip-light.png) |

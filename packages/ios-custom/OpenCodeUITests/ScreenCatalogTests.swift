@@ -5,12 +5,12 @@ import XCTest
   private var theme: String { ProcessInfo.processInfo.environment["OPENCODE_CATALOG_THEME"] ?? "dark" }
   override func setUp() { continueAfterFailure = false }
 
-  private func launch(_ extra: [String] = []) -> XCUIApplication {
+  private func launch(_ extra: [String] = [], proxy: String = "success") -> XCUIApplication {
     let app = XCUIApplication()
     app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4183", "-OpenCodeTheme", "openchamber-" + theme,
       "-OpenCodeScrollFixture", "catalog", "-OpenCodeFixturePosition", "top",
       "-OpenCodeCollapsibleUserMessages", "YES"] + extra
-    app.launchEnvironment["OPENCODE_PROXY_STUB"] = "success"
+    app.launchEnvironment["OPENCODE_PROXY_STUB"] = proxy
     app.launch()
     XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 20))
     // Fail before any interaction if launch ever falls through to AppRoot/a real connection.
@@ -458,11 +458,12 @@ import XCTest
   }
 
   func testSubscriptions() {
-    let app = launch()
+    // The Sessões strip's accounts (`SubscriptionMarksFixture`): every plan and state in the details.
+    let app = launch(proxy: "marks")
     defer { app.terminate() }
     app.openYou()
     tap("proxy-settings-codex", app)
-    XCTAssertTrue(app.otherElements["proxy-pool-header"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.otherElements["proxy-now"].waitForExistence(timeout: 10))
     shot("you-subscriptions-default")
   }
 

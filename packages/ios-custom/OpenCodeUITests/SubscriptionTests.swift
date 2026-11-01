@@ -24,7 +24,7 @@ import XCTest
     XCTAssertTrue(entry.waitForExistence(timeout: 15))
     entry.tap()
     XCTAssertTrue(app.buttons["proxy-close"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.otherElements["proxy-pool-header"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.otherElements["proxy-now"].waitForExistence(timeout: 20))
   }
   private func reveal(_ element: XCUIElement, app: XCUIApplication) {
     for _ in 0..<20 {
@@ -40,7 +40,7 @@ import XCTest
     XCTAssertTrue(app.buttons["proxy-settings-anthropic"].waitForExistence(timeout: 20))
     shot("voce")
     app.buttons["proxy-settings-codex"].tap()
-    XCTAssertTrue(app.otherElements["proxy-pool-header"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.otherElements["proxy-now"].waitForExistence(timeout: 20))
     shot("codex")
     let reset = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'proxy-reset-'" )).firstMatch
     reveal(reset, app: app)
@@ -49,19 +49,22 @@ import XCTest
     shot("confirmation-cancelled")
     app.buttons["Cancelar"].tap()
     // Never confirm a real reset or automation change.
-    app.segmentedControls["proxy-provider"].buttons["Claude"].tap()
+    app.buttons["proxy-provider-anthropic"].tap()
     app.swipeDown(velocity: .slow)
     shot("claude")
     let selection = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'proxy-select-'" )).firstMatch
     reveal(selection, app: app)
     let selectedID = selection.identifier
     selection.tap()
+    // "Destacar no resumo" only rings the account's mark in Sessões: the details stay open.
+    XCTAssertTrue(selection.isSelected)
+    app.buttons["proxy-close"].tap()
     XCTAssertTrue(app.buttons["proxy-close"].waitForNonExistence(timeout: 5))
     shot("voce-selected")
     app.showSessions()
     shot("sessions-selected")
     app.buttons["proxy-strip-anthropic"].tap()
-    XCTAssertTrue(app.segmentedControls["proxy-provider"].buttons["Claude"].isSelected)
+    XCTAssertTrue(app.buttons["proxy-provider-anthropic"].isSelected)
     let selected = app.buttons[selectedID]
     reveal(selected, app: app)
     XCTAssertTrue(selected.isSelected)

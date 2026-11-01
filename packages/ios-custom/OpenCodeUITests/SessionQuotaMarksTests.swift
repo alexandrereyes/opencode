@@ -61,13 +61,13 @@ import XCTest
     shot("varias")
     claude.tap()
     XCTAssertTrue(app.buttons["proxy-close"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.segmentedControls["proxy-provider"].buttons["Claude"].isSelected)
+    XCTAssertTrue(app.buttons["proxy-provider-anthropic"].isSelected)
     shot("detalhes")
     app.buttons["proxy-close"].tap()
     XCTAssertTrue(codex.waitForExistence(timeout: 10))
     codex.tap()
     XCTAssertTrue(app.buttons["proxy-close"].waitForExistence(timeout: 10))
-    XCTAssertTrue(app.segmentedControls["proxy-provider"].buttons["Codex"].isSelected)
+    XCTAssertTrue(app.buttons["proxy-provider-codex"].isSelected)
     app.buttons["proxy-close"].tap()
   }
 
