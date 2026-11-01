@@ -206,9 +206,59 @@ public struct SubscriptionMarks: Sendable {
   /// The same over every account with a known wait, an exhausted one's weekly renewal included: the strip's counts
   /// fallback says when the next accounts are back (`+1 em 35m`). The details keep `release` and renewals apart.
   public let next: Release?
+  /// The manual resets kept for later across these accounts; nil when none reports an inventory.
+  public let resets: Resets?
+  /// Enabled accounts the strip leaves out (Codex's Free accounts); the details still list them.
+  public let hidden: Int
 
-  public init(accounts: [Subscriptions.Account], pinned: String? = nil, now: Date) {
+  /// The manual resets kept for later (`bankedResets.available`, what "Usar redefinição" spends), summed over the
+  /// enabled accounts: never paid credits, the automatic reset or a count of accounts. `total` only when every one
+  /// reports its inventory; with any missing, `missing` counts those and no total is claimed. A provider whose
+  /// accounts report none has no `Resets`, so it never shows an invented 0.
+  public struct Resets: Sendable, Equatable {
+    public let total: Int?
+    /// The sum over the accounts that report, for VoiceOver when the total is unknown.
+    public let known: Int
+    public let missing: Int
+    /// Each account with resets and how many: `Iris 1`, `Kauri 2`.
+    public let holders: [String]
+    /// When the first of them expires, if the proxy says.
+    public let expires: Date?
+
+    init?(_ accounts: [Subscriptions.Account]) {
+      let reports = accounts.compactMap(\.bankedResets)
+      guard !reports.isEmpty else { return nil }
+      known = Int(reports.reduce(0) { $0 + $1.available }.rounded())
+      missing = accounts.count - reports.count
+      total = missing == 0 ? known : nil
+      holders = accounts.compactMap { account in
+        account.bankedResets.flatMap { $0.available > 0 ? "\(account.name) \(Int($0.available.rounded()))" : nil }
+      }
+      expires = accounts.compactMap { account in
+        account.bankedResets.flatMap { $0.available > 0 ? Subscriptions.date($0.earliestExpiresAt) : nil }
+      }.min()
+    }
+
+    /// `redef. 3`, `redef. 0`, or `redef. ?` while an account does not report.
+    public var label: String { "redef. " + (total.map(String.init) ?? "?") }
+
+    /// `3 redefinições manuais disponíveis (Iris 1, Kauri 2), a primeira vence ter 03/11 08:53`.
+    public func spoken(now: Date, calendar: Calendar = .current) -> String {
+      guard let total else {
+        return "redefinições manuais: total indisponível, \(missing) \(missing == 1 ? "conta sem dado" : "contas sem dado")"
+          + " (\(known) nas que informam)"
+      }
+      if total == 0 { return "nenhuma redefinição manual disponível" }
+      let expiry = expires.map { ", a primeira vence " + SubscriptionFormat.moment($0, now: now, calendar: calendar) } ?? ""
+      return "\(total) \(total == 1 ? "redefinição manual disponível" : "redefinições manuais disponíveis")"
+        + " (" + holders.joined(separator: ", ") + ")" + expiry
+    }
+  }
+
+  public init(accounts: [Subscriptions.Account], pinned: String? = nil, now: Date, hidden: Int = 0) {
     let enabled = accounts.filter(\.enabled)
+    resets = Resets(enabled)
+    self.hidden = hidden
     let plans = enabled.reduce(into: [String?]()) { if !$0.contains($1.plan) { $0.append($1.plan) } }
     let built = plans.map { plan in
       // A plan the app has no name for keeps the proxy's own identifier, capitalized.
@@ -271,7 +321,7 @@ public struct SubscriptionMarks: Sendable {
     return multiplier.map(String.init) ?? title
   }
 
-  static func capitalized(_ title: String) -> String { title.prefix(1).uppercased() + title.dropFirst() }
+  public static func capitalized(_ title: String) -> String { title.prefix(1).uppercased() + title.dropFirst() }
 
   /// `+1 às 10:30` (`+1 10:30` when compact), or with the date when it is not today.
   public func releaseLabel(now: Date, calendar: Calendar = .current, compact: Bool = false) -> String? {
@@ -293,11 +343,15 @@ public struct SubscriptionMarks: Sendable {
       .joined(separator: " · ")
   }
 
-  /// The strip's counts fallback, where no mark shows its wait: `14 prontas · +1 em 35m` (`+1 35m` when compact).
-  public func summary(now: Date, next: Bool, compact: Bool = false) -> String {
-    let base = summary(now: now, release: false)
-    guard next, let soon = self.next, total > 0 else { return base }
-    return base + " · +\(soon.count) " + (compact ? "" : "em ") + Wait(until: soon.at, causes: []).short(now: now)
+  /// The strip's summary after the marks or counts: when the next accounts are back (`+1 em 35m`, `+1 35m` when
+  /// compact; for counts, the marks show their own waits) and the provider's manual resets (`redef. 3`). The ready
+  /// accounts are the rings or `●×N`; `N prontas` comes back only for a provider that reports no resets. Empty when
+  /// nothing fits.
+  public func strip(now: Date, next: Bool, compact: Bool = false, resets: Bool = true) -> String {
+    if total == 0 { return hidden > 0 ? "só contas Free" : "nenhuma conta" }
+    let soon = next ? self.next.map { "+\($0.count) " + (compact ? "" : "em ") + Wait(until: $0.at, causes: []).short(now: now) } : nil
+    guard let kept = self.resets else { return [summary(now: now, release: false), soon].compactMap { $0 }.joined(separator: " · ") }
+    return [soon, resets ? kept.label : nil].compactMap { $0 }.joined(separator: " · ")
   }
 
   /// VoiceOver: every plan with its accounts by state, then the release; `balances` adds each ready account's
@@ -324,8 +378,9 @@ public struct SubscriptionMarks: Sendable {
       account.wait.map { account.name + " " + $0.spoken(now: now, calendar: calendar) }
     }
     let waits = balances && !back.isEmpty ? ". Prazos: " + back.joined(separator: "; ") : ""
+    let kept = balances ? resets.map { ". " + Self.capitalized($0.spoken(now: now, calendar: calendar)) } ?? "" : ""
     return "\(provider), \(ready) de \(total) assinaturas prontas agora. " + plans.joined(separator: ". ") + release
-      + tail + waits
+      + tail + waits + kept
   }
 }
 
@@ -334,5 +389,21 @@ extension SubscriptionStore {
   public func marks(_ provider: SubscriptionProvider) -> SubscriptionMarks? {
     guard let snapshot, snapshot.pool(provider).status == "ok" else { return nil }
     return SubscriptionMarks(accounts: snapshot.pool(provider).accounts, pinned: selectedIDs[provider], now: now)
+  }
+
+  /// The Sessões strip: `marks` without Codex's Free accounts, which it leaves out of its marks, counts, resets and
+  /// VoiceOver. Only what the strip shows: the accounts, the proxy and the details stay as they are.
+  public func strip(_ provider: SubscriptionProvider) -> SubscriptionMarks? {
+    guard let snapshot, snapshot.pool(provider).status == "ok" else { return nil }
+    let accounts = snapshot.pool(provider).accounts
+    let shown = SubscriptionMarks.strip(accounts, provider: provider)
+    return SubscriptionMarks(accounts: shown, pinned: selectedIDs[provider], now: now,
+      hidden: accounts.filter(\.enabled).count - shown.filter(\.enabled).count)
+  }
+}
+
+extension SubscriptionMarks {
+  static func strip(_ accounts: [Subscriptions.Account], provider: SubscriptionProvider) -> [Subscriptions.Account] {
+    provider == .codex ? accounts.filter { $0.plan != "free" } : accounts
   }
 }

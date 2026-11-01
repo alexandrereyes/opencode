@@ -1793,7 +1793,7 @@ import SwiftUI
     // The strip's runs: each ready account's balance, larger first within its plan, then the other states with their
     // own wait when the data gives one, `^` after the highlighted account.
     func plans(_ store: SubscriptionStore, _ provider: SubscriptionProvider) -> String {
-      (store.marks(provider)?.runs ?? []).map { group in
+      (store.strip(provider)?.runs ?? []).map { group in
         group.label + ":" + group.accounts.map { account in
           let mark: String = {
             if let balance = account.balance { return "\(balance.percent)" }
@@ -1812,7 +1812,9 @@ import SwiftUI
     let claude = plans(quota, .anthropic)
     let codex = plans(quota, .codex)
     print("MacAjustes cotas: Claude \(claude) · Codex \(codex)")
-    guard claude == "5x:100,72,64,41,B2h|20x:E3d,E3d", codex == "Pro Max:64|5x:B3h,E2d|Free:?,?",
+    // Codex's Free accounts stay out of the strip; its resets are all reported (1), Claude's only by Atlas (`?`).
+    guard claude == "5x:100,72,64,41,B2h|20x:E3d,E3d", codex == "Pro Max:64|5x:B3h,E2d",
+      quota.strip(.codex)?.resets?.label == "redef. 1", quota.strip(.anthropic)?.resets?.label == "redef. ?",
       quota.marks(.anthropic)?.release?.count == 1, quota.marks(.codex)?.release?.count == 1 else {
       throw Failure(description: "marcas: Claude \(claude) · Codex \(codex)")
     }
@@ -1827,7 +1829,7 @@ import SwiftUI
         let account = try require(store.snapshot?.pool(provider).accounts.first { $0.name == name }, name)
         store.toggleSelection(account, provider: provider)
       }
-      return [store.marks(.codex), store.marks(.anthropic)].flatMap { $0?.runs.flatMap(\.accounts) ?? [] }
+      return [store.strip(.codex), store.strip(.anthropic)].flatMap { $0?.runs.flatMap(\.accounts) ?? [] }
         .filter(\.pinned).map(\.name)
     }
     let suite = "br.com.alexandrem.opencode.mac.ajustes.cotas.destaque"
@@ -1838,7 +1840,7 @@ import SwiftUI
     let highlighted = try highlight(pinned)
     print("MacAjustes cotas destaque: \(plans(pinned, .anthropic)) · \(highlighted)")
     guard plans(pinned, .anthropic) == "5x:100,72^,64,41,B2h|20x:E3d,E3d",
-      plans(pinned, .codex) == "Pro Max:64^|5x:B3h,E2d|Free:?,?",
+      plans(pinned, .codex) == "Pro Max:64^|5x:B3h,E2d",
       highlighted == ["Iris", "Atlas"] else { throw Failure(description: "destaque: \(highlighted)") }
     // "Relógio + prazo": 35m, 2h from the later of two blockers, an unexplained stop without a time, the week's 2d,
     // login and Free; Iris and Faia (a wait mark) highlighted.
@@ -1850,7 +1852,8 @@ import SwiftUI
     _ = try highlight(waits, claude: "Faia")
     print("MacAjustes cotas prazos: Claude \(plans(waits, .anthropic)) · Codex \(plans(waits, .codex))")
     guard plans(waits, .anthropic) == "5x:100,9,B35m,B2h^,B|20x:E2d",
-      plans(waits, .codex) == "Pro Max:78^|Plus:B2h|Pro Max:!|Free:?,?" else {
+      plans(waits, .codex) == "Pro Max:78^|Plus:B2h|Pro Max:!",
+      waits.strip(.codex)?.resets?.label == "redef. 3", waits.strip(.anthropic)?.resets?.label == "redef. 0" else {
       throw Failure(description: "prazos: \(plans(waits, .anthropic)) · \(plans(waits, .codex))")
     }
     _ = try highlight(quota)

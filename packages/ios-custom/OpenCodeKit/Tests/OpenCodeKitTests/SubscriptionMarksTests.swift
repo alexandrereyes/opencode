@@ -200,9 +200,11 @@ private func markAccount(_ id: String, plan: String?, weekly: Double? = nil, fiv
   #expect(waits["week"]!!.spoken(now: marksNow, calendar: utc)
     == "volta ter 03/11 09:40, em 1 dia e 22 h (previsto pela renovação da semana)")
   #expect(marks.next == .init(count: 1, at: Subscriptions.date("2026-11-01T12:15:00Z")!))
-  #expect(marks.summary(now: marksNow, next: true) == "0 prontas · +1 em 35m")
-  #expect(marks.summary(now: marksNow, next: true, compact: true) == "0 prontas · +1 35m")
-  #expect(marks.summary(now: marksNow, next: false) == "0 prontas")
+  // A provider whose accounts report no resets keeps its ready count.
+  #expect(marks.resets == nil)
+  #expect(marks.strip(now: marksNow, next: true) == "0 prontas · +1 em 35m")
+  #expect(marks.strip(now: marksNow, next: true, compact: true) == "0 prontas · +1 35m")
+  #expect(marks.strip(now: marksNow, next: false) == "0 prontas")
   #expect(marks.spoken("Claude", now: marksNow, calendar: utc, balances: true).hasSuffix(
     "; Conta week-late volta ter 03/11 12:00, em 2 dias (previsto pela janela de 5 horas e renovação da semana)"))
 }
@@ -232,7 +234,7 @@ private func markAccount(_ id: String, plan: String?, weekly: Double? = nil, fiv
   // The details still read the proxy's wait; the strip counts nothing down over old windows.
   #expect(accounts["stale"]!.mark == .blocked(until: marksNow.addingTimeInterval(600)))
   #expect(accounts["login"]!.mark == .attention && accounts["free"]!.mark == .unmeasured)
-  #expect(marks.next == nil && marks.summary(now: marksNow, next: true) == "1 pronta")
+  #expect(marks.next == nil && marks.strip(now: marksNow, next: true) == "1 pronta")
   #expect(!marks.spoken("Claude", now: marksNow, calendar: utc, balances: true).contains("Prazos"))
 }
 
@@ -243,4 +245,71 @@ private func markAccount(_ id: String, plan: String?, weekly: Double? = nil, fiv
   #expect(short(20) == "1m" && short(60) == "1m" && short(61) == "2m" && short(59 * 60) == "59m")
   #expect(short(59 * 60 + 1) == "1h" && short(3_600) == "1h" && short(3_601) == "2h" && short(100 * 60) == "2h")
   #expect(short(23 * 3_600 + 1) == "1d" && short(86_400) == "1d" && short(86_401) == "2d" && short(46 * 3_600) == "2d")
+}
+
+private func withResets(_ account: Subscriptions.Account, _ available: Double?, expires: String? = nil) -> Subscriptions.Account {
+  var account = account
+  account.bankedResets = available.map { .init(available: $0, earliestExpiresAt: expires) }
+  return account
+}
+
+@Test func theStripSumsTheManualResetsOnlyWhenEveryAccountReportsThem() {
+  let complete = SubscriptionMarks(accounts: [
+    withResets(markAccount("iris", plan: "promax", weekly: 80, fiveHour: 46), 1, expires: "2026-11-03T08:53:00Z"),
+    withResets(markAccount("kauri", plan: "prolite", weekly: 0, capacity: false), 2, expires: "2026-11-05T10:00:00Z"),
+    withResets(markAccount("lume", plan: "promax", weekly: 70, authenticated: false), 0),
+    // A disabled account's resets are not the strip's.
+    { var off = withResets(markAccount("off", plan: "promax", weekly: 70), 5); off.enabled = false; return off }(),
+  ], now: marksNow)
+  #expect(complete.resets?.total == 3 && complete.resets?.known == 3 && complete.resets?.missing == 0)
+  #expect(complete.resets?.holders == ["Conta iris 1", "Conta kauri 2"])
+  #expect(complete.resets?.expires == Subscriptions.date("2026-11-03T08:53:00Z"))
+  // The ready count is in the marks; the summary carries the resets instead.
+  #expect(complete.strip(now: marksNow, next: false) == "redef. 3")
+  #expect(complete.strip(now: marksNow, next: true) == "+1 em 5d · redef. 3")
+  #expect(complete.spoken("Codex", now: marksNow, calendar: utc, balances: true).hasSuffix(
+    ". 3 redefinições manuais disponíveis (Conta iris 1, Conta kauri 2), a primeira vence ter 03/11 08:53"))
+
+  // Every account reports none: a confirmed 0.
+  let zero = SubscriptionMarks(accounts: [
+    withResets(markAccount("a", plan: "max5x", fiveHour: 0, fiveHourResetAt: "2026-11-01T11:57:00Z", capacity: false), 0),
+    withResets(markAccount("b", plan: "max20x", weekly: 0, capacity: false), 0),
+  ], now: marksNow)
+  #expect(zero.resets?.total == 0 && zero.strip(now: marksNow, next: true) == "+1 em 17m · redef. 0")
+  #expect(zero.strip(now: marksNow, next: true, resets: false) == "+1 em 17m")
+  #expect(zero.spoken("Claude", now: marksNow, calendar: utc, balances: true).hasSuffix(". Nenhuma redefinição manual disponível"))
+
+  // One account does not report: no total is claimed, and the known part is only spoken.
+  let partial = SubscriptionMarks(accounts: [
+    withResets(markAccount("a", plan: "max5x", fiveHour: 80), 2),
+    withResets(markAccount("b", plan: "max5x", fiveHour: 70), nil),
+  ], now: marksNow)
+  #expect(partial.resets?.total == nil && partial.resets?.label == "redef. ?")
+  #expect(partial.strip(now: marksNow, next: false) == "redef. ?")
+  #expect(partial.spoken("Claude", now: marksNow, calendar: utc, balances: true).hasSuffix(
+    ". Redefinições manuais: total indisponível, 1 conta sem dado (2 nas que informam)"))
+
+  // No account reports resets (a proxy without the feature): no invented 0.
+  let none = SubscriptionMarks(accounts: [markAccount("a", plan: "max5x", fiveHour: 80)], now: marksNow)
+  #expect(none.resets == nil && none.strip(now: marksNow, next: false) == "1 pronta")
+  #expect(!none.spoken("Claude", now: marksNow, calendar: utc, balances: true).contains("redefini"))
+}
+
+@Test func theStripLeavesOutCodexFreeAccountsOnly() {
+  let accounts = [
+    withResets(markAccount("iris", plan: "promax", weekly: 80, fiveHour: 46), 1),
+    withResets(markAccount("kauri", plan: "prolite", weekly: 0, capacity: false), 2),
+    // Free accounts report no inventory; shown, they would make the total unknown.
+    markAccount("free1", plan: "free"),
+    markAccount("free2", plan: "free"),
+  ]
+  let codex = SubscriptionMarks(accounts: SubscriptionMarks.strip(accounts, provider: .codex), now: marksNow, hidden: 2)
+  #expect(!codex.groups.contains { $0.label == "Free" } && !codex.runs.contains { $0.label == "Free" })
+  #expect(codex.total == 2 && codex.hidden == 2 && codex.resets?.total == 3)
+  #expect(!codex.spoken("Codex", now: marksNow, calendar: utc, balances: true).contains("Free"))
+  // The same accounts unfiltered, as the details read them, keep the Free plan.
+  #expect(SubscriptionMarks(accounts: accounts, now: marksNow).groups.contains { $0.label == "Free" })
+  // Only Codex: another provider's Free plan stays.
+  #expect(SubscriptionMarks.strip(accounts, provider: .anthropic).count == 4)
+  #expect(SubscriptionMarks(accounts: [], now: marksNow, hidden: 3).strip(now: marksNow, next: true) == "só contas Free")
 }

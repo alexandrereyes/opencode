@@ -24,7 +24,7 @@ struct SessionQuotaMarks: View {
 
   private func providers(_ style: SessionQuotaProvider.Style) -> some View {
     ForEach(quota.providers) { provider in
-      let row = SessionQuotaProvider(provider: provider, marks: quota.marks(provider),
+      let row = SessionQuotaProvider(provider: provider, marks: quota.strip(provider),
         status: quota.snapshot?.pool(provider).status, now: quota.now, style: style)
       Button { open(provider) } label: { row }
       .buttonStyle(.plain)
@@ -64,12 +64,14 @@ private struct SessionQuotaProvider: View {
     HStack(alignment: .center, spacing: 8) {
       ProxyProviderIcon(provider: provider).frame(width: icon, height: icon)
       if let marks, marks.total > 0 {
-        // The marks first, without the release; then counts, whose summary says when the next ones are back
-        // (`+1 em 35m`, then `+1 35m`): plans give way to keep it before it goes.
+        // The marks with the provider's manual resets first; then counts, whose summary also says when the next
+        // ones are back (`+1 em 35m`, then `+1 35m`): plans give way before the summary does.
+        let help = marks.resets.map { SubscriptionMarks.capitalized($0.spoken(now: now)) + ". Não inclui créditos nem a redefinição automática." }
         ViewThatFits(in: .horizontal) {
-          lines(plans(marks.runs) { group in each(group) }, marks.summary(now: now, release: false))
+          lines(plans(marks.runs) { group in each(group) }, marks.strip(now: now, next: false), help: help)
           ForEach(Self.fallbacks, id: \.self) { fallback in
-            lines(top(fallback.top, marks), marks.summary(now: now, next: fallback.next, compact: fallback.compact))
+            lines(top(fallback.top, marks), marks.strip(now: now, next: fallback.next, compact: fallback.compact,
+              resets: fallback.resets), help: help)
           }
         }
         .monospacedDigit()
@@ -87,14 +89,16 @@ private struct SessionQuotaProvider: View {
   private var line: String {
     guard let status else { return "consultando…" }
     guard status == "ok", let marks else { return status == "unconfigured" ? "sem LLM proxy" : "indisponível" }
-    return marks.summary(now: now)
+    return marks.strip(now: now, next: false)
   }
 
   /// The counts fallbacks in order: by state per plan, the ready share per plan, the provider's states; each with
-  /// the next return, then its compact form, then without it.
-  private struct Fallback: Hashable { let top: Int; let next: Bool; let compact: Bool }
-  private static let fallbacks = [(true, false), (true, true), (false, false)].flatMap { next, compact in
-    (0..<3).map { Fallback(top: $0, next: next, compact: compact) }
+  /// the next return and the resets, then the compact return, then the resets alone, then the compact return alone,
+  /// then nothing.
+  private struct Fallback: Hashable { let top: Int; let next: Bool; let compact: Bool; let resets: Bool }
+  private static let fallbacks = [(true, false, true), (true, true, true), (false, false, true), (true, true, false),
+    (false, false, false)].flatMap { next, compact, resets in
+    (0..<3).map { Fallback(top: $0, next: next, compact: compact, resets: resets) }
   }
 
   @ViewBuilder private func top(_ kind: Int, _ marks: SubscriptionMarks) -> some View {
@@ -105,17 +109,18 @@ private struct SessionQuotaProvider: View {
     }
   }
 
-  /// The marks or counts with the summary: after them on one line, below them for accessibility sizes.
-  @ViewBuilder private func lines<Top: View>(_ top: Top, _ text: String) -> some View {
+  /// The marks or counts with the summary: after them on one line, below them for accessibility sizes. The Mac
+  /// tooltip on the summary details the resets.
+  @ViewBuilder private func lines<Top: View>(_ top: Top, _ text: String, help: String?) -> some View {
     if style == .line {
       HStack(spacing: 7) {
         top
-        summary("· " + text)
+        if !text.isEmpty { summary("· " + text).help(help ?? "") }
       }
     } else {
       VStack(alignment: .leading, spacing: 3) {
         top
-        summary(text)
+        if !text.isEmpty { summary(text).help(help ?? "") }
       }
     }
   }
@@ -171,16 +176,17 @@ private struct SessionQuotaProvider: View {
     tally(group.accounts)
   }
 
-  /// Glyph and count of each state present; exhausted weeks show the renewal arrow when every one has a known
-  /// renewal, the crossed circle otherwise.
+  /// Glyph and count of each state present (`●×2`, `◷×3`); exhausted weeks show the renewal arrow when every one
+  /// has a known renewal, the crossed circle otherwise.
   private func tally(_ accounts: [SubscriptionMarks.Account]) -> some View {
     let exhausted = accounts.filter { SubscriptionMarks.Kind($0.mark) == .exhausted }
     return HStack(spacing: 4) {
       ForEach(SubscriptionMarks.Kind.allCases.filter { kind in accounts.contains { SubscriptionMarks.Kind($0.mark) == kind } }, id: \.self) { kind in
         HStack(spacing: 1) {
           SubscriptionMarkGlyph(kind: kind, renewing: kind == .exhausted && exhausted.allSatisfy { $0.wait != nil }, size: glyph)
-          Text("\(accounts.filter { SubscriptionMarks.Kind($0.mark) == kind }.count)").appFont(.footnote)
-            .foregroundStyle(theme.color(.text))
+          // `×N`: how many accounts, never a time (`3d`) nor a balance (the rings' numbers).
+          Text("\(Text("×").foregroundStyle(theme.color(.textSecondary)))\(accounts.filter { SubscriptionMarks.Kind($0.mark) == kind }.count)")
+            .appFont(.footnote).foregroundStyle(theme.color(.text))
         }
       }
     }

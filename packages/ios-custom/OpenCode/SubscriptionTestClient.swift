@@ -106,20 +106,23 @@ enum SubscriptionMarksFixture {
   /// Codex: Iris ready (78), Kauri whose 5-hour window is back in 50 min while the proxy waits 2 h (so 2h), Lume
   /// needing login and two Free accounts. Claude: Brisa (100) and Duna (9) ready, Eco in the proxy's 35-minute wait,
   /// Faia's 5-hour window back in 1 h 40 (2h, not the window's 5 hours), Gávea refused for no known reason, and
-  /// Farol's exhausted week renewing in 1 day and 22 hours (2d).
+  /// Farol's exhausted week renewing in 1 day and 22 hours (2d). Every account reports its manual resets: Codex 3
+  /// (Iris 1, Kauri 2; the Free ones none), Claude 0.
   static func waits(now: Date) -> Subscriptions {
     func at(_ offset: Double) -> String { ISO8601DateFormatter().string(from: now.addingTimeInterval(offset)) }
     func account(_ id: String, plan: String, weekly: Double?, fiveHour: Double?, capacity: Bool? = true,
                  fiveHourReset: Double = 3 * 3_600, cooldown: Double = 0, weeklyReset: Double = 4 * 86_400,
-                 authenticated: Bool = true) -> Subscriptions.Account {
+                 authenticated: Bool = true, resets: Double = 0) -> Subscriptions.Account {
       Subscriptions.Account(id: id, name: id.capitalized, authenticated: authenticated, plan: plan, remaining: weekly,
         resetAt: weekly == nil ? nil : at(weeklyReset), fiveHourRemaining: fiveHour,
         fiveHourResetAt: fiveHour == nil ? nil : at(fiveHourReset), observedAt: at(-120), hasCapacity: capacity,
-        cooldownSeconds: cooldown)
+        cooldownSeconds: cooldown, bankedResets: .init(available: resets,
+          earliestExpiresAt: resets > 0 ? at(2.6 * 86_400) : nil))
     }
     let codex = [
-      account("iris", plan: "promax", weekly: 81, fiveHour: 78),
-      account("kauri", plan: "plus", weekly: 60, fiveHour: 0, capacity: false, fiveHourReset: 3_000, cooldown: 7_200),
+      account("iris", plan: "promax", weekly: 81, fiveHour: 78, resets: 1),
+      account("kauri", plan: "plus", weekly: 60, fiveHour: 0, capacity: false, fiveHourReset: 3_000, cooldown: 7_200,
+        resets: 2),
       account("lume", plan: "promax", weekly: 70, fiveHour: 70, authenticated: false),
       account("mira", plan: "free", weekly: nil, fiveHour: nil),
       account("nara", plan: "free", weekly: nil, fiveHour: nil),

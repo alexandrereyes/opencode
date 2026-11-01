@@ -2690,6 +2690,31 @@ Verification: `SessionQuotaMarksTests` assert Codex above Claude with the same l
 (`marks`, `waits`, `many`, large text), 33 pt, in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas`
 counts two provider icons stacked in the left margin of every render (272, 302 and 452 pt, both themes).
 
+### Sessões strip: `×` counts, `redef. N` and no Codex Free — 1 November
+
+Approved mockup: the main proposal of `.agent-artifacts/cotas-assinaturas/contagens-redefinicoes/` in the main checkout,
+without Codex's Free accounts. A count of accounts always reads `●×2`, `◷×3`, `↻×2`, `?×3` (the `×` in the secondary
+color), so it never looks like a time (`↻3d`, `+1 em 17m`) or a balance (the number inside a ring).
+
+- **`redef. N`** (`SubscriptionMarks.Resets`) takes the place of `N prontas`, which the rings or `●×N` already show:
+  the manual resets kept for later (`bankedResets.available`, what "Usar redefinição" spends), summed over the strip's
+  enabled accounts. Never paid credits, the automatic reset or a count of accounts. A total only when every one of
+  those accounts reports its inventory; with one missing, `redef. ?` and VoiceOver says how many do not report and how
+  many the others hold. A provider whose accounts report none shows no `redef.` and keeps `N prontas`; `redef. 0` only
+  when every account reports zero. The Mac tooltip and VoiceOver list the holders and the first expiry (`3
+  redefinições manuais disponíveis (Iris 1, Kauri 2), a primeira vence ter 03/11 08:53`).
+- **Codex Free:** `SubscriptionStore.strip(_:)` leaves Codex's Free plan out of the strip's marks, counts, resets and
+  VoiceOver (`só contas Free` when nothing else is left). Only the strip: the accounts, the proxy, routing and the
+  details (`marks(_:)`) are unchanged.
+- **Fit:** marks with `redef. N`; then counts with `+1 em 35m · redef. N`, the compact return, the resets alone, the
+  compact return alone, nothing; plans give way to counts before the summary does. One provider per line, 33 pt.
+
+Verification: `SubscriptionMarksTests` (complete sum with holders and expiry, a disabled account left out, confirmed 0,
+one account missing → `redef. ?`, no inventory → `N prontas`, Codex Free hidden only from the strip, `só contas Free`);
+`SessionQuotaMarksTests` (`marks`: Codex without Free and `redef. 1`, Claude's total unavailable; `waits`: `redef. 3`
+and `redef. 0`; `many`: counts with `×`), in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas`
+checks the same runs and labels and renders every width.
+
 Verification: `SubscriptionMarksTests` (balance per window, one window, 0, 100, stale, order, runs, pinned, spoken
 balances); `SessionQuotaMarksTests` read `5x:100,72,64,41,B|20x:E,E` and the `many` runs, the `Saldos` suffix and a 33 pt
 strip, in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas` checks the same runs, heights and edges,

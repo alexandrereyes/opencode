@@ -59,10 +59,15 @@ import XCTest
     // Ready rings first with each account's own balance, larger first within the plan; then the other states, each
     // with its own wait when the data gives one (Eco 1 h 50 → 2h; the 20x weeks renew in 3 days).
     wait(claude, value: "5x:100,72,64,41,B2h|20x:E3d,E3d")
-    wait(codex, value: "Pro Max:64|5x:B3h,E2d|Free:?,?")
+    // Codex's Free accounts stay out of the strip (the details still list them).
+    wait(codex, value: "Pro Max:64|5x:B3h,E2d")
+    XCTAssertTrue(codex.label.hasPrefix("Codex, 1 de 3 assinaturas prontas agora."), codex.label)
     XCTAssertTrue(claude.label.hasPrefix("Claude, 4 de 7 assinaturas prontas agora. Max 5x: 4 prontas, 1 parada. Max 20x: 2 com a semana esgotada."), claude.label)
     XCTAssertTrue(claude.label.contains("Mais 1 às "), claude.label)
-    XCTAssertTrue(codex.label.contains("Free: 2 sem medição"), codex.label)
+    XCTAssertFalse(codex.label.contains("Free"), codex.label)
+    // The manual resets: Codex reports all of them (1, Kauri's); Claude only Atlas's, so no total is claimed.
+    XCTAssertTrue(codex.label.contains(". 1 redefinição manual disponível (Kauri 1), a primeira vence "), codex.label)
+    XCTAssertTrue(claude.label.hasSuffix(". Redefinições manuais: total indisponível, 6 contas sem dado (2 nas que informam)"), claude.label)
     // The number's window and what is unknown are spoken, never read as a capacity.
     XCTAssertTrue(claude.label.contains(". Saldos: Brisa 100% em 5 horas (semana não informada), Atlas 72% na semana, Cedro 64% na semana, Duna 41% na semana. Prazos: Eco volta "), claude.label)
     XCTAssertTrue(codex.label.contains(". Saldos: Iris 64% em 5 horas. Prazos: Kauri volta "), codex.label)
@@ -81,7 +86,8 @@ import XCTest
   }
 
   /// The approved "Relógio + prazo" mockup: each stopped account's own wait next to its clock, an exhausted week's
-  /// renewal next to the renewal arrow, nothing for an unexplained refusal, login or Free.
+  /// renewal next to the renewal arrow, nothing for an unexplained refusal or login; Codex's Free accounts left out,
+  /// and each provider's manual resets in place of its ready count (`redef. 3`, `redef. 0`).
   func testEachStoppedAccountShowsItsOwnWaitAndTheHighlightStaysUnderItsMark() throws {
     let app = try launch("waits")
     defer { app.terminate() }
@@ -90,7 +96,9 @@ import XCTest
     // Stopped by release, the unexplained one last and without a time; then the week, back in 1 day and 22 hours.
     wait(claude, value: "5x:100,9,B35m,B2h,B|20x:E2d")
     // Kauri's 5-hour window is back in 50 minutes, but the proxy waits 2 hours: the later one.
-    wait(codex, value: "Pro Max:78|Plus:B2h|Pro Max:!|Free:?,?")
+    wait(codex, value: "Pro Max:78|Plus:B2h|Pro Max:!")
+    XCTAssertTrue(codex.label.contains(". 3 redefinições manuais disponíveis (Iris 1, Kauri 2), a primeira vence "), codex.label)
+    XCTAssertTrue(claude.label.hasSuffix(". Nenhuma redefinição manual disponível"), claude.label)
     XCTAssertTrue(claude.label.contains(". Prazos: Eco volta "), claude.label)
     XCTAssertTrue(claude.label.contains(", em 35 min (previsto pela espera do proxy)"), claude.label)
     XCTAssertTrue(claude.label.contains(", em 1 h 40 min (previsto pela janela de 5 horas)"), claude.label)
@@ -102,11 +110,11 @@ import XCTest
 
     // "Destacar no resumo" puts the dash under Iris's ring, which keeps its place; it is removed at the end.
     try pin("iris", on: true, app)
-    wait(codex, value: "Pro Max:78^|Plus:B2h|Pro Max:!|Free:?,?")
+    wait(codex, value: "Pro Max:78^|Plus:B2h|Pro Max:!")
     checkGeometry(app)
     shot("prazos-destaque")
     try pin("iris", on: false, app)
-    wait(codex, value: "Pro Max:78|Plus:B2h|Pro Max:!|Free:?,?")
+    wait(codex, value: "Pro Max:78|Plus:B2h|Pro Max:!")
   }
 
   /// Turns an account's "Destacar no resumo" on or off in the Codex details and closes them.
@@ -132,7 +140,7 @@ import XCTest
     // each provider falls back to counts within its own line.
     // A plan's label comes back when the states split it: Pro Max ready, then Pro Max needing login.
     wait(claude, value: "5x:100,72,64,50,50,50,50,50,50,50,50,41|Outro:90|Team:40|5x:B45m,B2h,B2h,B3h|20x:E3d,E3d")
-    wait(app.buttons["proxy-strip-codex"], value: "Pro Max:64|Plus:33|5x:B3h,E2d|Pro Max:!|5x:?|Free:?,?,?,?,?,?,?,?")
+    wait(app.buttons["proxy-strip-codex"], value: "Pro Max:64|Plus:33|5x:B3h,E2d|Pro Max:!|5x:?")
     checkGeometry(app)
     shot("muitas")
   }
