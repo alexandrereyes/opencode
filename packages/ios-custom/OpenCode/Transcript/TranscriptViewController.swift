@@ -465,6 +465,20 @@ import SwiftUI
   /// Heights before measurement. Only scrolling far and the scroll indicator ever see them: the reader's
   /// place is kept by anchoring, whatever the estimate.
   private func estimate(_ item: TranscriptItem) -> CGFloat {
+    // Every rebuild (each streamed batch) sizes every unmeasured item, and most of a long history is unmeasured:
+    // an item's estimate is computed once for its content and width.
+    if let cached = estimates[item.id], cached.width == size.width, cached.kind == item.kind { return cached.height }
+    if estimates.count > 2 * items.count + 256 {
+      let current = Set(items.map(\.id))
+      estimates = estimates.filter { current.contains($0.key) }
+    }
+    let height = estimated(item)
+    estimates[item.id] = (item.kind, size.width, height)
+    return height
+  }
+  private var estimates: [String: (kind: TranscriptItem.Kind, width: CGFloat, height: CGFloat)] = [:]
+
+  private func estimated(_ item: TranscriptItem) -> CGFloat {
     let width = max(100, size.width - AppLayout.margin * 2)
     func text(_ value: String) -> CGFloat {
       let perLine = max(10, width / 8.5)
@@ -524,8 +538,21 @@ import SwiftUI
     cell.accessibilityIdentifier = item.id
     if case .prompt(let message, _) = item.kind { primeTruncation(message.id, text: message.displayText) }
     if case .pending(let pending, _) = item.kind { primeTruncation(pending.id, text: pending.payload.displayText) }
-    cell.configure(item, context: context)
+    cell.configure(item, context: context, knownHeight: knownHeight(item))
     return cell
+  }
+
+  /// Sizing a hosted table lays out every cell's text through SwiftUI; one that comes back with the content,
+  /// width, text size and wrapping it was measured with keeps that height. Its content cannot grow after display
+  /// (tables with media load images; quote markers insert text), so those still measure, as does every other item.
+  private func knownHeight(_ item: TranscriptItem) -> ((CGFloat) -> CGFloat?)? {
+    guard case .block(let part, let block, _) = item.kind, let table = block.table,
+      !table.rows.contains(where: { $0.contains { $0.contains { $0.image != nil } } })
+    else { return nil }
+    return { [weak self] width in
+      guard let self, width == size.width, context.responseQuotes(part).highlights.isEmpty else { return nil }
+      return memory.heights.height(item, width: width, category: category)
+    }
   }
 
   /// A bubble learns whether its prompt is truncated only after it renders, then grows by its toggle; tell it

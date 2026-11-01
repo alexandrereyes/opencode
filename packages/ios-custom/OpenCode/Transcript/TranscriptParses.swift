@@ -80,18 +80,21 @@ import SwiftUI
 }
 
 /// Measured heights, kept with the conversation so a rebuilt transcript lays out at once. An entry is valid
-/// for the same item content, width and text size.
+/// for the same item content, width, text size and code/table wrapping (global settings that change a block's
+/// height without changing its item).
 @MainActor final class TranscriptHeights {
   private struct Entry {
     let kind: TranscriptItem.Kind
     let width: CGFloat
     let category: UIContentSizeCategory
+    let wrapping: Int
     let height: CGFloat
   }
   private var entries: [String: Entry] = [:]
 
   func height(_ item: TranscriptItem, width: CGFloat, category: UIContentSizeCategory) -> CGFloat? {
-    guard let entry = entries[item.id], entry.width == width, entry.category == category, entry.kind == item.kind
+    guard let entry = entries[item.id], entry.width == width, entry.category == category,
+      entry.wrapping == Self.wrapping, entry.kind == item.kind
     else { return nil }
     return entry.height
   }
@@ -103,8 +106,24 @@ import SwiftUI
   }
 
   func store(_ height: CGFloat, for item: TranscriptItem, width: CGFloat, category: UIContentSizeCategory) {
-    entries[item.id] = Entry(kind: item.kind, width: width, category: category, height: height)
+    entries[item.id] = Entry(kind: item.kind, width: width, category: category, wrapping: Self.wrapping, height: height)
   }
+
+  /// The code and table wrap toggles (`@AppStorage`, on by default), read once per change of the defaults:
+  /// every rebuild looks up the height of every item.
+  static var wrapping: Int {
+    _ = observer
+    if let current { return current }
+    let defaults = UserDefaults.standard
+    let value = (defaults.object(forKey: "OpenCodeMarkdownCodeWrap") as? Bool ?? true ? 1 : 0)
+      | (defaults.object(forKey: "OpenCodeMarkdownTableWrap") as? Bool ?? true ? 2 : 0)
+    current = value
+    return value
+  }
+  private static var current: Int?
+  private static let observer = NotificationCenter.default.addObserver(
+    forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+  ) { _ in MainActor.assumeIsolated { current = nil } }
 
   func removeAll() { entries.removeAll() }
 }

@@ -123,24 +123,26 @@ private struct ResponseTableContent: UIViewRepresentable {
   func makeUIView(context: Context) -> ResponseTableView { ResponseTableView() }
   func updateUIView(_ view: ResponseTableView, context: Context) {
     var changed = view.wrap != wrap
-    if view.columns != table.alignments.count || view.cells.count != table.rows.count {
+    let identity = "\(messageID)/\(partID)/\(block.id)"
+    if view.identity != identity || view.cells.count != table.rows.count
+      || zip(view.cells, table.rows).contains(where: { $0.count != $1.count })
+    {
       changed = true
-      view.cells.flatMap { $0 }.forEach { $0.clearSelection(); $0.removeFromSuperview() }
-      view.cells = table.rows.map { row in row.map { _ in ResponseTextView(frame: .zero, textContainer: nil) } }
-      view.coordinators = table.rows.map { row in row.map { _ in SelectableResponseText.Coordinator() } }
-      view.cells.flatMap { $0 }.forEach {
-        $0.isEditable = false
-        $0.isSelectable = true
-        $0.isScrollEnabled = false
-        $0.backgroundColor = theme.uiColor(.tableSurface).withAlphaComponent(0)
-        $0.textContainer.lineFragmentPadding = 0
-        view.addSubview($0)
+      // Cell views pass between tables through a shared pool; a table that comes back gets its own views,
+      // already styled and laid out, when they are still there.
+      view.giveCells()
+      let taken = table.rows.indices.map { row in
+        table.rows[row].indices.map { column in ResponseTableCellPool.take("\(identity)#\(row)#\(column)") }
       }
+      view.cells = taken.map { $0.map(\.0) }
+      view.coordinators = taken.map { $0.map(\.1) }
+      view.cells.joined().forEach { view.addSubview($0) }
     }
     view.columns = table.alignments.count
+    view.markdown = table.markdown
     view.memory = memory
-    if view.identity != "\(messageID)/\(partID)/\(block.id)" {
-      view.identity = "\(messageID)/\(partID)/\(block.id)"
+    if view.identity != identity {
+      view.identity = identity
       // UIScrollView clamps an offset assigned before its content has been measured.
       view.pendingOffset = memory?.tableOffset(view.identity) ?? 0
       view.setNeedsLayout()
@@ -171,7 +173,7 @@ private struct ResponseTableContent: UIViewRepresentable {
     return CGSize(width: width, height: uiView.measure(width).height)
   }
   static func dismantleUIView(_ view: ResponseTableView, coordinator: Void) {
-    view.cells.flatMap { $0 }.forEach { $0.clearSelection(); $0.delegate = nil }
+    view.giveCells()
   }
 }
 
@@ -179,6 +181,8 @@ final class ResponseTableView: UIScrollView {
   struct Measurement {
     let widths: [CGFloat]
     let heights: [CGFloat]
+    /// Each cell's text height, so laying the cells out needs no second measurement.
+    var cells: [[CGFloat]] = []
     var width: CGFloat { widths.reduce(0, +) }
     var height: CGFloat { heights.reduce(0, +) }
   }
@@ -186,6 +190,7 @@ final class ResponseTableView: UIScrollView {
   var coordinators: [[SelectableResponseText.Coordinator]] = []
   var columns = 0
   var identity = ""
+  var markdown = ""
   /// Keeps the horizontal position per table, so a rebuilt response shows the same columns.
   weak var memory: TranscriptMemory?
   var pendingOffset: CGFloat?
@@ -217,6 +222,16 @@ final class ResponseTableView: UIScrollView {
     clipsToBounds = true
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) não é usado") }
+  /// Returns the cell views to the shared pool under this table's cell positions.
+  func giveCells() {
+    for (row, views) in cells.enumerated() {
+      for (column, cell) in views.enumerated() where coordinators.indices.contains(row) && coordinators[row].indices.contains(column) {
+        ResponseTableCellPool.give(cell, coordinators[row][column], key: "\(identity)#\(row)#\(column)")
+      }
+    }
+    cells = []
+    coordinators = []
+  }
   func invalidateMeasurement() {
     measurements.removeAll(keepingCapacity: true)
     layoutWidth = nil
@@ -225,6 +240,16 @@ final class ResponseTableView: UIScrollView {
   func measure(_ width: CGFloat) -> Measurement {
     if let cached = measurements[width] { return cached }
     guard columns > 0 else { return Measurement(widths: [], heights: []) }
+    // Shown text (quote markers included), Markdown (styles), text size, wrapping and width fix the geometry.
+    let first = cells.joined().first { ($0.attributedText?.length ?? 0) > 0 }?.attributedText
+    let key = ResponseTableMeasurements.Key(markdown: markdown,
+      text: cells.joined().map { $0.attributedText?.string ?? "" }.joined(separator: "\u{1}"),
+      textSize: (first?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)?.pointSize ?? 0, wrap: wrap, width: width)
+    if let cached = ResponseTableMeasurements.value(key) {
+      if measurements.count >= 8 { measurements.removeAll(keepingCapacity: true) }
+      measurements[width] = cached
+      return cached
+    }
     let natural = (0..<columns).map { column in
       max(120, cells.map { row in ceil(Self.width(row[column].attributedText)) + 32 }.max() ?? 120)
     }
@@ -234,12 +259,13 @@ final class ResponseTableView: UIScrollView {
     }
     let widths = MarkdownTable.columnWidths(natural: natural.map(Double.init), minimum: minimum.map(Double.init),
       available: Double(width), wrap: wrap).map { CGFloat($0) }
-    let heights = cells.map { row in
-      (row.enumerated().map { column, text in text.fittingSize(width: widths[column] - 32).height }.max() ?? 26) + 20
+    let texts = cells.map { row in
+      row.enumerated().map { column, text in text.fittingSize(width: widths[column] - 32).height }
     }
-    let result = Measurement(widths: widths, heights: heights)
+    let result = Measurement(widths: widths, heights: texts.map { ($0.max() ?? 26) + 20 }, cells: texts)
     if measurements.count >= 8 { measurements.removeAll(keepingCapacity: true) }
     measurements[width] = result
+    ResponseTableMeasurements.store(result, for: key)
     return result
   }
   static func width(_ text: NSAttributedString) -> CGFloat {
@@ -272,8 +298,7 @@ final class ResponseTableView: UIScrollView {
     for (row, texts) in cells.enumerated() {
       var x: CGFloat = 0
       for (column, text) in texts.enumerated() {
-        let height = text.fittingSize(width: layout.widths[column] - 32).height
-        text.frame = CGRect(x: x + 16, y: y + 10, width: layout.widths[column] - 32, height: height)
+        text.frame = CGRect(x: x + 16, y: y + 10, width: layout.widths[column] - 32, height: layout.cells[row][column])
         x += layout.widths[column]
         if column < columns - 1 { separators.append(CGRect(x: x, y: y, width: 1, height: layout.heights[row])) }
       }
@@ -309,5 +334,65 @@ final class ResponseTableView: UIScrollView {
         CATransaction.commit()
       }
     }
+  }
+}
+
+/// Column widths and row heights by table content, width, text size and wrapping, shared by every table view:
+/// a table that scrolls back into view is not measured again. Bounded; emptied on memory warnings.
+@MainActor enum ResponseTableMeasurements {
+  struct Key: Hashable {
+    let markdown: String
+    let text: String
+    /// The first cell's font size: Dynamic Type, whatever the view's own traits say.
+    let textSize: CGFloat
+    let wrap: Bool
+    let width: CGFloat
+  }
+  private static var values: [Key: ResponseTableView.Measurement] = [:]
+  private static let observer = NotificationCenter.default.addObserver(
+    forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+  ) { _ in MainActor.assumeIsolated { values.removeAll() } }
+
+  static func value(_ key: Key) -> ResponseTableView.Measurement? {
+    _ = observer
+    return values[key]
+  }
+  static func store(_ value: ResponseTableView.Measurement, for key: Key) {
+    if values.count >= 256 { values.removeAll(keepingCapacity: true) }
+    values[key] = value
+  }
+}
+
+/// Cell text views reused across tables: creating a selectable `UITextView` costs more than configuring one.
+/// Each view keeps its coordinator and the cell it last showed, so a table
+/// that comes back takes its own views and is neither styled nor laid out again. Bounded (oldest first out);
+/// emptied on memory warnings.
+@MainActor enum ResponseTableCellPool {
+  private static var views: [(key: String, view: ResponseTextView, coordinator: SelectableResponseText.Coordinator)] = []
+  private static let observer = NotificationCenter.default.addObserver(
+    forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+  ) { _ in MainActor.assumeIsolated { views.removeAll() } }
+
+  static func take(_ key: String) -> (ResponseTextView, SelectableResponseText.Coordinator) {
+    _ = observer
+    if let index = views.lastIndex(where: { $0.key == key }) ?? (views.isEmpty ? nil : 0) {
+      let reused = views.remove(at: index)
+      return (reused.view, reused.coordinator)
+    }
+    let view = ResponseTextView(frame: .zero, textContainer: nil)
+    view.isEditable = false
+    view.isSelectable = true
+    view.isScrollEnabled = false
+    view.backgroundColor = .clear
+    view.textContainer.lineFragmentPadding = 0
+    return (view, SelectableResponseText.Coordinator())
+  }
+
+  static func give(_ view: ResponseTextView, _ coordinator: SelectableResponseText.Coordinator, key: String) {
+    view.clearSelection()
+    view.delegate = nil
+    view.removeFromSuperview()
+    views.append((key, view, coordinator))
+    if views.count > 128 { views.removeFirst(views.count - 128) }
   }
 }

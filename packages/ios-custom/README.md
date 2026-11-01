@@ -2698,7 +2698,16 @@ composer, sheets and overlays stay SwiftUI; `TranscriptHost` mounts the view con
   `ResponseTextView` (selection crosses its paragraphs), while code, tables, media, formulas, activity steps, notices,
   footers, day chips, prompts and request cards are separate items hosted with `UIHostingConfiguration`. An item's kind
   carries everything its height depends on (expansion included), so equal kinds share a cached height
-  (`TranscriptHeights`, by item, content, width and text size).
+  (`TranscriptHeights`, by item, content, width, text size and the code/table wrap settings).
+  **Tables (1 November).** A hosted table cell that comes back with a cached height is not sized through SwiftUI
+  again (`TranscriptViewController.knownHeight`; tables with media or quote marks still measure). Column widths and
+  row heights are cached by shown text, Markdown, font size, wrapping and width (`ResponseTableMeasurements`, 256
+  entries), and cell text views come from a shared pool keyed by their table cell (`ResponseTableCellPool`, 128 views),
+  so a table scrolling back takes its own views, already styled and laid out. Both are emptied on memory warnings.
+  Item estimates are computed once per item content and width, not on every streamed batch. Simulator, Debug `-O`,
+  a private synthetic fixture shaped like a 1,090-message session with 208 tables, frames over 50 ms per 12 s
+  (medians of three, before → after): first history 14 → 4, paging 7 → 2, revisits 8 → 2, scrolling while a
+  response streams every 120 ms 14 → 5; main-thread CPU 10–21% lower. Not yet measured on a device.
   A rebuilt native table restores its `TranscriptMemory.tableOffset` only after its content width is measured;
   the grid is part of that same scrolling content, so separators stay aligned with cells.
 - **Shared conversation chrome.** Activity cells render `ConversationStep` through the shared

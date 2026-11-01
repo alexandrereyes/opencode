@@ -18,8 +18,11 @@ public enum PendingInputs {
   /// Undelivered user steers shown below the transcript in admission order. Queued items stay in
   /// the tray; an item whose message already arrived is delivered.
   public static func steers(_ inbox: [InboxItem], messages: [ConversationMessage]) -> [InboxItem] {
+    // Read on every scroll step: without a pending steer there is no need to index a long history.
+    let steers = inbox.filter { $0.type == "user" && $0.delivery == .steer }
+    guard !steers.isEmpty else { return [] }
     let delivered = Set(messages.map(\.id))
-    return inbox.filter { $0.type == "user" && $0.delivery == .steer && !delivered.contains($0.id) }
+    return steers.filter { !delivered.contains($0.id) }
   }
 
   public static func status(

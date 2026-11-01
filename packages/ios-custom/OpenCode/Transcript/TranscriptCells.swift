@@ -98,8 +98,13 @@ final class TranscriptHostCell: UICollectionViewCell, TranscriptMessageCell {
   }
   required init?(coder: NSCoder) { nil }
 
-  func configure(_ item: TranscriptItem, context: TranscriptContext) {
+  /// A height already measured for the item's current content, width, text size and wrapping, if sizing it again
+  /// can be skipped: see `TranscriptViewController.knownHeight`.
+  private var knownHeight: ((CGFloat) -> CGFloat?)?
+
+  func configure(_ item: TranscriptItem, context: TranscriptContext, knownHeight: ((CGFloat) -> CGFloat?)? = nil) {
     itemID = item.id
+    self.knownHeight = knownHeight
     if case .unparsed = item.kind { placeholder = true } else { placeholder = false }
     contentConfiguration = UIHostingConfiguration { TranscriptItemView(item: item, context: context) }
       .margins(.all, 0)
@@ -129,6 +134,10 @@ final class TranscriptHostCell: UICollectionViewCell, TranscriptMessageCell {
   ) -> UICollectionViewLayoutAttributes {
     let attributes = layoutAttributes.copy() as! UICollectionViewLayoutAttributes
     if placeholder { return attributes }
+    if let height = knownHeight?(layoutAttributes.frame.width) {
+      attributes.frame.size.height = height
+      return attributes
+    }
     let size = contentView.systemLayoutSizeFitting(
       CGSize(width: layoutAttributes.frame.width, height: UIView.layoutFittingCompressedSize.height),
       withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
