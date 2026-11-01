@@ -370,7 +370,11 @@ in [`docs/conversation-contract.md`](docs/conversation-contract.md).
   IDs, subgroup IDs and message anchors preserve expansion during streaming, splits and history prepend. The pure
   `ConversationActivity`/`ConversationActivityItem` projection feeds the existing single cached-measurement scroll owner.
 - **Response footer:** only when the response finishes, a discreet line with model, effort, date, and copy
-  (`Opus 5.5 · xhigh · 21/10 10:42 ⧉`).
+  (`Opus 5.5 · xhigh · 21/10 10:42 ⧉`). **1 November:** "finishes" means the session's own run ended
+  (`ConversationStore.executing`), not its whole family: a background subagent still working no longer hides the
+  footer of an answer that is complete (the header still says it is working). Whatever the last block (table, code,
+  prose) it shows the same; `OpenCodeUITests/ResponseFooterTests` covers five endings, ↓ back to the end and a streamed
+  answer that ends in a table (`-OpenCodeFixtureFamilyWorking`, `-OpenCodeFixtureStreamStop <ticks>`).
 - **Sticky message:** the current turn's user message always sticks below the header. **Alexandre, 22/10: user bubble
   like OpenChamber** — scrolling never collapses or expands it. **Você → Leitura → Recolher mensagens longas do usuário**
   is on by default: overflow beyond two rendered lines offers **Mostrar mensagem completa** / **Mostrar menos**.

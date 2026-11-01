@@ -256,7 +256,9 @@ import SwiftUI
     _ = (store.submitted, store.error, store.readingRequest)
     let input = TranscriptProjection.Input(
       messages: store.activity.messages,
-      marks: TranscriptMarks(messages, working: store.working),
+      // The answer ends with the session's own run: a background subagent still working keeps the family busy,
+      // not this answer, which shows its footer once the session is idle.
+      marks: TranscriptMarks(messages, working: store.executing),
       dividers: ConversationProjection.finalAnswerDividers(messages),
       pending: store.pendingSteers,
       permissions: store.family?.permissions ?? [],

@@ -895,6 +895,10 @@ import UniformTypeIdentifiers
     }
     #endif
     branch = "exemplo-sintetico"
+    // A background subagent still working after this session went idle.
+    if arguments.contains("-OpenCodeFixtureFamilyWorking") {
+      family = try! JSONDecoder().decode(FamilySnapshot.self, from: Data(#"{"count":2,"active":[{"id":"ses_fixture_child","projectID":"project_scroll_0","title":"Subagente sintético","location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576700000,"updated":1792576800000}}],"forms":[],"permissions":[]}"#.utf8))
+    }
     hasOlder = !fixtureHistory.isEmpty
     hasTranscript = true
     ready = true
@@ -943,11 +947,23 @@ import UniformTypeIdentifiers
   private func streamScrollFixture(every interval: Int) async {
     guard let target = messages.last(where: { $0.type == "assistant" && !$0.responseText.isEmpty })?.id else { return }
     active = [id]
+    // `-OpenCodeFixtureStreamStop <ticks>` ends the answer with a table and completes it, as a finished run does.
+    let arguments = ProcessInfo.processInfo.arguments
+    let stop = arguments.firstIndex(of: "-OpenCodeFixtureStreamStop").flatMap {
+      arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil
+    }
     var tick = 0
     while !Task.isCancelled {
       do { try await Task.sleep(for: .milliseconds(interval)) } catch { return }
       guard let index = messages.firstIndex(where: { $0.id == target }),
         let part = messages[index].content?.lastIndex(where: { $0.type == "text" }) else { return }
+      if let stop, tick >= stop {
+        messages[index].content?[part].text?.append("\n\n| Etapa | Situação |\n| --- | --- |\n| Fim sintético | concluída |")
+        messages[index].time.completed = messages[index].time.created + Double(tick * interval)
+        active = []
+        revision += 1
+        return
+      }
       messages[index].time.completed = nil
       messages[index].content?[part].text?.append(tick % 20 == 0 ? "\n\nParágrafo sintético \(tick)." : " token\(tick)")
       revision += 1
