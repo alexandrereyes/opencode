@@ -42,9 +42,12 @@ import XCTest
       XCTAssertLessThanOrEqual(frame.maxX, width - 15.5, "a faixa sai pela margem direita: \(frame)")
       XCTAssertLessThan(frame.maxY, chips.minY, "a faixa cobre os chips: \(frame) · \(chips)")
     }
-    // Side by side or one line each, the strip stays within the old rings' row.
+    // A list, one provider per line and never side by side: Codex above Claude, both across the whole strip.
+    XCTAssertGreaterThanOrEqual(claude.minY, codex.maxY - 0.5, "os provedores ficaram lado a lado: \(codex) · \(claude)")
+    XCTAssertEqual(claude.minX, codex.minX, accuracy: 0.5, "os provedores não começam na mesma margem: \(codex) · \(claude)")
+    XCTAssertEqual(claude.width, codex.width, accuracy: 0.5, "um provedor não ocupa a linha toda: \(codex) · \(claude)")
     let strip = claude.union(codex)
-    // 33 pt: the height the strip had before the rings (two lines of marks and summary, or one line each).
+    // 33 pt: two lines, one per provider, the height the strip had before the rings.
     if !stacked { XCTAssertLessThanOrEqual(strip.height, 33.5, "a faixa ficou mais alta que antes dos anéis: \(strip)") }
   }
 
@@ -125,7 +128,8 @@ import XCTest
     let app = try launch("many")
     defer { app.terminate() }
     let claude = app.buttons["proxy-strip-anthropic"]
-    // 16 Max 5x (every third extra one stopped by the 5-hour window), the plan without a name and an unknown one.
+    // 16 Max 5x (every third extra one stopped by the 5-hour window), the plan without a name and an unknown one:
+    // each provider falls back to counts within its own line.
     // A plan's label comes back when the states split it: Pro Max ready, then Pro Max needing login.
     wait(claude, value: "5x:100,72,64,50,50,50,50,50,50,50,50,41|Outro:90|Team:40|5x:B45m,B2h,B2h,B3h|20x:E3d,E3d")
     wait(app.buttons["proxy-strip-codex"], value: "Pro Max:64|Plus:33|5x:B3h,E2d|Pro Max:!|5x:?|Free:?,?,?,?,?,?,?,?")

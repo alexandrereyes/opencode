@@ -2675,6 +2675,21 @@ Max:!|Free:?,?`, VoiceOver prazos, 33 pt, the dash under Iris turned on and off 
 `marks|many` values, in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas` checks the same runs and
 renders `prazos-*` with Iris and Faia highlighted.
 
+### Sessões strip: one provider per line — 1 November
+
+The strip is a list again: Codex on one line, Claude on the next, on iPhone and Mac, as before the rings. The
+`ViewThatFits` from the first strip put the providers side by side when that fit (the Mac's wide column) and fell back
+to side-by-side counts when one line each did not; with the wider "Relógio + prazo" marks, real accounts reached that
+last form and the strip turned into two columns. Now `SessionQuotaMarks` always stacks the providers 1 pt apart
+(33 pt, the same position over the chips), and a line whose marks do not fit falls back within that line to the
+existing counts (`5x ●4 ◷1`, `4/5`, the provider's states), with `· +1 em 35m` while it fits. `SessionQuotaRow`, which
+only split the side-by-side row, is gone; accessibility sizes still stack each provider on two lines. Rings, waits,
+order, plan runs, the dash and the details are unchanged.
+
+Verification: `SessionQuotaMarksTests` assert Codex above Claude with the same left edge and width in every case
+(`marks`, `waits`, `many`, large text), 33 pt, in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas`
+counts two provider icons stacked in the left margin of every render (272, 302 and 452 pt, both themes).
+
 Verification: `SubscriptionMarksTests` (balance per window, one window, 0, 100, stale, order, runs, pinned, spoken
 balances); `SessionQuotaMarksTests` read `5x:100,72,64,41,B|20x:E,E` and the `many` runs, the `Saldos` suffix and a 33 pt
 strip, in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas` checks the same runs, heights and edges,

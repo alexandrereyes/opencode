@@ -5,9 +5,9 @@ import SwiftUI
 /// small icon, every enabled subscription as one mark, ready ones first as small rings with their own balance
 /// (`SubscriptionMarks.runs`, which repeats a plan's label when the states split it), and how many are ready now.
 /// It replaces the rings, which averaged one plan's weekly percent, within their row (38 pt), and keeps the 33 pt
-/// of the marks before it: the providers side by side on two lines; where the marks do not fit side by side, one
-/// line each (then without the release time); only then counts by state per plan, the ready share per plan, and the
-/// provider's counts by state. A provider opens its subscription details.
+/// of the marks before it: one provider per line, never side by side; a line whose marks do not fit shows, within the
+/// same line, counts by state per plan, the ready share per plan, or the provider's counts by state. A provider opens
+/// its subscription details.
 struct SessionQuotaMarks: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let quota: SubscriptionStore
@@ -17,12 +17,8 @@ struct SessionQuotaMarks: View {
     if dynamicTypeSize.isAccessibilitySize {
       VStack(alignment: .leading, spacing: 10) { providers(.adaptive) }
     } else {
-      ViewThatFits(in: .horizontal) {
-        SessionQuotaRow(spacing: 10) { providers(.marks) }
-        // One line each: 1 pt apart keeps two 16 pt rings within today's 33 pt.
-        VStack(alignment: .leading, spacing: 1) { providers(.line) }
-        SessionQuotaRow(spacing: 10) { providers(.adaptive) }
-      }
+      // A list, one provider per line: 1 pt apart keeps two 16 pt rings within 33 pt.
+      VStack(alignment: .leading, spacing: 1) { providers(.line) }
     }
   }
 
@@ -42,62 +38,11 @@ struct SessionQuotaMarks: View {
   }
 }
 
-/// The providers side by side, each with room for what it shows: as even as the row allows when everything fits,
-/// as even as possible between each one's narrowest form and what it needs when it does not, so a provider with
-/// longer plan names keeps its marks while the other never overflows. Each provider then fits its own content to
-/// that width.
-private struct SessionQuotaRow: Layout {
-  let spacing: CGFloat
-
-  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-    let widths = allot(proposal.width, subviews)
-    let height = zip(subviews, widths).map { $0.sizeThatFits(.init(width: $1, height: nil)).height }.max() ?? 0
-    return CGSize(width: proposal.width ?? widths.reduce(0, +) + gaps(subviews), height: height)
-  }
-
-  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-    var x = bounds.minX
-    for (subview, width) in zip(subviews, allot(bounds.width, subviews)) {
-      subview.place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading, proposal: .init(width: width, height: nil))
-      x += width + spacing
-    }
-  }
-
-  private func gaps(_ subviews: Subviews) -> CGFloat { spacing * CGFloat(max(0, subviews.count - 1)) }
-
-  private func allot(_ width: CGFloat?, _ subviews: Subviews) -> [CGFloat] {
-    let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }
-    guard let width, !ideal.isEmpty else { return ideal }
-    let available = max(0, width - gaps(subviews))
-    let total = ideal.reduce(0, +)
-    guard total > available else {
-      // Raise the narrower ones toward an even share: the smallest level t with sum(max(ideal, t)) = available.
-      var level = available / CGFloat(ideal.count)
-      for _ in 0..<ideal.count {
-        let fixed = ideal.filter { $0 > level }
-        guard fixed.count < ideal.count else { break }
-        level = (available - fixed.reduce(0, +)) / CGFloat(ideal.count - fixed.count)
-      }
-      return ideal.map { max($0, level) }
-    }
-    // As even as the row allows, never below a provider's last fallback (what it shows at no width) nor above what
-    // it needs: one provider's long row of rings never squeezes the other's counts under its neighbor, and both
-    // keep room for when their next accounts are back.
-    let least = subviews.map { $0.sizeThatFits(.init(width: 0, height: nil)).width }
-    func widths(_ level: CGFloat) -> [CGFloat] { zip(least, ideal).map { min(max($0, $1), max($0, level)) } }
-    let level = (0..<30).reduce((low: CGFloat(0), high: ideal.max() ?? 0)) { range, _ in
-      let middle = (range.low + range.high) / 2
-      return widths(middle).reduce(0, +) > available ? (range.low, middle) : (middle, range.high)
-    }.low
-    return widths(level)
-  }
-}
-
 private struct SessionQuotaProvider: View {
-  /// `marks`: every mark, on two lines, never degraded (the strip moves on when it does not fit). `line`: the same
-  /// on one line, the summary after the marks. Both leave the release out: each stopped mark shows its own wait.
-  /// `adaptive`: two lines that fall back to counts within their width, which then say when the next ones are back.
-  enum Style { case marks, line, adaptive }
+  /// `line`: the provider's marks and summary on one line, without the release (each stopped mark shows its own
+  /// wait), falling back to counts within the same line, whose summary then says when the next ones are back.
+  /// `adaptive`, for accessibility sizes: the same on two lines, marks or counts above the summary.
+  enum Style { case line, adaptive }
   @Environment(\.appTheme) private var theme
   #if os(iOS)
   // The ready ring (16 pt) and the other states' symbols (12 pt) keep the approved mockup's proportion.
@@ -118,36 +63,18 @@ private struct SessionQuotaProvider: View {
   var body: some View {
     HStack(alignment: .center, spacing: 8) {
       ProxyProviderIcon(provider: provider).frame(width: icon, height: icon)
-      if style == .line {
-        HStack(spacing: 7) {
-          if let marks, marks.total > 0 {
-            plans(marks.runs) { group in each(group) }
-            summary("· " + marks.summary(now: now, release: false))
-          } else {
-            summary(line)
+      if let marks, marks.total > 0 {
+        // The marks first, without the release; then counts, whose summary says when the next ones are back
+        // (`+1 em 35m`, then `+1 35m`): plans give way to keep it before it goes.
+        ViewThatFits(in: .horizontal) {
+          lines(plans(marks.runs) { group in each(group) }, marks.summary(now: now, release: false))
+          ForEach(Self.fallbacks, id: \.self) { fallback in
+            lines(top(fallback.top, marks), marks.summary(now: now, next: fallback.next, compact: fallback.compact))
           }
         }
         .monospacedDigit()
       } else {
-        Group {
-          if let marks, marks.total > 0 {
-            if style == .marks {
-              lines(plans(marks.runs) { group in each(group) }, marks.summary(now: now, release: false))
-            } else {
-              // The marks first, without the release; then counts, whose summary says when the next ones are back
-              // (`+1 em 35m`, then `+1 35m`): plans give way to keep it before it goes.
-              ViewThatFits(in: .horizontal) {
-                lines(plans(marks.runs) { group in each(group) }, marks.summary(now: now, release: false))
-                ForEach(Self.fallbacks, id: \.self) { fallback in
-                  lines(top(fallback.top, marks), marks.summary(now: now, next: fallback.next, compact: fallback.compact))
-                }
-              }
-            }
-          } else {
-            summary(line)
-          }
-        }
-        .monospacedDigit()
+        summary(line)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -178,10 +105,18 @@ private struct SessionQuotaProvider: View {
     }
   }
 
-  private func lines<Top: View>(_ top: Top, _ text: String) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
-      top
-      summary(text)
+  /// The marks or counts with the summary: after them on one line, below them for accessibility sizes.
+  @ViewBuilder private func lines<Top: View>(_ top: Top, _ text: String) -> some View {
+    if style == .line {
+      HStack(spacing: 7) {
+        top
+        summary("· " + text)
+      }
+    } else {
+      VStack(alignment: .leading, spacing: 3) {
+        top
+        summary(text)
+      }
     }
   }
 

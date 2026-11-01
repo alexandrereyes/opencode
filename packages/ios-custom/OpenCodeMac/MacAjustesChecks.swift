@@ -1783,8 +1783,8 @@ import SwiftUI
   /// `-OpenCodeMacProxyScenario marks`: every account of every plan in its group with the projection's mark and wait,
   /// then the production strip (`SessionQuotaMarks`) of that fixture, of that fixture with one account highlighted,
   /// of a store with the `many` fixture and of one with the `waits` fixture ("Relógio + prazo"), rendered
-  /// at the narrowest, default and widest Sessões column in both themes: never taller than the old ring row (38 pt) and
-  /// nothing drawn against the right edge.
+  /// at the narrowest, default and widest Sessões column in both themes: one provider per line (two icons stacked in
+  /// the left margin), never taller than those two lines and nothing drawn against the right edge.
   private static func cotas(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String,
     shot: (String) -> Void) async throws
   {
@@ -1879,18 +1879,22 @@ import SwiftUI
           let bitmap = NSBitmapImageRep(cgImage: image)
           let height = Double(image.height) / 2 - 2
           let background = bitmap.colorAt(x: 0, y: 0)
-          let inked = (0..<image.height).contains { y in
-            (image.width - 3..<image.width).contains { x in
-              guard let pixel = bitmap.colorAt(x: x, y: y), let background else { return false }
-              return abs(pixel.redComponent - background.redComponent) + abs(pixel.greenComponent - background.greenComponent)
-                + abs(pixel.blueComponent - background.blueComponent) > 0.12
-            }
+          func ink(_ x: Int, _ y: Int) -> Bool {
+            guard let pixel = bitmap.colorAt(x: x, y: y), let background else { return false }
+            return abs(pixel.redComponent - background.redComponent) + abs(pixel.greenComponent - background.greenComponent)
+              + abs(pixel.blueComponent - background.blueComponent) > 0.12
           }
+          let inked = (0..<image.height).contains { y in (image.width - 3..<image.width).contains { x in ink(x, y) } }
+          // One provider per line: two icons stacked in the left margin (side by side, only one would be there).
+          let rows = (0..<image.height).filter { y in (0..<32).contains { x in ink(x, y) } }
+          let icons = zip(rows, rows.dropFirst()).filter { $1 - $0 > 2 }.count + (rows.isEmpty ? 0 : 1)
           let step = "\(name)-\(Int(width))-\(variant.dark ? "escuro" : "claro")"
           try? bitmap.representation(using: .png, properties: [:])?
             .write(to: URL(fileURLWithPath: folder + "/\(MacCapture.name)-\(step).png"))
-          print("MacAjustes cotas \(step): altura \(height) pt · borda direita \(inked ? "tocada" : "livre")")
-          guard height <= 38.5, !inked else { throw Failure(description: "\(step): altura \(height), borda \(inked)") }
+          print("MacAjustes cotas \(step): altura \(height) pt · \(icons) provedores empilhados · borda direita \(inked ? "tocada" : "livre")")
+          guard height <= 34.5, icons == 2, !inked else {
+            throw Failure(description: "\(step): altura \(height), provedores empilhados \(icons), borda \(inked)")
+          }
         }
       }
     }
