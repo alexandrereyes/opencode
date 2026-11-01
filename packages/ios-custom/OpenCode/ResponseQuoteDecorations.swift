@@ -95,7 +95,7 @@ extension ResponseTextView {
         button.accessibilityIdentifier = "quote-marker-" + insertion.mark.id
         button.addAction(UIAction { [weak self] _ in
           guard let self else { return }
-          if selectedRange.length > 0 { clearSelection() }
+          ResponseTextView.endSelection()
           selectionChanged?()
           openQuote?(insertion.mark)
         }, for: .touchUpInside)

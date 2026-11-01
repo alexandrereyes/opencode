@@ -297,6 +297,20 @@ final class ResponseTextView: UITextView {
     if resigned, selectedRange.length > 0 { selectedRange = NSRange(location: selectedRange.location, length: 0) }
     return resigned
   }
+  /// The response text with the focus, which holds the only native selection.
+  private static weak var focused: ResponseTextView?
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { Self.focused = self }
+    return became
+  }
+  /// Ends the selection of whichever response text holds it, before a quote's sheet opens. A sheet does not take the
+  /// focus from that text: it comes back with a selection UIKit neither shows nor extends, and selecting it again
+  /// shows no menu.
+  static func endSelection() {
+    guard let view = focused, view.isFirstResponder else { return }
+    view.clearSelection()
+  }
 }
 
 /// Keeps short inline code of prose on one line: TextKit may not break inside it, so `/proventos` or `--all-pages`
@@ -525,8 +539,8 @@ struct SelectableResponseText: UIViewRepresentable {
     }
     @objc func openQuote(_ gesture: UITapGestureRecognizer) {
       guard let view = gesture.view as? ResponseTextView, let mark = view.quote(at: gesture.location(in: view)) else { return }
-      // A selection elsewhere is temporary: the tap that opens the comment also ends it.
-      if view.selectedRange.length > 0 { view.clearSelection() }
+      // A selection, in this text or another one, is temporary: the tap that opens the comment also ends it.
+      ResponseTextView.endSelection()
       view.selectionChanged?()
       view.openQuote?(mark)
     }

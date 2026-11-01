@@ -108,6 +108,49 @@ import XCTest
     XCTAssertFalse(view.isFirstResponder)
     XCTAssertEqual(view.quoteHighlights.map(\.mark.id), [mark.id], "Limpar a seleção não apaga a marcação")
   }
+  /// A quote opened from one text ends the selection another text holds, so its sheet does not leave that text with a
+  /// selection UIKit no longer shows or extends.
+  func testOpeningAQuoteEndsAnotherTextsSelection() throws {
+    let theme = AppTheme.load("openchamber-dark")
+    let plainSource = "Um parágrafo sem comentário, selecionado antes de abrir a citação."
+    let plain = try XCTUnwrap(MarkdownBlocks.parse(plainSource).first)
+    let source = "Trecho comentado em outro texto."
+    let block = try XCTUnwrap(MarkdownBlocks.parse(source).first)
+    let marked = (block.text as NSString).range(of: "Trecho comentado")
+    let quote = try XCTUnwrap(ChatQuote.selection(source: source, block: block, range: marked, messageID: "m", partID: "m:text:1"))
+    let mark = ChatQuoteMark(quote: quote, number: 1)
+    var opened: [String] = []
+    let host = UIHostingController(rootView: VStack {
+      SelectableResponseText(block: plain, messageID: "m", partID: "m:text:0", theme: theme, source: plainSource)
+      SelectableResponseText(block: block, messageID: "m", partID: "m:text:1", theme: theme, source: source,
+        quotesOverride: .init(highlights: [.init(mark: mark, ranges: [marked])], open: { opened.append($0.id) }))
+    })
+    let window = UIWindow(windowScene: try XCTUnwrap(
+      UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first))
+    window.rootViewController = host
+    window.makeKeyAndVisible()
+    window.layoutIfNeeded()
+    defer { window.isHidden = true; window.rootViewController = nil }
+    func responses(in parent: UIView) -> [ResponseTextView] {
+      [parent as? ResponseTextView].compactMap { $0 } + parent.subviews.flatMap(responses)
+    }
+    let views = responses(in: host.view)
+    let selected = try XCTUnwrap(views.first { $0.partID == "m:text:0" })
+    let commented = try XCTUnwrap(views.first { $0.partID == "m:text:1" })
+    commented.layoutIfNeeded()
+    XCTAssertTrue(selected.becomeFirstResponder())
+    selected.selectedRange = NSRange(location: 3, length: 9)
+    XCTAssertTrue(selected.hasSelection)
+    try XCTUnwrap(commented.quoteButtons.first).sendActions(for: .touchUpInside)
+    XCTAssertEqual(opened, [mark.id])
+    XCTAssertFalse(selected.isFirstResponder, "A outra seleção termina antes da folha")
+    XCTAssertEqual(selected.selectedRange.length, 0)
+    XCTAssertEqual(commented.quoteHighlights.map(\.mark.id), [mark.id])
+    // Selecting it again starts over from a focused text.
+    XCTAssertTrue(selected.becomeFirstResponder())
+    selected.selectedRange = NSRange(location: 3, length: 9)
+    XCTAssertTrue(selected.hasSelection)
+  }
   func testSeveralInlineMarkersPreserveUTF16SourceSelectionAndCopy() throws {
     let source = "Antes 😀 trecho um; depois trecho dois e o fim."
     let block = try XCTUnwrap(MarkdownBlocks.parse(source).first)

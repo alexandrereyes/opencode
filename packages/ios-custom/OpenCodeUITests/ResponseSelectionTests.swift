@@ -128,6 +128,103 @@ import XCTest
     resetDraft()
   }
 
+  /// A text whose selection was showing when another text's comment opened can be selected again (Alexandre, 01/11):
+  /// the sheet used to leave it focused with a selection UIKit neither showed nor extended, so neither a new selection
+  /// nor a tap inside it showed Copiar or Comentar. Covers a table cell and prose.
+  func testTextSelectsAgainAfterAnotherTextsCommentOpens() throws {
+    app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeTheme", theme,
+      "-OpenCodeScrollFixture", "conversation", "-OpenCodeFixturePosition", "tail", "-OpenCodeMarkdownFixture",
+      "-OpenCodeMarkdownFixtureDocument", "markdown-end-prose-table"]
+    app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_TEST_PASSWORD"])
+    launch()
+    if resetDraft() {
+      app.terminate()
+      launch()
+    }
+    defer { app.terminate() }
+    let transcript = app.collectionViews["conversation-transcript"]
+    func cell(_ prefix: String) -> XCUIElement {
+      app.textViews.matching(NSPredicate(format: "value BEGINSWITH %@", prefix)).firstMatch
+    }
+    let commented = cell("capturas prontas")
+    let other = cell("Exemplo A")
+    let table = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'markdown-table-content-'")).firstMatch
+    XCTAssertTrue(commented.waitForExistence(timeout: 10))
+    let viewport = app.transcriptViewport(transcript)
+    for _ in 0..<8 where !(commented.isHittable && commented.frame.maxY < viewport.maxY) {
+      app.dragTranscript(transcript, viewport: viewport, delta: -120)
+    }
+    func select(_ element: XCUIElement) {
+      let origin = element.coordinate(withNormalizedOffset: .zero)
+      origin.withOffset(CGVector(dx: 6, dy: 12)).press(forDuration: 1,
+        thenDragTo: origin.withOffset(CGVector(dx: element.frame.width - 6, dy: 40)), withVelocity: .slow, thenHoldForDuration: 0.3)
+    }
+    func menuShown(_ name: String) {
+      XCTAssertTrue(app.menuItems["Copiar"].waitForExistence(timeout: 5), "\(name): sem Copiar")
+      XCTAssertTrue(app.menuItems["Comentar"].exists, "\(name): sem Comentar")
+      capture("reselect-" + name)
+    }
+    let editor = app.textViews["comment-composer"]
+    let detail = app.staticTexts["quote-detail-comment"]
+    func openComment() {
+      commented.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.15)).tap()
+      XCTAssertTrue(detail.waitForExistence(timeout: 5))
+      XCTAssertEqual(detail.label, "Comentário da célula.")
+      app.buttons["Fechar"].tap()
+      XCTAssertTrue(detail.waitForNonExistence(timeout: 5))
+    }
+    select(commented)
+    menuShown("comentada")
+    app.menuItems["Comentar"].tap()
+    XCTAssertTrue(editor.waitForExistence(timeout: 5))
+    editor.typeText("Comentário da célula.")
+    app.buttons["Concluir"].tap()
+    let marker = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'quote-marker-'")).firstMatch
+    XCTAssertTrue(marker.waitForExistence(timeout: 10))
+
+    // A table cell: selected, another cell's comment opens and closes, the same cell is selected again.
+    select(other)
+    menuShown("celula")
+    openComment()
+    select(other)
+    menuShown("celula-de-novo")
+    app.menuItems["Copiar"].tap()
+    // A tap inside the new selection stays native.
+    other.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.3)).tap()
+    XCTAssertFalse(detail.waitForExistence(timeout: 2))
+
+    // Prose: the line above the table, once the transcript leaves it below the pinned prompt.
+    for _ in 0..<6 where table.frame.minY - app.transcriptViewport(transcript).minY < 90 {
+      app.dragTranscript(transcript, viewport: app.transcriptViewport(transcript), delta: 60)
+    }
+    func selectProse() {
+      let origin = table.coordinate(withNormalizedOffset: .zero)
+      origin.withOffset(CGVector(dx: 10, dy: -60)).press(forDuration: 1,
+        thenDragTo: origin.withOffset(CGVector(dx: 200, dy: -60)), withVelocity: .slow, thenHoldForDuration: 0.3)
+    }
+    selectProse()
+    menuShown("prosa")
+    openComment()
+    selectProse()
+    menuShown("prosa-de-novo")
+    // Comentar works, and the cell copied before pastes into its editor; cancelling keeps nothing.
+    app.menuItems["Comentar"].tap()
+    XCTAssertTrue(editor.waitForExistence(timeout: 5))
+    editor.press(forDuration: 1.2)
+    let paste = app.menuItems["Colar"]
+    XCTAssertTrue(paste.waitForExistence(timeout: 5))
+    paste.tap()
+    XCTAssertTrue((editor.value as? String ?? "").contains("Exemplo A"), String(describing: editor.value))
+    app.buttons["Cancelar"].tap()
+    XCTAssertTrue(editor.waitForNonExistence(timeout: 5))
+    // The earlier comment still opens from its mark.
+    marker.tap()
+    XCTAssertTrue(detail.waitForExistence(timeout: 5))
+    XCTAssertEqual(detail.label, "Comentário da célula.")
+    app.buttons["quote-remove"].tap()
+    XCTAssertTrue(marker.waitForNonExistence(timeout: 10))
+  }
+
   private func launch() {
     app.launch()
     let transcript = app.collectionViews["conversation-transcript"]
@@ -150,7 +247,14 @@ import XCTest
     let composer = app.textViews["conversation-composer"]
     if let text = composer.value as? String, !text.isEmpty {
       composer.tap()
-      composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: text.count + 2))
+      // The tap leaves the caret wherever it lands in a long pasted draft: select it all, or a leftover draft
+      // resizes the next test's transcript.
+      composer.tap()
+      let all = app.menuItems["Selecionar Tudo"]
+      if !all.waitForExistence(timeout: 3) { composer.press(forDuration: 1.2) }
+      if all.waitForExistence(timeout: 3) { all.tap() }
+      composer.typeText(XCUIKeyboardKey.delete.rawValue)
+      XCTAssertEqual(composer.value as? String ?? "", "", "O rascunho do compositor ficou com texto")
       // Leaving the foreground persists the cleared draft before the app is terminated.
       XCUIDevice.shared.press(.home)
       _ = app.wait(for: .runningBackground, timeout: 5)

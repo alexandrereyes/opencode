@@ -36,7 +36,6 @@ import XCTest
     capture("table-cell-mark-details")
     // A selection in another cell is temporary: one tap on the marked text, or on its number, ends it and opens the
     // comment; a tap inside the selection keeps the native menu.
-    // Each step selects in a cell not selected before (see `selectWithMenu`).
     func other(_ prefix: String) -> XCUIElement {
       app.textViews.matching(NSPredicate(format: "value BEGINSWITH %@", prefix)).firstMatch
     }
@@ -73,8 +72,8 @@ import XCTest
       thenDragTo: origin.withOffset(CGVector(dx: cell.frame.width - 6, dy: 40)), withVelocity: .slow, thenHoldForDuration: 0.3)
   }
 
-  /// A selection with its native menu. A text whose selection a comment sheet ended shows no menu when selected
-  /// again (prose too, outside this test's scope), so each step uses a fresh cell.
+  /// A selection with its native menu. Selecting a text again after a comment sheet is covered by
+  /// `ResponseSelectionTests/testTextSelectsAgainAfterAnotherTextsCommentOpens`.
   private func selectWithMenu(_ cell: XCUIElement) {
     select(cell)
     XCTAssertTrue(app.menuItems["Comentar"].waitForExistence(timeout: 5), "sem menu nativo na seleção")

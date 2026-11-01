@@ -4249,6 +4249,13 @@ project filter replacing the chips and the highlight of the open subagent.
   Checks: `QuoteDecorationTests/testSelectionElsewhereLetsTheMarkAndItsNumberOpenTheComment` and
   `ResponseSelectionTests/testSelectionElsewhereNeverBlocksTheSavedComment` (offline Markdown fixture; it fails on
   the previous code, whose word selection lost its menu), with the four keyboard cases of `QuestionFormUITests`.
+  The selection a quote ends may also be in another text (another cell, prose beside a table): the comment's sheet
+  does not take the focus from it, and that text came back with a selection UIKit neither showed nor extended, so
+  selecting it again showed no Copiar or Comentar, not even with a tap inside. The text with the focus is tracked
+  (`ResponseTextView.endSelection()`), and a quote's tap or number ends its selection before the sheet opens.
+  `QuoteDecorationTests/testOpeningAQuoteEndsAnotherTextsSelection` and
+  `ResponseSelectionTests/testTextSelectsAgainAfterAnotherTextsCommentOpens` (a cell and prose, Copiar pasted into the
+  comment editor, the earlier mark reopened) fail on the previous code.
   **Question drafts (Alexandre, 31/10):** the card's answers are no longer view state. They live in a
   `QuestionDraftSync` per form (`OpenCodeKit/QuestionDrafts.swift`), kept by the server's `QuestionDrafts` for the
   app's lifetime, saved on this device (Application Support `OpenCode/QuestionDrafts/<server hash>/`, one file per form,
