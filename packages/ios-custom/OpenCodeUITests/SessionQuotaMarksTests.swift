@@ -44,7 +44,8 @@ import XCTest
     }
     // Side by side or one line each, the strip stays within the old rings' row.
     let strip = claude.union(codex)
-    if !stacked { XCTAssertLessThanOrEqual(strip.height, 38.5, "a faixa ficou mais alta que os anéis: \(strip)") }
+    // 33 pt: the height the strip had before the rings (two lines of marks and summary, or one line each).
+    if !stacked { XCTAssertLessThanOrEqual(strip.height, 33.5, "a faixa ficou mais alta que antes dos anéis: \(strip)") }
   }
 
   func testEveryPlanAndAccountShowsAsAMarkAndOpensTheDetails() throws {
@@ -52,11 +53,15 @@ import XCTest
     defer { app.terminate() }
     let claude = app.buttons["proxy-strip-anthropic"]
     let codex = app.buttons["proxy-strip-codex"]
-    wait(claude, value: "5x:RRRRB|20x:EE")
-    wait(codex, value: "Pro Max:R|5x:BE|Free:??")
+    // Ready rings first with each account's own balance, larger first within the plan; then the other states.
+    wait(claude, value: "5x:100,72,64,41,B|20x:E,E")
+    wait(codex, value: "Pro Max:64|5x:B,E|Free:?,?")
     XCTAssertTrue(claude.label.hasPrefix("Claude, 4 de 7 assinaturas prontas agora. Max 5x: 4 prontas, 1 parada. Max 20x: 2 com a semana esgotada."), claude.label)
     XCTAssertTrue(claude.label.contains("Mais 1 às "), claude.label)
     XCTAssertTrue(codex.label.contains("Free: 2 sem medição"), codex.label)
+    // The number's window and what is unknown are spoken, never read as a capacity.
+    XCTAssertTrue(claude.label.hasSuffix(". Saldos: Brisa 100% em 5 horas (semana não informada), Atlas 72% na semana, Cedro 64% na semana, Duna 41% na semana"), claude.label)
+    XCTAssertTrue(codex.label.hasSuffix(". Saldos: Iris 64% em 5 horas"), codex.label)
     checkGeometry(app)
     shot("varias")
     claude.tap()
@@ -76,8 +81,9 @@ import XCTest
     defer { app.terminate() }
     let claude = app.buttons["proxy-strip-anthropic"]
     // 16 Max 5x (every third extra one stopped by the 5-hour window), the plan without a name and an unknown one.
-    wait(claude, value: "5x:RRRRBRRBRRBRRBRR|20x:EE|Outro:R|Team:R")
-    wait(app.buttons["proxy-strip-codex"], value: "Pro Max:R!|5x:BE?|Plus:R|Free:????????")
+    // A plan's label comes back when the states split it: Pro Max ready, then Pro Max needing login.
+    wait(claude, value: "5x:100,72,64,50,50,50,50,50,50,50,50,41|Outro:90|Team:40|5x:B,B,B,B|20x:E,E")
+    wait(app.buttons["proxy-strip-codex"], value: "Pro Max:64|Plus:33|5x:B,E|Pro Max:!|5x:?|Free:?,?,?,?,?,?,?,?")
     checkGeometry(app)
     shot("muitas")
   }
@@ -85,7 +91,7 @@ import XCTest
   func testLargeTextStacksTheProvidersInsideTheMargins() throws {
     let app = try launch("marks", largeText: true)
     defer { app.terminate() }
-    wait(app.buttons["proxy-strip-anthropic"], value: "5x:RRRRB|20x:EE")
+    wait(app.buttons["proxy-strip-anthropic"], value: "5x:100,72,64,41,B|20x:E,E")
     checkGeometry(app, stacked: true)
     shot("texto-grande")
   }

@@ -1781,7 +1781,8 @@ import SwiftUI
   // MARK: Cotas — the Sessões strip of subscription marks (rev. 2026-11-01)
 
   /// `-OpenCodeMacProxyScenario marks`: every account of every plan in its group with the projection's mark, then the
-  /// production strip (`SessionQuotaMarks`) of that fixture and of a second store with the `many` fixture, rendered
+  /// production strip (`SessionQuotaMarks`) of that fixture, of that fixture with one account highlighted and of a
+  /// store with the `many` fixture, rendered
   /// at the narrowest, default and widest Sessões column in both themes: never taller than the old ring row (38 pt) and
   /// nothing drawn against the right edge.
   private static func cotas(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String,
@@ -1789,37 +1790,67 @@ import SwiftUI
   {
     let quota = try require(runtime.store, "sessões").quota
     try await wait("cotas do fixture", timeout: 12) { (quota.marks(.anthropic)?.total ?? 0) > 0 ? true : nil }
+    // The strip's runs: each ready account's balance, larger first within its plan, then the other states.
     func plans(_ marks: SubscriptionMarks?) -> String {
-      (marks?.groups ?? []).map { group in
+      (marks?.runs ?? []).map { group in
         group.label + ":" + group.accounts.map { account in
+          if let balance = account.balance { return "\(balance.percent)" }
           switch SubscriptionMarks.Kind(account.mark) {
-          case .ready: "R"
-          case .blocked: "B"
-          case .exhausted: "E"
-          case .unmeasured: "?"
-          case .attention: "!"
+          case .ready: return "R"
+          case .blocked: return "B"
+          case .exhausted: return "E"
+          case .unmeasured: return "?"
+          case .attention: return "!"
           }
-        }.joined()
+        }.joined(separator: ",")
       }.joined(separator: "|")
     }
     let claude = plans(quota.marks(.anthropic))
     let codex = plans(quota.marks(.codex))
     print("MacAjustes cotas: Claude \(claude) · Codex \(codex)")
-    guard claude == "5x:RRRRB|20x:EE", codex == "Pro Max:R|5x:BE|Free:??",
+    guard claude == "5x:100,72,64,41,B|20x:E,E", codex == "Pro Max:64|5x:B,E|Free:?,?",
       quota.marks(.anthropic)?.release?.count == 1, quota.marks(.codex)?.release?.count == 1 else {
       throw Failure(description: "marcas: Claude \(claude) · Codex \(codex)")
     }
-    let many = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(),
+    let many = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(many: true),
       defaults: UserDefaults(suiteName: "br.com.alexandrem.opencode.mac.ajustes.cotas") ?? .standard)
     await many.refresh()
+    // The same fixture with Iris (Codex, 64) and Atlas (Claude, 72) highlighted, one on each line: a dash under its
+    // ring, which keeps its place in the order. Then the Sessões column itself with both, unhighlighted afterwards.
+    func highlight(_ store: SubscriptionStore) throws -> [String] {
+      for (provider, name) in [(SubscriptionProvider.codex, "Iris"), (.anthropic, "Atlas")]
+        where store.selected(provider)?.name != name {
+        let account = try require(store.snapshot?.pool(provider).accounts.first { $0.name == name }, name)
+        store.toggleSelection(account, provider: provider)
+      }
+      return [store.marks(.codex), store.marks(.anthropic)].flatMap { $0?.runs.flatMap(\.accounts) ?? [] }
+        .filter(\.pinned).map(\.name)
+    }
+    let suite = "br.com.alexandrem.opencode.mac.ajustes.cotas.destaque"
+    UserDefaults.standard.removePersistentDomain(forName: suite)
+    let pinned = SubscriptionStore(server: "mac-ajustes-cotas", client: StripClient(many: false),
+      defaults: UserDefaults(suiteName: suite) ?? .standard)
+    await pinned.refresh()
+    let highlighted = try highlight(pinned)
+    print("MacAjustes cotas destaque: \(plans(pinned.marks(.anthropic))) · \(highlighted)")
+    guard plans(pinned.marks(.anthropic)) == claude, plans(pinned.marks(.codex)) == codex,
+      highlighted == ["Iris", "Atlas"] else { throw Failure(description: "destaque: \(highlighted)") }
+    _ = try highlight(quota)
+    try await Task.sleep(for: .milliseconds(600))
+    shot("janela-destaque")
+    for provider in [SubscriptionProvider.codex, .anthropic] {
+      if let account = quota.selected(provider) { quota.toggleSelection(account, provider: provider) }
+    }
     try await Task.sleep(for: .milliseconds(800))
     shot("coluna")
     let other = AppTheme.load(theme.dark ? "openchamber-light" : "openchamber-dark")
-    for (name, source) in [("varias", quota), ("muitas", many)] {
+    for (name, source) in [("varias", quota), ("muitas", many), ("destaque", pinned)] {
       for width in [272.0, 302.0, 452.0] {
         for variant in [theme, other] {
+          // 2 pt below the strip for the last line's dash, which falls into the margin under it.
           let content = SessionQuotaMarks(quota: source) { _ in }
             .frame(width: width)
+            .padding(.bottom, 2)
             .background(variant.color(.background))
             .environment(\.appTheme, variant)
             .environment(\.locale, Locale(identifier: "pt_BR"))
@@ -1828,7 +1859,7 @@ import SwiftUI
           renderer.scale = 2
           let image = try require(renderer.cgImage, "imagem da faixa")
           let bitmap = NSBitmapImageRep(cgImage: image)
-          let height = Double(image.height) / 2
+          let height = Double(image.height) / 2 - 2
           let background = bitmap.colorAt(x: 0, y: 0)
           let inked = (0..<image.height).contains { y in
             (image.width - 3..<image.width).contains { x in
@@ -1847,9 +1878,10 @@ import SwiftUI
     }
   }
 
-  /// The `many` fixture for a second store, read once; actions never reach a proxy.
+  /// The `marks` or `many` fixture for another store, read once; actions never reach a proxy.
   private struct StripClient: SubscriptionClient {
-    func subscriptions() async throws -> Subscriptions { SubscriptionMarksFixture.snapshot(many: true, now: .now) }
+    let many: Bool
+    func subscriptions() async throws -> Subscriptions { SubscriptionMarksFixture.snapshot(many: many, now: .now) }
     func setSubscriptionAutomation(_ provider: SubscriptionProvider, enabled: Bool) async throws -> Subscriptions.Automation {
       throw SubscriptionActionFailure.unsupported
     }

@@ -2,11 +2,12 @@ import OpenCodeKit
 import SwiftUI
 
 /// The Sessões quota strip, shared by the iPhone and the Mac: for each LLM proxy provider, in `providers` order, its
-/// small icon, every enabled subscription as one mark grouped by the plan the proxy reports, and how many are ready
-/// now (`SubscriptionMarks`). It replaces the rings, which averaged one plan's weekly percent, within their row
-/// (38 pt): the providers side by side on two lines; where the marks do not fit side by side, one line each (then
-/// without the release time); only then counts by state per plan, the ready share per plan, and the provider's
-/// counts by state. A provider opens its subscription details.
+/// small icon, every enabled subscription as one mark, ready ones first as small rings with their own balance
+/// (`SubscriptionMarks.runs`, which repeats a plan's label when the states split it), and how many are ready now.
+/// It replaces the rings, which averaged one plan's weekly percent, within their row (38 pt), and keeps the 33 pt
+/// of the marks before it: the providers side by side on two lines; where the marks do not fit side by side, one
+/// line each (then without the release time); only then counts by state per plan, the ready share per plan, and the
+/// provider's counts by state. A provider opens its subscription details.
 struct SessionQuotaMarks: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let quota: SubscriptionStore
@@ -18,8 +19,9 @@ struct SessionQuotaMarks: View {
     } else {
       ViewThatFits(in: .horizontal) {
         SessionQuotaRow(spacing: 10) { providers(.marks) }
-        VStack(alignment: .leading, spacing: 3) { providers(.line) }
-        VStack(alignment: .leading, spacing: 3) { providers(.lineReady) }
+        // One line each: 1 pt apart keeps two 16 pt rings within today's 33 pt.
+        VStack(alignment: .leading, spacing: 1) { providers(.line) }
+        VStack(alignment: .leading, spacing: 1) { providers(.lineReady) }
         SessionQuotaRow(spacing: 10) { providers(.adaptive) }
       }
     }
@@ -42,8 +44,9 @@ struct SessionQuotaMarks: View {
 }
 
 /// The providers side by side, each with room for what it shows: as even as the row allows when everything fits,
-/// in proportion to what each needs when it does not, so a provider with longer plan names keeps its marks
-/// while the other has room to spare. Each provider then fits its own content to that width.
+/// each one's narrowest form plus a share of the rest in proportion to what it needs beyond that when it does not,
+/// so a provider with longer plan names keeps its marks while the other never overflows. Each provider then fits its
+/// own content to that width.
 private struct SessionQuotaRow: Layout {
   let spacing: CGFloat
 
@@ -78,7 +81,12 @@ private struct SessionQuotaRow: Layout {
       }
       return ideal.map { max($0, level) }
     }
-    return ideal.map { available * $0 / max(total, 1) }
+    // Each keeps its last fallback (what it shows at no width); the rest goes by what each needs beyond it, so one
+    // provider's long row of rings never squeezes the other's counts under its neighbor.
+    let least = subviews.map { $0.sizeThatFits(.init(width: 0, height: nil)).width }
+    let spare = max(0, available - least.reduce(0, +))
+    let more = zip(ideal, least).map { max(0, $0 - $1) }
+    return zip(least, more).map { $0 + spare * $1 / max(more.reduce(0, +), 1) }
   }
 }
 
@@ -89,10 +97,13 @@ private struct SessionQuotaProvider: View {
   enum Style { case marks, line, lineReady, adaptive }
   @Environment(\.appTheme) private var theme
   #if os(iOS)
-  @ScaledMetric(relativeTo: .caption) private var glyph = 10.0
+  // The ready ring (16 pt) and the other states' symbols (12 pt) keep the approved mockup's proportion.
+  @ScaledMetric(relativeTo: .caption) private var glyph = 12.0
+  @ScaledMetric(relativeTo: .caption) private var ring = 16.0
   @ScaledMetric(relativeTo: .caption) private var icon = 15.0
   #else
-  private let glyph = 10.0
+  private let glyph = 12.0
+  private let ring = 16.0
   private let icon = 14.0
   #endif
   let provider: SubscriptionProvider
@@ -107,7 +118,7 @@ private struct SessionQuotaProvider: View {
       if style == .line || style == .lineReady {
         HStack(spacing: 7) {
           if let marks, marks.total > 0 {
-            plans(marks) { group in each(group) }
+            plans(marks.runs) { group in each(group) }
             summary("· " + marks.summary(now: now, compact: true, release: style == .line))
           } else {
             summary(line)
@@ -118,13 +129,13 @@ private struct SessionQuotaProvider: View {
         VStack(alignment: .leading, spacing: 3) {
           if let marks, marks.total > 0 {
             if style == .marks {
-              plans(marks) { group in each(group) }
+              plans(marks.runs) { group in each(group) }
               summary(marks.summary(now: now))
             } else {
               ViewThatFits(in: .horizontal) {
-                plans(marks) { group in each(group) }
-                plans(marks) { group in counts(group) }
-                plans(marks) { group in ready(group) }
+                plans(marks.runs) { group in each(group) }
+                plans(marks.groups) { group in counts(group) }
+                plans(marks.groups) { group in ready(group) }
                 states(marks)
               }
               ViewThatFits(in: .horizontal) {
@@ -145,7 +156,7 @@ private struct SessionQuotaProvider: View {
     .accessibilityElement(children: .ignore)
   }
 
-  var spoken: String { marks?.spoken(provider.title, now: now) ?? "\(provider.title), \(line)" }
+  var spoken: String { marks?.spoken(provider.title, now: now, balances: true) ?? "\(provider.title), \(line)" }
 
   private var line: String {
     guard let status else { return "consultando…" }
@@ -153,12 +164,12 @@ private struct SessionQuotaProvider: View {
     return marks.summary(now: now)
   }
 
-  /// Every group with its short plan label; a group with no measured account shows only its `?` count.
-  private func plans<Content: View>(_ marks: SubscriptionMarks,
+  /// Every run or plan with its short plan label; one with no measured account shows only its `?` count.
+  private func plans<Content: View>(_ groups: [SubscriptionMarks.Group],
     @ViewBuilder _ body: @escaping (SubscriptionMarks.Group) -> Content) -> some View
   {
     HStack(spacing: 7) {
-      ForEach(marks.groups) { group in
+      ForEach(groups) { group in
         HStack(spacing: 3) {
           Text(group.label).appFont(.footnote).foregroundStyle(theme.color(.textSecondary))
           if group.unmeasured { counts(group) } else { body(group) }
@@ -170,15 +181,29 @@ private struct SessionQuotaProvider: View {
     .fixedSize()
   }
 
-  /// One mark per account; past 12 accounts a plan shows its counts instead.
+  /// One mark per account: a ring with its balance when ready, the state's symbol otherwise; past 12 accounts a run
+  /// shows its counts instead. The highlighted account gets a short dash below its mark, outside any ring.
   @ViewBuilder private func each(_ group: SubscriptionMarks.Group) -> some View {
     if group.accounts.count > 12 {
       counts(group)
     } else {
-      HStack(spacing: 1.5) {
+      HStack(spacing: 2) {
         ForEach(group.accounts) { account in
-          SubscriptionMarkGlyph(kind: .init(account.mark), pinned: account.pinned, size: glyph)
-            .help("\(account.name) · \(group.title) · \(Self.state(account.mark))")
+          Group {
+            if let balance = account.balance {
+              SubscriptionRingMark(balance: balance, size: ring)
+            } else {
+              SubscriptionMarkGlyph(kind: .init(account.mark), size: glyph)
+            }
+          }
+          // Right under the mark, in the 1 pt between lines, so it neither covers the number nor touches the line
+          // below; on the last line it falls into the margin under the strip, which keeps its height.
+          .overlay(alignment: .bottom) {
+            if account.pinned {
+              Capsule().fill(theme.color(.textStrong)).frame(width: ring * 0.4, height: 1).offset(y: 1)
+            }
+          }
+          .help("\(account.name) · \(group.title) · \(account.balance?.spoken ?? Self.state(account.mark))")
         }
       }
     }
@@ -224,21 +249,51 @@ private struct SessionQuotaProvider: View {
   }
 
   #if DEBUG
-  /// What the UI tests read: every plan with each account's mark, in order (`5x:RRRRB|20x:EE`).
+  /// What the UI tests read: the strip's runs with each account's balance or state, in order
+  /// (`5x:100,72,64,41,B|20x:E,E`).
   var fixture: String {
-    (marks?.groups ?? []).map { group in
+    (marks?.runs ?? []).map { group in
       group.label + ":" + group.accounts.map { account in
+        if let balance = account.balance { return "\(balance.percent)" }
         switch SubscriptionMarks.Kind(account.mark) {
-        case .ready: "R"
-        case .blocked: "B"
-        case .exhausted: "E"
-        case .unmeasured: "?"
-        case .attention: "!"
+        case .ready: return "R"
+        case .blocked: return "B"
+        case .exhausted: return "E"
+        case .unmeasured: return "?"
+        case .attention: return "!"
         }
-      }.joined()
+      }.joined(separator: ",")
     }.joined(separator: "|")
   }
   #endif
+}
+
+/// A ready subscription in the strip: a small ring whose arc is that account's own balance (the share left of the
+/// window that limits it), with the number in the center and no `%`. Never an aggregate of accounts or plans.
+struct SubscriptionRingMark: View {
+  @Environment(\.appTheme) private var theme
+  let balance: SubscriptionMarks.Balance
+  let size: Double
+
+  var body: some View {
+    let stroke = size * 0.12
+    ZStack {
+      Circle().inset(by: stroke / 2).stroke(theme.color(.highlight), lineWidth: stroke)
+      Circle().inset(by: stroke / 2).trim(from: 0, to: Double(balance.percent) / 100)
+        .stroke(theme.color(.primary), lineWidth: stroke)
+        .rotationEffect(.degrees(-90))
+      // Condensed so "100" fits inside the ring at the same size as the other numbers.
+      Text("\(balance.percent)")
+        .font(.system(size: size * 0.42, weight: .bold).width(.condensed))
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+        .foregroundStyle(theme.color(.textStrong))
+        .padding(.horizontal, stroke)
+    }
+    .frame(width: size, height: size)
+    .accessibilityHidden(true)
+  }
 }
 
 /// One subscription's state, readable without color: a filled dot (ready), a clock (stopped for a while), a

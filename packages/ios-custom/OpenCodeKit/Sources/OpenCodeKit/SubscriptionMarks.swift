@@ -59,6 +59,39 @@ public struct SubscriptionMarks: Sendable {
     public let mark: SubscriptionMark
     /// The "Mostrar no resumo" account: highlighted, never the only one shown.
     public let pinned: Bool
+    /// What a ready account has left; nil for every other mark, which never shows a number.
+    public let balance: Balance?
+  }
+  /// The share left of the window that limits a ready account now: the smaller of its measured 5-hour and weekly
+  /// windows, never a capacity and never comparable across plans. With one window reported, it is that one and
+  /// `alone` says the other is unknown.
+  public struct Balance: Sendable, Equatable {
+    public enum Window: Sendable, Equatable { case fiveHour, weekly }
+    public let percent: Int
+    public let window: Window
+    public let alone: Bool
+
+    init(percent: Int, window: Window, alone: Bool) {
+      self.percent = percent
+      self.window = window
+      self.alone = alone
+    }
+
+    init?(_ account: Subscriptions.Account) {
+      let windows = [(Window.fiveHour, account.fiveHourRemaining), (.weekly, account.remaining)]
+        .compactMap { window, value in value.map { (window, $0) } }
+      guard let lowest = windows.min(by: { $0.1 < $1.1 }) else { return nil }
+      percent = Int(min(100, max(0, lowest.1)).rounded())
+      window = lowest.0
+      alone = windows.count == 1
+    }
+
+    /// `72% na semana`, `100% em 5 horas (semana não informada)`.
+    public var spoken: String {
+      let place = window == .weekly ? "na semana" : "em 5 horas"
+      let missing = window == .weekly ? "5 horas não informada" : "semana não informada"
+      return "\(percent)% \(place)" + (alone ? " (\(missing))" : "")
+    }
   }
   public struct Group: Sendable, Identifiable {
     public let plan: String?
@@ -67,7 +100,9 @@ public struct SubscriptionMarks: Sendable {
     /// The full plan name for VoiceOver.
     public let title: String
     public let accounts: [Account]
-    public var id: String { plan ?? "" }
+    /// The plan for `groups`; the run's position too for `runs`, where a plan may come back.
+    var key: String? = nil
+    public var id: String { key ?? plan ?? "" }
     public var ready: Int { accounts.filter { $0.mark == .ready }.count }
     public func count(_ kind: Kind) -> Int { accounts.filter { Kind($0.mark) == kind }.count }
     /// No account measured: shown apart, as a count of `?`.
@@ -93,6 +128,11 @@ public struct SubscriptionMarks: Sendable {
   /// Groups in the proxy's order; groups with no measured account (such as Free accounts the proxy accepts but
   /// does not measure) go last, apart.
   public let groups: [Group]
+  /// The strip's order: ready accounts first (plans in the proxy's order, the larger balance first, then the proxy's
+  /// order), then stopped ones by their release (unknown last), exhausted, needing login and unmeasured (each by plan,
+  /// then the proxy's order). Consecutive accounts of one plan form a run, so a plan's label comes back when the
+  /// states split it. Balances order accounts only within one plan.
+  public let runs: [Group]
   /// Ready subscriptions: a count of accounts, not of quota.
   public var ready: Int { groups.reduce(0) { $0 + $1.ready } }
   public var total: Int { groups.reduce(0) { $0 + $1.accounts.count } }
@@ -107,19 +147,51 @@ public struct SubscriptionMarks: Sendable {
       // A plan the app has no name for keeps the proxy's own identifier, capitalized.
       let title = plan.map { Self.capitalized(Subscriptions.planLabel($0)) } ?? "Plano desconhecido"
       return Group(plan: plan, label: plan == nil ? "Outro" : Self.label(title), title: title,
-        accounts: enabled.filter { $0.plan == plan }.map {
-          Account(id: $0.id, name: $0.name, mark: SubscriptionMark($0, now: now), pinned: $0.id == pinned)
+        accounts: enabled.filter { $0.plan == plan }.map { account in
+          let mark = SubscriptionMark(account, now: now)
+          return Account(id: account.id, name: account.name, mark: mark, pinned: account.id == pinned,
+            balance: mark == .ready ? Balance(account) : nil)
         })
     }
     let ordered = built.filter { $0.count(.unmeasured) < $0.accounts.count }
       + built.filter { $0.count(.unmeasured) == $0.accounts.count }
     groups = ordered
+    runs = Self.runs(built, order: enabled.map(\.id))
     let releases = ordered.flatMap(\.accounts).compactMap { account -> Date? in
       if case .blocked(let until) = account.mark { return until }
       return nil
     }
     release = releases.min().map { first in
       Release(count: releases.filter { $0.timeIntervalSince(first) < 60 }.count, at: first)
+    }
+  }
+
+  static func runs(_ groups: [Group], order: [String]) -> [Group] {
+    let position = Dictionary(order.enumerated().map { ($1, Double($0)) }, uniquingKeysWith: { first, _ in first })
+    let entries = groups.enumerated().flatMap { plan, group in
+      group.accounts.map { account in (group: group, account: account, key: Self.key(account, plan: Double(plan),
+        position: position[account.id] ?? 0)) }
+    }
+    let sorted = entries.sorted { $0.key.lexicographicallyPrecedes($1.key) }
+    return sorted.reduce(into: [Group]()) { runs, entry in
+      if let last = runs.last, last.plan == entry.group.plan {
+        runs[runs.count - 1] = Group(plan: last.plan, label: last.label, title: last.title,
+          accounts: last.accounts + [entry.account], key: last.key)
+        return
+      }
+      runs.append(Group(plan: entry.group.plan, label: entry.group.label, title: entry.group.title,
+        accounts: [entry.account], key: "\(runs.count):\(entry.group.plan ?? "")"))
+    }
+  }
+
+  /// State first; then what orders that state; the proxy's order last, so ties never swap between reads.
+  static func key(_ account: Account, plan: Double, position: Double) -> [Double] {
+    switch account.mark {
+    case .ready: [0, plan, -Double(account.balance?.percent ?? 0), position]
+    case .blocked(let until): [1, until?.timeIntervalSince1970 ?? .greatestFiniteMagnitude, plan, position]
+    case .exhausted: [2, plan, position, 0]
+    case .attention: [3, plan, position, 0]
+    case .unmeasured: [4, plan, position, 0]
     }
   }
 
@@ -150,8 +222,9 @@ public struct SubscriptionMarks: Sendable {
       .joined(separator: " · ")
   }
 
-  /// VoiceOver: every plan with its accounts by state, then the release.
-  public func spoken(_ provider: String, now: Date, calendar: Calendar = .current) -> String {
+  /// VoiceOver: every plan with its accounts by state, then the release; `balances` adds each ready account's
+  /// balance and its window, in the strip's order.
+  public func spoken(_ provider: String, now: Date, calendar: Calendar = .current, balances: Bool = false) -> String {
     let plans = groups.map { group in
       let parts = Kind.allCases.compactMap { kind -> String? in
         let count = group.count(kind)
@@ -167,7 +240,9 @@ public struct SubscriptionMarks: Sendable {
       return "\(group.title): " + parts.joined(separator: ", ")
     }
     let release = releaseLabel(now: now, calendar: calendar).map { ". " + $0.replacingOccurrences(of: "+", with: "Mais ") + " volta" } ?? ""
-    return "\(provider), \(ready) de \(total) assinaturas prontas agora. " + plans.joined(separator: ". ") + release
+    let left = runs.flatMap(\.accounts).compactMap { account in account.balance.map { account.name + " " + $0.spoken } }
+    let tail = balances && !left.isEmpty ? ". Saldos: " + left.joined(separator: ", ") : ""
+    return "\(provider), \(ready) de \(total) assinaturas prontas agora. " + plans.joined(separator: ". ") + release + tail
   }
 }
 

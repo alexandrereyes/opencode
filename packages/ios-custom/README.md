@@ -2538,8 +2538,8 @@ Since 1 November the Sessões strip shows one mark per subscription instead of r
   honest unavailable state. Runtime shutdown cancels requests/actions and invalidates their generation before the next
   server runtime exists, so late old-server results are discarded. Observation times remain backend measurement times.
 - **Selection:** IDs only are persisted in `OpenCodeSubscriptionSelection.v1`, scoped by server URL/provider. Selecting
-  again restores the pool; a successful list removes vanished IDs. The Sessões strip rings that account's mark among
-  all the others (it no longer shows it alone); the Você row still uses it, and the large detail header always
+  again restores the pool; a successful list removes vanished IDs. The Sessões strip puts a short dash under that
+  account's mark among all the others (it no longer shows it alone); the Você row still uses it, and the large detail header always
   remains the pool. No model, request routing or backend preference is changed.
 - **Actions:** automatic resets and consuming one banked reset require a native confirmation alert with Cancel. Pending
   automation is provider-specific; pending reset is account-specific and prevents duplicates. Every action refetches;
@@ -2584,7 +2584,8 @@ rings' row (38 pt): measured 33 pt on iPhone 17 Pro, 35 pt on iPhone SE, 32–33
   accounts grouped by the plan the proxy reports, in the proxy's order, and one mark per account: ● ready, clock
   stopped for a while, ⊘ week exhausted, ? not measured, warning sign needs login. Groups whose accounts are all
   unmeasured (Free accounts the proxy accepts without measuring) go last, as `Free ?2`. Below: `4 prontas · +1 às
-  10:30`. The "Mostrar no resumo" account gets a ring around its mark. A tap opens the details, as before.
+  10:30`. The "Mostrar no resumo" account gets a ring around its mark. A tap opens the details, as before. Since the
+  rings below, ready accounts show their balance and come first.
 - **States** (`SubscriptionMark`): disabled accounts stay out. No login → needs login. A fresh measurement with the
   proxy refusing and the weekly window at 0 → exhausted. A proxy wait → stopped. No fresh measurement (stale, null
   capacity, a renewal passed since the observation, or no window reported at all) → not measured, never 0% or ready.
@@ -2611,6 +2612,37 @@ every account's mark per plan, VoiceOver text, geometry under the header and abo
 large text, details opening, in both themes and on iPhone SE; run with `script/test-subscriptions.py
 OpenCodeUITests/SessionQuotaMarksTests` and an explicit sandbox. Mac: `script/test-mac-ajustes.sh cotas` checks the
 fixture window and renders the production strip at 272, 302 and 452 pt in both themes (height and right edge).
+
+### Sessões strip: each ready subscription as a ring — 1 November
+
+Approved mockup: the 16 pt ring of `.agent-artifacts/cotas-assinaturas/percentuais-compactos/redondos/` in the main
+checkout. The ● of a ready account becomes a **16 pt ring** (`SubscriptionRingMark`, stroke 12% of the size, ~1.9 pt)
+whose arc is that account's own balance, with the number in the center and no `%`, bold condensed at 42% of the size
+(`100` fits). The other states keep their symbols, now 12 pt (clock, ⊘, ?, warning sign), never with a number. The
+"Mostrar no resumo" account gets a 1 pt dash right under its mark, in the 1 pt between lines (on the last line, in the
+margin under the strip), as an overlay that takes no height. iPhone and Mac draw the same strip (`SessionQuotaMarks`
+in `SessionsView` and `MacSessionColumn`); on iPhone both sizes scale with `.caption`, the Mac keeps them fixed.
+
+- **The number** (`SubscriptionMarks.Balance`): only for ready accounts, the smaller of the measured 5-hour and weekly
+  windows, rounded and clamped to 0–100. With one window reported (Max 5x reports no weekly window today) it is that
+  one, and VoiceOver and the Mac tooltip say so (`Brisa 100% em 5 horas (semana não informada)`); a rounded 0% the proxy
+  still serves shows `0`. A missing or stale measurement keeps its `?` and is never 0. Never a sum or average.
+- **Order** (`SubscriptionMarks.runs`; `groups` stays whole, by plan, for the details): ready first (plans in the
+  proxy's order; within a plan the larger number first, ties in the proxy's order), then stopped by known release
+  (unknown last), exhausted, needing login and unmeasured (each by plan, then the proxy's order). Consecutive accounts
+  of one plan form a run, so a plan's label comes back when states split it (`Pro Max 64 · 5x ◷⊘ · Pro Max ⚠`). Plans
+  are never compared by number. The mockup's 10-point bands were left out: ordering by the shown number is just as
+  stable here (the proxy's order breaks ties), and a band would put `41` before `49`, against the visible numbers.
+- **Height and fallbacks:** two lines of marks and summary, or one line each 1 pt apart, keep the strip at 33 pt
+  (iPhone 17 Pro and SE; 32–34 pt on the Mac). Past 12 accounts in a run, or when the rings do not fit, the existing
+  counts take over (`5x ●12 ◷4`, then `12/16`, then the provider's counts); full balances stay in VoiceOver, the Mac
+  tooltip and the details. `SessionQuotaRow` now gives each provider its narrowest form first and shares the rest by
+  need, so a long row of rings never pushes the other provider's counts under its icon.
+
+Verification: `SubscriptionMarksTests` (balance per window, one window, 0, 100, stale, order, runs, pinned, spoken
+balances); `SessionQuotaMarksTests` read `5x:100,72,64,41,B|20x:E,E` and the `many` runs, the `Saldos` suffix and a 33 pt
+strip, in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas` checks the same runs, heights and edges,
+also with Iris and Atlas highlighted (`destaque-*` renders and the Sessões column, `janela-destaque`).
 
 ### iPhone details: "Agora primeiro" — 1 November
 

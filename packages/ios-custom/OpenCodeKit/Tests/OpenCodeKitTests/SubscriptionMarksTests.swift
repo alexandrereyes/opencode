@@ -112,3 +112,53 @@ private func markAccount(_ id: String, plan: String?, weekly: Double? = nil, fiv
   ], now: marksNow)
   #expect(tomorrow.summary(now: marksNow, calendar: utc) == "0 prontas · +2 02/11 11:40")
 }
+
+@Test func eachReadyAccountShowsTheBalanceOfItsLimitingWindowAndNothingElseShowsANumber() {
+  let marks = SubscriptionMarks(accounts: [
+    markAccount("both", plan: "max5x", weekly: 72, fiveHour: 100),
+    markAccount("five", plan: "max5x", fiveHour: 100),
+    markAccount("week", plan: "max5x", weekly: 99.6),
+    markAccount("zero", plan: "max5x", weekly: 0, capacity: true),
+    markAccount("stopped", plan: "max5x", weekly: 58, fiveHour: 0, fiveHourResetAt: "2026-11-01T13:30:00Z", capacity: false),
+    markAccount("stale", plan: "max5x", weekly: 80, stale: true),
+    markAccount("empty", plan: "max20x", weekly: 0, capacity: false),
+  ], now: marksNow)
+  let balances = Dictionary(uniqueKeysWithValues: marks.groups.flatMap(\.accounts).map { ($0.id, $0.balance) })
+  #expect(balances["both"]! == .init(percent: 72, window: .weekly, alone: false))
+  #expect(balances["five"]! == .init(percent: 100, window: .fiveHour, alone: true))
+  #expect(balances["week"]! == .init(percent: 100, window: .weekly, alone: true))
+  // The proxy still serves a rounded 0%: the number says 0, not unknown.
+  #expect(balances["zero"]! == .init(percent: 0, window: .weekly, alone: true))
+  #expect(balances["stopped"]! == nil && balances["stale"]! == nil && balances["empty"]! == nil)
+  #expect(balances["five"]!!.spoken == "100% em 5 horas (semana não informada)")
+  #expect(balances["both"]!!.spoken == "72% na semana")
+}
+
+@Test func theStripPutsReadyAccountsFirstAndRepeatsAPlanWhenStatesSplitIt() {
+  let marks = SubscriptionMarks(accounts: [
+    markAccount("a-wait", plan: "max5x", fiveHour: 0, fiveHourResetAt: "2026-11-01T14:00:00Z", capacity: false),
+    markAccount("a-9", plan: "max5x", fiveHour: 9),
+    markAccount("b-off", plan: "max20x", weekly: 0, capacity: false),
+    markAccount("a-100", plan: "max5x", fiveHour: 100),
+    markAccount("b-64", plan: "max20x", weekly: 64),
+    markAccount("a-soon", plan: "max5x", fiveHour: 0, fiveHourResetAt: "2026-11-01T12:00:00Z", capacity: false),
+    markAccount("a-100b", plan: "max5x", fiveHour: 100),
+    markAccount("free", plan: "free"),
+    markAccount("login", plan: "max20x", weekly: 50, authenticated: false),
+    markAccount("a-why", plan: "max5x", weekly: 40, fiveHour: 30, capacity: false),
+  ], pinned: "a-9", now: marksNow)
+  #expect(marks.runs.map(\.label) == ["5x", "20x", "5x", "20x", "Free"])
+  #expect(marks.runs.map { $0.accounts.map(\.id) } == [
+    // Larger balance first within the plan; equal ones keep the proxy's order.
+    ["a-100", "a-100b", "a-9"], ["b-64"],
+    // Stopped ones by release, the unexplained one last; then exhausted, login and unmeasured.
+    ["a-soon", "a-wait", "a-why"], ["b-off", "login"], ["free"],
+  ])
+  #expect(Set(marks.runs.map(\.id)).count == marks.runs.count)
+  // Groups, which the details read, keep the plans whole in the proxy's order.
+  #expect(marks.groups.map(\.label) == ["5x", "20x", "Free"])
+  #expect(marks.runs[0].accounts.map(\.pinned) == [false, false, true])
+  #expect(marks.spoken("Claude", now: marksNow, calendar: utc, balances: true).hasSuffix(
+    ". Saldos: Conta a-100 100% em 5 horas (semana não informada), Conta a-100b 100% em 5 horas (semana não informada), Conta a-9 9% em 5 horas (semana não informada), Conta b-64 64% na semana (5 horas não informada)"))
+  #expect(!marks.spoken("Claude", now: marksNow, calendar: utc).contains("Saldos"))
+}
