@@ -64,7 +64,26 @@ struct VoiceTests {
       == .unreadableDelegation(id: "ask-2"))
     #expect(try VoiceProtocol.decode(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"ask-3"}}"#.utf8))
       == .unreadableDelegation(id: "ask-3"))
-    #expect(try VoiceProtocol.decode(Data(#"{"type":"session.closed"}"#.utf8)) == .closed)
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"session.closed"}"#.utf8)) == .closed())
+  }
+  /// `session.closed` as the route sent it on 02/11, and shapes it might send: the reason and the audio it counted are
+  /// optional, and a field of another type is left out instead of losing the event.
+  @Test func sessionClosedCarriesItsReasonAndUsage() throws {
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"session.closed","reason":"client_request","usage":{"audio_duration_ms":86800,"backend_model_usage":[]}}"#.utf8))
+      == .closed(reason: "client_request", audioMs: 86_800))
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"session.closed","reason":7,"usage":{"audio_duration_ms":1e300}}"#.utf8))
+      == .closed())
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"session.closed","reason":"expired","usage":null}"#.utf8))
+      == .closed(reason: "expired"))
+    #expect(VoiceProtocol.close == Data(#"{"type":"session.close"}"#.utf8))
+  }
+  /// A close reason names moderation by OpenAI's `content` or any reason that mentions content or moderation; the
+  /// reasons seen or documented for other ends do not.
+  @Test func closeReasonsThatNameModeration() {
+    for reason in ["content", "content_filter", "moderation", "Moderated"] { #expect(VoiceProtocol.closedByModeration(reason)) }
+    for reason in [nil, "client_request", "close_requested", "expired", "remote_hangup", "connection_lost", "novo"] {
+      #expect(!VoiceProtocol.closedByModeration(reason))
+    }
   }
   /// Only an expired session ends GPT Live's session; every other error leaves it open.
   @Test func onlyAnExpiredSessionEndsTheCall() throws {

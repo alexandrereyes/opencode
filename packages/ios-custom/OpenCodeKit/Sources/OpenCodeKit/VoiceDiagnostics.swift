@@ -28,7 +28,8 @@ public struct VoiceFailureReason: Equatable, Sendable {
   public static func leaseRefused(_ error: any Error) -> Self { Self("lease_refused", code: errorCode(error)) }
   /// The confirmed lease ran out with no renewal getting through.
   public static let leaseExpired = Self("lease_expired")
-  /// GPT Live moderated the call (`content_filter`): voice memory was cleared and an empty call started.
+  /// GPT Live moderated the call and ended its session: voice memory was cleared and an empty call started. `code` is
+  /// the moderation error's `type/code`, or the `session.closed` reason that named moderation.
   public static func contextReset(_ code: String?, detail: String? = nil) -> Self {
     Self("context_reset", code: code, detail: detail)
   }
@@ -54,8 +55,11 @@ public struct VoiceFailureReason: Equatable, Sendable {
   public static let delegationOverflow = Self("delegation_overflow")
   public static func startFailed(_ error: any Error) -> Self { Self("start_failed", code: errorCode(error)) }
   public static func reconnectFailed(_ error: any Error) -> Self { Self("reconnect_failed", code: errorCode(error)) }
-  /// GPT Live closed the session (`session.closed`).
-  public static let sessionClosed = Self("session_closed")
+  /// GPT Live closed the session (`session.closed`); `code` is its `reason` (`client_request` for our own close), and
+  /// `detail` the audio it counted.
+  public static func sessionClosed(_ reason: String?, audioMs: Int? = nil) -> Self {
+    Self("session_closed", code: reason, detail: audioMs.map { "audio_duration_ms=\($0)" })
+  }
 
   // Tolerated: the call goes on (or was rebuilt) after these.
   /// ICE came back on its own within the grace.
@@ -68,6 +72,14 @@ public struct VoiceFailureReason: Equatable, Sendable {
   public static let delegationRepeat = Self("delegation_repeat")
   /// A result that arrived during a rebuild went to the new call as context (`session.context.append`).
   public static let contextAppend = Self("context_append")
+  /// GPT Live sent a moderation `error`; whether it ends the session is seen within `moderationWindow`.
+  public static func moderationPending(_ code: String?, detail: String? = nil) -> Self {
+    Self("moderation_pending", code: code, detail: detail)
+  }
+  /// The session outlived the moderation window: only the speech was cut, the call and its memory went on.
+  public static func moderationNonFatal(_ code: String?, detail: String? = nil) -> Self {
+    Self("moderation_nonfatal", code: code, detail: detail)
+  }
 
   /// The kind of an error, never its message: `http_503`, `url_-1009`, `invalid_answer`, `DecodingError`.
   public static func errorCode(_ error: any Error) -> String {

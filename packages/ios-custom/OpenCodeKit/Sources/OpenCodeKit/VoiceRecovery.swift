@@ -1,7 +1,7 @@
 import Foundation
 
-/// Limits for keeping one voice conversation alive across network loss. Tests inject shorter values;
-/// the lease margin is deliberately not configurable.
+/// Limits for keeping one voice conversation alive across network loss, moderation and its own end. Tests inject
+/// shorter values; the lease margin is deliberately not configurable.
 public struct VoiceRecoveryPolicy: Sendable, Equatable {
   /// Audio stops this long before the proxy lease expires, whatever the network does.
   public static let leaseMargin: TimeInterval = 10
@@ -23,13 +23,20 @@ public struct VoiceRecoveryPolicy: Sendable, Equatable {
   public var attemptTimeout: TimeInterval
   /// Interval between network checks while offline.
   public var networkPoll: TimeInterval
+  /// After a moderation `error`, how long the session has to end for the moderation to count as the kind that ends
+  /// it (voice memory cleared); a session still alive after it goes on with its memory.
+  public var moderationWindow: TimeInterval
+  /// How long ending a call waits, after `session.close`, for `session.closed` or the data channel to close.
+  public var closeWait: TimeInterval
 
   public init(renewal: TimeInterval = 5, renewalRetry: TimeInterval = 1, mediaGrace: TimeInterval = 15,
               handoverGrace: TimeInterval = 3, window: TimeInterval = 120, backoff: [TimeInterval] = [1, 2, 4, 8, 15, 15],
-              attemptTimeout: TimeInterval = 20, networkPoll: TimeInterval = 0.25) {
+              attemptTimeout: TimeInterval = 20, networkPoll: TimeInterval = 0.25, moderationWindow: TimeInterval = 5,
+              closeWait: TimeInterval = 2) {
     self.renewal = renewal; self.renewalRetry = renewalRetry; self.mediaGrace = mediaGrace
     self.handoverGrace = handoverGrace; self.window = window; self.backoff = backoff
     self.attemptTimeout = attemptTimeout; self.networkPoll = networkPoll
+    self.moderationWindow = moderationWindow; self.closeWait = closeWait
   }
 }
 

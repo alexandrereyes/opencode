@@ -7,8 +7,9 @@ its preference pointer and custom-web picker filter have been removed.
 
 Version 2 `custom.voice` RPCs provide `info`, atomic idempotent `append`, bounded
 `context` and `end` (compaction check). Older/unsupported servers remain usable
-without memory. History is supplied to GPT Live as `session.initial_items` with
-both roles; instructions stay short and behavior-only.
+without memory. History is supplied to GPT Live as `session.initial_items`: turns
+as `user`/`assistant`, the labelled summary and Mestra state as `developer`
+messages (since 2026-11-02); instructions stay short and behavior-only.
 
 Compaction starts above ~7,000 estimated tokens or 120 turns, using
 `llm-proxy/gpt-6.1-sol-ultrafast`, with a deterministic fallback. It overwrites

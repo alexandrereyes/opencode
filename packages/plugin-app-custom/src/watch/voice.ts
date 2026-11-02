@@ -23,6 +23,12 @@ export const limits = {
   createMs: 25_000,
   memoryMs: 2_000,
   closeMs: 4_000,
+  /**
+   * After a moderation `error`, how long the session has to end for the moderation to count as the kind that ends it
+   * (voice memory cleared); a session still alive after it goes on with its memory. Same as the iPhone's
+   * `VoiceRecoveryPolicy.moderationWindow`.
+   */
+  moderationMs: 5_000,
   /** An ending call still lets delegations it received reach the Mestra (a cold Mestra took ~6 s), at most this long. */
   admissionMs: 20_000,
   /** Event types kept, newest last, to correlate an upstream error or close with what led to it. */
@@ -101,8 +107,12 @@ type Call = {
   recent: string[]
   /** How many memory items the call started with: with none, clearing memory cannot help a moderated call. */
   contextItems: number
-  /** The service moderated the call: later events are ignored while it clears memory and ends. */
+  /** A moderation `error` waiting `limits.moderationMs` to see whether the session ends; `code` is its `type/code`. */
+  moderation?: { readonly at: number; readonly code: string }
+  /** The service moderated the call and ended its session: later events are ignored while it clears memory and ends. */
   moderated?: boolean
+  /** The service sent `session.closed`, with its reason and the audio it counted: ending asks for nothing more. */
+  closed?: { readonly reason?: string; readonly audioMs?: number }
   /** Set when this server asked the sideband to close; a close without it came from the other side. */
   closingAt?: number
   sidebandClose?: SidebandClose & { readonly by: "local" | "remote" }
@@ -144,9 +154,16 @@ const SidebandEvent = Schema.Struct({
   message: Schema.optionalKey(Schema.Unknown),
   param: Schema.optionalKey(Schema.Unknown),
   event_id: Schema.optionalKey(Schema.Unknown),
+  // `session.closed`, read field by field below: a field of an unexpected type must not lose the event.
+  reason: Schema.optionalKey(Schema.Unknown),
+  usage: Schema.optionalKey(Schema.Unknown),
 })
 const decodeEvent = Schema.decodeUnknownOption(Schema.fromJsonString(SidebandEvent))
 const decodeType = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({ type: Schema.String })))
+const decodeClosedReason = Schema.decodeUnknownOption(Schema.Struct({ reason: Schema.String }))
+const decodeClosedUsage = Schema.decodeUnknownOption(
+  Schema.Struct({ usage: Schema.Struct({ audio_duration_ms: Schema.Finite }) }),
+)
 
 /**
  * GPT Live calls for paired watches: the gateway reserves the llm-proxy lease, creates the call, attaches the
@@ -407,25 +424,68 @@ export function makeVoice(input: {
           ...error,
           ...(yield* correlation(call)),
         })
-        if (moderated(error)) return yield* moderate(call)
+        if (moderated(error)) return yield* pendModeration(call, [error.type, error.code].filter(Boolean).join("/"))
         return yield* emit(call, { type: "error", code: "voice_error", message: "O serviço de voz informou um erro." })
       }
-      case "session.closed":
+      case "session.closed": {
+        call.closed = {
+          reason: Option.getOrUndefined(decodeClosedReason(event))?.reason,
+          audioMs: Option.getOrUndefined(decodeClosedUsage(event))?.usage.audio_duration_ms,
+        }
+        // The answer to our own `session.close`: the end already running finishes.
+        if (call.ending) return
+        if ((yield* moderationEnded(call)) || closedByModeration(call.closed.reason)) return yield* moderate(call)
         return yield* end(call, "session_closed")
+      }
       case "sideband.closed":
+        if (yield* moderationEnded(call)) return yield* moderate(call)
         return yield* end(call, "sideband_closed")
     }
   })
 
   /**
-   * The service moderated the call (`content_filter`). A call that started with memory clears it, as the iPhone and the
-   * Mac do, and ends as `context_reset`: the watch says so and its retry starts an empty call. A call that started
-   * empty has nothing to clear and ends as `moderation`. Off the reader: an admission in flight finishes first, so its
-   * late-reply window is opened before the reset takes it.
+   * A moderation `error`. Some moderations end the session and others only cut the current speech (OpenAI's live
+   * conversations guide), so it only marks the call: a session that ends within `limits.moderationMs` was moderated
+   * (`moderate`); after it, the call goes on with its memory and the moderation is logged as not fatal.
+   */
+  const pendModeration = (call: Call, code: string) =>
+    Effect.gen(function* () {
+      const at = yield* Clock.currentTimeMillis
+      call.moderation = { at, code }
+      yield* Effect.sleep(limits.moderationMs).pipe(
+        Effect.andThen(
+          Effect.suspend(() => {
+            if (call.moderation?.at !== at) return Effect.void
+            call.moderation = undefined
+            return correlation(call).pipe(
+              Effect.flatMap((fields) =>
+                Effect.logInfo("Watch call moderation was not fatal", { call: call.id, code, ...fields }),
+              ),
+            )
+          }),
+        ),
+        Effect.forkIn(call.scope),
+      )
+    })
+
+  /** Whether the session ends right after a moderation error: the kind of moderation that ends it. */
+  const moderationEnded = (call: Call) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.map((now) => call.moderation !== undefined && now - call.moderation.at <= limits.moderationMs),
+    )
+
+  /**
+   * The service moderated the call and ended its session: `session.closed` or the sideband closing within
+   * `limits.moderationMs` of a `content_filter` error, or a `session.closed` whose reason names moderation. A call that
+   * started with memory clears it, as the iPhone and the Mac do, and ends as `context_reset`: the watch says so and its
+   * retry starts an empty call. A call that started empty has nothing to clear and ends as `moderation`. What was said
+   * since the last `turn.done` is not kept. Off the reader: an admission in flight finishes first, so its late-reply
+   * window is opened before the reset takes it.
    */
   const moderate = (call: Call) =>
     Effect.gen(function* () {
       call.moderated = true
+      call.moderation = undefined
       yield* Effect.gen(function* () {
         yield* settleLane(call.delegationTail, limits.admissionMs)
         const ctx = input.ctx()
@@ -524,8 +584,11 @@ export function makeVoice(input: {
       call.ending = ending
       const teardown = Effect.gen(function* () {
         if (call.sideband && !call.sidebandClose) {
-          call.closingAt = yield* Clock.currentTimeMillis
-          yield* send(call, { type: "session.close" })
+          // After the service's own `session.closed` its socket follows: there is nothing to ask.
+          if (!call.closed) {
+            call.closingAt = yield* Clock.currentTimeMillis
+            yield* send(call, { type: "session.close" })
+          }
           yield* Deferred.await(call.sidebandClosed).pipe(Effect.timeoutOption(limits.closeMs))
           call.sideband.close()
         }
@@ -558,9 +621,30 @@ export function makeVoice(input: {
           reason,
           released: Option.isSome(released) ? released.value.status : 0,
           elapsedMs: (yield* Clock.currentTimeMillis) - call.startedAt,
+          ...(call.closed?.reason ? { closedReason: sanitize(call.closed.reason, 64) } : {}),
+          ...(call.closed?.audioMs === undefined ? {} : { audioDurationMs: call.closed.audioMs }),
         })
         // The memory `end` looks for Mestra replies to this call's requests: they and its turns go in first.
         yield* settleLane(call.delegationTail, limits.admissionMs)
+        // What each role said since its last `turn.done` (the reader has stopped): nothing arrives after
+        // `session.close`, and the user's `turn.done` waits for the assistant's next turn. An assistant cut off by
+        // Alexandre spoke first. A moderated conversation keeps none of it.
+        if (!call.moderated)
+          for (const role of ["assistant", "user"] as const) {
+            const spoken = call.captions[role].trim()
+            if (spoken)
+              yield* lane(
+                call,
+                "memoryTail",
+                remember(call, {
+                  id: `${call.id}:partial-${role}`,
+                  role,
+                  text: spoken,
+                  at: yield* Clock.currentTimeMillis,
+                  interrupted: true,
+                }),
+              )
+          }
         yield* settleLane(call.memoryTail, limits.memoryMs)
         const ctx = input.ctx()
         if (ctx)
@@ -635,16 +719,19 @@ const initialItems = (ctx: VoiceContext) =>
     Effect.map((memory) =>
       memory
         ? [
-            ...(memory.summary ? [message("user", summaryLabel + memory.summary)] : []),
+            ...(memory.summary ? [message("developer", summaryLabel + memory.summary)] : []),
             ...memory.turns.map((turn) => message(turn.role, turnText(turn))),
-            ...(memory.master ? [message("user", masterLabel + memory.master.state + ": " + memory.master.text)] : []),
+            ...(memory.master
+              ? [message("developer", masterLabel + memory.master.state + ": " + memory.master.text)]
+              : []),
           ]
         : [],
     ),
   )
 
-function message(role: "user" | "assistant", text: string) {
-  return { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text }] }
+/** Turns keep their speaker; what the server tells GPT Live (summary, Mestra state) is a developer message. */
+function message(role: "developer" | "user" | "assistant", text: string) {
+  return { type: "message", role, content: [{ type: role === "assistant" ? "output_text" : "input_text", text }] }
 }
 
 const ErrorFields = Schema.Struct({
@@ -659,6 +746,16 @@ const decodeErrorFields = Schema.decodeUnknownOption(ErrorFields)
 /** The service's moderation error, by its structured `type` or `code`; never by its message. */
 export function moderated(error: ReturnType<typeof upstreamError>) {
   return error.type === "content_filter" || error.code === "content_filter"
+}
+
+/**
+ * Same rule as the iPhone's `VoiceProtocol.closedByModeration`: a `session.closed` reason that names moderation.
+ * OpenAI documents `content`; this route was only seen sending `client_request`, so any reason mentioning content or
+ * moderation counts.
+ */
+export function closedByModeration(reason: string | undefined) {
+  const value = reason?.toLowerCase() ?? ""
+  return value.includes("content") || value.includes("moderat")
 }
 
 /**

@@ -664,14 +664,23 @@ test("voice diagnostics carry categories and names only and log one line each", 
             lastSentSeconds: 1.26,
           },
           { ...diagnostic, kind: "ended", reason: "user_end" },
+          // The service's `session.closed` reason as the code and the audio it counted as the detail (02/11).
+          { ...diagnostic, kind: "lost", reason: "session_closed", code: "expired", detail: "audio_duration_ms=86800" },
+          { ...diagnostic, kind: "tolerated", reason: "moderation_nonfatal", code: "content_filter/content_filter" },
         ],
       }),
     ).pipe(
       Effect.provideService(Logger.CurrentLoggers, new Set([Logger.make((entry) => logged.push({ message: entry.message }))])),
     ),
   )
-  expect(result).toEqual({ accepted: 2 })
-  expect(logged.map((entry) => (entry.message as unknown[])[0])).toEqual(["Voice diagnostics", "Voice diagnostics"])
+  expect(result).toEqual({ accepted: 4 })
+  expect(logged.map((entry) => (entry.message as unknown[])[0])).toEqual(Array(4).fill("Voice diagnostics"))
+  expect((logged[2]?.message as unknown[])[1]).toMatchObject({
+    kind: "lost",
+    reason: "session_closed",
+    code: "expired",
+    detail: "audio_duration_ms=86800",
+  })
   expect((logged[0]?.message as unknown[])[1]).toEqual({
     kind: "failed",
     reason: "service_error",

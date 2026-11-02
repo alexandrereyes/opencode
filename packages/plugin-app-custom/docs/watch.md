@@ -291,14 +291,20 @@ arrived for 30 s, checked at each 5 s renewal tick (renewals stop with the heart
 watch sends the next heartbeat 5 s after the previous one settles, with an 8 s timeout, so a single stuck heartbeat
 could end a call whose audio was fine. The llm-proxy lease is renewed with the iPhone's rules: 408, 429, any 5xx or
 network errors are retried until the confirmed lease (minus 10 s) runs out; any other refusal ends the call. An
-upstream `error` is passed to the watch as `voice_error`; it does not end the call, which ends when the service
-closes the sideband (`session_closed`, `sideband_closed`). The offer must be SDP with `m=audio` and Opus 48 kHz (`400
-invalid_offer`); the answer needs `a=ice-lite` and a UDP candidate (`502 unsupported_answer`). Voice IDs fall back
-to `rio` then `cove` only on an explicit voice rejection, as on the iPhone. `initial_items` come from
+upstream `error` (other than moderation, below) is passed to the watch as `voice_error`; it does not end the call,
+which ends when the service closes the session or the sideband (`session_closed`, `sideband_closed`). Ending the call
+sends `session.close` and waits for the sideband to close (at most 4 s), except after the service's own
+`session.closed` (rev. 2026-11-02): then it only waits for the socket. The offer must be SDP with `m=audio` and Opus
+48 kHz (`400 invalid_offer`); the answer needs `a=ice-lite` and a UDP candidate (`502 unsupported_answer`). Voice IDs
+fall back to `rio` then `cove` only on an explicit voice rejection, as on the iPhone. `initial_items` come from
 `custom.voice.context` (2 s budget; without it the call starts without memory): summary and master state as labelled
-user data items, turns with the interruption annotation. Captions accumulate `input_transcript.added` /
+`developer` messages (rev. 2026-11-02; accepted and used by the route, as the iPhone's), turns as `user`/`assistant`
+with the interruption annotation. Captions accumulate `input_transcript.added` /
 `output_transcript.added` deltas per role (`final: false`); `turn.done` emits the canonical transcript with `final:
-true` and appends it to memory as `<callID>:<turnID>`; `custom.voice.end` runs when the call ends. An ended call's
+true`, appends it to memory as `<callID>:<turnID>` and clears that role's caption. When the call ends, a caption
+still open (nothing arrives after `session.close`, and the user's `turn.done` waits for the assistant's next turn)
+goes to memory through the memory lane as an interrupted `<callID>:partial-assistant` / `<callID>:partial-user` turn,
+the assistant's first, unless moderation cleared the call; `custom.voice.end` runs after it. An ended call's
 events stay readable for 60 s. A new call ends the device's previous one (`reason: "replaced"`). Other end reasons:
 `client_end`, `heartbeat_timeout`, `lease_refused`, `lease_lost`, `max_duration`, `session_closed`,
 `sideband_closed`, `shutdown`. The watch shows every reason but its own `client_end` and `replaced` as a notice
@@ -306,16 +312,23 @@ events stay readable for 60 s. A new call ends the device's previous one (`reaso
 Tentar de novo, and reports it in its diagnostics as `voice.failed` with `stage: ended`. When the media ends first
 (`sessionEnded`), it waits 3 s for that reason before showing the generic service notice.
 
-**Moderation (rev. 2026-11-01).** An upstream `error` whose structured `type` or `code` is `content_filter` (never
-its message) stops the call's reader: later events, turns and requests not yet admitted are dropped. Off the reader,
-an admission already in flight finishes (its late-reply window opens before the reset takes it); then a call that
-started with memory calls `custom.voice.reset` and ends as `context_reset`, and one that started empty ends as
-`moderation` without clearing again. Watch turns carry the time they were received, so a memory lane that runs after
-the reset cannot bring them back. The watch shows "Limpou o contexto…" (or the moderation notice) with Fechar and
-Tentar de novo; its retry is a new, empty call. The watch does not reconnect by itself: that would need a new offer
+**Moderation (rev. 2026-11-01, 2026-11-02).** An upstream `error` whose structured `type` or `code` is
+`content_filter` (never its message) only marks the call as pending moderation, with its time and `type/code`: OpenAI's
+live conversations guide says some moderations end the session and others only cut the current speech. It is the
+fatal kind when the session ends within 5 s (`limits.moderationMs`, the iPhone's window): `session.closed` (any
+reason) or the sideband closing. A `session.closed` whose `reason` mentions content or moderation (`closedByModeration`,
+the iPhone's rule; OpenAI documents `content`) is fatal without an error. Past the window the call goes on with its
+memory, logged as `Watch call moderation was not fatal`, and a later close is an ordinary end. A fatal moderation stops
+the call's reader: later events, turns and requests not yet admitted are dropped, and open captions are not kept. Off
+the reader, an admission already in flight finishes (its late-reply window opens before the reset takes it); then a
+call that started with memory calls `custom.voice.reset` and ends as `context_reset`, and one that started empty ends
+as `moderation` without clearing again. Turns and requests received between the error and the end of the session go on
+as usual (the reset drops those turns). Watch turns carry the time they were received, so a memory lane that runs
+after the reset cannot bring them back. The watch shows "Limpou o contexto…" (or the moderation notice) with Fechar
+and Tentar de novo; its retry is a new, empty call. The watch does not reconnect by itself: that would need a new offer
 from its media engine, a separate flow.
 
-**Voice diagnostics (rev. 2026-10-31).** Three log lines, never a transcript or speech; every service text goes
+**Voice diagnostics (rev. 2026-10-31, 2026-11-02).** Four log lines, never a transcript or speech; every service text goes
 through `sanitize` (`src/voice/sanitize.ts`: control characters out, quoted spans over 32 characters as `"…"`,
 whitespace collapsed, bounded), since an error message can quote the request it rejects:
 
@@ -326,7 +339,11 @@ whitespace collapsed, bounded), since an error message can quote the request it 
 - `Watch call sideband closed`: `call`, `by` (`local` when this server sent `session.close` first, `remote`
   otherwise), the WebSocket `code`, `reason` (120) and `clean`, `transportError: true` when the socket failed before
   closing, and the same correlation.
-- `Watch call ended`: `deviceID`, `call`, `reason`, `released` (the lease `DELETE` status) and `elapsedMs`.
+- `Watch call ended`: `deviceID`, `call`, `reason`, `released` (the lease `DELETE` status) and `elapsedMs`; after a
+  `session.closed` read before it, `closedReason` (its `reason`, sanitized, 64) and `audioDurationMs`
+  (`usage.audio_duration_ms`).
+- `Watch call moderation was not fatal`: `call`, the moderation's `code` and the same correlation, when the session
+  outlived the moderation window.
 
 **Reader lanes and warm-up (rev. 2026-10-31).** The sideband reader never waits: memory appends go to a memory
 lane and delegation admissions (where a cold Mestra took ~6 s to wake its Location) to a delegation lane. Each lane

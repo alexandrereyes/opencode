@@ -91,6 +91,11 @@ import UIKit
   @ObservationIgnored private var linkAnswered = false
   /// Master updates of requests from before a reset are not heard in the empty call.
   @ObservationIgnored private var masterStale = false
+  /// A moderation `error` on the current link, waiting `policy.moderationWindow` to see whether the session ends.
+  @ObservationIgnored private var moderation: (at: TimeInterval, code: String?, detail: String?)?
+  @ObservationIgnored private var moderationTimer: Task<Void, Never>?
+  /// While ending waits for GPT Live to confirm `session.close`: the confirmation or the channel closing cancels it.
+  @ObservationIgnored private var closeWait: Task<Void, Never>?
   @ObservationIgnored private var currentDelegation: String?
   @ObservationIgnored private var handled: Set<String> = []
   /// A delegation waiting for the master; a screen capture starts when GPT Live delegates, not when sent.
@@ -134,6 +139,8 @@ import UIKit
   @ObservationIgnored private var interruptedAssistant = false
   @ObservationIgnored private var interruptedUser = false
   @ObservationIgnored private var capturedTurns: Set<String> = []
+  /// What each role said since its own last `turn.done`; kept as an interrupted turn when the call ends or drops.
+  @ObservationIgnored private var partial: [VoiceMemoryTurn.Role: String] = [:]
   #if DEBUG
   struct TestDependencies {
     let transport: (@escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) -> any VoiceTransporting
@@ -187,10 +194,11 @@ import UIKit
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false; recentSpeech = []
     trail = VoiceEventTrail(); lastSent = nil
-    freshContext = false; linkHadContext = false; linkAnswered = false; masterStale = false
+    freshContext = false; linkHadContext = false; linkAnswered = false; masterStale = false; moderation = nil
     graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; contextAppend = nil; contextRejected = false
     state.apply(.start); detail = "Preparando o microfone"; publish()
     inputItemID = nil; outputItemID = nil; interruptedAssistant = false; interruptedUser = false; capturedTurns = []
+    partial = [:]
     #if DEBUG
     memory = testing == nil ? sessions.voiceMemory : testing?.memory
     #else
@@ -290,7 +298,7 @@ import UIKit
   private func open(token: UUID, timeout: Double, message: String) async throws {
     let current = UUID()
     link = current; ready = false; mediaConnected = false; graceUntil = nil; lease = VoiceLeaseClock()
-    contextAppend = nil
+    contextAppend = nil; moderation = nil; moderationTimer?.cancel()
     armWatchdog(token: token, seconds: timeout, message: message, reason: .attemptTimeout)
     // A rebuilt call is the same conversation: its prompt does not wait for (or depend on) the OpenCode server.
     let instructions = if let servedInstructions { servedInstructions } else { try await instructions() }
@@ -432,6 +440,15 @@ import UIKit
     case .data(let data): VoiceProtocol.eventType(data) ?? "unreadable"
     }
     trail.record(name)
+    if busy {
+      // Ending, after our `session.close`: the channel going away only ends the wait; nothing reconnects or reports a
+      // loss.
+      switch event {
+      case .failed, .disconnected: closeWait?.cancel(); return
+      case .data: break
+      default: return
+      }
+    }
     switch event {
     case .connected:
       mediaConnected = true
@@ -489,10 +506,19 @@ import UIKit
     }
   }
   private func handle(_ event: VoiceEvent) {
+    if busy {
+      // Ending: GPT Live confirms our `session.close`; what was said still reaches memory, nothing else acts.
+      switch event {
+      case .closed: closeWait?.cancel(); return
+      case .input, .output, .turnDone: break
+      default: return
+      }
+    }
     switch event {
     case .ready: ready = true; if mediaConnected { connected() }
     case .input(let piece):
       inputItemID = piece.id ?? inputItemID
+      partial[.user, default: ""] += piece.text
       recentSpeech.append((ProcessInfo.processInfo.systemUptime, piece.text))
       if state.phase == .speaking { interruptedAssistant = true }
       VoiceTransport.log.notice("phase=input-transcript")
@@ -500,20 +526,34 @@ import UIKit
       publish()
     case .output(let piece):
       outputItemID = piece.id ?? outputItemID
+      partial[.assistant, default: ""] += piece.text
       VoiceTransport.log.notice("phase=output-transcript")
       currentSpokenLine = String((state.phase == .speaking ? currentSpokenLine + " " + piece.text : piece.text).suffix(2000))
       state.apply(.speech); publish()
     case .turnDone(let turn):
       capture(turn)
+      partial[turn.role] = nil
       if turn.role == .assistant {
-        if !turn.interrupted { linkAnswered = true }
+        // An answer after a moderation error belongs to the moderated session: it does not allow another reset.
+        if !turn.interrupted, moderation == nil { linkAnswered = true }
         state.apply(.silence); outputItemID = nil; interruptedAssistant = false
       }
       else { userUntil = ProcessInfo.processInfo.systemUptime + 1; inputItemID = nil; interruptedUser = false }
       publish()
     case .failure(let code, let detail) where VoiceProtocol.isModeration(code):
+      // Some moderations end the session and others only cut the current speech (OpenAI's live conversations
+      // guide): the memory is cleared only when the session ends within the window (`lose`).
       VoiceTransport.log.notice("phase=moderated")
-      clearContext(code: code, detail: detail)
+      report(.tolerated, .moderationPending(code, detail: detail))
+      moderation = (Self.now, code, detail)
+      let token = epoch, current = link
+      moderationTimer?.cancel()
+      moderationTimer = Task { [weak self, window = policy.moderationWindow] in
+        do { try await Task.sleep(for: .seconds(window)) } catch { return }
+        guard let self, epoch == token, link == current, let pending = moderation else { return }
+        moderation = nil
+        report(.tolerated, .moderationNonFatal(pending.code, detail: pending.detail))
+      }
     case .failure(let code, let detail):
       VoiceTransport.log.notice("phase=service-error")
       if let sent = contextAppend, Self.now - sent.at < 3 {
@@ -524,7 +564,13 @@ import UIKit
       // GPT Live keeps its session after most errors; only an expired one is rebuilt (VoiceProtocol.endsSession).
       guard VoiceProtocol.endsSession(code) else { report(.tolerated, .service(code, detail: detail)); return }
       lose("O serviço de voz encerrou a sessão. Reconectando…", .service(code, detail: detail))
-    case .closed: lose("O serviço de voz encerrou a sessão. Reconectando…", .sessionClosed)
+    case .closed(let reason, let audioMs):
+      guard !VoiceProtocol.closedByModeration(reason) else {
+        clearContext(code: moderation?.code ?? reason, detail: moderation?.detail)
+        return
+      }
+      // Any other reason, expired, unknown or none, rebuilds the call (or clears it, right after a moderation).
+      lose("O serviço de voz encerrou a sessão. Reconectando…", .sessionClosed(reason, audioMs: audioMs))
     case .unreadableDelegation(let id):
       guard handled.insert(id).inserted else { return }
       report(.tolerated, .invalidEvent("delegation.created"))
@@ -572,18 +618,35 @@ import UIKit
     }
   }
   private func capture(_ turn: VoiceCompletedTurn) {
-    guard let memory, let callID = sessionID, let text = turn.text,
+    guard memory != nil, let callID = sessionID, let text = turn.text,
       let nativeID = turn.id ?? turn.itemID ?? (turn.role == .assistant ? outputItemID : inputItemID),
       !nativeID.isEmpty, capturedTurns.insert(nativeID).inserted else { return }
     let itemID = turn.itemID ?? (turn.role == .assistant ? outputItemID : inputItemID) ?? nativeID
     let sourceID = nativeID == itemID ? itemID : nativeID + ":" + itemID
-    let recorded = VoiceMemoryTurn(id: callID.uuidString + ":" + sourceID, role: turn.role, text: text,
+    record(VoiceMemoryTurn(id: callID.uuidString + ":" + sourceID, role: turn.role, text: text,
       at: Date.now.timeIntervalSince1970 * 1000,
-      interrupted: turn.interrupted || (turn.role == .assistant ? interruptedAssistant : interruptedUser))
+      interrupted: turn.interrupted || (turn.role == .assistant ? interruptedAssistant : interruptedUser)))
+  }
+  /// Writes what each role said since its own last `turn.done` as an interrupted turn of this link: nothing arrives
+  /// after `session.close`, and the user's `turn.done` only comes when the assistant starts the next turn (02/11). An
+  /// assistant cut off by Alexandre spoke first.
+  private func capturePartial() {
+    let pieces = partial
+    partial = [:]
+    guard let callID = sessionID else { return }
+    for role in [VoiceMemoryTurn.Role.assistant, .user] {
+      guard let text = pieces[role]?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
+      record(VoiceMemoryTurn(id: callID.uuidString + ":" + link.uuidString + ":partial-" + role.rawValue, role: role,
+        text: text, at: Date.now.timeIntervalSince1970 * 1000, interrupted: true))
+    }
+  }
+  /// In the order heard, into the memory's local buffer.
+  private func record(_ turn: VoiceMemoryTurn) {
+    guard let memory else { return }
     let previous = memoryEvents
     memoryEvents = Task {
       await previous?.value
-      await memory.capture(recorded)
+      await memory.capture(turn)
     }
   }
   private func pumpDelegations() async {
@@ -726,7 +789,8 @@ import UIKit
     let sounded = connectedAt != nil && state.visible
     #endif
     if state.visible, state.phase != .failed { report(.ended, .userEnd) }
-    alert = nil; await retire(); state.apply(.end); detail = ""; publish(); VoiceLaunchLog.record("end", reason: "user_end")
+    alert = nil; await retire(waitForClose: true); state.apply(.end); detail = ""; publish()
+    VoiceLaunchLog.record("end", reason: "user_end")
     #if os(macOS)
     if sounded { cues.play(.ended) }
     #endif
@@ -812,13 +876,15 @@ import UIKit
 
   // MARK: Moderation
 
-  /// GPT Live moderated the call (`content_filter`), which also ends its session. Its voice memory, the requests a
-  /// rebuilt call would carry and results not yet heard are cleared, and an empty call starts: once per reset. Moderated
-  /// again on a link that started empty and has not answered normally, it fails instead of clearing again. Work the
-  /// Mestra already has goes on; only its updates are no longer narrated.
+  /// GPT Live moderated the call and ended its session: the session ended within the moderation window of a
+  /// `content_filter` error (`lose`), or `session.closed` named moderation. Its voice memory, the requests a rebuilt
+  /// call would carry, results not yet heard and what was said since the last `turn.done` are cleared, and an empty
+  /// call starts: once per reset. Moderated again on a link that started empty and has not answered normally, it
+  /// fails instead of clearing again. Work the Mestra already has goes on; only its updates are no longer narrated.
   private func clearContext(code: String?, detail: String?) {
     guard state.visible, state.phase != .failed, !busy else { return }
     guard connectedAt != nil, linkHadContext || linkAnswered else {
+      partial = [:]
       Task { await fail("O serviço de voz interrompeu a conversa por moderação, mesmo sem histórico. Tente de novo mais tarde.",
         .moderated(code, detail: detail)) }
       return
@@ -836,12 +902,20 @@ import UIKit
   /// recovery window; a call that never connected fails as before.
   private func lose(_ message: String, _ reason: VoiceFailureReason, clearing: Bool = false) {
     guard state.visible, state.phase != .failed, !busy else { return }
+    if !clearing, let pending = moderation, Self.now - pending.at <= policy.moderationWindow {
+      // The session ended right after a moderation error: the kind of moderation that ends it.
+      clearContext(code: pending.code, detail: pending.detail)
+      return
+    }
+    moderation = nil; moderationTimer?.cancel()
     guard connectedAt != nil else { Task { await fail(message, reason) }; return }
     let token = epoch
     let first = !recovery.active
     report(.lost, reason)
     recovery.lose(at: Self.now)
     VoiceLaunchLog.record("lost", reason: reason.summary)
+    // What was said since the last `turn.done` stays in memory, unless the conversation is being cleared.
+    if clearing { partial = [:] } else { capturePartial() }
     // Invalidate every callback of the old call before tearing it down.
     link = UUID()
     if state.phase == .speaking { interruptedAssistant = true }
@@ -864,6 +938,8 @@ import UIKit
     recoveryTask?.cancel()
     let memory = memory
     recoveryTask = Task { [weak self] in
+      // Best effort, without waiting: a session still open on the service ends now, not when its media times out.
+      try? await transport?.send(VoiceProtocol.close)
       await transport?.close()
       guard let self else { return }
       if clearing {
@@ -917,6 +993,7 @@ import UIKit
     watchdog = nil; renewal = nil; leaseDeadline = nil
     let transport = transport; self.transport = nil
     let signal = signaling; signaling = nil
+    try? await transport?.send(VoiceProtocol.close)
     await transport?.close()
     if let signal, let request = try? signal.leaseRequest(method: "DELETE") {
       Task { [self] in _ = try? await perform(request) }
@@ -941,24 +1018,26 @@ import UIKit
   }
 
   private static var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
-  private func retire() async {
+  private func retire(waitForClose: Bool = false) async {
     if let retirement { await retirement.value; return }
     busy = true
-    let retirement = Task { await releaseResources() }
+    let retirement = Task { await releaseResources(waitForClose: waitForClose) }
     self.retirement = retirement
     await retirement.value
     self.retirement = nil
     busy = false
   }
-  private func releaseResources() async {
+  private func releaseResources(waitForClose: Bool) async {
+    watchdog?.cancel(); narrationTask?.cancel(); delegationTask?.cancel(); moderationTimer?.cancel()
+    watchdog = nil; narrationTask = nil; delegationTask = nil; moderationTimer = nil; moderation = nil
+    await closeSession(wait: waitForClose && ready)
+    capturePartial()
     let callID = sessionID
     let memory = memory
     epoch = UUID(); link = UUID()
     network.stop(); recovery.restore(); cues.stop()
-    connection?.cancel(); renewal?.cancel(); watchdog?.cancel(); narrationTask?.cancel(); delegationTask?.cancel()
-    leaseDeadline?.cancel(); recoveryTask?.cancel()
-    connection = nil; renewal = nil; watchdog = nil; narrationTask = nil; delegationTask = nil
-    leaseDeadline = nil; recoveryTask = nil
+    connection?.cancel(); renewal?.cancel(); leaseDeadline?.cancel(); recoveryTask?.cancel()
+    connection = nil; renewal = nil; leaseDeadline = nil; recoveryTask = nil
     delegationQueue = []; master?.stop(); master = nil
     let transport = transport; self.transport = nil
     let signal = signaling; signaling = nil
@@ -973,6 +1052,20 @@ import UIKit
     #if os(iOS)
     await activity.end()
     #endif
+  }
+  /// Asks GPT Live to end the session (`session.close`) before the transport goes, so the service ends it now instead
+  /// of when its media times out. `wait` (Alexandre ended a session that started) mutes the microphone and holds the
+  /// teardown until `session.closed` or the channel closing, at most `policy.closeWait`; meanwhile nothing reconnects,
+  /// reports a loss or reads a moderation. Otherwise it only asks.
+  private func closeSession(wait: Bool) async {
+    guard let transport else { return }
+    if wait {
+      transport.mute(true)
+      closeWait = Task { [seconds = policy.closeWait] in try? await Task.sleep(for: .seconds(seconds)) }
+    }
+    do { try await transport.send(VoiceProtocol.close) } catch { closeWait?.cancel() }
+    await closeWait?.value
+    closeWait = nil
   }
   private func publish() {
     #if os(macOS)

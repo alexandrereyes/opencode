@@ -83,8 +83,9 @@ public enum VoiceEvent: Equatable, Sendable {
   /// `failure` carries GPT Live's error `type/code` and, sanitized for diagnostics (`VoiceDiagnosticText`), its message
   /// and `param`.
   case delegation(id: String, text: String), failure(code: String?, detail: String? = nil), ignored
-  /// GPT Live closed the session (`session.closed`).
-  case closed
+  /// GPT Live closed the session (`session.closed`): its `reason` and the audio it counted (`usage.audio_duration_ms`),
+  /// when sent.
+  case closed(reason: String? = nil, audioMs: Int? = nil)
   /// A delegation whose request could not be read; it is answered so GPT Live asks Alexandre again.
   case unreadableDelegation(id: String)
 }
@@ -178,10 +179,16 @@ public enum VoiceProtocol {
       let code = [field("type"), field("code")].compactMap { $0 }.joined(separator: "/")
       return .failure(code: code.isEmpty ? nil : code,
         detail: VoiceDiagnosticText.detail(message: field("message") ?? root?["error"]?.string, param: field("param")))
-    case "session.closed": return .closed
+    case "session.closed":
+      return .closed(reason: root?["reason"]?.string,
+        audioMs: root?["usage"]?.object?["audio_duration_ms"]?.number.flatMap { Int(exactly: $0) })
     default: return .ignored
     }
   }
+
+  /// Asks GPT Live to end the session; it answers `session.closed`, then closes the data channel (02/11: 0.55 s and
+  /// 1.1 s, nothing else in between).
+  public static let close = Data(#"{"type":"session.close"}"#.utf8)
 
   /// Whether a GPT Live error means its session is over. OpenAI's Realtime reference: "Most errors are recoverable
   /// and the session will stay open"; openai/codex, on this same protocol, ends a call only when the transport
@@ -190,10 +197,18 @@ public enum VoiceProtocol {
     code?.split(separator: "/").contains("session_expired") == true
   }
 
-  /// GPT Live's moderation stop (`content_filter`), by the error's structured `type/code` only, never its message: the
-  /// service ends that session (31/10 and 01/11, data channel closed within a second).
+  /// GPT Live's moderation (`content_filter`), by the error's structured `type/code` only, never its message. OpenAI's
+  /// live conversations guide: some moderations end the session, others only cut the current speech; on 31/10 and 01/11
+  /// the data channel closed within a second.
   public static func isModeration(_ code: String?) -> Bool {
     code?.split(separator: "/").contains("content_filter") == true
+  }
+
+  /// A `session.closed` reason that names content moderation. OpenAI documents `content`; this route was only seen
+  /// sending `client_request` (02/11), so any reason that mentions content or moderation counts.
+  public static func closedByModeration(_ reason: String?) -> Bool {
+    guard let reason = reason?.lowercased() else { return false }
+    return reason.contains("content") || reason.contains("moderat")
   }
 
   public static func append(id: String, text: String) throws -> [Data] {

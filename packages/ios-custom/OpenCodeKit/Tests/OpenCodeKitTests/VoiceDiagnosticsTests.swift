@@ -48,9 +48,20 @@ struct VoiceDiagnosticsTests {
       (.microphoneDenied, "microphone_denied"), (.delegationOverflow, "delegation_overflow"),
       (.startFailed(URLError(.timedOut)), "start_failed"), (.reconnectFailed(ClientError.http(401)), "reconnect_failed"),
       (.contextReset("content_filter/content_filter"), "context_reset"), (.moderated("content_filter/content_filter"), "moderated"),
+      (.moderationPending("content_filter/content_filter"), "moderation_pending"),
+      (.moderationNonFatal("content_filter/content_filter"), "moderation_nonfatal"), (.sessionClosed(nil), "session_closed"),
     ]
     for (reason, category) in reasons { #expect(reason.category == category) }
     #expect(Set(reasons.map(\.1)).count == reasons.count)
+  }
+
+  /// The service's close reason is the code, bounded like any name; the audio it counted is the detail.
+  @Test func sessionClosedNamesItsReason() {
+    let closed = VoiceFailureReason.sessionClosed("client_request", audioMs: 86_800)
+    #expect(closed.summary == "session_closed code=client_request")
+    #expect(closed.detail == "audio_duration_ms=86800")
+    #expect(VoiceFailureReason.sessionClosed("motivo com espaço " + String(repeating: "x", count: 200)).code?.count == 120)
+    #expect(VoiceFailureReason.sessionClosed(nil).code == nil && VoiceFailureReason.sessionClosed(nil).detail == nil)
   }
 
   @Test func errorCodesNameTheKindNeverTheMessage() {

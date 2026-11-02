@@ -113,7 +113,8 @@ pelo WARP; não se publica essa origem na Internet.
    prazo são validados antes da negociação.
 2. `POST /backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas`, JSON com `sdp`
    completo e `session`: modelo `gpt-live-1-codex`, `audio.output.voice` escolhido em Você (Rio por padrão), instruções pt-BR e
-   `delegation.type=client` e, quando disponível, `initial_items` com memória nas duas roles.
+   `delegation.type=client` e, quando disponível, `initial_items` com a memória: os turnos como `user` e
+   `assistant`, e o que o app informa (resumo, estado da mestra, pedidos em andamento) como `developer` (02/11).
    As instructions continuam curtas, somente com regras de comportamento. Headers: `OpenAI-Alpha: quicksilver=v2`, `originator: a2a-chat`,
    `session-id`, `thread-id`, `x-session-id` e `x-gpt-live-generation`. O proxy escolhe a conta e
    injeta credenciais. Só 201 com SDP e Location é aceito; criação ambígua não é repetida.
@@ -125,12 +126,18 @@ pelo WARP; não se publica essa origem na Internet.
    refeita, mesmo com uma renovação ainda em voo. Recusa explícita (outro HTTP: 404 lease ausente, 409
    conflito de geração, 410 expirada; lease malformada, de outra chamada ou já dentro da margem) encerra
    na hora, sem reconexão. A lease padrão no deploy é de 60 segundos.
-4. Encerramento fecha primeiro mídia/canal/áudio local, depois envia `DELETE` com `generation` na
-   query. Se a rede estiver indisponível, a lease do proxy expira; não há retry de criação.
+4. Encerramento (02/11): com a sessão iniciada (`session.started`), o app silencia o microfone, manda
+   `session.close` e espera `session.closed` ou o fechamento do canal por até 2 s
+   (`VoiceRecoveryPolicy.closeWait`); a sondagem de 02/11 mediu 0,55 s e 1,1 s, sem nenhum outro evento no
+   meio. Esse fechamento não reconecta, não registra perda nem passa pela moderação. Depois fecha
+   mídia/canal/áudio local e envia `DELETE` com `generation` na query. Sem sessão iniciada ou sem canal
+   aberto, encerra sem esperar. Perdas, tentativas falhas e falhas mandam `session.close` só como melhor
+   esforço, sem esperar. Se a rede estiver indisponível, a lease do proxy expira; não há retry de criação.
 
 O protocolo é o privado GPT Live/Codex, **não** `/v1/realtime` público. O canal `oai-events` transporta
 `session.started`, `input_transcript.added`, `output_transcript.added`, `turn.done`,
-`delegation.created` e `delegation.context.append`. Appends usam `channel=speakable`, até 500 bytes
+`delegation.created`, `delegation.context.append`, `session.close` e `session.closed` (com `reason`, por exemplo
+`client_request`, e `usage.audio_duration_ms`). Appends usam `channel=speakable`, até 500 bytes
 UTF-8 por parte. Eventos e texto têm limites locais. Erros remotos não são despejados em logs.
 
 ### Escolha da voz
@@ -207,13 +214,21 @@ alto-falante padrão. Mudanças de rota revalidam ativação; iOS 27 usa `didBec
 e `resumptionRecommendationNotification`. Sem recomendação de retomada, o controle **Retomar
 áudio** é explícito. Media-services reset exige nova conexão. Quedas de rede seguem a seção abaixo.
 
-## Moderação: limpar o contexto (01/11)
+## Moderação: limpar o contexto (01/11, rev. 02/11)
 
-Quando o GPT Live manda `error` com `type` ou `code` `content_filter` (o `VoiceProtocol.isModeration`, nunca pelo
-texto da mensagem), o serviço encerra aquela sessão. O app então:
+O GPT Live manda `error` com `type` ou `code` `content_filter` (o `VoiceProtocol.isModeration`, nunca pelo texto da
+mensagem). Segundo o guia de conversas ao vivo da OpenAI, algumas moderações encerram a sessão e outras só cortam a
+fala atual. Por isso o erro só marca uma **moderação pendente** (horário e código) e gera um diagnóstico
+`tolerated` `moderation_pending`; a chamada e a memória seguem. Ela vira limpeza só se a sessão terminar em até 5 s
+(`VoiceRecoveryPolicy.moderationWindow`): `session.closed` (qualquer motivo), canal fechado, transporte caído ou
+qualquer outra perda dentro da janela. Também limpa um `session.closed` cujo `reason` cite conteúdo ou moderação
+(`VoiceProtocol.closedByModeration`: a OpenAI documenta `content`; a rota só mostrou `client_request`). Se a janela
+passa com a sessão viva, a chamada segue com a memória e um `tolerated` `moderation_nonfatal` registra o caso; uma
+perda depois disso é uma perda comum, com reconstrução e memória. Uma resposta normal da assistente entre o erro e o
+fim da sessão não conta para permitir outra limpeza. Na limpeza, o app:
 
 1. descarta a chamada moderada (o link muda antes de tudo, então eventos, falas e áudio dela são ignorados), fecha o
-   transporte e libera a lease;
+   transporte e libera a lease; o que foi dito desde o último `turn.done` não vai para a memória;
 2. limpa a memória de voz: no aparelho, `VoiceMemoryBuffer.reset` tira os turnos ainda não enviados e o contexto em
    cache e enfileira `custom.voice` → `reset` depois do que já foi enviado; enquanto ele não chega ao servidor, a
    memória do servidor não é lida de volta;
@@ -243,7 +258,8 @@ na hora (a queda de 31/10, 08:48); agora cada caso tem uma regra:
 | Situação | O que acontece |
 |---|---|
 | `error` do GPT Live | Registrado (`tolerated`, `service_error` com `type/code`) e a chamada segue. A referência do Realtime da OpenAI diz "Most errors are recoverable and the session will stay open", e o `openai/codex`, que usa este mesmo protocolo (`frameless bidi`), nunca encerra por um `error`: só quando o transporte fecha. Exceção: `session_expired` (a sessão chegou à duração máxima) refaz a chamada na hora (`VoiceProtocol.endsSession`) |
-| `session.closed` | Refaz a chamada |
+| `error` de moderação (`content_filter`) | Moderação pendente (`tolerated`, `moderation_pending`); só limpa o contexto se a sessão terminar em até 5 s (seção anterior) |
+| `session.closed` | Refaz a chamada, qualquer que seja o `reason` (expirado, desconhecido ou ausente), registrado como `code` de `session_closed`. Limpa o contexto se o `reason` citar moderação ou se vier logo depois de um erro de moderação. Durante o próprio encerramento, só conclui o fechamento |
 | Evento ilegível (JSON inválido, sem `type`, campo obrigatório ausente, acima de 256 KB) | Ignorado e registrado (`invalid_event` com o tipo) |
 | `delegation.created` com ID mas sem texto legível | A própria delegação recebe "Não consegui ler esse pedido…", para o GPT Live pedir de novo (como o Abacato) |
 | Mais de 8 pedidos na fila | A delegação nova recebe uma recusa; a chamada e a fila seguem |
@@ -259,8 +275,9 @@ na hora (a queda de 31/10, 08:48); agora cada caso tem uma regra:
   celular quando o Wi-Fi cai. ICE restart de verdade não existe neste protocolo: a chamada nasce de um
   único `POST /calls`, sem renegociação, e o `gatherOnce` não pode virar contínuo depois (o
   `setConfiguration` do libwebrtc recusa). Sem recuperação dentro do prazo, a chamada é refeita.
-- **Reconstrução:** fecha mídia e lease antiga (DELETE sem bloquear) e abre uma chamada nova, com novos
-  UUIDs e a memória como `initial_items`; antes, aguarda a gravação local dos turnos ouvidos. Mute, a voz
+- **Reconstrução:** pede `session.close` à sessão antiga sem esperar, fecha mídia e lease antiga (DELETE sem
+  bloquear) e abre uma chamada nova, com novos UUIDs e a memória como `initial_items`; antes, grava como turno
+  interrompido o que cada papel disse desde o próprio último `turn.done` e aguarda a gravação local. Mute, a voz
   aceita e o prompt da conversa continuam (a reconstrução não busca o prompt de novo nem depende do servidor
   do OpenCode). Por último nos `initial_items` vai um item de dados com os pedidos já entregues à mestra (ou
   na fila para ela) e ainda em andamento (`VoiceContinuity`, até 6).
@@ -283,7 +300,9 @@ na hora (a queda de 31/10, 08:48); agora cada caso tem uma regra:
 - **Diagnóstico:** cada falha tolerada e cada reconexão vão ao servidor (`Voice diagnostics`, seção
   "Motivo da queda"): `tolerated` com `service_error`, `invalid_event`, `ice_disconnected`,
   `ice_recovered`, `network_changed`, `lease_retry`, `reconnect_failed`, `delegation_overflow`,
-  `delegation_repeat`, `context_append` e `reconnected` (`code=attempts_N`); `lost` em cada perda.
+  `delegation_repeat`, `context_append`, `moderation_pending`, `moderation_nonfatal` e `reconnected`
+  (`code=attempts_N`); `lost` em cada perda (`session_closed` leva o `reason` do serviço como `code` e
+  `audio_duration_ms=…` como `detail`).
 - **Falhas antes da primeira conexão** continuam encerrando com erro, sem retry (deadline de 45 s).
 - **Feedback:** faixa e Live Activity mostram **Reconectando…** ou **Sem conexão**. `VoiceCuePlayer`
   toca dois tons descendentes na perda, um tique suave a cada 3 s durante a recuperação, dois tons
@@ -307,7 +326,12 @@ lease, áudio ou delegação da mestra.
 Cada `turn.done` preserva o texto canônico completo (não a soma de deltas), role,
 timestamp, IDs nativos do turno/item e interrupção. Barge-in também marca a resposta
 interrompida, pois seu final pode não ter sido ouvido. Os IDs enviados ao servidor
-são qualificados pelo UUID da chamada. Deltas continuam sendo apenas apresentação.
+são qualificados pelo UUID da chamada. Deltas servem à apresentação e a uma exceção (02/11): nada chega
+depois de `session.close` e o `turn.done` do usuário só vem quando a assistente começa o turno seguinte, então,
+ao encerrar ou perder a chamada, o texto acumulado de `input_transcript.added`/`output_transcript.added` desde o
+último `turn.done` de cada papel vira um turno interrompido (`<chamada>:<link>:partial-assistant`/`-user`, a
+assistente primeiro). O `turn.done` de um papel zera o acumulado dele, então nada se duplica; numa limpeza por
+moderação, o acumulado é descartado.
 
 Antes de qualquer append HTTP, `VoiceMemoryBuffer` grava um arquivo JSON atômico
 por servidor em Application Support, com proteção até a primeira autenticação no
@@ -320,15 +344,17 @@ O `SessionStore` retoma pendências no próximo lançamento/conexão; capturas e
 também iniciam sincronização. Falhas transitórias usam retry limitado a 3–30 s;
 servidor sem suporte só é sondado novamente ao preparar uma chamada/leitura. A fila
 envia lotes de turnos antes de seu marcador `end`, sem reordená-los. Encerrar fecha
-primeiro a mídia e libera a lease, aguarda as gravações locais e enfileira o check
-de compactação. Não fica com áudio aberto esperando o servidor. Não se promete
-execução após force-quit; o arquivo fica para o próximo lançamento.
+a sessão (`session.close`, até 2 s), grava a fala parcial, fecha a mídia e libera a lease, aguarda as
+gravações locais e enfileira o check de compactação. Não fica com áudio aberto esperando o servidor de
+memória. Não se promete execução após force-quit; o arquivo fica para o próximo lançamento.
 
 No início, contexto do servidor e pendências locais viram `session.initial_items`:
-user/`input_text`, assistant/`output_text`, resumo anterior como item user claramente
+user/`input_text`, assistant/`output_text`, resumo anterior como item `developer`/`input_text` claramente
 rotulado como dado (conforme o contrato), e, só enquanto a mestra trabalha, o estado dela como
-outro item de dado (o servidor omite a mestra parada desde 30/10: a última resposta dela era de
-outra conversa, e uma chamada nova começou repetindo-a).
+outro item `developer` (o servidor omite a mestra parada desde 30/10: a última resposta dela era de
+outra conversa, e uma chamada nova começou repetindo-a). Os pedidos que uma chamada reconstruída leva
+(`VoiceContinuity`) também vão como `developer`. A sondagem de 02/11 confirmou que a rota aceita e usa itens
+`developer`; o formato da memória no servidor não muda (os turnos continuam `user`/`assistant`).
 O cliente reaplica o teto de **128 itens / 8.192 tokens estimados**, incluindo labels
 e interrupções, usando `ceil(bytes UTF-8 / 3) + 8` por item. Não envia transcrição nas
 instructions, não usa `session.input` e não envia falas recentes à Sessão mestra.
@@ -595,7 +621,8 @@ Falar com a mestra**.
 - **Motivo da queda (31/10):** toda falha (`fail`), perda com reconexão (`lose`), interrupção de áudio e fim
   pelo usuário vira um relatório `VoiceDiagnostic` (OpenCodeKit) com a categoria (`service_error` com o
   `type/code` do `error` do GPT Live, `invalid_event` com o tipo do evento, `lease_refused`, `send_failed`,
-  `ice_failed`, `data_channel_closed`, `audio_interrupted`, `user_end`…), os últimos 24 nomes de evento
+  `ice_failed`, `data_channel_closed`, `audio_interrupted`, `user_end`, `session_closed` com o `reason` do serviço
+  como `code`…), os últimos 24 nomes de evento
   (tipos do canal e estados do transporte), a fase, o estado do app (frente/fundo, bloqueado), a sessão de
   áudio e a rota (iPhone) e a rede. Desde 31/10, um `service_error` leva também `detail`, a mensagem e o `param`
   do erro sanitizados por `VoiceDiagnosticText` (sem caracteres de controle, trechos entre aspas com mais de 32

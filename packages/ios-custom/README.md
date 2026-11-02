@@ -1749,7 +1749,10 @@ The waveform in **Sessões** starts a native, full-duplex GPT Live call through 
 on tabs and sits above the composer; mute/end also appear in the Live Activity/Dynamic Island extension.
 Audio continues in the background after microphone consent. Real actions and answers are delegated
 to the existing **Sessão mestra**, with throttled live progress rather than waiting silently for the
-final answer. Ending the call does not interrupt work already submitted to OpenCode.
+final answer. Ending the call does not interrupt work already submitted to OpenCode. Ending a session
+that started sends `session.close` and waits up to 2 s for `session.closed` (or the data channel
+closing) before the transport and lease go; that close never reconnects or reports a loss. A moderation `error` only
+clears voice memory when the session ends within 5 s of it; otherwise the call goes on with its memory.
 
 The same call starts without opening the app from the **Falar com a mestra** Control (Action
 button, Control Center, Lock Screen) or the App Shortcut of the same name: only the Live Activity
@@ -1768,10 +1771,14 @@ The TestFlight script also accepts `OPENCODE_DERIVED_DATA` for an isolated archi
 
 Voice memory uses the plugin's KV record, **not an OpenCode Session**. Canonical
 `turn.done` text, roles, native IDs, timestamps and interruptions are written to an
-atomic protected local file before RPC append. Ordered pending operations survive
+atomic protected local file before RPC append. What each role said since its last
+`turn.done` is kept as an interrupted turn when the call ends or drops (02/11: nothing arrives
+after `session.close`, and the user's `turn.done` waits for the assistant's next turn), except
+when moderation clears the conversation. Ordered pending operations survive
 crash/offline periods and replay on launch/call; end checks follow their turns.
-`custom.voice` version 2 context becomes `session.initial_items` with both roles,
-summary/master data labels and a client-enforced 128-item/8,192-estimated-token cap.
+`custom.voice` version 2 context becomes `session.initial_items`: turns as `user`/`assistant`,
+the labelled summary, Mestra state and requests a rebuilt call carries as `developer` messages,
+within a client-enforced 128-item/8,192-estimated-token cap.
 Instructions remain behavior-only. Unsupported/older servers do not block voice;
 local turns remain queued. The master receives only explicit delegations, not the
 voice transcript, as plain request text without a voice preamble (its agent prompt
