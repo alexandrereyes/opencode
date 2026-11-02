@@ -23,7 +23,7 @@ public struct SessionRow: Sendable, Identifiable {
   public let rank: Double
   /// A managed `custom.chats` conversation: listed in Todas and Chats, never under a repository filter.
   public var chat = false
-  /// Its Progresso while the session itself executes and the list still has an open item (`SessionProgress`).
+  /// Its Progresso while the family works (`working`) and the list still has an open item (`SessionProgress`).
   public var progress: SessionProgress?
   public var id: String { entry.session.id }
   public var session: Session { entry.session }
@@ -59,6 +59,38 @@ public enum SessionFilter: String, CaseIterable, Identifiable, Sendable {
     case .running: row.state == .running
     case .attention: row.needsYou
     }
+  }
+}
+
+/// What keeps a family working in Sessões, for its row and the conversation's Progresso (the plugin's Live Activity
+/// hub applies the same rule): a member executes, or a background shell of one still runs (the server counts them
+/// per Session, `backgroundCount`).
+public enum FamilyWork {
+  public static func working(_ members: [NavigationEntry], active: Set<String>) -> Bool {
+    members.contains { active.contains($0.session.id) || ($0.backgroundCount ?? 0) > 0 }
+  }
+
+  /// The session and its descendants at any depth among `entries`: the work it started, below it.
+  public static func subtree(_ id: String, entries: [NavigationEntry]) -> [NavigationEntry] {
+    let children = Dictionary(grouping: entries) { $0.session.parentID ?? "" }
+    var members = entries.filter { $0.session.id == id }
+    var frontier = [id]
+    var seen: Set<String> = [id]
+    while let parent = frontier.popLast() {
+      for child in children[parent] ?? [] where seen.insert(child.session.id).inserted {
+        members.append(child)
+        frontier.append(child.session.id)
+      }
+    }
+    return members
+  }
+
+  /// The session `id` or anything it started still works: an execution of it or of a descendant, among `active` or
+  /// the family snapshot's `descendants`, or a background shell of one of them.
+  public static func working(_ id: String, entries: [NavigationEntry], active: Set<String>,
+    descendants: [Session] = []) -> Bool
+  {
+    active.contains(id) || !descendants.isEmpty || working(subtree(id, entries: entries), active: active)
   }
 }
 
@@ -99,7 +131,7 @@ public enum SessionList {
       let executing = members.contains { active.contains($0.session.id) }
       // A background shell outlives its turn without any Session state; the server counts it per Session.
       let shells = members.filter { ($0.backgroundCount ?? 0) > 0 }
-      let running = executing || !shells.isEmpty
+      let running = FamilyWork.working(members, active: active)
       let idle =
         session.outcome == .succeeded || session.outcome == .failed ? session.time.idle : nil
       let unread = max(entry.unreadAt ?? 0, idle ?? 0) > (session.time.viewed ?? 0)
@@ -121,8 +153,9 @@ public enum SessionList {
         background: executing ? nil : shells.first.map { $0.backgroundTitle ?? "" },
         rank: ranks[session.id] ?? session.time.updated,
         chat: chatRoot.map { session.location.directory.hasPrefix($0 + "/") } ?? false,
-        // Like the web, only while the session itself executes; the event stream's list wins over the snapshot's.
-        progress: active.contains(session.id)
+        // While the family works (rev. 2026-11-02; the web only while the session itself executes), so a list stays
+        // while its subagents or background shells go on; the event stream's list wins over the snapshot's.
+        progress: running
           ? (progress[session.id] ?? entry.progress.map { SessionProgress(items: $0.todos) }).flatMap { $0.open ? $0 : nil }
           : nil)
     }.sorted { left, right in

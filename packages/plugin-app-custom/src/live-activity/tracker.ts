@@ -403,6 +403,8 @@ export function makeTracker(ctx: TrackerContext) {
     )
     for (const root of roots) {
       root.workedAt = now
+      // Its family works even when it does not execute itself, so its Progresso may show.
+      if (root.todos === undefined) yield* readTodos(root)
       // A top-level session waiting for background work: its most recent turn started at its latest prompt.
       if (!root.running && root.startedAt === undefined) root.startedAt = yield* latestPrompt(root.id)
       const family = yield* ctx.session
@@ -536,6 +538,9 @@ export function makeTracker(ctx: TrackerContext) {
         const target = yield* lineage(owner)
         if (target) target.activityAt = Math.max(target.activityAt, event.created)
         worked(owner, event.created)
+        // A background shell keeps the family working: its top-level session's list may show.
+        const top = rootOf(owner)
+        if (top && top.todos === undefined) yield* readTodos(top)
         return
       }
       case "shell.exited":
@@ -598,8 +603,11 @@ export function makeTracker(ctx: TrackerContext) {
           target.activity = undefined
           target.tools.clear()
           target.calls.clear()
-          // Only top-level sessions show a Progresso; a subagent's own list stays in its conversation.
-          if (!target.parentID) yield* target.todos === undefined ? readTodos(target) : refreshGate(target.directory)
+          // Only top-level sessions read their list from the transcript (a subagent's comes from its events). A
+          // descendant starting makes its top-level session's family work, so that list may show too.
+          const top = target.parentID ? rootOf(target.id) : target
+          if (top && top.todos === undefined) yield* readTodos(top)
+          else if (!target.parentID) yield* refreshGate(target.directory)
         }
         worked(id, event.created)
         return yield* refreshPending(now)
@@ -689,11 +697,28 @@ export function makeTracker(ctx: TrackerContext) {
     (entry.completionAt ?? 0) > (entry.viewedAt ?? 0) ? (entry.completionAt ?? 0) : (entry.idleAt ?? 0)
 
   /**
-   * The web's rule for showing the list: `experimental.todo` is on, the session itself executes (not only its
-   * subagents) and its list still has an open item.
+   * The session or a descendant at any depth executes, or a background shell of one of them still runs: the working
+   * family of Sessões and of the rows below (`family` in `derive`), taken below `entry`.
+   */
+  const working = (entry: Entry) =>
+    entry.running ||
+    [...sessions.values()].some((other) => other.running && !other.archived && within(other.id, entry.id)) ||
+    [...shells.values()].some((shell) => within(shell.sessionID, entry.id))
+  const within = (id: string, ancestor: string) => {
+    const visit = (current: Entry | undefined, depth: number): boolean =>
+      current !== undefined &&
+      (current.id === ancestor ||
+        (current.parentID !== undefined && depth < 32 && visit(sessions.get(current.parentID), depth + 1)))
+    return visit(sessions.get(id), 0)
+  }
+
+  /**
+   * When the list shows (rev. 2026-11-02): `experimental.todo` is on, the session's family below it works (it
+   * executes, or a subagent or background shell it started still runs) and its list still has an open item. The
+   * web shows it only while the session itself executes; the apps keep it while the work it planned goes on.
    */
   const progressOf = (entry: Entry): SessionProgress | undefined => {
-    if (!entry.running || entry.archived || gates.get(entry.directory) !== true) return undefined
+    if (entry.archived || gates.get(entry.directory) !== true || !working(entry)) return undefined
     const todos = entry.todos ?? []
     const summary = summarize(todos)
     return summary ? { ...summary, todos } : undefined

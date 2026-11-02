@@ -123,15 +123,18 @@ import Testing
     #expect(try tracker.apply(event("session.tool.success", failed)) == nil)
   }
 
-  static func entry(_ id: String, progress: JSONValue? = nil) throws -> NavigationEntry {
-    var row: [String: JSONValue] = [
-      "session": .object([
-        "id": .string(id), "projectID": .string("project"), "title": .string(id),
-        "location": .object(["directory": .string("/repo")]),
-        "time": .object(["created": .number(100), "updated": .number(100)]),
-      ])
+  static func entry(_ id: String, progress: JSONValue? = nil, parent: String? = nil, background: Int? = nil) throws
+    -> NavigationEntry
+  {
+    var session: [String: JSONValue] = [
+      "id": .string(id), "projectID": .string("project"), "title": .string(id),
+      "location": .object(["directory": .string("/repo")]),
+      "time": .object(["created": .number(100), "updated": .number(100)]),
     ]
+    if let parent { session["parentID"] = .string(parent) }
+    var row: [String: JSONValue] = ["session": .object(session)]
     if let progress { row["progress"] = progress }
+    if let background { row["backgroundCount"] = .number(Double(background)) }
     return try JSONDecoder().decode(NavigationEntry.self, from: JSONEncoder().encode(JSONValue.object(row)))
   }
 
@@ -140,7 +143,7 @@ import Testing
     "current": .string("Atualizar a Live Activity e o relógio"), "todos": .array(plan),
   ])
 
-  @Test func rowShowsItsProgressOnlyWhileTheSessionItselfExecutes() throws {
+  @Test func rowShowsItsProgressOnlyWhileItsFamilyWorks() throws {
     let entries = [try Self.entry("ses_plan", progress: Self.navigationProgress), try Self.entry("ses_old")]
     func rows(active: Set<String>, live: [String: SessionProgress] = [:]) -> [String: SessionRow] {
       Dictionary(
@@ -159,6 +162,47 @@ import Testing
     #expect(rows(active: ["ses_plan"], live: ["ses_plan": next])["ses_plan"]?.progress == nil)
     let moved = SessionProgress(items: [.init(content: "a", status: .completed), .init(content: "b", status: .inProgress)])
     #expect(rows(active: ["ses_old"], live: ["ses_old": moved])["ses_old"]?.progress?.count == "1/2")
+  }
+
+  /// Rev. 2026-11-02: the list stays while the work the session started goes on, by Sessões' own rule.
+  @Test func aListStaysWhileItsSubagentsOrBackgroundShellsWork() throws {
+    let plan = try Self.entry("ses_plan", progress: Self.navigationProgress)
+    let child = try Self.entry("ses_child", parent: "ses_plan")
+    let grandchild = try Self.entry("ses_grandchild", parent: "ses_child")
+    let other = try Self.entry("ses_other")
+    let entries = [plan, child, grandchild, other]
+    func row(_ active: Set<String>, entries: [NavigationEntry] = entries, live: [String: SessionProgress] = [:])
+      -> SessionRow?
+    {
+      SessionList.rows(entries: entries, projects: [], active: active, pins: [], notify: [], autoApprove: false,
+        ranks: [:], chatRoot: nil, progress: live).first { $0.id == "ses_plan" }
+    }
+    // The session itself executes, as before.
+    #expect(row(["ses_plan"])?.progress?.count == "3/7")
+    // Idle, while its subagent or that subagent's own subagent works: the snapshot's list (a reopened app) stays.
+    #expect(row(["ses_child"])?.progress?.count == "3/7")
+    #expect(row(["ses_grandchild"])?.progress?.count == "3/7")
+    // A background shell anywhere below it, with nothing executing.
+    let shelled = [plan, child, try Self.entry("ses_grandchild", parent: "ses_child", background: 1), other]
+    #expect(row([], entries: shelled)?.working == true)
+    #expect(row([], entries: shelled)?.progress?.count == "3/7")
+    // Another session's work, or none at all: hidden.
+    #expect(row(["ses_other"])?.progress == nil)
+    #expect(row([])?.progress == nil)
+    // A list whose every item is finished stays hidden while the subagents work.
+    let closed = SessionProgress(items: [.init(content: "a", status: .completed), .init(content: "b", status: .cancelled)])
+    #expect(row(["ses_child"], live: ["ses_plan": closed])?.progress == nil)
+    // A session without a list shows none.
+    #expect(SessionList.rows(entries: entries, projects: [], active: ["ses_other"], pins: [], notify: [],
+      autoApprove: false, ranks: [:], chatRoot: nil).first { $0.id == "ses_other" }?.progress == nil)
+
+    // The conversation's rule: the viewed session and what it started, never its parent or siblings.
+    #expect(FamilyWork.working("ses_child", entries: entries, active: ["ses_grandchild"]))
+    #expect(!FamilyWork.working("ses_child", entries: entries, active: ["ses_plan", "ses_other"]))
+    #expect(FamilyWork.working("ses_child", entries: shelled, active: []))
+    #expect(FamilyWork.working("ses_plan", entries: entries, active: [], descendants: [grandchild.session]))
+    #expect(!FamilyWork.working("ses_plan", entries: entries, active: []))
+    #expect(FamilyWork.subtree("ses_child", entries: entries).map(\.session.id) == ["ses_child", "ses_grandchild"])
   }
 
   @Test func navigationRowsFromOlderServersHaveNoProgress() throws {

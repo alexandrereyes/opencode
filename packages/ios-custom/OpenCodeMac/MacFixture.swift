@@ -63,9 +63,11 @@ struct MacFixtureServer: Sendable {
   /// "Precisa de você" section, the Dock badge and the alerts.
   private let attention = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacFixtureAttention")
   private let searchFixture = ProcessInfo.processInfo.arguments.contains("-OpenCodeMacSearchFixture")
-  /// `-OpenCodeMacAjustes progresso`: `experimental.todo` on and the root's running turn keeps a Progresso, until
-  /// the check ends that run (`MacAjustesChecks.progressEnded`).
+  /// `-OpenCodeMacAjustes progresso`: `experimental.todo` on and the root's running turn keeps a Progresso. The check
+  /// ends that run (`MacAjustesChecks.progressEnded`) while its subagents and background shells go on, then stops them
+  /// too (`progressFamilyEnded`).
   private let progress = MacAjustesChecks.mode == "progresso"
+  private var familyEnded: Bool { progress && MacAjustesChecks.progressFamilyEnded }
   private static let todos = #"[{"content":"Ler o rastreador da Live Activity","status":"completed"},{"content":"Somar o progresso do plano no plugin","status":"completed"},{"content":"Adicionar a unidade todos ao contrato","status":"completed"},{"content":"Atualizar a Live Activity e o relógio","status":"in_progress"},{"content":"Rodar os testes do OpenCodeKit","status":"pending"},{"content":"Capturar as telas no iPhone 14","status":"pending"},{"content":"Migrar as fixtures antigas","status":"cancelled"}]"#
 
   func respond(_ request: URLRequest) -> String? {
@@ -80,7 +82,8 @@ struct MacFixtureServer: Sendable {
     case "/api/session/active":
       let ended = progress && MacAjustesChecks.progressEnded
       return #"{"data":{"#
-        + ((ended ? [] : ["ses_mac_root"]) + ["ses_mac_live"] + Self.live.map(\.id) + Self.liveGrandchildren.map(\.id))
+        + ((ended ? [] : ["ses_mac_root"]) + ["ses_mac_live"]
+          + (familyEnded ? [] : Self.live.map(\.id) + Self.liveGrandchildren.map(\.id)))
           .map { #""\#($0)":{"type":"running"}"# }
           .joined(separator: ",") + "}}"
     case "/api/session": return #"{"data":[\#(searchFixture ? archivedSession : "")],"cursor":{}}"#
@@ -92,6 +95,7 @@ struct MacFixtureServer: Sendable {
       return #"{"data":["# + ["build", "explore", "opushigh", "terraxhigh", "terrahigh"].map {
         #"{"id":"\#($0)","name":"\#($0)","mode":"\#($0 == "build" ? "primary" : "subagent")"}"#
       }.joined(separator: ",") + "]}"
+    case "/api/shell" where familyEnded: return #"{"data":[]}"#
     case "/api/shell":
       return #"{"data":[{"id":"shl_dev","status":"running","command":"bun run dev --port 4177","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 12 * minute)}},{"id":"shl_test","status":"running","command":"xcodebuild test -scheme OpenCode","metadata":{"sessionID":"ses_mac_root"},"time":{"started":\#(now - 3 * minute)}}]}"#
     case "/api/vcs/diff": return "{\"data\":\(changes)}"
@@ -201,6 +205,8 @@ struct MacFixtureServer: Sendable {
     // Every descendant of the root, its grandchildren included; Backend da Live Activity has subagents of its own.
     case "custom.session-family/snapshot":
       switch input?["sessionID"]?.string {
+      case MacFixture.rootID where familyEnded:
+        #"{"count":\#(Self.children.count + Self.grandchildren.count),"cost":63.89,"active":[],"forms":[],"permissions":[]}"#
       case MacFixture.rootID:
         #"{"count":\#(Self.children.count + Self.grandchildren.count),"cost":63.89,"active":[\#((Self.live + Self.liveGrandchildren).map { session($0) }.joined(separator: ","))],"forms":[\#(rootQuestion)],"permissions":[\#(childPermission)],"progress":{\#(Self.snapshotProgress)}}"#
       case Self.parentOfGrandchildren:
@@ -375,8 +381,9 @@ struct MacFixtureServer: Sendable {
       let at = now - value.minutes * minute
       let requests = (value.permission ? #","permissionAt":\#(at),"permissionCount":1"# : "")
         + (value.question ? #","questionAt":\#(at),"questionCount":1"# : "")
-      let plan = progress && value.id == MacFixture.rootID && !MacAjustesChecks.progressEnded
-        ? #","progress":{"done":3,"finished":4,"total":7,"current":"Atualizar a Live Activity e o relógio","todos":\#(Self.todos)}"#
+      // Like the server (rev. 2026-11-02): the list while the family works, and the root's two background shells.
+      let plan = progress && value.id == MacFixture.rootID && !familyEnded
+        ? #","progress":{"done":3,"finished":4,"total":7,"current":"Atualizar a Live Activity e o relógio","todos":\#(Self.todos)},"backgroundCount":2,"backgroundTitle":"xcodebuild test -scheme OpenCode""#
         : ""
       return #"{"session":\#(rootSession(value)),"messageAt":\#(at)\#(requests)\#(plan)}"#
     }.joined(separator: ",")

@@ -282,12 +282,17 @@ import UniformTypeIdentifiers
   private(set) var progressEnabled = false
   @ObservationIgnored private var progressGateDirectory: String?
   /// Progresso, with the upstream web's rules (`SessionProgress`): the latest completed `todowrite` list before the
-  /// revert boundary, while the session itself executes and the list still has an open item. `fallback` is the
-  /// Sessões row's list, for a loaded tail that does not reach the latest call.
-  func progress(fallback: SessionProgress?) -> SessionProgress? {
-    guard executing, progressEnabled else { return nil }
+  /// revert boundary, while the list still has an open item and the work this session started goes on (rev.
+  /// 2026-11-02; the web only while the session itself executes): it executes, or a subagent or background shell
+  /// below it still runs, by Sessões' rule (`FamilyWork`) plus this conversation's own agents and shells. The
+  /// Sessões row's list is the fallback for a loaded tail that does not reach the latest call.
+  func progress(in sessions: SessionStore) -> SessionProgress? {
+    guard progressEnabled, runningCount > 0
+      || FamilyWork.working(id, entries: sessions.entries, active: active, descendants: family?.active ?? [])
+    else { return nil }
     let visible = SessionRevert.visible(messages, boundary: reversion.boundary(session))
-    let current = SessionProgress.latest(in: visible).map(SessionProgress.init(items:)) ?? (hasOlder ? fallback : nil)
+    let current = SessionProgress.latest(in: visible).map(SessionProgress.init(items:))
+      ?? (hasOlder ? sessions.progress(id) : nil)
     return current?.open == true ? current : nil
   }
   /// Server inbox plus optimistic admissions awaiting their echo.
@@ -895,6 +900,26 @@ import UniformTypeIdentifiers
     }
     #endif
     branch = "exemplo-sintetico"
+    // `-OpenCodeFixtureProgress open|closed`: `experimental.todo` on and a completed `todowrite` last, with an open
+    // item (3 of 7) or every item finished.
+    if let index = arguments.firstIndex(of: "-OpenCodeFixtureProgress"), arguments.indices.contains(index + 1) {
+      let statuses = arguments[index + 1] == "closed"
+        ? ["completed", "completed", "completed", "completed", "completed", "cancelled", "cancelled"]
+        : ["completed", "completed", "completed", "in_progress", "pending", "pending", "cancelled"]
+      let titles = ["Ler o rastreador da Live Activity", "Somar o progresso do plano no plugin",
+        "Adicionar a unidade todos ao contrato", "Atualizar a Live Activity e o relógio", "Rodar os testes do OpenCodeKit",
+        "Capturar as telas no iPhone 14", "Migrar as fixtures antigas"]
+      let todos = JSONValue.array(zip(titles, statuses).map { .object(["content": .string($0), "status": .string($1)]) })
+      let plan: JSONValue = .object([
+        "id": .string("msg_fixture_plan"), "type": .string("assistant"),
+        "time": .object(["created": .number((messages.last?.time.created ?? 0) + 1)]),
+        "content": .array([.object(["type": .string("tool"), "id": .string("call_fixture_plan"),
+          "name": .string(SessionProgress.tool),
+          "state": .object(["status": .string("completed"), "input": .object(["todos": todos])])])]),
+      ])
+      messages.append(try! JSONDecoder().decode(ConversationMessage.self, from: JSONEncoder().encode(plan)))
+      progressEnabled = true
+    }
     // A background subagent still working after this session went idle.
     if arguments.contains("-OpenCodeFixtureFamilyWorking") {
       family = try! JSONDecoder().decode(FamilySnapshot.self, from: Data(#"{"count":2,"active":[{"id":"ses_fixture_child","projectID":"project_scroll_0","title":"Subagente sintético","location":{"directory":"/Projetos/exemplo-0"},"time":{"created":1792576700000,"updated":1792576800000}}],"forms":[],"permissions":[]}"#.utf8))

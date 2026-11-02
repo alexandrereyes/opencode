@@ -30,6 +30,7 @@ import SwiftUI
   static let foreground: Set<String> = ["numbers", "viewer", "dictation"]
   /// `progresso`: the fixture server answers that the root's run ended (read off the main actor by the server).
   nonisolated(unsafe) static var progressEnded = false
+  nonisolated(unsafe) static var progressFamilyEnded = false
 
   /// Once per launch: a second window (one SwiftUI restores and one the capture opens) would drive the same views.
   static func run(window: NSWindow, runtime: MacWindowRuntime, theme: AppTheme, folder: String) async {
@@ -1763,13 +1764,25 @@ import SwiftUI
     try await Task.sleep(for: .milliseconds(700))
     MacCapture.shot(popover, theme: theme, to: folder + "/\(MacCapture.name)-popover.png")
     shot("popover-janela")
-    // The run ends with the popover open: the server no longer lists the root as running, both reads follow it,
-    // and the pill leaves with its popover.
+    // The root's own run ends with the popover open while its subagents and background shells go on: the list it
+    // planned stays in the pill, its popover and the Sessões row (rev. 2026-11-02).
     progressEnded = true
     conversation.revalidate()
     await store.reload()
+    try await wait("raiz parada com a família trabalhando") { conversation.executing ? nil : true }
+    try await Task.sleep(for: .milliseconds(800))
+    let kept = store.rows.first { $0.id == MacFixture.rootID }?.progress?.count
+    guard ConversationProgressPill.shown == pill, popover.isVisible, kept == "3/7" else {
+      throw Failure(description: "família trabalhando: pílula \(ConversationProgressPill.shown ?? "-") · popover \(popover.isVisible) · linha \(kept ?? "-")")
+    }
+    MacCapture.shot(popover, theme: theme, to: folder + "/\(MacCapture.name)-popover-familia.png")
+    shot("familia-trabalhando")
+    // The whole family stops: no subagent or shell is left, and the pill leaves with its popover.
+    progressFamilyEnded = true
+    conversation.revalidate()
+    await store.reload()
     try await wait("pílula e popover sumiram") {
-      ConversationProgressPill.shown == nil && !conversation.executing && !popover.isVisible ? true : nil
+      ConversationProgressPill.shown == nil && !popover.isVisible ? true : nil
     }
     try await wait("linha sem Progresso") {
       store.rows.first { $0.id == MacFixture.rootID }.map { $0.progress == nil ? true : nil } ?? nil

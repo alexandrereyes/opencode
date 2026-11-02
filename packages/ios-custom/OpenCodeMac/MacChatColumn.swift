@@ -368,7 +368,7 @@ struct MacConversationView: View {
     VStack(spacing: 8) {
       FloatingVoiceHost(sessions: sessions)
       if conversation.session?.revert != nil, !conversation.isChild { revertBar }
-      if let progress = conversation.progress(fallback: sessions.progress(conversation.id)) {
+      if let progress = conversation.progress(in: sessions) {
         ConversationProgressPill(progress: progress)
       }
       ConversationTray(store: conversation, draft: draft, started: .some(input.executionStarted.value))

@@ -353,7 +353,7 @@ struct ConversationView: View {
           .foregroundStyle(theme.color(.textSecondary)).padding(14).frame(maxWidth: .infinity)
       } else {
         VStack(spacing: 0) {
-          if let progress = conversation.progress(fallback: sessions.progress(conversation.id)) {
+          if let progress = conversation.progress(in: sessions) {
             ConversationProgressPill(progress: progress).padding(.bottom, 8)
           }
           ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))

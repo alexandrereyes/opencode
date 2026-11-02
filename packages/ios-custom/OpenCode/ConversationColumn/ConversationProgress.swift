@@ -2,8 +2,9 @@ import OpenCodeKit
 import SwiftUI
 
 /// Progresso above the tray, shared by the iPhone and the Mac: `◔ 3/7 · current item`, opening the whole list (a
-/// sheet on the iPhone, a popover on the Mac). It shows only while `ConversationStore.progress` does: the session
-/// itself executes and its list still has an open item (`plugin-app-custom/docs/progress.md`).
+/// sheet on the iPhone, a popover on the Mac). It shows only while `ConversationStore.progress` does: the work the
+/// session started goes on (it, a subagent or a background shell below it) and its list still has an open item
+/// (`plugin-app-custom/docs/progress.md`).
 struct ConversationProgressPill: View {
   @Environment(\.appTheme) private var theme
   let progress: SessionProgress

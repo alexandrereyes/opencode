@@ -49,7 +49,8 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
   yield* Effect.forEach([...new Set([...permissions, ...forms].map((item) => item.sessionID))], depthOf)
   const order = (a: { sessionID: string; created?: number }, b: { sessionID: string; created?: number }) =>
     (members.get(a.sessionID) ?? -1) - (members.get(b.sessionID) ?? -1) || (a.created ?? 0) - (b.created ?? 0)
-  // A Progresso shows only while its session executes, so the active descendants are the ones to ask.
+  // The subagent lists show each active descendant's Progresso; one that waits on its own subagents keeps it in its
+  // own conversation and Sessões row.
   const progress = family.active.flatMap((item) => {
     const value = ctx.progress?.(item.id)
     return value ? [[item.id, value] as const] : []

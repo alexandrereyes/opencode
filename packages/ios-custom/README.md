@@ -851,7 +851,22 @@ is completed/total (cancelled ones count in the total), the ring (completed + ca
 the first in progress, else the first pending, else the last completed; it shows only while `experimental.todo` is
 on (the last `/api/config` document that sets `experimental` decides, read when the conversation opens and again
 after `session.execution.started`), **the session itself** executes (`ConversationStore.executing`, not a parent
-waiting for subagents) and the list still has an open item. So it disappears when the work ends.
+waiting for subagents) and the list still has an open item. So it disappears when the work ends. Since 2 November
+the work is the family's (next paragraph).
+
+**Alexandre, 2/11: the list stays while the work goes on.** The pill disappeared as soon as the session's own run
+ended, while its subagents or background shells were still at the plan. Now it shows while the work the viewed
+session started goes on, by Sessões' rule for a working family (`FamilyWork`, OpenCodeKit, which `SessionList` uses
+for `SessionRow.working`): the session or a descendant at any depth executes, or a background shell of one of them
+still runs (`backgroundCount`), plus the family snapshot's active descendants and the conversation's own agents and
+shells (`ConversationStore.progress(in:)`). It is still the viewed session's own list, never a sum of its subagents',
+and a list with every item finished stays hidden. The Sessões row follows the same rule, and so does the plugin
+(`custom.navigation`, Mestra's tools, the Live Activity and the watch, which then show `3/7 · Agora: …` instead of the
+subagent count); a server restarted while the family works reads the idle session's list from its transcript.
+Checks: `SessionProgressTests` (idle parent with a working child, grandchild or shell, another session's work,
+nothing working, a finished list), `OpenCodeUITests/ProgressFamilyTests` (server-free, `-OpenCodeFixtureProgress
+open|closed` with `-OpenCodeFixtureFamilyWorking`) and the Mac's `test-mac-ajustes.sh progresso` (the root's run ends
+with the popover open while its subagents and shells go on, then the whole family stops).
 
 Sources: the conversation reads its loaded messages; when the loaded tail does not reach the latest call it falls
 back to the Sessões row's list. Sessões takes `progress` from `custom.navigation/list` (the plugin folds the same

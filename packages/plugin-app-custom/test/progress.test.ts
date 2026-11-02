@@ -19,6 +19,9 @@ import {
   plan,
   scene,
   session,
+  backgroundShellMessage,
+  shellExited,
+  shellStarted,
   todoMessage,
   todowrite,
   userMessage,
@@ -129,7 +132,7 @@ test("without experimental.todo the row keeps its subagent count and nothing sho
   expect(tracker.progress(ids.live)).toBeUndefined()
 })
 
-test("the list shows only while the session itself executes and still has an open item", async () => {
+test("the list shows while the session's family works and still has an open item", async () => {
   const server = world()
   server.todo.add(directory)
   const tracker = makeTracker(server.ctx)
@@ -162,12 +165,15 @@ test("the list shows only while the session itself executes and still has an ope
     },
   ])
   expect(tracker.progress(ids.live)?.done).toBe(3)
-  // Its own run ended while the subagent still works: back to the subagent count.
+  // Its own run ended while the subagent still works: the list it planned stays (rev. 2026-11-02).
   await apply([execution("succeeded", ids.live, T0 + 5 * minute)])
   expect(tracker.derive(T, host).state.sessions[0]).toMatchObject({
     status: "working",
-    progress: { done: 0, total: 1, unit: "subagents" },
+    progress: { done: 3, total: 7, unit: "todos" },
   })
+  expect(tracker.progress(ids.live)?.done).toBe(3)
+  // The whole family stopped: it no longer shows.
+  await apply([execution("succeeded", "ses_child_1", T0 + 5 * minute + 30_000)])
   expect(tracker.progress(ids.live)).toBeUndefined()
   // Every item finished: nothing shows although it works again.
   await apply([
@@ -178,6 +184,85 @@ test("the list shows only while the session itself executes and still has an ope
     ]),
   ])
   expect(tracker.progress(ids.live)).toBeUndefined()
+})
+
+test("a grandchild or a background shell keeps an idle session's list showing until the family stops", async () => {
+  const server = world()
+  server.todo.add(directory)
+  const tracker = makeTracker(server.ctx)
+  const apply = (events: Event[]) =>
+    run(Effect.forEach(events, (event) => tracker.apply(event, "created" in event ? event.created : T)))
+  const child = [{ content: "Revisar o snapshot", status: "in_progress" as const }]
+  await apply([
+    created(ids.live, T0),
+    execution("started", ids.live, T0),
+    ...todowrite(ids.live, T0 + minute, "call_1", plan),
+    created("ses_child_1", T0 + 2 * minute, ids.live),
+    execution("started", "ses_child_1", T0 + 2 * minute),
+    ...todowrite("ses_child_1", T0 + 3 * minute, "call_child", child),
+    created("ses_grandchild", T0 + 4 * minute, "ses_child_1"),
+    execution("started", "ses_grandchild", T0 + 4 * minute),
+    execution("succeeded", "ses_child_1", T0 + 5 * minute),
+    execution("succeeded", ids.live, T0 + 6 * minute),
+  ])
+  // Only the grandchild runs: both lists above it stay, each its own.
+  expect(tracker.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
+  expect(tracker.progress("ses_child_1")).toMatchObject({ done: 0, total: 1, current: "Revisar o snapshot" })
+  await apply([execution("succeeded", "ses_grandchild", T0 + 7 * minute)])
+  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress("ses_child_1")).toBeUndefined()
+  // A background shell, of the session or of a descendant, is work of the family too.
+  await apply([shellStarted("ses_grandchild", "sh_1", T0 + 8 * minute, "bun test")])
+  expect(tracker.progress(ids.live)?.done).toBe(3)
+  expect(tracker.derive(T0 + 8 * minute, host).state.sessions[0]).toMatchObject({
+    status: "working",
+    progress: { done: 3, total: 7, unit: "todos" },
+  })
+  await apply([shellExited("sh_1", T0 + 9 * minute)])
+  expect(tracker.progress(ids.live)).toBeUndefined()
+})
+
+test("a rebuild reads the list of an idle top-level session whose subagent or background shell still runs", async () => {
+  const server = world()
+  server.todo.add(directory)
+  server.add(session(ids.live))
+  server.add(session("ses_child_1", { parentID: ids.live }))
+  server.active.add("ses_child_1")
+  server.transcripts.set(ids.live, [todoMessage("msg_1", T - 2 * minute, plan)])
+  const tracker = makeTracker(server.ctx)
+  await run(tracker.rebuild(T))
+  expect(tracker.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
+  expect(tracker.derive(T, host).state.focus?.progress).toMatchObject({ done: 3, total: 7, unit: "todos" })
+
+  // No subagent, only a shell its transcript moved to the background and never closed.
+  const shelled = world()
+  shelled.todo.add(directory)
+  shelled.add(
+    session(ids.live, {
+      outcome: "succeeded",
+      time: { created: T - 3_600_000, updated: T - minute, idle: T - minute },
+    }),
+  )
+  shelled.transcripts.set(ids.live, [
+    backgroundShellMessage("msg_2", "sh_9", T - 2 * minute, "bun run build"),
+    todoMessage("msg_1", T - 3 * minute, plan),
+  ])
+  const rebuilt = makeTracker(shelled.ctx)
+  await run(rebuilt.rebuild(T))
+  expect(rebuilt.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
+})
+
+test("a subagent that starts while its idle top-level session's list is unknown reads that list", async () => {
+  const server = world()
+  server.todo.add(directory)
+  server.add(session(ids.live))
+  server.add(session("ses_child_1", { parentID: ids.live }))
+  server.transcripts.set(ids.live, [todoMessage("msg_1", T - 2 * minute, plan)])
+  const tracker = makeTracker(server.ctx)
+  await run(tracker.rebuild(T - minute))
+  expect(tracker.progress(ids.live)).toBeUndefined()
+  await run(tracker.apply(execution("started", "ses_child_1", T), T))
+  expect(tracker.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
 })
 
 test("a resumed session reads its list from the transcript, and a revert reads it again before the boundary", async () => {
