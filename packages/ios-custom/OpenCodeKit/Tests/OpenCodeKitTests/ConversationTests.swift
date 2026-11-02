@@ -218,6 +218,28 @@ private func page(_ name: String) throws -> [ConversationMessage] {
       == nil)
 }
 
+@Test func answersAreAcknowledgedOnlyWhileTheConversationIsSeen() {
+  let seen = { (visible: Bool) in
+    ConversationProjection.viewedWatermark(idle: 20, viewed: 10, acknowledged: nil, visible: visible)
+  }
+  // The Mac: every condition of a window the user can see; any one missing keeps the answer unread.
+  #expect(ReadVisibility.desktop(appActive: true, windowVisible: true, minimized: false, occluded: false, systemAwake: true))
+  #expect(seen(ReadVisibility.desktop(appActive: true, windowVisible: true, minimized: false, occluded: false, systemAwake: true)) == 20)
+  for (active, visible, minimized, occluded, awake) in [
+    (false, true, false, false, true), (true, false, false, false, true), (true, true, true, false, true),
+    (true, true, false, true, true), (true, true, false, false, false),
+  ] {
+    let readable = ReadVisibility.desktop(
+      appActive: active, windowVisible: visible, minimized: minimized, occluded: occluded, systemAwake: awake)
+    #expect(!readable)
+    #expect(seen(readable) == nil)
+  }
+  // The iPhone: on top of the stack and in the foreground.
+  #expect(ReadVisibility.phone(screenVisible: true, sceneActive: true))
+  #expect(!ReadVisibility.phone(screenVisible: true, sceneActive: false))
+  #expect(!ReadVisibility.phone(screenVisible: false, sceneActive: true))
+}
+
 @Test func markdownBlocksRetainSelectionOffsetsAndStructures() throws {
   let source =
     "# Título\n\nOlá **mundo** e `código` 😀.\n\n> Citação\n\n1. Um\n   - Dois\n\n```swift\nlet x = 1\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |"

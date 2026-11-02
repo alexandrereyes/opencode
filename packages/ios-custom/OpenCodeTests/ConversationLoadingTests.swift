@@ -80,6 +80,9 @@ private actor OpeningReadProbe {
     case "/api/session/ses_open/inbox", "/api/model", "/api/agent", "/api/provider", "/api/shell":
       body = #"{"data":[]}"#
     case "/api/model/default": body = #"{"data":null}"#
+    case "/api/config": body = "[]"
+    case "/api/session/ses_parent":
+      body = #"{"data":{"id":"ses_parent","projectID":"global","location":{"directory":"/sandbox"},"time":{"created":1,"updated":3}}}"#
     case "/api/rpc/custom.preferences/get":
       body = #"{"output":{"revision":1,"data":{"projects":{},"pinnedSessions":[],"settings":{"autoApprove":false}}}}"#
     case "/api/rpc/custom.worktrees/available": body = #"{"output":true}"#
@@ -109,18 +112,46 @@ private actor OpeningReadProbe {
       let loading = Task { await store.refresh() }
       await probe.gate.waitForArrival()
       XCTAssertFalse(store.ready)
-      await store.presented()
-      await store.presented()
+      await store.presented(visible: true)
+      await store.presented(visible: true)
       let views = await probe.viewed()
       XCTAssertEqual(views, [20])
       await probe.gate.release()
       await loading.value
       await probe.advanceIdle(30)
       await store.refresh()
-      await store.presented()
+      await store.presented(visible: true)
       let advanced = await probe.viewed()
       XCTAssertEqual(advanced, [20, 30])
     }
+  }
+
+  /// A conversation left open but not seen (hidden window, app in the background, screen asleep) sends nothing; it
+  /// acknowledges once seen again, and a new answer while it stays seen.
+  func testHiddenConversationKeepsItsAnswerUnreadUntilSeen() async throws {
+    let probe = OpeningReadProbe(idle: 20)
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)) {
+      await probe.response($0)
+    }
+    let store = ConversationStore(id: "ses_open", client: client, hub: EventHub(client: client))
+    let loading = Task { await store.refresh() }
+    await probe.gate.waitForArrival()
+    await probe.gate.release()
+    await loading.value
+    await store.presented(visible: false)
+    let hidden = await probe.viewed()
+    XCTAssertEqual(hidden, [])
+    await store.presented(visible: true)
+    let seen = await probe.viewed()
+    XCTAssertEqual(seen, [20])
+    await probe.advanceIdle(30)
+    await store.refresh()
+    await store.presented(visible: false)
+    let hiddenAgain = await probe.viewed()
+    XCTAssertEqual(hiddenAgain, [20])
+    await store.presented(visible: true)
+    let seenAgain = await probe.viewed()
+    XCTAssertEqual(seenAgain, [20, 30])
   }
 
   func testFailedViewedRequestAllowsRetryWithoutBlockingTheReader() async throws {
@@ -131,9 +162,9 @@ private actor OpeningReadProbe {
     let store = ConversationStore(id: "ses_open", client: client, hub: EventHub(client: client))
     let loading = Task { await store.refresh() }
     await probe.gate.waitForArrival()
-    await store.presented()
-    await store.presented()
-    await store.presented()
+    await store.presented(visible: true)
+    await store.presented(visible: true)
+    await store.presented(visible: true)
     let views = await probe.viewed()
     XCTAssertEqual(views, [20, 20])
     XCTAssertNil(store.error)

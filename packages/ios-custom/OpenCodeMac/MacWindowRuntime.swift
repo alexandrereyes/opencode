@@ -11,6 +11,8 @@ import SwiftUI
   let drafts: ConversationDrafts
   let voicePresentation = FloatingVoicePresentation()
   weak var window: NSWindow?
+  /// The user can see this window now (`MacRuntime.syncShown`): only then does its conversation acknowledge answers.
+  var readable = false
   var state: DesktopWindowState {
     didSet {
       app.syncShown()

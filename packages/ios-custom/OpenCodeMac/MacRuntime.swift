@@ -31,6 +31,16 @@ import SwiftUI
   @ObservationIgnored private var events: Task<Void, Never>?
   @ObservationIgnored private var finishes: Task<Void, Never>?
   @ObservationIgnored private var conversations: [String: (count: Int, task: Task<Void, Never>)] = [:]
+  /// What keeps every screen from the user now; empty is `systemAwake` (`ReadVisibility.desktop`). Views read each
+  /// window's `readable` instead, set by `syncShown`.
+  @ObservationIgnored private var asleep: Set<SystemState> = []
+  #if DEBUG
+  /// The read check's stand-in for AppKit (`MacLaunch.readCheck`): whether the app is active and hidden, and the
+  /// sessions whose windows are minimized. A locked Mac activates no app, and the check never takes the user's focus.
+  @ObservationIgnored private var simulated = (active: true, hidden: false, minimized: Set<String>())
+  #endif
+
+  init() { observeSystem() }
 
   func prepare() async {
     if let building { await building.value }
@@ -133,9 +143,107 @@ import SwiftUI
   }
 
   func syncShown() {
+    for runtime in windows.values {
+      let readable = seen(runtime)
+      guard runtime.readable != readable else { continue }
+      runtime.readable = readable
+      #if DEBUG
+      if MacLaunch.readCheck {
+        print("MacRead \(runtime.selection.sessionID ?? "-") readable \(readable) \(simulated)"
+          + " system \(asleep.map(\.rawValue).sorted())")
+        fflush(stdout)
+      }
+      #endif
+    }
     store?.shownConversations = windows.values.flatMap { [$0.selection.sessionID, $0.selection.childID].compactMap { $0 } }
-    store?.shownSessionID = NSApp.isActive ? front?.selection.childID ?? front?.selection.sessionID : nil
+    // `NSApp.isActive` too: the bell check's background copy reads without its conversation being the shown one.
+    store?.shownSessionID = NSApp.isActive && front?.readable == true
+      ? front?.selection.childID ?? front?.selection.sessionID : nil
   }
+
+  /// Whether the user can see this window now, so its conversation may acknowledge answers on its own.
+  private func seen(_ runtime: MacWindowRuntime) -> Bool {
+    #if DEBUG
+    // The bell check runs in the background and off-screen, and opening a line must still read it.
+    if MacBellChecks.arrival != nil { return true }
+    if MacLaunch.readCheck {
+      return runtime.window != nil && ReadVisibility.desktop(
+        appActive: simulated.active, windowVisible: !simulated.hidden,
+        minimized: simulated.minimized.contains(runtime.selection.sessionID ?? ""), occluded: false,
+        systemAwake: asleep.isEmpty)
+    }
+    #endif
+    guard let window = runtime.window else { return false }
+    return ReadVisibility.desktop(
+      appActive: NSApp.isActive, windowVisible: window.isVisible, minimized: window.isMiniaturized,
+      occluded: !window.occlusionState.contains(.visible), systemAwake: asleep.isEmpty)
+  }
+
+  /// Displays asleep, the screen locked or another user's session in front: no window can be seen until it ends.
+  private func observeSystem() {
+    let workspace = NSWorkspace.shared.notificationCenter
+    let distributed = DistributedNotificationCenter.default()
+    let changes: [(NotificationCenter, Notification.Name, SystemState, Bool)] = [
+      (workspace, NSWorkspace.screensDidSleepNotification, .asleep, true),
+      (workspace, NSWorkspace.screensDidWakeNotification, .asleep, false),
+      (workspace, NSWorkspace.sessionDidResignActiveNotification, .switchedOut, true),
+      (workspace, NSWorkspace.sessionDidBecomeActiveNotification, .switchedOut, false),
+      (distributed, Notification.Name("com.apple.screenIsLocked"), .locked, true),
+      (distributed, Notification.Name("com.apple.screenIsUnlocked"), .locked, false),
+    ]
+    for (center, name, state, on) in changes {
+      center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated {
+          #if DEBUG
+          // The read check takes only the states it is told; the real ones are traced.
+          if MacLaunch.readCheck {
+            print("MacRead real \(state.rawValue) \(on)")
+            fflush(stdout)
+            return
+          }
+          #endif
+          self?.change(state, on)
+        }
+      }
+    }
+    #if DEBUG
+    // The read check tells its copy those transitions instead, so it never sleeps, locks or takes over the Mac.
+    guard MacLaunch.readCheck, let id = Bundle.main.bundleIdentifier else { return }
+    distributed.addObserver(forName: Notification.Name(id + ".read-check"), object: nil, queue: .main) { [weak self] note in
+      guard let command = note.object as? String else { return }
+      MainActor.assumeIsolated { self?.readCheck(command) }
+    }
+    #endif
+  }
+
+  #if DEBUG
+  /// `active:1|0`, `hidden:1|0`, `minimized:<session id>:1|0` (that session's window), `asleep:1|0`, `locked:1|0`,
+  /// `switchedOut:1|0`, or `window:<session id>` for one more window showing that session.
+  private func readCheck(_ command: String) {
+    let parts = command.split(separator: ":").map(String.init)
+    let on = parts.last == "1"
+    switch parts.first {
+    case "window" where parts.count == 2:
+      pendingNotification = (parts[1], nil)
+      openMainWindow?()
+    case "active": simulated.active = on
+    case "hidden": simulated.hidden = on
+    case "minimized" where parts.count == 3:
+      if on { simulated.minimized.insert(parts[1]) } else { simulated.minimized.remove(parts[1]) }
+    default:
+      if let state = parts.first.flatMap(SystemState.init(rawValue:)) { change(state, on) }
+      return
+    }
+    syncShown()
+  }
+  #endif
+
+  private func change(_ state: SystemState, _ on: Bool) {
+    if on { asleep.insert(state) } else { asleep.remove(state) }
+    syncShown()
+  }
+
+  private enum SystemState: String { case asleep, locked, switchedOut }
 
   /// Only one event consumer per conversation, even when it is visible in two windows.
   func mount(_ conversation: ConversationStore) {
@@ -181,4 +289,10 @@ enum MacLaunch {
   /// installed app and the Debug build. It never connects to a saved server or to 4096 (`TestInstall`).
   static let testCopy = !["br.com.alexandrem.opencode.mac", "br.com.alexandrem.opencode.mac.debug"]
     .contains(Bundle.main.bundleIdentifier ?? "")
+  #if DEBUG
+  /// `-OpenCodeMacReadCheck` in a test copy (`script/test-read-visibility.py mac`): prints `MacRead …` whenever a
+  /// window's `readable` changes and takes the app, window and system states it is told (`<bundle id>.read-check`)
+  /// instead of AppKit's, so the check runs in the background, even with the Mac's screen off or locked.
+  static let readCheck = testCopy && ProcessInfo.processInfo.arguments.contains("-OpenCodeMacReadCheck")
+  #endif
 }

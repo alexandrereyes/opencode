@@ -306,8 +306,10 @@ struct ConversationView: View {
     // One event loop while the screen is shown. Hiding the app does not restart it: the reconnection that
     // follows merges the tail without republishing an unchanged transcript.
     .task { await conversation.run() }
-    .task(id: conversation.session) {
-      if screenVisible { await conversation.presented() }
+    // Acknowledges answers only while seen (`ReadVisibility.phone`): in the background, locked or under another screen
+    // they stay unread; coming back to the foreground or to this screen acknowledges the latest one.
+    .task(id: ReadTrigger(session: conversation.session, visible: readVisible)) {
+      await conversation.presented(visible: readVisible)
     }
     .task(id: conversation.session?.location.directory) {
       await conversation.mcps.load(directory: conversation.session?.location.directory)
@@ -706,6 +708,7 @@ struct ConversationView: View {
     leavePosition()
     sessions.conversationPath.append(.init(id: id, parent: conversation.id))
   }
+  private var readVisible: Bool { ReadVisibility.phone(screenVisible: screenVisible, sceneActive: scenePhase == .active) }
   private func leavePosition() {
     // Capture before NavigationStack changes safe areas; its later disappearance
     // callbacks must not overwrite that snapshot with transition geometry.

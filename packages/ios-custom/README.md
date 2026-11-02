@@ -989,7 +989,26 @@ Opening the route acknowledges that session's observed `time.idle` through `POST
 without waiting for catalogs, pagination, bottom or a visible response. Root and child acknowledge only themselves.
 The request/payload exist unchanged on installed `1de0005…`; there is no message-level receipt and no backward move.
 Deduplication remembers the requested watermark and releases it on failure, like the web. No `custom.preferences`
-write or local unread boundary is involved. The original wave notes below describe historical checks; unread skips
+write or local unread boundary is involved. **Since 1 November** the route acknowledges only while its user can
+actually see it (`ReadVisibility`), so an answer arriving behind another app or with the screen off stays unread in
+Sessões, "Precisa de você", the bell and the Live Activity, pinned or not:
+- **iPhone:** the conversation is on top of its stack (`screenVisible`) and the scene is `.active`. In the background,
+  locked or in the app switcher nothing is sent; back in the foreground, or back from a subagent or another screen,
+  the latest `idle` is acknowledged without reopening. The Sessões list never acknowledges.
+- **Mac:** per window (`MacWindowRuntime.readable`, recomputed by `MacRuntime.syncShown`): the app is active, the
+  window is visible, not minimized and not fully covered (`occlusionState`), and the user's session can see a screen
+  (no `screensDidSleep`, `com.apple.screenIsLocked` or `sessionDidResignActive` in force). A hidden window never
+  acknowledges for another one, and the bell leaves out a new line only for the front window's conversation while it
+  is seen (`shownSessionID`).
+  Check: `script/test-read-visibility.py mac` runs a test copy in the background with `-OpenCodeMacReadCheck`. The
+  copy takes the app, window and system states from the distributed notification `<bundle id>.read-check` (object
+  `active:1|0`, `hidden:1|0`, `minimized:<id>:1|0`, `asleep:1|0`, `locked:1|0`, `switchedOut:1|0`, `window:<id>`)
+  instead of AppKit, so it never takes the focus, sleeps or locks the Mac, and runs with the screen off; the AppKit
+  and system notifications themselves need a check by hand. `script/test-read-visibility.py ios` runs
+  `OpenCodeUITests/ReadVisibilityTests` on a simulator.
+- Marcar como lida (row, menu, bell) is not gated.
+
+The original wave notes below describe historical checks; unread skips
 and seed-reset instructions are superseded by the deterministic jump tests.
 
 Verification uses only **OpenCode Novas** (`66EA82DF-D048-4E54-85D0-FB32A02CEC20`), `ios-novas-derived`, and explicit

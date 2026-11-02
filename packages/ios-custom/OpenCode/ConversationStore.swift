@@ -1267,12 +1267,13 @@ import UniformTypeIdentifiers
       }
     }
   }
-  /// Route acknowledgement is independent of transcript layout, paging and catalogs.
-  func presented() async {
+  /// Route acknowledgement is independent of transcript layout, paging and catalogs. `visible` is whether the user
+  /// can see the conversation now (`ReadVisibility`): a hidden one keeps its answers unread.
+  func presented(visible: Bool) async {
     guard let session,
       let watermark = ConversationProjection.viewedWatermark(
         idle: session.time.idle, viewed: session.time.viewed, acknowledged: requestedView,
-        visible: true)
+        visible: visible)
     else { return }
     let previous = requestedView
     requestedView = watermark
@@ -1304,4 +1305,10 @@ struct SnippetEditorLaunch: Identifiable {
   let id = UUID()
   var name = ""
   var content = ""
+}
+
+/// Reruns the acknowledgement of a shown conversation when its session changes (a new answer) or it becomes seen.
+struct ReadTrigger: Equatable {
+  let session: Session?
+  let visible: Bool
 }

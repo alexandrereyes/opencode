@@ -19,12 +19,18 @@ struct MacWindowConnection: NSViewRepresentable {
       if runtime.app.front == nil || window.isKeyWindow { runtime.app.front = runtime }
       NotificationCenter.default.addObserver(self, selector: #selector(front), name: NSWindow.didBecomeKeyNotification, object: window)
       NotificationCenter.default.addObserver(self, selector: #selector(close), name: NSWindow.willCloseNotification, object: window)
+      // Minimized, restored, covered or uncovered: whether its conversation is seen (`MacWindowRuntime.readable`).
+      for name in [NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification,
+        NSWindow.didChangeOcclusionStateNotification] {
+        NotificationCenter.default.addObserver(self, selector: #selector(sync), name: name, object: window)
+      }
       runtime.app.syncShown()
     }
     @objc private func front() {
       runtime.app.front = runtime
       runtime.app.syncShown()
     }
+    @objc private func sync() { runtime.app.syncShown() }
     @objc private func close() {
       runtime.app.windows[runtime.id] = nil
       if runtime.app.front === runtime { runtime.app.front = runtime.app.windows.values.first }

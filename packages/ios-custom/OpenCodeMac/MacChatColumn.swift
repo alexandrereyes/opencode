@@ -212,7 +212,10 @@ struct MacConversationView: View {
       runtime.app.mount(conversation)
       search.navigate = { id, offset in transcript?.reveal(messageID: id, offset: offset, animated: true) }
     }
-    .task(id: conversation.session) { await conversation.presented() }
+    // Acknowledges answers only while this window is seen; coming back to it acknowledges the latest one.
+    .task(id: ReadTrigger(session: conversation.session, visible: runtime.readable)) {
+      await conversation.presented(visible: runtime.readable)
+    }
     .task(id: conversation.session?.location.directory) {
       await conversation.mcps.load(directory: conversation.session?.location.directory)
     }
