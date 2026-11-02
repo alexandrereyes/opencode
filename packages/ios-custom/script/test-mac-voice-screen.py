@@ -35,6 +35,8 @@ password = (home / "password").read_text().strip()
 headers = {"Authorization": "Basic " + base64.b64encode(("opencode:" + password).encode()).decode(),
     "Content-Type": "application/json"}
 domain = "br.com.alexandrem.opencode.mac.debug.voice-screen"
+# The JSON form (`screen`, `screen_app`) is what the voice prompt described until 02/11; the route never sends it (its
+# delegation text is the transcript of his turn), but the app still reads it, so those scenarios keep the planner covered.
 scenarios = {
     "own": {"text": "Dá uma olhada nessa tela", "screen": "front"},
     "first": {"text": "Olha o Chrome", "screen": "app", "screen_app": "Chrome"},
@@ -45,13 +47,16 @@ scenarios = {
     # The two phrases of 29/10, delegated by GPT Live as plain text without "screen".
     "question": "Você está vendo a minha tela aí?",
     "follow": "Não, vai lá na Mestra que você consegue",
+    # As the route delegates it (02/11): plain text; "tela toda" asks for the whole screen.
+    "whole": "Olha minha tela toda",
 }
 # The fake system each scenario runs against (front app, windows, permission) and what Alexandre said first.
-systems = {"question": "granted", "follow": "own"}
+systems = {"question": "granted", "follow": "own", "whole": "display"}
 speech = {"question": " Você está vendo a minha tela aí?",
-    "follow": " Você está vendo a minha tela aí? Não, vai lá na Mestra que você consegue"}
+    "follow": " Você está vendo a minha tela aí? Não, vai lá na Mestra que você consegue",
+    "whole": " Olha minha tela toda"}
 expected = {"own": "sent:", "first": "sent:", "denied": "sent:", "granted": "sent:", "display": "sent:",
-    "missing": "refused:appNotRunning", "question": "sent:", "follow": "sent:"}
+    "missing": "refused:appNotRunning", "question": "sent:", "follow": "sent:", "whole": "sent:"}
 
 
 def api(path, body=None, method="POST"):
@@ -156,6 +161,8 @@ with tempfile.TemporaryDirectory(prefix="mac-voice-screen-", dir=evidence) as te
                     (evidence / f"{name}-sent-to-master.{extension}").write_bytes(base64.b64decode(images[0]["data"]))
             if name == "missing":
                 result["ok"] = result["ok"] and not new
+            if name == "whole":
+                result["ok"] = result["ok"] and "[Captura da tela inteira do Mac" in (result.get("text") or "")
             report["scenarios"][name] = result
             print(name, json.dumps(result, ensure_ascii=False), flush=True)
     finally:

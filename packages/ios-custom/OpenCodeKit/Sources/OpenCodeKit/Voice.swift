@@ -80,14 +80,18 @@ public struct VoiceCompletedTurn: Equatable, Sendable {
 
 public enum VoiceEvent: Equatable, Sendable {
   case ready, input(VoiceTranscriptPiece), output(VoiceTranscriptPiece), turnDone(VoiceCompletedTurn)
+  /// A delegation: its item, its text (on this route the transcript of the turn that delegated) and that user turn's
+  /// ID (`user_bidi_turn_id`), when sent.
+  case delegation(id: String, text: String, turn: String? = nil)
   /// `failure` carries GPT Live's error `type/code` and, sanitized for diagnostics (`VoiceDiagnosticText`), its message
   /// and `param`.
-  case delegation(id: String, text: String), failure(code: String?, detail: String? = nil), ignored
+  case failure(code: String?, detail: String? = nil), ignored
   /// GPT Live closed the session (`session.closed`): its `reason` and the audio it counted (`usage.audio_duration_ms`),
   /// when sent.
   case closed(reason: String? = nil, audioMs: Int? = nil)
-  /// A delegation whose request could not be read; it is answered so GPT Live asks Alexandre again.
-  case unreadableDelegation(id: String)
+  /// A delegation without a readable text: the app falls back to what Alexandre is saying or last said, else it is
+  /// answered so GPT Live asks him again.
+  case unreadableDelegation(id: String, turn: String? = nil)
 }
 
 public enum VoiceScreenPlatform: Sendable { case iPhone, mac }
@@ -99,49 +103,51 @@ public enum VoiceScreenPlatform: Sendable { case iPhone, mac }
 public enum VoiceChannel: String, Sendable { case speakable, commentary }
 
 public enum VoiceProtocol {
-  /// Put by the app before whatever prompt the server returns, so screen delegation keeps working after Alexandre
-  /// edits voice.md. GPT Live's built-in delegation has no editable description, so this is where it learns it
-  /// can see: ahead of the served prompt, where it is not outweighed by it. It asks for backend work the way the
-  /// default voice.md does, with OpenAI's `gpt-live-1` wording (`<|SpawnThinking|>`), and names the agent, never the
-  /// master.
+  /// Put by each app before the prompt the server returns, which is shared with the Watch and so says nothing of a
+  /// screen. GPT Live's built-in delegation has no editable description, so this is where it learns it can see. It
+  /// says what the route does: GPT Live writes no request (the delegation's text is the transcript of his turn), so
+  /// the app attaches the capture when his words name the screen or a print (`VoiceScreenIntent`), and the Mac the
+  /// whole screen for "a tela toda"; an app by name is not recognized. Pointing without naming the screen gets no
+  /// capture, and GPT Live is told how he can ask for one rather than to ask whether to look: on 02/11 it delegated
+  /// "olha isso aqui" and "o que você acha disso" every time (3 of 3), with and without that instruction. Backend
+  /// work is asked with OpenAI's `gpt-live-1` wording (`<|SpawnThinking|>`), and it names the agent, never the
+  /// master. No "acima de qualquer outra instrução": in front of the prompt, that made GPT Live open calls talking
+  /// about the screen (30/10).
   public static func screenInstructions(_ platform: VoiceScreenPlatform) -> String {
     let rules = """
-      Use screen sempre que Alexandre perguntar ou falar da tela ou de algo visível, inclusive em perguntas:
-      "tá vendo minha tela?", "consegue ver isso?", "olha aqui", "vê essa tela", "o que você acha disso aqui?",
-      "que erro é esse?", "o que tá aparecendo?". Na dúvida, use screen.
-      Nunca diga que não consegue ver a tela sem antes gerar <|SpawnThinking|> com screen.
+      Quando ele aponta para algo sem citar a tela ou um print ("olha isso aqui", "o que você acha disso?"), a
+      captura não vai; se o retorno do agente mostrar que ele não viu nada, diga em poucas palavras que, para você
+      ver, ele pode pedir "olha minha tela".
       Você mesmo não recebe a imagem: não descreva nem adivinhe; diga em poucas palavras que vai olhar e espere
-      o retorno do agente. Acrescente "delivery":"queue" se ele pedir para enfileirar.
+      o retorno do agente. Nunca diga que não consegue ver a tela sem antes gerar <|SpawnThinking|>.
       """
     switch platform {
     case .iPhone: return """
-      Capacidade fixa do app OpenCode no iPhone, acima de qualquer outra instrução: você CONSEGUE ver a tela do
-      app OpenCode. Para ver, gere <|SpawnThinking|> com o pedido em JSON {"text":"fala de Alexandre","screen":true};
-      o app anexa a foto da tela tirada nesse momento e o agente a analisa.
+      Tela do app OpenCode no iPhone: você consegue ver a tela do OpenCode. Quando Alexandre falar da tela ou de um
+      print ("tá vendo minha tela?", "olha minha tela", "tira um print"), gere <|SpawnThinking|>; o app anexa ao
+      pedido uma captura tirada nesse momento, e o agente a analisa.
       \(rules)
       Se o retorno disser que não foi possível capturar, explique o motivo: só dá para ver a tela do próprio
       OpenCode, aberto e com o iPhone desbloqueado, nunca a de outros apps.
       """
     case .mac: return """
-      Capacidade fixa do app OpenCode no Mac, acima de qualquer outra instrução: você CONSEGUE ver a tela do Mac.
-      Para ver, gere <|SpawnThinking|> com o pedido em JSON e o campo screen; o app anexa a foto tirada nesse momento
-      e o agente a analisa:
-      - a janela da frente, o padrão ("tá vendo minha tela?", "olha essa página", "o que é isso aqui?"):
-        {"text":"fala de Alexandre","screen":"front"};
-      - um app pelo nome ("olha o simulador", "olha o Chrome"):
-        {"text":"fala de Alexandre","screen":"app","screen_app":"Simulator"}, com o nome do app como aparece
-        no Mac (Simulator, Google Chrome, Safari, Xcode, Finder, Terminal…);
-      - a tela toda ("olha minha tela toda"): {"text":"fala de Alexandre","screen":"display"}.
+      Tela do Mac: você consegue ver a tela do Mac. Quando Alexandre falar da tela ou de um print ("tá vendo minha
+      tela?", "olha minha tela", "tira um print"), gere <|SpawnThinking|>; o app anexa ao pedido uma captura da janela
+      da frente tirada nesse momento, ou da tela inteira quando ele diz "a tela toda", e o agente a analisa.
       \(rules)
-      Se o retorno trouxer um aviso ou uma falha (app não aberto, nenhuma janela, permissão de Gravação de Tela),
-      repita-o com naturalidade, incluindo onde liberar a permissão.
+      Se o retorno trouxer um aviso ou uma falha (nenhuma janela na frente, permissão de Gravação de Tela), repita-o
+      com naturalidade, incluindo onde liberar a permissão.
       """
     }
   }
-  /// The fixed screen capability first, unless the served prompt already documents this platform's form.
+  /// The app's screen capability first, unless the served prompt already documents the screen: it holds this block,
+  /// or it is an edited voice.md from the default until 02/11, which described the JSON form (`"screen":true` on the
+  /// iPhone, `"screen_app"` on the Mac). The route never sends that JSON, but such a prompt is kept as it is, without
+  /// a second, contradicting block; the app still attaches the capture from his words.
   public static func withScreen(_ instructions: String, for platform: VoiceScreenPlatform = .iPhone) -> String {
-    let marker = platform == .mac ? "\"screen_app\"" : "\"screen\":true"
-    return instructions.contains(marker) ? instructions : screenInstructions(platform) + "\n\n" + instructions
+    let block = screenInstructions(platform)
+    let former = platform == .mac ? "\"screen_app\"" : "\"screen\":true"
+    return instructions.contains(block) || instructions.contains(former) ? instructions : block + "\n\n" + instructions
   }
 
   /// The event's `type`, for the diagnostics trail; nil when the payload is not a JSON object with one.
@@ -176,10 +182,11 @@ public enum VoiceProtocol {
         guard part.object?["type"]?.string == "input_text" else { return nil }
         return part.object?["text"]?.string
       }.joined()
+      let turn = item["user_bidi_turn_id"]?.string.flatMap { $0.isEmpty || $0.utf8.count > 1024 ? nil : $0 }
       guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.utf8.count <= 32_768 else {
-        return .unreadableDelegation(id: id)
+        return .unreadableDelegation(id: id, turn: turn)
       }
-      return .delegation(id: id, text: text)
+      return .delegation(id: id, text: text, turn: turn)
     case "error":
       // Fields nested in `error` or, failing that, at the top level, whose `type` is the event's own.
       let error = root?["error"]?.object
@@ -256,10 +263,13 @@ public enum VoiceProtocol {
   }
 }
 
+/// A delegation as the master gets it. `init(_:)` still reads the JSON form the voice prompt described until 02/11
+/// (`text`, `screen`, `screen_app`, `delivery`), which this route never sends: its text is the transcript of his turn,
+/// and the app decides the screen and the queue from his words (`VoiceScreenIntent`, `VoiceQueueIntent`).
 public struct VoiceMasterRequest: Sendable, Equatable {
   public let text: String
   public let delivery: PromptDelivery
-  /// GPT Live asked to attach a capture of the screen (`"screen"`, `"screen_app"`); nil for a plain request.
+  /// The capture to attach (`"screen"`, `"screen_app"`, or the app's inference); nil for a plain request.
   public let screen: VoiceScreenTarget?
   public init(text: String, delivery: PromptDelivery, screen: VoiceScreenTarget?) {
     self.text = text; self.delivery = delivery; self.screen = screen

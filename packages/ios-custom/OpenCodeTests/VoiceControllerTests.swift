@@ -617,11 +617,14 @@ private actor LiveMemoryHTTP {
     // Unrelated: no capture.
     say(" Cria uma sessão no abacato")
     await delegate("q3", "Cria uma sessão no abacato")
-    XCTAssertEqual(targets, [.front, .front])
-    XCTAssertEqual(master.requests.map(\.screen), [.front, .front, nil])
+    // "A tela toda" asks for the whole screen (the Mac's; the iPhone captures its own window anyway).
+    say(" Olha minha tela toda")
+    await delegate("q4", "Olha minha tela toda")
+    XCTAssertEqual(targets, [.front, .front, .display])
+    XCTAssertEqual(master.requests.map(\.screen), [.front, .front, nil, .display])
     XCTAssertEqual(master.requests.map(\.text), ["Você está vendo a minha tela aí?",
-      "Não, vai lá na Mestra que você consegue", "Cria uma sessão no abacato"])
-    XCTAssertEqual(master.screens.map { $0 != nil }, [true, true, false])
+      "Não, vai lá na Mestra que você consegue", "Cria uma sessão no abacato", "Olha minha tela toda"])
+    XCTAssertEqual(master.screens.map { $0 != nil }, [true, true, false, true])
     await controller.end()
   }
 
@@ -1087,6 +1090,88 @@ private actor LiveMemoryHTTP {
     call.pool.transports[1].event?(delegation("c", "Confira a sessão do Abacato."))
     await fulfillment(of: [again], timeout: 3)
     XCTAssertEqual(call.master.requests.count, 2)
+    await call.controller.end()
+  }
+
+  // MARK: Request built by the app (02/11, third wave)
+
+  /// As the route sends them: the delegation's text is the transcript of the turn it names (`user_bidi_turn_id`), and
+  /// that turn's `turn.done` comes after it.
+  private func routeDelegation(_ id: String, _ text: String, turn: String) -> VoiceTransportEvent {
+    .data(try! JSONEncoder().encode(JSONValue.object(["type": .string("delegation.created"), "item": .object([
+      "type": .string("delegation"), "target": .string("client"), "id": .string(id), "handoff_id": .string("handoff_1"),
+      "user_bidi_turn_id": .string(turn),
+      "content": .array(text.isEmpty ? [] : [.object(["type": .string("input_text"), "text": .string(text)])])]),
+      "offset_ms": .number(15_000)])))
+  }
+  private func spoken(_ role: String, _ id: String, _ text: String) -> VoiceTransportEvent {
+    .data(try! JSONEncoder().encode(JSONValue.object(["type": .string("turn.done"),
+      "turn": .object(["id": .string(id), "role": .string(role), "transcript": .string(text)])])))
+  }
+  private func piece(_ text: String) -> VoiceTransportEvent {
+    .data(try! JSONEncoder().encode(JSONValue.object(["type": .string("input_transcript.added"),
+      "item": .object(["id": .string(UUID().uuidString), "text": .string(text)])])))
+  }
+
+  /// The master gets his words plus the conversation it has not seen; a rebuilt call still knows only his words.
+  func testRequestCarriesTheConversationSinceThePreviousDelegation() async throws {
+    let call = await resilient()
+    let transport = try XCTUnwrap(call.pool.transports.first)
+    let first = expectation(description: "first")
+    call.master.asked = { first.fulfill() }
+    transport.event?(piece(" Quantas sessões estão abertas?"))
+    transport.event?(routeDelegation("a", "Quantas sessões estão abertas?", turn: "t1"))
+    await fulfillment(of: [first], timeout: 3)
+    for event in [spoken("user", "t1", " Quantas sessões estão abertas?"), spoken("assistant", "a1", " Vou verificar."),
+      spoken("assistant", "a2", " Há duas: Abacato e Misty.")] { transport.event?(event) }
+    let second = expectation(description: "second")
+    call.master.asked = { second.fulfill() }
+    transport.event?(piece(" E a outra?"))
+    transport.event?(routeDelegation("b", "E a outra?", turn: "t2"))
+    await fulfillment(of: [second], timeout: 3)
+    XCTAssertEqual(call.master.requests.map(\.text), ["Quantas sessões estão abertas?", """
+      E a outra?
+
+      Conversa por voz desde o pedido anterior (transcrição, pode ter erros):
+      Voz: Vou verificar.
+      Voz: Há duas: Abacato e Misty.
+      """])
+    XCTAssertEqual(call.master.requests.map(\.delivery), [.steer, .steer])
+    XCTAssertEqual(call.master.requests.map(\.screen), [nil, nil])
+    transport.event?(.failed(.dataChannelClosed))
+    let rebuilt = await until { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    let carried = try await call.offers()[1]["initial_items"]?.array?.last?.object?["content"]?.array?.first?.object?["text"]?.string
+    XCTAssertTrue(carried?.hasSuffix("- Quantas sessões estão abertas?\n- E a outra?") == true, carried ?? "")
+    await call.controller.end()
+  }
+
+  /// A delegation without text is what he is saying, else what he last said; only with neither GPT Live hears to ask
+  /// again. His words, not a JSON field, queue it.
+  func testDelegationWithoutTextKeepsWhatAlexandreSaid() async throws {
+    let call = await resilient()
+    let transport = try XCTUnwrap(call.pool.transports.first)
+    let first = expectation(description: "pending speech")
+    call.master.asked = { first.fulfill() }
+    transport.event?(piece(" Coloca na fila"))
+    transport.event?(piece(" os testes do Mac"))
+    transport.event?(routeDelegation("u1", "", turn: "t1"))
+    await fulfillment(of: [first], timeout: 3)
+    transport.event?(spoken("user", "t1", " Coloca na fila os testes do Mac"))
+    transport.event?(spoken("user", "t2", " Roda o lint"))
+    let second = expectation(description: "last turn")
+    call.master.asked = { second.fulfill() }
+    transport.event?(routeDelegation("u2", "", turn: "t2"))
+    await fulfillment(of: [second], timeout: 3)
+    XCTAssertEqual(call.master.requests.map(\.text), ["Coloca na fila os testes do Mac", "Roda o lint"])
+    XCTAssertEqual(call.master.requests.map(\.delivery), [.queue, .steer])
+    transport.event?(routeDelegation("u3", "", turn: "t3"))
+    let answered = await until { !transport.sent("delegation.context.append", item: "u3").isEmpty }
+    XCTAssertTrue(answered)
+    XCTAssertEqual(transport.sent("delegation.context.append", item: "u3"), "Não consegui ler esse pedido. Peça para Alexandre repetir.")
+    XCTAssertEqual(call.master.requests.count, 2)
+    let unreadable = await call.reports("invalid_event")
+    XCTAssertEqual(unreadable.map(\.code), ["delegation.created", "delegation.created", "delegation.created"])
     await call.controller.end()
   }
 

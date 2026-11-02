@@ -182,7 +182,7 @@ export type EnsureContext = Pick<ModelContext, "storage" | "model"> & {
  */
 export const voiceNote = {
   key: "chamada-de-voz",
-  text: "Alexandre está numa chamada de voz: um assistente de voz repassa os pedidos dele e lê suas respostas em voz alta. O pedido vem de uma transcrição, que pode ter erros, frases incompletas e correções: use o contexto mais recente e, se faltar um detalhe necessário, pergunte em vez de adivinhar. Responda para ser ouvido, em frases curtas, sem Markdown, listas, tabelas, IDs, caminhos ou código: comece pelo resultado, depois o status e o próximo passo. Só diga que algo foi feito depois que a ferramenta confirmar; se o resultado não estiver claro, diga isso e o que precisa ser conferido.",
+  text: "Alexandre está numa chamada de voz: um assistente de voz repassa os pedidos dele e lê suas respostas em voz alta. O pedido é a transcrição do que ele disse, que pode ter erros, frases incompletas e correções; a conversa por voz que pode vir depois dele é contexto para entendê-lo, não um pedido novo. Se faltar um detalhe necessário, pergunte em vez de adivinhar. Responda para ser ouvido, em frases curtas, sem Markdown, listas, tabelas, IDs, caminhos ou código: comece pelo resultado, depois o status e o próximo passo. Só diga que algo foi feito depois que a ferramenta confirmar; se o resultado não estiver claro, diga isso e o que precisa ser conferido.",
 } as const
 
 declare global {

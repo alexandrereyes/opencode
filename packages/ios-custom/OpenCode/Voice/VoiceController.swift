@@ -101,6 +101,8 @@ import UIKit
   /// A delegation waiting for the master; a screen capture starts when GPT Live delegates, not when sent.
   private struct Delegation {
     let id: String
+    /// What Alexandre said, as `continuity` knows it; the request adds the conversation around it.
+    let speech: String
     let request: VoiceMasterRequest
     let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>?
     /// The app added the capture because Alexandre talked about the screen; a failed capture still sends the text.
@@ -109,9 +111,11 @@ import UIKit
     let link: UUID
   }
   @ObservationIgnored private var delegationQueue: [Delegation] = []
-  /// Transcript pieces of what Alexandre said since the previous delegation (at most 45 s), to recognize a request about the screen
-  /// that GPT Live delegated without `"screen"`.
+  /// Transcript pieces of what Alexandre said since the previous delegation (at most 45 s): his words decide whether a
+  /// request carries the screen and whether it queues.
   @ObservationIgnored private var recentSpeech: [(at: Double, text: String)] = []
+  /// The completed turns of this conversation the master has not seen, sent with the next request; never stored.
+  @ObservationIgnored private var conversation = VoiceRequestContext()
   @ObservationIgnored private weak var sessions: SessionStore?
   /// The target GPT Live asked for and the conversation open on the iPhone (the Mac reads its own window's).
   @ObservationIgnored private var captureScreen: @MainActor (VoiceScreenTarget, String?) async throws(VoiceScreenRefusal)
@@ -195,7 +199,7 @@ import UIKit
     recovery = VoiceRecovery(policy: policy); alert = nil
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); status = VoiceMasterStatus(); finalNarration = false
-    recentSpeech = []
+    recentSpeech = []; conversation = VoiceRequestContext()
     trail = VoiceEventTrail(); lastSent = nil
     freshContext = false; linkHadContext = false; linkAnswered = false; masterStale = false; moderation = nil
     graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; contextAppend = nil; contextRejected = false
@@ -536,6 +540,7 @@ import UIKit
       state.apply(.speech); publish()
     case .turnDone(let turn):
       capture(turn)
+      conversation.heard(turn)
       partial[turn.role] = nil
       if turn.role == .assistant {
         // An answer after a moderation error belongs to the moderated session: it does not allow another reset.
@@ -575,51 +580,64 @@ import UIKit
       }
       // Any other reason, expired, unknown or none, rebuilds the call (or clears it, right after a moderation).
       lose("O serviço de voz encerrou a sessão. Reconectando…", .sessionClosed(reason, audioMs: audioMs))
-    case .unreadableDelegation(let id):
-      guard handled.insert(id).inserted else { return }
-      report(.tolerated, .invalidEvent("delegation.created"))
-      answer(id, "Não consegui ler esse pedido. Peça para Alexandre repetir.")
-    case .delegation(let id, let text):
-      VoiceTransport.log.notice("phase=delegation")
+    case .unreadableDelegation(let id, let turn):
       guard !handled.contains(id) else { return }
-      guard handled.count < 1024, delegationQueue.count < 8 else {
-        // Refused on its own item; the call and the requests already queued go on.
-        report(.tolerated, .delegationOverflow)
-        answer(id, "Há pedidos demais esperando o agente. Peça para Alexandre aguardar os anteriores.")
+      report(.tolerated, .invalidEvent("delegation.created"))
+      // Without a text, the request is what he is saying (his `turn.done` comes after the delegation) or last said.
+      let pending = partial[.user]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      guard let speech = pending.isEmpty ? conversation.lastUser : pending else {
+        handled.insert(id)
+        answer(id, "Não consegui ler esse pedido. Peça para Alexandre repetir.")
         return
       }
-      handled.insert(id)
-      let asked = VoiceMasterRequest(text)
-      if continuity.repeats(asked.text, link: link) {
-        // A rebuilt call delegated again what the lost one had already sent: the master is on it, and this
-        // item now carries its progress and result.
-        report(.tolerated, .delegationRepeat)
-        currentDelegation = id; status = VoiceMasterStatus()
-        answer(id, "Esse pedido já está com o agente desde antes da queda da conexão; o resultado vem por aqui.")
-        return
-      }
-      let now = ProcessInfo.processInfo.systemUptime
-      // Transcript pieces carry their own spacing; they arrive while he speaks, before the delegation.
-      let heard = recentSpeech.filter { now - $0.at <= 45 }.map(\.text).joined() + " " + asked.text
-      recentSpeech = []
-      // Locked, there is nothing to capture: an explicit request is answered by voice (unlock first) and a guess
-      // is dropped, so the request goes as delegated.
-      let locked = screenLocked()
-      // GPT Live sometimes delegates a question about the screen as plain text; the app attaches it anyway.
-      let inferred = !locked && asked.screen == nil && VoiceScreenIntent.mentionsScreen(heard)
-      let request = inferred ? VoiceMasterRequest(text: asked.text, delivery: asked.delivery, screen: .front) : asked
-      // Captured now, before awaiting earlier delegations: the screen GPT Live was asked about.
-      let current = sessions?.currentSessionID
-      let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>? = if locked, request.screen != nil {
-        Task { .failure(.locked) }
-      } else {
-        request.screen.map { target in screenTask(target, sessionID: current) }
-      }
-      delegationQueue.append(Delegation(id: id, request: request, screen: screen, inferred: inferred, link: link))
-      continuity.accepted(request.text, link: link)
-      if delegationTask == nil { delegationTask = Task { await pumpDelegations() } }
+      delegate(id, speech, turn: turn)
+    case .delegation(let id, let text, let turn): delegate(id, text, turn: turn)
     case .ignored: break
     }
+  }
+  /// One request for the master. GPT Live writes none: `text` is the transcript of his turn (02/11), so the app adds
+  /// the conversation the master has not seen (`VoiceRequestContext`) and decides the screen and the queue from his
+  /// words; the JSON form the prompt described until 02/11 is still read if it ever comes.
+  private func delegate(_ id: String, _ text: String, turn: String?) {
+    VoiceTransport.log.notice("phase=delegation")
+    guard !handled.contains(id) else { return }
+    guard handled.count < 1024, delegationQueue.count < 8 else {
+      // Refused on its own item; the call and the requests already queued go on.
+      report(.tolerated, .delegationOverflow)
+      answer(id, "Há pedidos demais esperando o agente. Peça para Alexandre aguardar os anteriores.")
+      return
+    }
+    handled.insert(id)
+    let asked = VoiceMasterRequest(text)
+    if continuity.repeats(asked.text, link: link) {
+      // A rebuilt call delegated again what the lost one had already sent: the master is on it, and this
+      // item now carries its progress and result.
+      report(.tolerated, .delegationRepeat)
+      currentDelegation = id; status = VoiceMasterStatus()
+      answer(id, "Esse pedido já está com o agente desde antes da queda da conexão; o resultado vem por aqui.")
+      return
+    }
+    let now = ProcessInfo.processInfo.systemUptime
+    // Transcript pieces carry their own spacing; they arrive while he speaks, before the delegation.
+    let heard = recentSpeech.filter { now - $0.at <= 45 }.map(\.text).joined() + " " + asked.text
+    recentSpeech = []
+    // Locked, there is nothing to capture: an explicit request is answered by voice (unlock first) and a guess
+    // is dropped, so the request goes as delegated.
+    let locked = screenLocked()
+    let inferred = locked || asked.screen != nil ? nil : VoiceScreenIntent.target(heard)
+    let request = VoiceMasterRequest(text: conversation.request(asked.text, turn: turn),
+      delivery: asked.delivery == .queue || VoiceQueueIntent.queues(heard) ? .queue : .steer, screen: asked.screen ?? inferred)
+    // Captured now, before awaiting earlier delegations: the screen GPT Live was asked about.
+    let current = sessions?.currentSessionID
+    let screen: Task<Result<VoiceScreenShot, VoiceScreenRefusal>, Never>? = if locked, request.screen != nil {
+      Task { .failure(.locked) }
+    } else {
+      request.screen.map { target in screenTask(target, sessionID: current) }
+    }
+    delegationQueue.append(Delegation(id: id, speech: asked.text, request: request, screen: screen,
+      inferred: inferred != nil, link: link))
+    continuity.accepted(asked.text, link: link)
+    if delegationTask == nil { delegationTask = Task { await pumpDelegations() } }
   }
   private func capture(_ turn: VoiceCompletedTurn) {
     guard memory != nil, let callID = sessionID, let text = turn.text,
@@ -671,7 +689,7 @@ import UIKit
           request = VoiceMasterRequest(text: request.text, delivery: request.delivery, screen: nil)
         case .failure(let refusal):
           guard epoch == token else { return }
-          continuity.dropped(request.text, link: delegation.link)
+          continuity.dropped(delegation.speech, link: delegation.link)
           refuseScreen(refusal)
           continue
         }
@@ -905,9 +923,10 @@ import UIKit
 
   /// GPT Live moderated the call and ended its session: the session ended within the moderation window of a
   /// `content_filter` error (`lose`), or `session.closed` named moderation. Its voice memory, the requests a rebuilt
-  /// call would carry, results not yet heard and what was said since the last `turn.done` are cleared, and an empty
-  /// call starts: once per reset. Moderated again on a link that started empty and has not answered normally, it
-  /// fails instead of clearing again. Work the Mestra already has goes on; only its updates are no longer narrated.
+  /// call would carry, the turns the next request would carry, results not yet heard and what was said since the last
+  /// `turn.done` are cleared, and an empty call starts: once per reset. Moderated again on a link that started empty
+  /// and has not answered normally, it fails instead of clearing again. Work the Mestra already has goes on; only its
+  /// updates are no longer narrated.
   private func clearContext(code: String?, detail: String?) {
     guard state.visible, state.phase != .failed, !busy else { return }
     guard connectedAt != nil, linkHadContext || linkAnswered else {
@@ -917,7 +936,7 @@ import UIKit
       return
     }
     freshContext = true; masterStale = true
-    continuity = VoiceContinuity(); delegationQueue = []
+    continuity = VoiceContinuity(); conversation = VoiceRequestContext(); delegationQueue = []
     state.apply(.contextCleared)
     cues.play(.contextCleared)
     lose("Limpando o contexto da voz…", .contextReset(code, detail: detail), clearing: true)

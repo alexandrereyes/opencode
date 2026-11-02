@@ -347,7 +347,8 @@ whitespace collapsed, bounded), since an error message can quote the request it 
 
 **Reader lanes and warm-up (rev. 2026-10-31).** The sideband reader never waits: memory appends go to a memory
 lane and delegation admissions (where a cold Mestra took ~6 s to wake its Location) to a delegation lane. Each lane
-runs its jobs one after another, in arrival order, in the gateway scope; the delegator still drops repeated item IDs.
+runs its jobs one after another, in arrival order, in the gateway scope; the reader drops repeated item IDs before
+building the request (`call.delegated`).
 An error or a close is therefore read and logged the moment it arrives. When a call ends, it waits for the delegation
 lane (at most 20 s), so a request it received reaches the Mestra, and for the memory lane (at most 2 s) before
 `custom.voice.end`. At the start of a call the server warms the current Mestra (`warmMaster`): it reads the pointer,
@@ -356,10 +357,35 @@ skips a missing or archived session and lists the MCP servers of the session's L
 
 **Delegation.** Like `VoiceMaster`: `custom.master.ensure` with `voice: true` (the Mestra's voice-call note, removed by
 the call's memory `end`), one replacement ensure when the prompt fails, prompt
-text only (`steer`, or `queue` for `{"text":…,"delivery":"queue"}`), duplicate delegation IDs ignored. Progress
+text only, duplicate delegation IDs ignored. Progress
 lines are the iPhone's pt-BR texts (tool names from `session.tool.input.started`, Code Mode `toolCalls`, text,
 failures, pending requests). Only text updates (`Atualização: …`), pending requests, results and execution failures
 are spoken, at most one every 5 s keeping only the latest; results and failures skip the wait.
+
+**Request built by the gateway (rev. 2026-11-02, third wave).** On this route the text of `delegation.created` is the
+literal transcript of the user turn that delegated (the `turn.done` its `user_bidi_turn_id` names, recognition errors
+included): GPT Live writes no request, and the JSON the prompt used to describe never came. As OpenAI's guide for
+client delegations says, the app builds the backend request from the transcripts. The call keeps, in memory only
+(never in voice memory), the completed turns (`turn.done` of both roles) since the previous delegation (`hear`), and
+the prompt is `masterRequest`, the iPhone's `VoiceRequestContext`: the speech, then, when other turns were heard, a
+blank line, "Conversa por voz desde o pedido anterior (transcrição, pode ter erros):" and `Alexandre: …`/`Voz: …`
+lines, the newest, at most `limits.contextTurns` (6) and `limits.contextChars` (1,200; a newest turn that alone
+exceeds it goes by its end after "…"). Each turn goes once, and only an admitted item takes them: a repeated
+`delegation.created` (same `item.id`) is dropped before the request is built, and the reader ignores everything once
+the call is moderated, so neither empties the context of the next request. The delegating turn, whose `turn.done`
+arrives after the delegation, is recognized by `user_bidi_turn_id` (or, without IDs, by its words) and is never
+context.
+
+- **No text:** a delegation without readable text uses what Alexandre is saying (`captions.user`, since his last
+  `turn.done`) or, failing that, his last completed turn. With neither, GPT Live hears "Não consegui ler esse pedido.
+  Peça para Alexandre repetir." on that item (`unreadable`, once per item) and nothing reaches the Mestra; until this
+  wave the gateway ignored such a delegation silently.
+- **Queue:** `queue` when his words since the previous delegation (the completed user turns kept for the request,
+  what he is saying and the speech) ask for it (`queues`, the iPhone's `VoiceQueueIntent`: "enfileira"/"enfileirar"/
+  "enfileire", "coloca … na fila"/"põe … na fila" with at most two words between, "sem interromper", case and accents
+  aside); otherwise `steer`. `parse` still reads `{"text":…,"delivery":"queue"}` if it ever comes.
+- The watch has no screen: the shared `voice.md` no longer mentions one, and only the iPhone and Mac put their screen
+  block in front of it.
 
 **Quiet state (rev. 2026-11-02).** The admission, each tool's activity (`toolActivity`, the phrase after "A mestra
 está") and the failures the Mestra recovers from also go to GPT Live as `output.note`: `delegation.context.append`

@@ -23,4 +23,7 @@ There is no TTL or delete action; this is rolling memory, not a verbatim archive
 See [the plugin contract, measurements and Phase 3 handoff](../packages/plugin-app-custom/docs/voice-session.md).
 iOS still needs durable local buffering/replay, context → `initial_items`, the
 end check and read-only **Ver transcrição**. The master does not receive voice
-turns. No Core or public API extension was required.
+memory; since 2026-11-02 (third wave) each request it gets is the delegating speech plus, kept only for the call,
+the last few voice turns since the previous request (at most 6 turns and 1,200 characters, labelled as a transcript),
+because on this route GPT Live delegates the literal transcript and writes no request. No Core or public API
+extension was required.

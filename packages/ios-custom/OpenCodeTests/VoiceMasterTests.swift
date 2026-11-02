@@ -169,6 +169,32 @@ private actor VoiceMasterHTTP {
     XCTAssertEqual(prompt?["metadata"]?.object?["agent"]?.string, "mestra")
     master.stop()
   }
+  /// The request the app builds (his words, then the conversation) keeps the capture line last.
+  func testComposedRequestKeepsTheCaptureLineAfterTheConversation() async throws {
+    let http = VoiceMasterHTTP(masterID: "ses_existing")
+    let config = ServerConfiguration(url: URL(string: "http://127.0.0.1:4177")!)
+    let client = OpenCodeClient(configuration: config) { try await http.respond($0) }
+    let master = VoiceMaster(sessions: SessionStore(configuration: config, client: client)) { _ in }
+    var context = VoiceRequestContext()
+    context.heard(VoiceCompletedTurn(id: "a1", itemID: nil, role: .assistant, text: "Quer que eu olhe a tela?", interrupted: false))
+    let text = context.request("Sim, olha a tela", turn: "t2")
+    try await master.ask(VoiceMasterRequest(text: text, delivery: .queue, screen: .front),
+      screen: VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 0xFF, 0xD9]), sessionID: nil))
+    let requests = await http.requests
+    let body = try XCTUnwrap(requests.first { $0.url!.path.hasSuffix("/prompt") }?.httpBody)
+    let prompt = try JSONDecoder().decode(JSONValue.self, from: body).object
+    // The composer's attachment line follows, as for any staged upload.
+    XCTAssertTrue(try XCTUnwrap(prompt?["text"]?.string).hasPrefix("""
+      Sim, olha a tela
+
+      Conversa por voz desde o pedido anterior (transcrição, pode ter erros):
+      Voz: Quer que eu olhe a tela?
+
+      [Captura da tela do app OpenCode anexada.]
+      """))
+    XCTAssertEqual(prompt?["delivery"]?.string, "queue")
+    master.stop()
+  }
   func testDelegationWithoutScreenUploadsNothing() async throws {
     let http = VoiceMasterHTTP(masterID: "ses_existing")
     let config = ServerConfiguration(url: URL(string: "http://127.0.0.1:4177")!)

@@ -1751,7 +1751,12 @@ Audio continues in the background after microphone consent. Real actions and ans
 to the existing **Sessão mestra**, with throttled live progress rather than waiting silently for the
 final answer: the master's own text, what needs Alexandre and the result are spoken; its tools and admission reach
 GPT Live only as quiet state (`commentary`) it uses when asked; the result is spoken without display Markdown and
-cut to 1,500 characters (`VoiceResult.spoken`). Ending the call does not interrupt work already submitted to OpenCode. Ending a session
+cut to 1,500 characters (`VoiceResult.spoken`). GPT Live writes no request on this route (the delegation's text is
+the transcript of Alexandre's turn), so the app builds it: his speech plus the voice turns since the previous request
+(`VoiceRequestContext`, at most 6 turns and 1,200 characters, kept only for the call); a delegation without text uses
+what he is saying or last said. The app also decides from his words whether to attach the screen
+(`VoiceScreenIntent`: tela, print; the Mac's whole screen for "a tela toda") and whether to queue (`VoiceQueueIntent`:
+"enfileira", "coloca na fila", "sem interromper"). Ending the call does not interrupt work already submitted to OpenCode. Ending a session
 that started sends `session.close` and waits up to 2 s for `session.closed` (or the data channel
 closing) before the transport and lease go; that close never reconnects or reports a loss. A moderation `error` only
 clears voice memory when the session ends within 5 s of it; otherwise the call goes on with its memory.

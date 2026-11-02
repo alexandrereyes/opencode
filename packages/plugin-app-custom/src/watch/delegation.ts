@@ -18,7 +18,14 @@ export const limits = {
   /** How long and how often the result waits for the Mestra to leave the running set after `succeeded`. */
   settleMs: 1_000,
   settleAttempts: 15,
+  /** The conversation a request carries (`masterRequest`), as the iPhone's `VoiceRequestContext`: turns and characters. */
+  contextTurns: 6,
+  contextChars: 1_200,
 }
+
+/** Said to GPT Live for a delegation with nothing to send, as on the iPhone, so it asks Alexandre again. */
+export const unreadable = "Não consegui ler esse pedido. Peça para Alexandre repetir."
+export const contextLabel = "Conversa por voz desde o pedido anterior (transcrição, pode ter erros):"
 
 export type DelegationContext = {
   /** `custom.master` → `ensure`: the current Sessão mestra, created when missing, deleted or archived. */
@@ -99,13 +106,13 @@ const Request = Schema.fromJsonString(
 const decodeRequest = Schema.decodeUnknownOption(Request)
 
 /**
- * Server-side counterpart of the iPhone's `VoiceMaster`: each GPT Live delegation becomes a prompt to the Sessão
- * mestra (steer, or queue when asked); its own text, what needs Alexandre and its result return as speakable appends
+ * Server-side counterpart of the iPhone's `VoiceMaster`: each GPT Live delegation the call admits (once per item, by
+ * the sideband reader) becomes a prompt to the Sessão mestra (steer, or queue when asked), and one with nothing to
+ * send is answered with `unreadable`; its own text, what needs Alexandre and its result return as speakable appends
  * to the latest delegation item, and its activity as quiet state there. Admission is not completion; ending the call
  * never interrupts work already admitted.
  */
 export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, scope: Scope.Scope) {
-  const seen = new Set<string>()
   const tools = new Map<string, string>()
   const admission = Semaphore.makeUnsafe(1)
   const state = {
@@ -122,10 +129,8 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
     noting: false,
   }
 
-  const ask = Effect.fn("Watch.delegate")(function* (itemID: string, raw: string) {
-    if (seen.has(itemID)) return
-    seen.add(itemID)
-    const request = parse(raw)
+  const ask = Effect.fn("Watch.delegate")(function* (itemID: string, request: ReturnType<typeof parse> | undefined) {
+    if (!request) return yield* output.append(itemID, unreadable)
     yield* admission.withPermit(
       send(itemID, request).pipe(
         Effect.catchCause((cause) =>
@@ -137,10 +142,7 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
     )
   })
 
-  const send = Effect.fn("Watch.delegateSend")(function* (
-    itemID: string,
-    request: { readonly text: string; readonly delivery: "steer" | "queue" },
-  ) {
+  const send = Effect.fn("Watch.delegateSend")(function* (itemID: string, request: ReturnType<typeof parse>) {
     const prompt = (sessionID: string) =>
       ctx.session.prompt({ sessionID: Session.ID.make(sessionID), text: request.text, delivery: request.delivery })
     const masterID = state.masterID ?? (yield* ensure())
@@ -450,6 +452,11 @@ function plain(line: string) {
     .replace(/\*\*|__|`/g, "")
 }
 
+/**
+ * The JSON form the voice prompt described until 02/11 (`{"text":…,"delivery":"queue"}`), still read if it ever comes.
+ * This route never sends it: the delegation's text is the transcript of the turn that delegated, and the queue comes
+ * from his words (`queues`).
+ */
 export function parse(raw: string) {
   return Option.match(decodeRequest(raw), {
     onNone: () => ({ text: raw, delivery: "steer" as const }),
@@ -458,6 +465,84 @@ export function parse(raw: string) {
         ? { text: value.text, delivery: value.delivery === "queue" ? ("queue" as const) : ("steer" as const) }
         : { text: raw, delivery: "steer" as const },
   })
+}
+
+/** The completed turns of a call the Mestra has not seen, and the user turn the last request came from. */
+export type Heard = {
+  turns: { readonly id?: string; readonly role: "user" | "assistant"; readonly text: string }[]
+  trigger?: { readonly id?: string; readonly key: string }
+}
+
+/**
+ * A completed turn, kept for the next request: the newest `limits.contextTurns`, each turn ID once. The turn the last
+ * request came from is not, since its `turn.done` usually arrives after the delegation.
+ */
+export function hear(heard: Heard, turn: { readonly id?: string; readonly role: "user" | "assistant"; text: string }) {
+  const text = turn.text.trim()
+  if (!text) return
+  if (turn.role === "user" && heard.trigger && same(heard.trigger, turn.id, text)) {
+    heard.trigger = undefined
+    return
+  }
+  if (turn.id !== undefined && heard.turns.some((item) => item.id === turn.id)) return
+  heard.turns.push({ id: turn.id, role: turn.role, text })
+  if (heard.turns.length > limits.contextTurns) heard.turns.splice(0, heard.turns.length - limits.contextTurns)
+}
+
+/**
+ * What the Mestra is told of a voice request, the iPhone's `VoiceRequestContext.request`. On this route the
+ * delegation's text is the literal transcript of the turn that delegated (02/11), and OpenAI's live delegation guide
+ * has the app prepare the backend request from the transcripts: the speech, then the turns heard since the previous
+ * delegation, the newest, within `limits.contextChars`, labelled as a transcript. They go once.
+ */
+export function masterRequest(heard: Heard, speech: string, turnID?: string) {
+  const said = speech.trim()
+  const trigger = { id: turnID, key: key(said) }
+  const context = heard.turns.filter((turn) => !(turn.role === "user" && same(trigger, turn.id, turn.text)))
+  heard.turns = []
+  heard.trigger = trigger
+  const lines: string[] = []
+  const budget = { used: 0 }
+  for (const turn of context.toReversed()) {
+    const name = turn.role === "user" ? "Alexandre: " : "Voz: "
+    const chars = Array.from(turn.text)
+    const room = limits.contextChars - budget.used - name.length
+    if (chars.length > room) {
+      // The newest turn alone fills the budget: its end, nearest to the request.
+      if (lines.length === 0) lines.push(name + "…" + chars.slice(-(room - 1)).join(""))
+      break
+    }
+    lines.push(name + turn.text)
+    budget.used += name.length + chars.length + 1
+  }
+  return lines.length === 0 ? said : `${said}\n\n${contextLabel}\n${lines.toReversed().join("\n")}`
+}
+
+const queuePatterns = [/\benfileir(a|ar|e)\b/, /\b(coloca|poe)( \w+){0,2} na fila\b/, /\bsem interromper\b/]
+
+/**
+ * Whether Alexandre asked to queue behind the Mestra's current work ("enfileira", "coloca na fila", "sem
+ * interromper"), the iPhone's `VoiceQueueIntent`: a narrow net, case and accents aside. Otherwise the request steers.
+ */
+export function queues(text: string) {
+  const folded = fold(text).split(/\s+/).join(" ")
+  return queuePatterns.some((pattern) => pattern.test(folded))
+}
+
+/** The same turn: by ID when both have one, else by its words (the iPhone's `VoiceContinuity.key`). */
+function same(trigger: NonNullable<Heard["trigger"]>, id: string | undefined, text: string) {
+  if (id !== undefined && trigger.id !== undefined) return id === trigger.id
+  return key(text) === trigger.key
+}
+
+function key(text: string) {
+  return fold(text)
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+}
+
+function fold(text: string) {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()
 }
 
 /**

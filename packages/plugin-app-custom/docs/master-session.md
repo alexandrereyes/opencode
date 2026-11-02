@@ -50,7 +50,10 @@ sentences without Markdown, lists, tables, IDs, paths or code. Since 2026-11-02 
 backend prompt in OpenAI's live delegation guide: the request comes from a transcript that can have errors, unfinished
 phrases and corrections, so use the latest context and ask for a missing detail instead of guessing; lead with the
 result, then the status and the next step; say something was done only after the tool confirms it; and when the
-outcome is unclear, say so and what needs checking. The voice apps speak at most the first 1,500 characters of the
+outcome is unclear, say so and what needs checking. Since the same day's third wave the request is the transcript of
+what he said followed, when there is one, by the voice conversation since the previous request
+(`VoiceRequestContext`, the watch's `masterRequest`); the note says that conversation is context to understand the
+request, not a new request. The voice apps speak at most the first 1,500 characters of the
 answer (`VoiceResult.spoken`). Core renders it as a context block at the next step,
 and a later removal as a one-line "no longer applies"; neither rewrites the cached system prompt, starts a turn or is
 lost to compaction.

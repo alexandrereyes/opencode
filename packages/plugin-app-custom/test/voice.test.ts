@@ -102,9 +102,12 @@ test("voice instructions reload the editable Markdown and reject empty or unread
   await using dir = await tmpdir("opencode-voice-prompt-")
   const file = `${dir.path}/voice.md`
   const defaults = await Effect.runPromise(loadInstructions(file))
-  // The default documents the screen parameter in each app's form, so neither app prepends its own rules.
-  expect(defaults).toContain(`"screen":true`)
-  expect(defaults).toContain(`"screen_app"`)
+  // Shared with the Watch, which has no screen: each app puts its own screen block first. No JSON either: on this route
+  // the delegation's text is the transcript of his turn, and the app builds the request and decides the queue.
+  expect(defaults).not.toMatch(/\btela\b|screen|[{}]/i)
+  expect(defaults).not.toContain("não ouve a conversa")
+  expect(defaults).toContain("Recebe o que Alexandre disse ao pedir e o trecho recente da conversa.")
+  expect(defaults).toContain(`("enfileira", "coloca na fila", "sem interromper")`)
   expect(defaults.toLowerCase()).not.toContain("mestra")
   // OpenAI's recommended structure for gpt-live-1, with its labels kept in English.
   for (const label of [

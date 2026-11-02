@@ -64,6 +64,11 @@ struct VoiceTests {
       == .unreadableDelegation(id: "ask-2"))
     #expect(try VoiceProtocol.decode(Data(#"{"type":"delegation.created","item":{"type":"delegation","target":"client","id":"ask-3"}}"#.utf8))
       == .unreadableDelegation(id: "ask-3"))
+    // As the route sent it on 02/11: the text is the transcript of the user turn it names.
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"delegation.created","item":{"id":"item_E","type":"delegation","content":[{"type":"input_text","text":"Olha a minha tela, o que tem aí"}],"handoff_id":"handoff_1","target":"client","user_bidi_turn_id":"turn_E"},"offset_ms":15000}"#.utf8))
+      == .delegation(id: "item_E", text: "Olha a minha tela, o que tem aí", turn: "turn_E"))
+    #expect(try VoiceProtocol.decode(Data(#"{"type":"delegation.created","item":{"id":"item_F","type":"delegation","content":[],"target":"client","user_bidi_turn_id":"turn_F"}}"#.utf8))
+      == .unreadableDelegation(id: "item_F", turn: "turn_F"))
     #expect(try VoiceProtocol.decode(Data(#"{"type":"session.closed"}"#.utf8)) == .closed())
   }
   /// `session.closed` as the route sent it on 02/11, and shapes it might send: the reason and the audio it counted are
@@ -232,7 +237,8 @@ struct VoiceTests {
     #expect(try JSONDecoder().decode(JSONValue.self, from: #require(VoiceProtocol.append(id: "ask-1", text: "x").first))
       .object?["channel"]?.string == "speakable")
   }
-  @Test func followupsUseExplicitDeliveryOnly() {
+  /// The JSON form is still read if it ever comes; on this route the queue comes from his words (`VoiceQueueIntent`).
+  @Test func jsonDeliveryIsStillRead() {
     #expect(VoiceMasterRequest("Confira minha sessão").delivery == .steer)
     #expect(VoiceMasterRequest(#"{"text":"Continue depois","delivery":"queue"}"#).delivery == .queue)
     #expect(VoiceMasterRequest(#"{"text":"Agora","delivery":"invented"}"#).delivery == .steer)

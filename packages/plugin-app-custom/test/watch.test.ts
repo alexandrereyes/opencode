@@ -10,7 +10,19 @@ import { makeStats } from "../src/watch/stats"
 import { limits as gatewayLimits, redact } from "../src/watch/gateway"
 import { chunks, closedByModeration, limits as voiceLimits, rejectsVoice, upstreamError } from "../src/watch/voice"
 import { sanitize } from "../src/voice/sanitize"
-import { limits as delegationLimits, parse, spoken, statusNote, toolActivity } from "../src/watch/delegation"
+import {
+  contextLabel,
+  hear,
+  limits as delegationLimits,
+  parse,
+  queues,
+  masterRequest,
+  spoken,
+  statusNote,
+  toolActivity,
+  unreadable,
+  type Heard,
+} from "../src/watch/delegation"
 import { Watch } from "../src/watch/rpc"
 import { key as memoryKey, lateLabel, limits as memoryLimits, makeVoice } from "../src/voice"
 import { Voice } from "../src/voice/rpc"
@@ -534,6 +546,91 @@ const delegate = (socket: { deliver: (event: object) => void } | undefined, id: 
     item: { id, type: "delegation", target: "client", content: [{ type: "input_text", text }] },
   })
 
+it.effect("the app builds the request from the transcripts; a delegation without text keeps what he said", () =>
+  Effect.gen(function* () {
+    const { sidebands, server, json } = yield* setup()
+    yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    const socket = sidebands.opened[0]
+    // As the route sends it (02/11): the text is the transcript of the turn it names, whose `turn.done` comes after.
+    const delegation = (id: string, text: string, turn: string) =>
+      socket?.deliver({
+        type: "delegation.created",
+        item: {
+          id,
+          type: "delegation",
+          target: "client",
+          content: text ? [{ type: "input_text", text }] : [],
+          handoff_id: "handoff_1",
+          user_bidi_turn_id: turn,
+        },
+        offset_ms: 15_000,
+      })
+    const done = (id: string, role: "user" | "assistant", transcript: string) =>
+      socket?.deliver({ type: "turn.done", turn: { id, role, transcript } })
+    socket?.deliver({ type: "input_transcript.added", item: { id: "item_1", text: " Quantas sessões estão abertas?" } })
+    delegation("item_d1", "Quantas sessões estão abertas?", "turn_1")
+    done("turn_1", "user", " Quantas sessões estão abertas?")
+    done("turn_2", "assistant", " Vou verificar.")
+    done("turn_3", "assistant", " Há duas: Abacato e Misty.")
+    delegation("item_d2", "E a outra?", "turn_4")
+    yield* settled
+    expect(server.prompts.map((prompt) => prompt.text)).toEqual([
+      "Quantas sessões estão abertas?",
+      [
+        "E a outra?",
+        "",
+        "Conversa por voz desde o pedido anterior (transcrição, pode ter erros):",
+        "Voz: Vou verificar.",
+        "Voz: Há duas: Abacato e Misty.",
+      ].join("\n"),
+    ])
+    // Without text, what he is saying; his words, not a JSON field, queue it.
+    done("turn_4", "user", " E a outra?")
+    socket?.deliver({
+      type: "input_transcript.added",
+      item: { id: "item_2", text: " Coloca na fila os testes do Mac" },
+    })
+    delegation("item_d3", "", "turn_5")
+    yield* settled
+    expect(server.prompts.at(-1)).toEqual({
+      sessionID: "ses_master",
+      text: "Coloca na fila os testes do Mac",
+      delivery: "queue",
+    })
+    // With nothing at all, GPT Live hears to have him repeat it, once, and nothing reaches the Mestra.
+    done("turn_5", "user", " Coloca na fila os testes do Mac")
+    delegation("item_d4", "", "turn_6")
+    delegation("item_d4", "", "turn_6")
+    yield* settled
+    expect(server.prompts).toHaveLength(3)
+    expect(
+      contextAppends(socket, "speakable")
+        .filter((event) => event.delegation_item_id === "item_d4")
+        .map((event) => event.content[0].text),
+    ).toEqual([unreadable])
+  }).pipe(Effect.map(() => undefined)),
+)
+
+it.effect("a repeated delegation is admitted once and leaves the context to the next request", () =>
+  Effect.gen(function* () {
+    const { sidebands, server, json } = yield* setup()
+    yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    const socket = sidebands.opened[0]
+    delegate(socket, "item_r1", "Quantas sessões estão abertas?")
+    socket?.deliver({
+      type: "turn.done",
+      turn: { id: "turn_a", role: "assistant", transcript: " Há duas: Abacato e Misty." },
+    })
+    delegate(socket, "item_r1", "Quantas sessões estão abertas?")
+    delegate(socket, "item_r2", "E a outra?")
+    yield* settled
+    expect(server.prompts.map((prompt) => prompt.text)).toEqual([
+      "Quantas sessões estão abertas?",
+      ["E a outra?", "", contextLabel, "Voz: Há duas: Abacato e Misty."].join("\n"),
+    ])
+  }).pipe(Effect.map(() => undefined)),
+)
+
 /** The `delegation.context.append` commands sent on one channel. */
 const contextAppends = (socket: { sent: string[] } | undefined, channel: "speakable" | "commentary") =>
   (socket?.sent ?? [])
@@ -735,7 +832,11 @@ it.effect("a cold Mestra never holds the sideband reader; admissions and memory 
     const socket = sidebands.opened[0]
     socket?.deliver({ type: "session.started" })
     delegate(socket, "item_a", "Quais sessões estão rodando?")
-    socket?.deliver({ type: "turn.done", turn: { id: "turn_1", role: "user", transcript: "Quais sessões rodam?" } })
+    // The delegating turn, as on the route (its transcript is the delegation's text): not context for the next one.
+    socket?.deliver({
+      type: "turn.done",
+      turn: { id: "turn_1", role: "user", transcript: "Quais sessões estão rodando?" },
+    })
     delegate(socket, "item_b", "E quais precisam de mim?")
     delegate(socket, "item_a", "Quais sessões estão rodando?")
     socket?.deliver({ type: "error", error: { type: "server_error", code: "internal" } })
@@ -1076,6 +1177,62 @@ it.effect("helpers: delegation parsing, append chunks, close reasons, voice reje
     expect(parse("Olá")).toEqual({ text: "Olá", delivery: "steer" })
     expect(parse('{"text":"x","delivery":"queue"}')).toEqual({ text: "x", delivery: "queue" })
     expect(parse('{"text":"  "}')).toEqual({ text: '{"text":"  "}', delivery: "steer" })
+    // The iPhone's `VoiceRequestContext`: the newest six turns, within 1,200 characters, the delegating turn left out.
+    const heard: Heard = { turns: [] }
+    expect(masterRequest(heard, " Pedido ")).toBe("Pedido")
+    for (const index of [1, 2, 3, 4, 5, 6, 7, 8, 9])
+      hear(heard, { id: `t${index}`, role: index % 2 === 0 ? "assistant" : "user", text: ` Fala ${index}` })
+    hear(heard, { id: "t9", role: "user", text: "Repetida" })
+    hear(heard, { role: "assistant", text: "  " })
+    hear(heard, { role: "user", text: "pedido!" })
+    expect(heard.turns).toHaveLength(6)
+    expect(masterRequest(heard, "Pedido", "t10")).toBe(
+      [
+        "Pedido",
+        "",
+        contextLabel,
+        "Voz: Fala 4",
+        "Alexandre: Fala 5",
+        "Voz: Fala 6",
+        "Alexandre: Fala 7",
+        "Voz: Fala 8",
+        "Alexandre: Fala 9",
+      ].join("\n"),
+    )
+    hear(heard, { id: "t10", role: "user", text: "Pedido e mais" })
+    expect(heard.turns).toEqual([])
+    const long = "a".repeat(700)
+    hear(heard, { id: "o", role: "assistant", text: "início " + long })
+    hear(heard, { id: "p", role: "user", text: long })
+    hear(heard, { id: "q", role: "assistant", text: "curta" })
+    expect(masterRequest(heard, "Outro").endsWith(`\nAlexandre: ${long}\nVoz: curta`)).toBe(true)
+    hear(heard, { id: "r", role: "assistant", text: "início " + "b".repeat(2_000) })
+    const clipped = masterRequest(heard, "Outro").split("\n").at(-1) ?? ""
+    expect(clipped.startsWith("Voz: …b") && clipped.length === delegationLimits.contextChars).toBe(true)
+    // The iPhone's `VoiceQueueIntent`.
+    for (const text of [
+      "Enfileira isso: roda os testes do Mac",
+      "pode enfileirar depois",
+      "Enfileire o pedido",
+      "Coloca na fila",
+      "coloca isso na fila",
+      "põe essa tarefa na fila",
+      "POE NA FILA",
+      "sem interromper, vê o PR",
+      "Faz isso sem  interromper o que ele está fazendo",
+    ])
+      expect(queues(text)).toBe(true)
+    for (const text of [
+      "Roda os testes",
+      "quantas sessões tem na fila?",
+      "a fila do banco tá enorme",
+      "interrompe a sessão",
+      "não interrompe",
+      "coloca o arquivo na pasta",
+      "o pedido foi enfileirado?",
+      "fila",
+    ])
+      expect(queues(text)).toBe(false)
     expect(chunks("é".repeat(300)).map((part) => Buffer.byteLength(part))).toEqual([500, 100])
     // The iPhone's rule for a `session.closed` reason that names moderation.
     for (const reason of ["content", "content_filter", "moderation", "Moderated"])

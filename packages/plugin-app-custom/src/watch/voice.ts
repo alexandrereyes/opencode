@@ -2,7 +2,7 @@ import { Clock, Deferred, Effect, Exit, Fiber, Option, Queue, Schema, Scope } fr
 import { Voice } from "../voice/rpc.js"
 import { masterLabel, summaryLabel, turnText } from "../voice/index.js"
 import { sanitize } from "../voice/sanitize.js"
-import { makeDelegator, type DelegationContext } from "./delegation.js"
+import { hear, makeDelegator, masterRequest, parse, queues, type DelegationContext, type Heard } from "./delegation.js"
 import { fail } from "./failure.js"
 import { Watch } from "./rpc.js"
 
@@ -102,6 +102,10 @@ type Call = {
   seq: number
   changed: Deferred.Deferred<void>
   captions: { user: string; assistant: string }
+  /** The completed turns the Mestra has not seen, sent with the next request (`masterRequest`); never stored. */
+  heard: Heard
+  /** Delegation items already admitted: a repeated `delegation.created` is ignored. */
+  delegated: Set<string>
   /** Until when (epoch ms) each side counts as speaking (`limits.speakingMs`). */
   speaking: { user: number; assistant: number }
   ending?: Deferred.Deferred<void>
@@ -141,6 +145,7 @@ const SidebandEvent = Schema.Struct({
       type: Schema.optionalKey(Schema.String),
       text: Schema.optionalKey(Schema.String),
       target: Schema.optionalKey(Schema.String),
+      user_bidi_turn_id: Schema.optionalKey(Schema.String),
       content: Schema.optionalKey(
         Schema.Array(Schema.Struct({ type: Schema.String, text: Schema.optionalKey(Schema.String) })),
       ),
@@ -232,6 +237,8 @@ export function makeVoice(input: {
       seq: 0,
       changed: Deferred.makeUnsafe<void>(),
       captions: { user: "", assistant: "" },
+      heard: { turns: [] },
+      delegated: new Set(),
       speaking: { user: 0, assistant: 0 },
       recent: [],
       contextItems: 0,
@@ -394,6 +401,7 @@ export function makeVoice(input: {
         // The user's `turn.done` only comes when GPT Live answers, so only GPT Live's ends a speaking window.
         if (role === "assistant") call.speaking.assistant = 0
         if (!spoken) return
+        hear(call.heard, { id: event.turn?.id, role, text: spoken })
         yield* emit(call, { type: "caption", role, text: spoken, final: true })
         return yield* lane(
           call,
@@ -413,17 +421,37 @@ export function makeVoice(input: {
         const item = event.item
         if (item?.target !== "client" || item.type !== "delegation" || !item.id) return
         const id = item.id
-        const request = (item.content ?? [])
+        // Each item once, before the request is built: building it consumes the turns heard since the previous one.
+        if (call.delegated.has(id)) return
+        call.delegated.add(id)
+        const text = (item.content ?? [])
           .flatMap((part) => (part.type === "input_text" && part.text ? [part.text] : []))
           .join("")
-        if (!request.trim()) return
-        // Admissions stay in order and each item once (the delegator remembers item IDs).
+        // GPT Live writes no request: the text is the transcript of the turn that delegated (02/11). Without one, it is
+        // what Alexandre is saying (his `turn.done` follows the delegation) or last said; with nothing, GPT Live is
+        // asked to have him repeat it.
+        const said =
+          text.trim() || call.captions.user.trim() || call.heard.turns.findLast((turn) => turn.role === "user")?.text
+        const asked = said ? parse(said) : undefined
+        // His words since the previous delegation decide the queue, as on the iPhone.
+        const words = [
+          ...call.heard.turns.flatMap((turn) => (turn.role === "user" ? [turn.text] : [])),
+          call.captions.user,
+          asked?.text ?? "",
+        ].join(" ")
+        const prompt = asked
+          ? {
+              text: masterRequest(call.heard, asked.text, item.user_bidi_turn_id),
+              delivery: asked.delivery === "queue" || queues(words) ? ("queue" as const) : ("steer" as const),
+            }
+          : undefined
+        // Admissions stay in order.
         return yield* lane(
           call,
           "delegationTail",
           // A request still waiting when the call was moderated belongs to the cleared conversation.
           delegator(call).pipe(
-            Effect.flatMap((delegate) => (delegate && !call.moderated ? delegate.ask(id, request) : Effect.void)),
+            Effect.flatMap((delegate) => (delegate && !call.moderated ? delegate.ask(id, prompt) : Effect.void)),
           ),
         )
       }

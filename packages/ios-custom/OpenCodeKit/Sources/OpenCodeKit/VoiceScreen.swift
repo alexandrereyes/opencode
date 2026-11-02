@@ -1,8 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// What GPT Live asked to look at: `"screen": true | "front" | "app" | "display"`, `"screen_app": "Simulator"`.
-/// The iPhone always captures its own OpenCode window, whatever the target.
+/// What to look at: the window in front, or the whole screen when Alexandre says "a tela toda" (`VoiceScreenIntent`);
+/// `"screen": true | "front" | "app" | "display"` and `"screen_app": "Simulator"` in the JSON form the route never
+/// sends. The iPhone always captures its own OpenCode window, whatever the target.
 public enum VoiceScreenTarget: Sendable, Equatable {
   /// The window in front ("olha essa página").
   case front
@@ -64,24 +65,31 @@ public enum VoiceScreenRefusal: Error, Equatable, Sendable, LocalizedError {
   }
 }
 
-/// Whether Alexandre named the screen itself ("tá vendo minha tela?", "manda um print"), so a delegation GPT Live
-/// sent without `"screen"` still carries the capture. Speech since the previous delegation counts too: "Pergunta pra
-/// Mestra" right after "tá vendo minha tela?" is about the screen.
+/// Whether Alexandre named the screen itself ("tá vendo minha tela?", "manda um print"), which is how the app knows to
+/// attach the capture: on this route GPT Live never sends the `"screen"` field (the delegation's text is the transcript
+/// of his turn, 02/11). Speech since the previous delegation counts too: "Pergunta pra Mestra" right after "tá vendo
+/// minha tela?" is about the screen.
 ///
-/// Only a narrow net: whether to look is GPT Live's call, through the `screen` field the voice prompt describes.
-/// Phrases that point at something without naming the screen ("isso aqui", "olha aqui", "vê o que cê acha", "o que
-/// acha disso") are everyday speech, and listing them here guessed wrong (31/10: "dá uma pesquisada… vê o que cê
-/// acha" tried a capture). When GPT Live misses one of those, the fix goes to the prompt's general line about the
-/// screen, not to a new phrase here.
+/// Only a narrow net. Phrases that point at something without naming the screen ("isso aqui", "olha aqui", "vê o que
+/// cê acha", "o que acha disso") are everyday speech, and listing them here guessed wrong (31/10: "dá uma pesquisada…
+/// vê o que cê acha" tried a capture). GPT Live delegates them anyway (02/11, 3 of 3, even when told to ask whether
+/// to look), so they reach the master without a capture, and the app's screen block has GPT Live tell him he can
+/// say "olha minha tela" when the result shows nothing was seen. An app by name ("olha o simulador") is not
+/// recognized either: no phrase reliably names one.
 public enum VoiceScreenIntent {
   private static let patterns = [
     #"\btelas?\b"#, #"\bscreenshots?\b"#, #"\bprints?\b"#, #"\bcaptura de tela\b"#,
   ].map { try! NSRegularExpression(pattern: $0) }
+  private static let whole = try! NSRegularExpression(pattern: #"\btela (toda|inteira)\b"#)
 
-  public static func mentionsScreen(_ text: String) -> Bool {
+  /// What his words ask to capture: the window in front, or the whole screen for "a tela toda" or "a tela inteira"
+  /// (the Mac; the iPhone always captures its own window); nil when they do not name the screen.
+  public static func target(_ text: String) -> VoiceScreenTarget? {
     let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "pt_BR"))
+      .split(whereSeparator: \.isWhitespace).joined(separator: " ")
     let range = NSRange(folded.startIndex..., in: folded)
-    return patterns.contains { $0.firstMatch(in: folded, range: range) != nil }
+    guard patterns.contains(where: { $0.firstMatch(in: folded, range: range) != nil }) else { return nil }
+    return whole.firstMatch(in: folded, range: range) == nil ? .front : .display
   }
 }
 

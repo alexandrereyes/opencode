@@ -65,7 +65,10 @@ authenticated normal plugin transport, for example
   The entire file replaces the bundled `src/voice/voice.md` default; only a missing file uses that default. Since
   2026-11-02 the default follows OpenAI's recommended GPT Live prompt structure (role and style, `Backchannel policy`,
   `Interruption policy`, `Delegation policy` with `Backend tools` and `<|SpawnThinking|>`), labels in English and
-  content in Portuguese; an edited copy keeps whatever structure it has.
+  content in Portuguese; an edited copy keeps whatever structure it has. Since the same day's third wave the default
+  says nothing of a screen (the watch has none; the iPhone and the Mac put their own screen block in front of it) nor
+  of a JSON request (this route never sends one: the delegation's text is the transcript of his turn, and the app
+  builds the request and decides the queue from his words).
   An empty or unreadable file fails. Clients fetch before each new GPT Live call, so Markdown edits apply
   without a restart or rebuild. This additive method is independent of memory; new iPhone builds require it
   and do not start a provider call if instructions cannot be fetched. Updating the backend precedes the initial

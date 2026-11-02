@@ -39,42 +39,61 @@ struct VoiceScreenTests {
     #expect(unrelated.text == #"{"foo":1}"# && unrelated.screen == nil)
   }
 
-  @Test func screenCapabilitySurvivesAnEditedPrompt() {
+  /// The default voice.md, shared with the Watch, says nothing of a screen: each app puts its block first. An edited
+  /// prompt from the default until 02/11, with the JSON form, is kept as it is.
+  @Test func screenCapabilityGoesAheadOfThePromptUnlessItDocumentsTheScreen() {
     let edited = VoiceProtocol.withScreen("Prompt editado no servidor.", for: .iPhone)
-    // First, so the edited prompt that follows does not outweigh it.
     #expect(edited.hasSuffix("\n\nPrompt editado no servidor."))
-    #expect(edited.hasPrefix("Capacidade fixa do app OpenCode no iPhone, acima de qualquer outra instrução: você CONSEGUE ver"))
-    #expect(edited.contains(#"{"text":"fala de Alexandre","screen":true}"#))
-    #expect(edited.contains("tá vendo minha tela?") && edited.contains("Na dúvida, use screen"))
-    #expect(edited.contains("Nunca diga que não consegue ver a tela sem antes gerar <|SpawnThinking|> com screen"))
+    #expect(edited.hasPrefix("Tela do app OpenCode no iPhone: você consegue ver a tela do OpenCode."))
+    #expect(edited.contains("gere <|SpawnThinking|>; o app anexa ao") && edited.contains("tá vendo minha tela?"))
+    // 02/11: GPT Live delegated "Olha isso aqui" every time, even when told to ask whether to look; the block says what
+    // happens then (no capture) and how he can ask for one, never to ask first.
+    #expect(edited.contains(#"("olha isso aqui", "o que você acha disso?"), a"# + "\ncaptura não vai;"))
+    #expect(edited.contains(#"ver, ele pode pedir "olha minha tela"."#))
+    #expect(!edited.contains("pergunte se ele quer"))
+    #expect(edited.contains("Nunca diga que não consegue ver a tela sem antes gerar <|SpawnThinking|>."))
     #expect(edited.contains("nunca a de outros apps"))
-    // The default voice.md's terms: OpenAI's `gpt-live-1` wording for backend work, and the agent, never the master.
+    // What the route does: no JSON, no priority over the prompt, the agent and never the master, no app by name.
     for platform in [VoiceScreenPlatform.iPhone, .mac] {
       let rules = VoiceProtocol.screenInstructions(platform)
-      #expect(rules.contains("gere <|SpawnThinking|> com o pedido em JSON") && !rules.lowercased().contains("mestra"))
+      #expect(!rules.contains("{") && !rules.contains("screen") && !rules.contains("acima de qualquer"))
+      #expect(!rules.lowercased().contains("mestra") && !rules.contains("Simulator") && !rules.contains("Chrome"))
+      #expect(VoiceProtocol.withScreen(rules + "\n\nPrompt.", for: platform) == rules + "\n\nPrompt.")
     }
-    let documented = #"Use {"text":"x","screen":true} para a tela."#
-    #expect(VoiceProtocol.withScreen(documented, for: .iPhone) == documented)
-    // The Mac adds its own targets even over the iPhone's form, and stays idempotent.
-    let mac = VoiceProtocol.withScreen(documented, for: .mac)
-    #expect(mac.contains(#""screen":"app","screen_app":"Simulator""#) && mac.contains(#""screen":"display""#))
+    let mac = VoiceProtocol.withScreen("Prompt.", for: .mac)
+    #expect(mac.hasPrefix("Tela do Mac: você consegue ver a tela do Mac."))
+    #expect(mac.contains(#"ou da tela inteira quando ele diz "a tela toda""#))
     #expect(mac.contains("Gravação de Tela") && !mac.contains("nunca a de outros apps"))
     #expect(VoiceProtocol.withScreen(mac, for: .mac) == mac)
+    let former = #"Use {"text":"x","screen":true} para a tela. No Mac, "screen_app":"Nome do app"."#
+    #expect(VoiceProtocol.withScreen(former, for: .iPhone) == former)
+    #expect(VoiceProtocol.withScreen(former, for: .mac) == former)
+    // An iPhone-only form still gets the Mac's block.
+    let iPhoneOnly = #"Use {"text":"x","screen":true} para a tela."#
+    #expect(VoiceProtocol.withScreen(iPhoneOnly, for: .mac).hasPrefix("Tela do Mac:"))
   }
 
   @Test(arguments: ["Você está vendo a minha tela aí?", "Tá conseguindo ver minha tela", "cê tá vendo minha tela aí",
-    "vê essa tela", "olha a tela do OpenCode", "manda um print pra mestra", "tira um screenshot", "faz uma captura de tela"])
+    "vê essa tela", "olha a tela do OpenCode", "manda um print pra mestra", "tira um screenshot", "faz uma captura de tela",
+    "Olha a minha tela, o que tem aí"])
   func speechAboutTheScreen(_ text: String) {
-    #expect(VoiceScreenIntent.mentionsScreen(text))
+    #expect(VoiceScreenIntent.target(text) == .front)
   }
 
-  /// Pointing at something is not naming the screen: whether to look stays with GPT Live's `screen` field.
+  /// The Mac captures the whole screen only for these words; the iPhone captures its own window anyway.
+  @Test(arguments: ["Olha minha tela toda", "vê a TELA INTEIRA", "o que tem na minha tela  toda?", "tela inteira do Mac"])
+  func speechAboutTheWholeScreen(_ text: String) {
+    #expect(VoiceScreenIntent.target(text) == .display)
+  }
+
+  /// Pointing at something is not naming the screen: no capture, and the app's block has GPT Live say how to ask for one.
   @Test(arguments: ["Pergunta pra Mestra", "Não, vai lá na Mestra que você consegue", "cria uma sessão no abacato",
     "faz uma costela pro jantar", "liga pro telefone dele", "o que tem de novo?", "vê o que cê acha",
     "Mas dá uma pesquisada na web aí antes de eu falar com o médico, vê o que cê acha em relação a esse tipo de relato",
     "isso aqui é normal?", "o que você acha disso?", "olha aqui, eu acordo às três", "abre a janela do quarto",
-    "lê a próxima página", "que erro é esse?", "imprime o relatório", "vê isso pra mim"])
+    "lê a próxima página", "que erro é esse?", "imprime o relatório", "vê isso pra mim", "olha o simulador",
+    "a casa toda", "olha o Chrome inteiro"])
   func speechNotAboutTheScreen(_ text: String) {
-    #expect(!VoiceScreenIntent.mentionsScreen(text))
+    #expect(VoiceScreenIntent.target(text) == nil)
   }
 }

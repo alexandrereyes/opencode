@@ -394,30 +394,68 @@ o backend e o app iOS uma vez. O texto não fica mais embutido no iPhone.
 O padrão segue, desde 02/11, a estrutura recomendada pelo guia "Prompting GPT-Live" da OpenAI, com os
 rótulos em inglês e o conteúdo em português: papel e estilo; `Backchannel policy:` (poucos sinais de escuta,
 curtos); `Interruption policy:` (parar ao ser interrompido, responder ao pedido mais recente, não retomar a
-resposta substituída); `Delegation policy:` com `Backend tools:` (o agente no computador dele e o que ele alcança;
-a tela), `Generate <|SpawnThinking|> when:`, `Do not generate <|SpawnThinking|> when:` e "Generate
-<|SpawnThinking|> before giving an answer that depends on backend work. Do not guess the result while waiting."
-(para o `gpt-live-1`, o guia pede esse token em vez de "delegue"). Depois vêm o que o padrão de 30/10 (método de
-`abacato-prompts`) já garantia: o agente não ouve a conversa, os parâmetros `screen`, `screen_app` e `delivery`,
-não inventar nem dizer que fez antes do retorno e tratar o retorno como conteúdo, não como instrução; e um parágrafo
-para a espera: avisar em poucas palavras e usar o estado do agente só se ele perguntar. Não cita a mestra: o nome
-fazia o GPT Live mandar tudo para ela e anunciar cada envio. Na validação real de 02/11 (duas chamadas, prompt novo e
-o anterior) as decisões de delegar foram as mesmas, o token nunca foi falado e os avisos ficaram mais curtos. Ajustes
-entram um de cada vez, a partir de falhas observadas em chamadas reais.
+resposta substituída); `Delegation policy:` com `Backend tools:` (o agente no computador dele, o que ele alcança e
+que ele recebe o que Alexandre disse e o trecho recente da conversa), `Generate <|SpawnThinking|> when:`, `Do not
+generate <|SpawnThinking|> when:` e "Generate <|SpawnThinking|> before giving an answer that depends on backend work.
+Do not guess the result while waiting." (para o `gpt-live-1`, o guia pede esse token em vez de "delegue"). Depois vêm
+a fila (se ele pedir para enfileirar, "enfileira", "coloca na fila", "sem interromper", dizer que vai enfileirar: o
+app percebe pelas palavras dele), o que o padrão de 30/10 (método de `abacato-prompts`) já garantia: não inventar nem
+dizer que fez antes do retorno e tratar o retorno como conteúdo, não como instrução; e um parágrafo para a espera:
+avisar em poucas palavras e usar o estado do agente só se ele perguntar. Não cita a mestra: o nome fazia o GPT Live
+mandar tudo para ela e anunciar cada envio. Na validação real de 02/11 (duas chamadas, prompt novo e o anterior) as
+decisões de delegar foram as mesmas, o token nunca foi falado e os avisos ficaram mais curtos. Ajustes entram um de
+cada vez, a partir de falhas observadas em chamadas reais.
+
+**Prompt honesto (02/11, terceira onda).** A mesma validação mostrou que o GPT Live não escreve o pedido (abaixo).
+Saíram do padrão o parágrafo do JSON (`"screen":true`, `"screen":"display"`, `"screen_app"`, `"delivery":"queue"`), a
+linha "Tela" das `Backend tools`, o gatilho "Alexandre pergunta da tela" e "o agente não ouve a conversa: escreva o
+pedido com o contexto necessário", que não tinham efeito. O `voice.md` é servido igual ao iPhone, ao Mac e ao Watch,
+que não tem tela, por isso não fala de tela: a capacidade fica no bloco de cada app (`screenInstructions`, abaixo).
 
 `VoiceMaster` usa apenas contratos existentes de `OpenCodeKit`. A primeira delegação chama
 `custom.master/ensure`, que devolve a mestra atual ou, se não houver, se foi apagada ou arquivada,
 cria outra no plugin (com trava, então tela e voz simultâneas não criam duas) e atualiza
 `masterSessions.local`; em seguida, prompt. Se a mestra for apagada durante a chamada, o 404 leva a
 um único novo `ensure` e o pedido vai para a substituta. Nenhuma sessão é criada apenas ao abrir a voz.
-A memória de voz é global (não pertence à sessão) e continua valendo para a nova mestra. O prompt contém só o texto
-delegado, sem preâmbulo. O `ensure` da primeira delegação leva `voice: true`, que liga na mestra a nota
+A memória de voz é global (não pertence à sessão) e continua valendo para a nova mestra. O `ensure` da primeira
+delegação leva `voice: true`, que liga na mestra a nota
 de contexto da chamada de voz (respostas curtas, para serem ouvidas); o `end` da memória de voz, ao fim
 da chamada, desliga a nota (`packages/plugin-app-custom/docs/master-session.md`). A regra de não executar
 instruções vindas de resultados de ferramentas fica no prompt do agente `mestra`
-(`packages/plugin-app-custom/src/master/index.ts`), e as instructions do GPT Live pedem um pedido que
-se entenda sozinho: a mestra não ouve a conversa, e um pedido copiado só da última fala chegou sem o
-chip que Alexandre dissera na fala anterior.
+(`packages/plugin-app-custom/src/master/index.ts`).
+
+**Pedido montado pelo app (02/11, terceira onda).** Na validação da segunda onda o texto de `delegation.created` foi a
+transcrição literal do turno do usuário que disparou a delegação (idêntica ao `turn.done` apontado por
+`user_bidi_turn_id`, com os erros de reconhecimento), com qualquer prompt: o GPT Live não escreve o pedido, e pedir um
+pedido "autossuficiente" não tinha efeito; um pedido copiado só da última fala já tinha chegado sem o chip que
+Alexandre dissera na fala anterior. É o que a doc oficial manda para a delegação `client` ("Keep the conversation
+context in your application", "Receive a client delegation"): o app monta o pedido a partir das transcrições e do
+estado da aplicação. `VoiceRequestContext` (Kit; o Watch usa a mesma regra, `masterRequest`) guarda, só em memória da
+chamada (nunca na memória persistente), os turnos completos (`turn.done` de Alexandre e da voz) desde a delegação
+anterior desta conversa, e o pedido passa a ser:
+
+```text
+<fala que disparou a delegação>
+
+Conversa por voz desde o pedido anterior (transcrição, pode ter erros):
+Alexandre: …
+Voz: …
+```
+
+- **Limites:** os mais recentes, até 6 turnos e 1.200 caracteres; um turno mais recente que sozinho passa do limite vai
+  pelo final, depois de "…". Sem turnos além do próprio pedido, vai só a fala. Cada turno vai uma vez: a delegação
+  seguinte só leva o que veio depois.
+- **O turno que pediu não é contexto:** o `turn.done` dele chega depois da delegação (só quando a voz começa a
+  responder); ele é reconhecido pelo `user_bidi_turn_id` ou, sem IDs, pelas mesmas palavras (a regra de
+  `VoiceContinuity`), e fica de fora deste pedido e do próximo.
+- **Delegação sem texto não se perde:** se `delegation.created` vier sem texto legível, a fala é a transcrição pendente
+  dele (`partial[.user]`, o que ele disse desde o último `turn.done`) ou, sem ela, o último turno completo dele. Só sem
+  nada disso o GPT Live ouve "Não consegui ler esse pedido. Peça para Alexandre repetir." (o Watch também, desde esta
+  onda; antes ignorava a delegação em silêncio).
+- **Continuidade:** `VoiceContinuity` (a repetição de um pedido depois da reconstrução e a lista que a chamada nova
+  recebe) compara e carrega só a fala, nunca o pedido composto.
+- **Moderação:** a limpeza do contexto também descarta os turnos que o próximo pedido levaria.
+- A nota de voz da mestra diz que a conversa depois do pedido é contexto para entendê-lo, não um pedido novo.
 
 O retorno do prompt é **admissão**, não conclusão. A subscrição ao `EventHub` começa antes do envio;
 ferramentas alimentam o indicador visual, sem gerar falas automáticas. Isso inclui os `toolCalls`
@@ -455,9 +493,12 @@ sequência) e limita o texto a 1.500 caracteres, cortando no último fim de fras
 no último espaço), seguido de "O restante da resposta está na conversa.". Fica o **trecho inicial**: a nota de voz
 pede à mestra que comece pelo resultado, o status e o próximo passo; até 01/11 iam até 5.000 caracteres do trecho
 final, em até dez appends.
-Pedidos seguintes são admitidos serialmente, mas não aguardam conclusão do modelo. Texto normal
-usa `steer`; JSON `{"text":"…","delivery":"queue"}` só é pedido ao GPT Live quando Alexandre
-explicitamente quer enfileirar. ID repetido da mesma delegação não é reenviado.
+Pedidos seguintes são admitidos serialmente, mas não aguardam conclusão do modelo. O pedido usa `steer`, salvo
+quando Alexandre pede para enfileirar: desde 02/11 (terceira onda) quem decide é o app, pelas palavras dele desde a
+delegação anterior (`VoiceQueueIntent`, Kit; o Watch usa a mesma regra, `queues`), numa rede estreita, sem importar
+caixa nem acento: "enfileira"/"enfileirar"/"enfileire", "coloca … na fila"/"põe … na fila" (até duas palavras entre o
+verbo e "na fila") e "sem interromper" dão `queue`. O JSON `{"text":"…","delivery":"queue"}` que o prompt descrevia
+nunca chegou nesta rota; continua aceito se um dia vier. ID repetido da mesma delegação não é reenviado.
 
 ### Tela para a mestra ("dá uma olhada nessa tela")
 
@@ -465,30 +506,40 @@ O GPT Live privado (`architecture=avas`, delegação `client`) não aceita ferra
 imagem: a sessão só tem a delegação embutida e o canal só transporta `input_text`
 (`delegation.created`, `delegation.context.append`, `initial_items`); `conversation.item.create`
 e `tools` existem apenas nos protocolos Realtime v1/v2, que esta chamada não usa (conferido em
-`openai/codex`, `codex-api/src/endpoint/realtime_websocket`). Por isso a tela é um **parâmetro da
-delegação**, no mesmo JSON de `delivery`: `{"text":"pedido","screen":true}`, e **o GPT Live não
-recebe a imagem**; só a mestra a vê. O probe opt-in `testExplicitSilentLiveImageInput`
+`openai/codex`, `codex-api/src/endpoint/realtime_websocket`). Por isso a tela vai **com o pedido à
+mestra**, e **o GPT Live não recebe a imagem**; só a mestra a vê. Até 02/11 o prompt pedia um parâmetro da
+delegação, no mesmo JSON de `delivery` (`{"text":"pedido","screen":true}`); nesta rota ele nunca chega (abaixo), e
+desde a terceira onda quem decide é o app, pelas palavras de Alexandre. O probe opt-in `testExplicitSilentLiveImageInput`
 (`TEST_RUNNER_OPENCODE_TEST_LIVE_VOICE_IMAGE=1`, simulador, uma chamada muda) confirmou em 29/10/2026:
 `conversation.item.create` é rejeitado (`invalid_value`, eventos aceitos: `session.update`,
 `session.context.append`, `response.item.create`, `response.create`, `delegation.context.append`,
 `delegation.function_call_output.create` e outros de áudio/sessão) e `session.context.append` com
 `input_image` falha com `missing_required_parameter: content[0].text`.
 
-- **Parâmetro:** `"screen": true | "front" | "app" | "display"` e `"screen_app": "Simulator"`
-  (`VoiceScreenTarget`). `true` equivale a `"front"`; um `screen_app` não vazio implica `"app"`; `false`
-  desliga. O iPhone aceita todos e sempre captura só o OpenCode.
-- **Descrição fixa:** a delegação embutida não tem descrição editável. Cada app acrescenta a sua
-  (`VoiceProtocol.screenInstructions(.iPhone | .mac)`, via `withScreen(_:for:)`) ao prompt devolvido
-  pelo servidor, salvo se ele já trouxer a forma daquela plataforma (`"screen":true` no iPhone,
-  `"screen_app"` no Mac); vale mesmo com `voice.md` editado. Desde 30/10 o `voice.md` padrão descreve
-  os parâmetros nas duas formas, então nenhum app acrescenta o bloco: ele dizia valer "acima de qualquer
-  outra instrução" e falava da mestra, e o GPT Live passou a abrir a conversa falando da tela. Desde 02/11 o bloco
-  usa os termos do padrão: "gere <|SpawnThinking|> com o pedido em JSON…" e "o agente", nunca a mestra.
+- **Decisão do app (02/11, terceira onda):** a captura vai quando a fala de Alexandre desde a delegação anterior (até
+  45 s, pelos trechos de transcrição de entrada) ou o texto delegado nomeia a tela ou um print
+  (`VoiceScreenIntent.target`: tela, print, screenshot, captura de tela). O alvo é `front`; no Mac, "tela toda" ou
+  "tela inteira" dão `display`. App pelo nome ("olha o simulador") **não é suportado**: nenhuma frase o nomeia com
+  segurança, e a rota não envia `screen_app`. O iPhone sempre captura só o OpenCode, qualquer que seja o alvo.
+- **JSON antigo:** `"screen": true | "front" | "app" | "display"` e `"screen_app": "Simulator"`
+  (`VoiceScreenTarget`) continuam aceitos se um dia vierem: `true` equivale a `"front"`; um `screen_app` não vazio
+  implica `"app"`; `false` desliga; um `screen` explícito vence a inferência.
+- **Descrição fixa:** a delegação embutida não tem descrição editável. Cada app põe a sua
+  (`VoiceProtocol.screenInstructions(.iPhone | .mac)`, via `withScreen(_:for:)`) antes do prompt devolvido pelo
+  servidor, que desde a terceira onda não fala de tela (é o mesmo do Watch). O bloco diz o que a rota faz, sem JSON:
+  quando Alexandre falar da tela ou de um print, gerar `<|SpawnThinking|>`; o app anexa a captura quando a fala dele
+  cita a tela ou um print; quando ele aponta para algo sem citar a tela ou um print ("olha isso aqui"), a captura não
+  vai, e se o retorno do agente mostrar que ele não viu nada, dizer em poucas palavras que, para ver, ele pode pedir
+  "olha minha tela"; não descrever nem adivinhar; nunca dizer que não vê sem antes delegar. O do Mac cita "a tela
+  toda" para a tela inteira e não cita app pelo nome. Sem "acima de qualquer outra instrução" e sem a mestra: em
+  30/10, com essas palavras na frente do prompt, o GPT Live passou a abrir a conversa falando da tela. Um `voice.md`
+  editado a partir do padrão até 02/11, que descreve o JSON (`"screen":true` no iPhone, `"screen_app"` no Mac), é
+  usado como está, sem um segundo bloco que o contradiga; um prompt que já contenha o bloco também.
 - **O texto da delegação é a transcrição (02/11):** nas duas chamadas da validação da Onda 2, com o prompt novo e com
   o anterior, o texto de `delegation.created` foi idêntico ao `turn.done` do usuário apontado por `user_bidi_turn_id`
   ("Olha a minha tela, o que tem aí"), sem JSON. Nesta rota o modelo não escreve o pedido; o `screen` explícito não
-  veio, e quem anexou a captura seria a inferência abaixo ("tela"). A doc oficial da delegação `client` diz o mesmo:
-  o evento traz metadados, e o app monta o pedido a partir das transcrições.
+  veio, e quem anexou a captura seria a inferência ("tela"). A doc oficial da delegação `client` diz o mesmo: o evento
+  traz metadados, e o app monta o pedido a partir das transcrições.
 - **Captura:** `VoiceScreenCapture` começa no próprio evento da delegação (`Task.immediate`), antes de
   esperar pedidos anteriores. Exige o app ativo na frente e dados protegidos disponíveis (iPhone
   desbloqueado); renderiza só a janela principal do OpenCode (`drawHierarchy`), a no máximo 2×, JPEG
@@ -524,9 +575,17 @@ depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples.
   screenshot, captura de tela). Expressões que apontam sem nomear ("isso aqui", "olha aqui", "vê o que cê
   acha", "o que acha disso", "janela", "página", "que erro é esse") saíram: são fala comum, e "dá uma
   pesquisada na web… vê o que cê acha" tentou capturar a tela com o iPhone bloqueado. É a escada da skill
-  `abacato-prompts` (abacato-v2): regra presa a frases é enxugar gelo; decidir olhar é do GPT Live, pelo campo
-  estrutural `screen` que o prompt mínimo descreve numa linha (degrau 2), e uma falha dele nisso se corrige
-  nessa linha geral do prompt (degrau 1), não com mais frases aqui.
+  `abacato-prompts` (abacato-v2): regra presa a frases é enxugar gelo. Até 02/11 decidir olhar era do GPT Live, pelo
+  campo estrutural `screen`; como esse campo nunca chega nesta rota, desde a terceira onda a rede estreita é a
+  decisão, e ela não se amplia (nem pela fala da voz). Para quem aponta sem nomear a tela, a primeira versão do bloco
+  mandava o GPT Live perguntar se ele queria que olhasse a tela; na validação real de 02/11
+  (`gpt-live-probe/VALIDATION-onda3.md`) ele **não perguntou**: delegou "Olha isso aqui" e "O que você acha disso"
+  nas três tentativas, com essa linha e com uma variante mais forte ("não gere <|SpawnThinking|> ainda"), logo
+  depois de um resultado de tela e no começo da chamada. Por isso o bloco descreve o que acontece em vez de pedir o
+  que o modelo não faz: a captura não vai, e se o retorno do agente mostrar que ele não viu nada, a voz diz em poucas
+  palavras que, para ver, ele pode pedir "olha minha tela". O pedido vai sem captura, com a conversa recente no
+  contexto, e a mestra, sem imagem, diz que a captura não veio. Uma falha nisso se corrige nessa linha geral do
+  bloco, não com mais frases aqui.
 - **iPhone bloqueado:** nada é capturado nem tentado. Com `screen` explícito, o GPT Live ouve
   `VoiceScreenRefusal.locked` (desbloquear e abrir o OpenCode) e nada vai à mestra; a inferência pelas falas
   nem é avaliada, e o pedido segue como foi delegado.
@@ -547,9 +606,10 @@ depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples.
   entra quando **ele** é o app da frente; aí é a sua janela da frente (`MacRuntime.front`). Faixa de voz,
   sino, paleta e outros painéis do OpenCode nunca cobrem o app que Alexandre está olhando.
 - **`app`** + `screen_app`: a janela da frente do app pelo nome, sem diferenciar caixa e acentos, exato,
-  depois prefixo, depois contido ("chrome" → Google Chrome). "OpenCode" é a própria janela.
+  depois prefixo, depois contido ("chrome" → Google Chrome). "OpenCode" é a própria janela. Só pelo JSON antigo,
+  que esta rota não envia: por voz, app pelo nome não é suportado (o bloco do Mac não o cita).
 - **`display`**: o monitor da janela da frente (senão o principal), sem as janelas do OpenCode, a menos
-  que ele esteja na frente.
+  que ele esteja na frente. Por voz, quando ele diz "a tela toda" ou "a tela inteira".
 - **Permissão:** a janela do próprio OpenCode sai do window server (`CGWindowListCreateImage`, lido em
   tempo de execução) e não precisa de permissão. Outros apps usam ScreenCaptureKit
   (`SCShareableContent` + `SCScreenshotManager`, um quadro, sem stream) e precisam de **Gravação de
@@ -576,7 +636,9 @@ depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples.
   compartilhável ou erro do ScreenCaptureKit), sem permissão e sem janela do OpenCode para mandar.
 - **Verificação:** `script/test-mac-voice-screen.py` roda uma cópia Debug (bundle próprio, assinatura
   ad-hoc, `open -g`, sem ativar o app) contra um sandbox isolado, com `-OpenCodeMacVoiceScreenCheck
-  own|first|denied|granted|display|missing`: um sistema falso faz o papel do app da frente, da lista de
+  own|first|denied|granted|display|missing` (os cenários de JSON) e as frases em texto simples, como a rota delega
+  (`question`, `follow` e, desde a terceira onda, `whole`: "Olha minha tela toda" captura a tela inteira): um sistema
+  falso faz o papel do app da frente, da lista de
   janelas e da permissão (nada pede permissão ao macOS nem lê as janelas de Alexandre); a janela do
   OpenCode é capturada de verdade, fora da tela. A mestra real do sandbox recebe o prompt e é
   interrompida assim que ele chega.
