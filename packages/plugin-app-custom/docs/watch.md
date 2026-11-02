@@ -119,10 +119,10 @@ candidates; the answer must be ICE-lite with UDP candidates, otherwise `502 {cod
 - **Delegation (server-side):** the backend handles GPT Live delegation on the sideband with the same behaviour as
   the iPhone's `VoiceMaster` (`OpenCode/Voice/VoiceMaster.swift`): `delegation.created` → ensure the Sessão mestra
   (`custom.master`) and send the task to it (steer by default, queue when asked), stream its progress back with
-  `delegation.context.append` (`channel: speakable`, ≤ 500 UTF-8 bytes per part) and as `master` events. The
-  admission confirmation, tool activity and tool or step failures produce only visual `master` events (GPT Live
-  acknowledges the request itself, and spoke "já encaminhei" for every admission); the Mestra's text updates,
-  blockers and results supply voice context, without naming the Mestra. Turns are
+  `delegation.context.append` (≤ 500 UTF-8 bytes per part) and as `master` events. The admission confirmation, tool
+  activity and tool or step failures are never spoken (GPT Live acknowledges the request itself, and spoke "já
+  encaminhei" for every admission): besides the `master` event they go as quiet state (`channel: commentary`, rev.
+  2026-11-02); the Mestra's text updates, blockers and results go to be spoken (`channel: speakable`). Turns are
   appended to voice memory (`custom.voice.append`) so the watch and the iPhone share one memory. First verify on the
   Mac, with one short call, which `session.delegation` setting makes `delegation.created` arrive on the sideband and
   whether appends sent there are accepted; record the result in "Backend implementation notes".
@@ -360,11 +360,27 @@ text only (`steer`, or `queue` for `{"text":…,"delivery":"queue"}`), duplicate
 lines are the iPhone's pt-BR texts (tool names from `session.tool.input.started`, Code Mode `toolCalls`, text,
 failures, pending requests). Only text updates (`Atualização: …`), pending requests, results and execution failures
 are spoken, at most one every 5 s keeping only the latest; results and failures skip the wait.
+
+**Quiet state (rev. 2026-11-02).** The admission, each tool's activity (`toolActivity`, the phrase after "A mestra
+está") and the failures the Mestra recovers from also go to GPT Live as `output.note`: `delegation.context.append`
+with `channel: commentary` on the current delegation item, the route's form of OpenAI's `session.thinking.append`
+(it refuses that name). The text is a standing fact, not news (`statusNote`: "Estado do agente (para consulta; não é
+novidade para anunciar): consultando os arquivos. Pedido em andamento, ainda sem resultado."), since on 02/11
+neutral facts on `commentary` stayed quiet and "a etapa terminou" was spoken. It is the iPhone's
+`VoiceMasterStatus`: a latest-value box apart from the spoken one, sent only when it changes, at most every
+`limits.noteMs` (10 s), never while Alexandre or GPT Live is speaking (`output.quietAt`: 2 s after their last
+transcript piece, GPT Live's ending at its `turn.done`), while a spoken line waits or within `limits.noteAfterSpeechMs`
+(3 s) of one. A new delegation resets it; a result or failure drops what is waiting.
+
 The result is the latest assistant text after the admitted prompt, read once the Mestra leaves the running set
 (`session.execution.succeeded` can arrive while the drain still lists it; it is checked again every second, up to
-15 times). Appends go to the latest delegation item in parts of at most 500 UTF-8 bytes; every line is also a
-`master` event (`running`, or `idle` for results and failures). Ending the call stops narration, never the Mestra; a
-reply that arrives after the end reaches voice memory as described in `voice-session.md` (late Mestra replies).
+15 times). It is spoken as `spoken(reply)`, the iPhone's `VoiceResult.spoken` (rev. 2026-11-02): display Markdown
+removed (a fenced code block becomes "(há código na resposta; veja na conversa)", tables plain lines, links their
+text) and cut to `limits.spokenChars` (1,500) at the last sentence or line end in its second half, followed by "O
+restante da resposta está na conversa."; it keeps the start, where the voice note asks the Mestra to put the result.
+Appends go to the latest delegation item in parts of at most 500 UTF-8 bytes; every line, spoken or quiet, is also a
+`master` event (`running`, or `idle` for results and failures). Ending the call stops narration, never the Mestra; a reply that
+arrives after the end reaches voice memory as described in `voice-session.md` (late Mestra replies).
 
 **Sideband verification (2026-10-27, Mac, spike macOS client, audio-only offer without a data channel).**
 `session.delegation = {type: "client"}`, the iPhone's setting, delivers `delegation.created` on the sideband

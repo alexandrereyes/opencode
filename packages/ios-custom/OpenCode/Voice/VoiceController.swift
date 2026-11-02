@@ -127,6 +127,8 @@ import UIKit
   private(set) var screenOutcome = ""
   #endif
   @ObservationIgnored private var narration = VoiceNarration()
+  /// The master's activity for GPT Live to consult, on the current delegation only.
+  @ObservationIgnored private var status = VoiceMasterStatus()
   @ObservationIgnored private var userUntil: Double = 0
   @ObservationIgnored private var finalNarration = false
   @ObservationIgnored private var theme = AppTheme.selected
@@ -192,7 +194,8 @@ import UIKit
     epoch = token; sessionID = token; ready = false; mediaConnected = false
     recovery = VoiceRecovery(policy: policy); alert = nil
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
-    handled = []; currentDelegation = nil; narration = VoiceNarration(); finalNarration = false; recentSpeech = []
+    handled = []; currentDelegation = nil; narration = VoiceNarration(); status = VoiceMasterStatus(); finalNarration = false
+    recentSpeech = []
     trail = VoiceEventTrail(); lastSent = nil
     freshContext = false; linkHadContext = false; linkAnswered = false; masterStale = false; moderation = nil
     graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; contextAppend = nil; contextRejected = false
@@ -501,6 +504,7 @@ import UIKit
         while !Task.isCancelled {
           do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
           await self?.flushNarration()
+          await self?.flushStatus()
         }
       }
     }
@@ -590,7 +594,7 @@ import UIKit
         // A rebuilt call delegated again what the lost one had already sent: the master is on it, and this
         // item now carries its progress and result.
         report(.tolerated, .delegationRepeat)
-        currentDelegation = id
+        currentDelegation = id; status = VoiceMasterStatus()
         answer(id, "Esse pedido já está com o agente desde antes da queda da conexão; o resultado vem por aqui.")
         return
       }
@@ -655,7 +659,7 @@ import UIKit
     while epoch == token, !Task.isCancelled, !delegationQueue.isEmpty {
       let delegation = delegationQueue.removeFirst()
       // A delegation queued before a rebuild still goes to the master; its item stays in the lost call.
-      if delegation.link == link { currentDelegation = delegation.id }
+      if delegation.link == link { currentDelegation = delegation.id; status = VoiceMasterStatus() }
       var screen: VoiceScreenShot?
       var request = delegation.request
       if let capture = delegation.screen {
@@ -721,15 +725,19 @@ import UIKit
   private func receive(_ update: VoiceMasterUpdate) {
     guard !masterStale else { return }
     switch update {
-    case .progress(let text, let narrate):
+    case .progress(let text):
       state.masterWorking = true; detail = text; masterProgressLine = text
-      if narrate { narration.offer(text) }
+      narration.offer(text)
+    case .activity(let text, let note):
+      state.masterWorking = true; detail = text; masterProgressLine = text
+      status.offer(note)
     case .finished(let text):
       state.masterWorking = false; detail = "A Sessão mestra concluiu"
-      masterProgressLine = detail; continuity.settled()
+      masterProgressLine = detail; continuity.settled(); status = VoiceMasterStatus()
       finalNarration = true; narration.offer("Resultado: " + text)
     case .failed(let text):
       state.masterWorking = false; detail = text; masterProgressLine = text; continuity.settled()
+      status = VoiceMasterStatus()
       finalNarration = true; narration.offer(text)
     case .disconnected:
       detail = "Sem atualizações da mestra. Reconectando ao OpenCode…"
@@ -743,7 +751,7 @@ import UIKit
     guard let transport, state.phase == .listening, currentDelegation != nil || (finalNarration && !contextRejected),
       let text = narration.take(now: Self.now, speaking: false, userUntil: userUntil, final: finalNarration) else { return }
     let token = epoch, current = link, final = finalNarration, delegation = currentDelegation
-    finalNarration = false
+    finalNarration = false; status.spoke(at: Self.now)
     let frames: [Data]
     do {
       frames = if let delegation { try VoiceProtocol.append(id: delegation, text: text) }
@@ -766,10 +774,29 @@ import UIKit
       lose("Não foi possível transmitir a atualização da Sessão mestra. Reconectando…", .sendFailed)
     }
   }
+  /// The master's latest activity as quiet context of the current delegation (OpenAI's `session.thinking.append`, here
+  /// `commentary`), only while nothing waits to be said and GPT Live is listening.
+  private func flushStatus() async {
+    guard let transport, let delegation = currentDelegation, state.phase == .listening, narration.waiting == nil,
+      let note = status.take(now: Self.now, userUntil: userUntil),
+      let frames = try? VoiceProtocol.append(id: delegation, text: note, channel: .commentary) else { return }
+    let token = epoch, current = link
+    do {
+      for data in frames {
+        guard epoch == token, link == current else { return }
+        lastSent = ("delegation.context.append", Self.now)
+        try await transport.send(data)
+      }
+    } catch {
+      guard epoch == token, link == current else { return }
+      lose("Não foi possível transmitir a atualização da Sessão mestra. Reconectando…", .sendFailed)
+    }
+  }
   /// Answers one delegation right away, without the master; the call goes on.
   private func answer(_ id: String, _ text: String) {
     guard let transport, let frames = try? VoiceProtocol.append(id: id, text: text) else { return }
     let token = epoch, current = link
+    status.spoke(at: Self.now)
     Task { [weak self] in
       do {
         for data in frames {
@@ -923,7 +950,7 @@ import UIKit
     // Delegation items belong to the old call; the next call learns the master's state from memory and the
     // requests still running from `continuity`. Stale progress is dropped, but a result not yet heard is kept.
     let unheard = finalNarration && !clearing ? narration.waiting : nil
-    currentDelegation = nil; narration = VoiceNarration(); finalNarration = false
+    currentDelegation = nil; narration = VoiceNarration(); status = VoiceMasterStatus(); finalNarration = false
     if let unheard { narration.retry(unheard); finalNarration = true }
     ready = false; mediaConnected = false; graceUntil = nil; contextAppend = nil
     connection?.cancel(); renewal?.cancel(); watchdog?.cancel(); leaseDeadline?.cancel()

@@ -9,7 +9,10 @@ Version 2 `custom.voice` RPCs provide `info`, atomic idempotent `append`, bounde
 `context` and `end` (compaction check). Older/unsupported servers remain usable
 without memory. History is supplied to GPT Live as `session.initial_items`: turns
 as `user`/`assistant`, the labelled summary and Mestra state as `developer`
-messages (since 2026-11-02); instructions stay short and behavior-only.
+messages (since 2026-11-02); instructions stay short and behavior-only, in OpenAI's recommended GPT Live prompt
+structure since the same day. During a call the Mestra's activity reaches GPT Live as quiet `commentary` state and its
+result as at most 1,500 spoken characters; those appends are not stored in voice memory, only what GPT Live says of
+them, as its own turns.
 
 Compaction starts above ~7,000 estimated tokens or 120 turns, using
 `llm-proxy/gpt-6.1-sol-ultrafast`, with a deterministic fallback. It overwrites

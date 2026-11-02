@@ -6,7 +6,9 @@
 
 GPT Live's shared iPhone/Watch prompt is read from `voice.md` in the global config directory
 (`OPENCODE_CONFIG_DIR`, otherwise `$XDG_CONFIG_HOME/opencode`, otherwise `~/.config/opencode`).
-Start with `packages/plugin-app-custom/src/voice/voice.md`. The authenticated `custom.voice/instructions`
+Start with `packages/plugin-app-custom/src/voice/voice.md`, which since 2026-11-02 follows OpenAI's recommended GPT Live
+prompt structure (`Backchannel policy`, `Interruption policy`, `Delegation policy` with `<|SpawnThinking|>`); an older
+edited copy keeps its own text until it is replaced by hand. The authenticated `custom.voice/instructions`
 RPC rereads the complete file for every new call, so later edits require neither a server restart nor an app
 update. Existing calls keep their instructions. An absent file uses the bundled default; an empty or unreadable
 file fails explicitly. The initial migration requires a backend release and an iOS build with RPC loading.

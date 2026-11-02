@@ -28,11 +28,13 @@ import XCTest
   }
   /// The type of every frame sent on this call, in order.
   var types: [String] { frames.compactMap(VoiceProtocol.eventType) }
-  /// The text of every frame of one type sent on this call, joined.
-  func sent(_ type: String, item: String? = nil) -> String {
+  /// The text of every frame of one type sent on this call, joined: by default what GPT Live says (a frame without a
+  /// channel is spoken), `.commentary` for its quiet state.
+  func sent(_ type: String, item: String? = nil, channel: VoiceChannel = .speakable) -> String {
     frames.compactMap { frame -> String? in
       let object = (try? JSONDecoder().decode(JSONValue.self, from: frame))?.object
-      guard object?["type"]?.string == type, item == nil || object?["delegation_item_id"]?.string == item else { return nil }
+      guard object?["type"]?.string == type, item == nil || object?["delegation_item_id"]?.string == item,
+        (object?["channel"]?.string ?? VoiceChannel.speakable.rawValue) == channel.rawValue else { return nil }
       return object?["content"]?.array?.first?.object?["text"]?.string
     }.joined()
   }
@@ -48,7 +50,9 @@ import XCTest
   var stopped = false
   var screens: [VoiceScreenShot?] = []
   func ask(_ request: VoiceMasterRequest, screen: VoiceScreenShot?) async throws {
-    requests.append(request); screens.append(screen); update?(.progress("Consultando a sessão de teste.", narrate: false)); asked?()
+    requests.append(request); screens.append(screen)
+    update?(.activity("Consultando a sessão de teste.", note: VoiceMasterProgress.note("consultando a sessão de teste")))
+    asked?()
   }
   func stop() { stopped = true }
 }
@@ -679,9 +683,8 @@ private actor LiveMemoryHTTP {
     XCTAssertEqual(targets, [.app("Simulator")])
     XCTAssertEqual(master.screens.first??.notice, VoiceScreenPlanner.deniedNotice)
     let deadline = Date.now.addingTimeInterval(3)
-    while transport.frames.isEmpty, Date.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
-    let spoken = transport.frames.compactMap { try? JSONDecoder().decode(JSONValue.self, from: $0).object?["content"]?.array?.first?.object?["text"]?.string }.joined()
-    XCTAssertEqual(spoken, VoiceScreenPlanner.deniedNotice)
+    while transport.sent("delegation.context.append").isEmpty, Date.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+    XCTAssertEqual(transport.sent("delegation.context.append"), VoiceScreenPlanner.deniedNotice)
     XCTAssertEqual(controller.toast.message?.text, VoiceScreenPlanner.deniedNotice)
     await controller.end()
   }
@@ -948,6 +951,29 @@ private actor LiveMemoryHTTP {
     await call.controller.end()
   }
 
+  /// What the master is doing reaches GPT Live as quiet state of the current delegation (`commentary`), never spoken:
+  /// not without a delegation, and not while Alexandre speaks.
+  func testMasterActivityIsQuietStateOfTheCurrentDelegation() async throws {
+    let call = await resilient()
+    let transport = try XCTUnwrap(call.pool.transports.first)
+    call.master.update?(.activity("A mestra está consultando os arquivos.", note: VoiceMasterProgress.note("consultando os arquivos")))
+    try await Task.sleep(for: .milliseconds(700))
+    XCTAssertTrue(transport.frames.isEmpty, "no delegation to carry it")
+    let asked = expectation(description: "asked")
+    call.master.asked = { asked.fulfill() }
+    transport.event?(.data(Data(#"{"type":"input_transcript.added","item":{"id":"u1","text":"e as sessões?"}}"#.utf8)))
+    transport.event?(delegation("a", "Confira as sessões"))
+    await fulfillment(of: [asked], timeout: 3)
+    try await Task.sleep(for: .milliseconds(1_200))
+    XCTAssertEqual(transport.sent("delegation.context.append", item: "a", channel: .commentary), "", "he is still speaking")
+    let quiet = await until(3) { !transport.sent("delegation.context.append", item: "a", channel: .commentary).isEmpty }
+    XCTAssertTrue(quiet)
+    XCTAssertEqual(transport.sent("delegation.context.append", item: "a", channel: .commentary),
+      VoiceMasterProgress.note("consultando a sessão de teste"))
+    XCTAssertEqual(transport.sent("delegation.context.append"), "", "nothing spoken")
+    await call.controller.end()
+  }
+
   /// `session_expired` ends GPT Live's session: the call is rebuilt at once instead of failing.
   func testExpiredSessionRebuildsTheCall() async throws {
     let call = await resilient()
@@ -989,7 +1015,7 @@ private actor LiveMemoryHTTP {
     XCTAssertTrue(rebuilt)
     let heard = await until(3) { call.pool.transports[1].sent("session.context.append").contains("Resultado: Custa 10 mil reais.") }
     XCTAssertTrue(heard)
-    XCTAssertTrue(call.pool.transports[0].frames.isEmpty)
+    XCTAssertTrue(call.pool.transports[0].sent("delegation.context.append").isEmpty)
     XCTAssertEqual(call.master.requests.count, 1)
     let lost = await call.reports("send_failed")
     XCTAssertEqual(lost.map(\.kind), [.lost])

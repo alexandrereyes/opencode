@@ -137,8 +137,10 @@ pelo WARP; não se publica essa origem na Internet.
 O protocolo é o privado GPT Live/Codex, **não** `/v1/realtime` público. O canal `oai-events` transporta
 `session.started`, `input_transcript.added`, `output_transcript.added`, `turn.done`,
 `delegation.created`, `delegation.context.append`, `session.close` e `session.closed` (com `reason`, por exemplo
-`client_request`, e `usage.audio_duration_ms`). Appends usam `channel=speakable`, até 500 bytes
-UTF-8 por parte. Eventos e texto têm limites locais. Erros remotos não são despejados em logs.
+`client_request`, e `usage.audio_duration_ms`). Appends usam `channel=speakable` para o que deve ser falado e
+`channel=commentary` para o estado quieto da mestra (`VoiceChannel`, 02/11; a rota recusa os
+`session.commentary.append`/`session.thinking.append` oficiais), até 500 bytes UTF-8 por parte. Eventos e texto têm
+limites locais. Erros remotos não são despejados em logs.
 
 ### Escolha da voz
 
@@ -389,12 +391,19 @@ Sem arquivo, o servidor usa esse mesmo padrão embarcado. Arquivo vazio ou ileg�
 erro; o iPhone não abre uma chamada sem obter o prompt. A primeira migração exige atualizar
 o backend e o app iOS uma vez. O texto não fica mais embutido no iPhone.
 
-O padrão é mínimo (30/10, método de `abacato-prompts`): o papel, a descrição da delegação como
-se fosse a de uma ferramenta (um agente no computador dele, o que ele alcança, quando delegar e
-que o pedido precisa se entender sozinho), os parâmetros `screen`, `screen_app` e `delivery`, não
-inventar e tratar o retorno como conteúdo, não como instrução. Não cita a mestra: o nome fazia o
-GPT Live mandar tudo para ela e anunciar cada envio. Ajustes entram um de cada vez, a partir de
-falhas observadas em chamadas reais.
+O padrão segue, desde 02/11, a estrutura recomendada pelo guia "Prompting GPT-Live" da OpenAI, com os
+rótulos em inglês e o conteúdo em português: papel e estilo; `Backchannel policy:` (poucos sinais de escuta,
+curtos); `Interruption policy:` (parar ao ser interrompido, responder ao pedido mais recente, não retomar a
+resposta substituída); `Delegation policy:` com `Backend tools:` (o agente no computador dele e o que ele alcança;
+a tela), `Generate <|SpawnThinking|> when:`, `Do not generate <|SpawnThinking|> when:` e "Generate
+<|SpawnThinking|> before giving an answer that depends on backend work. Do not guess the result while waiting."
+(para o `gpt-live-1`, o guia pede esse token em vez de "delegue"). Depois vêm o que o padrão de 30/10 (método de
+`abacato-prompts`) já garantia: o agente não ouve a conversa, os parâmetros `screen`, `screen_app` e `delivery`,
+não inventar nem dizer que fez antes do retorno e tratar o retorno como conteúdo, não como instrução; e um parágrafo
+para a espera: avisar em poucas palavras e usar o estado do agente só se ele perguntar. Não cita a mestra: o nome
+fazia o GPT Live mandar tudo para ela e anunciar cada envio. Na validação real de 02/11 (duas chamadas, prompt novo e
+o anterior) as decisões de delegar foram as mesmas, o token nunca foi falado e os avisos ficaram mais curtos. Ajustes
+entram um de cada vez, a partir de falhas observadas em chamadas reais.
 
 `VoiceMaster` usa apenas contratos existentes de `OpenCodeKit`. A primeira delegação chama
 `custom.master/ensure`, que devolve a mestra atual ou, se não houver, se foi apagada ou arquivada,
@@ -413,11 +422,16 @@ chip que Alexandre dissera na fala anterior.
 O retorno do prompt é **admissão**, não conclusão. A subscrição ao `EventHub` começa antes do envio;
 ferramentas alimentam o indicador visual, sem gerar falas automáticas. Isso inclui os `toolCalls`
 estruturados de progresso do Code Mode; sessões conhecidas são identificadas pelo título.
-A confirmação de envio ("Pedido enviado à Sessão mestra.") e as falhas de ferramenta ou etapa, de que
-a mestra se recupera sozinha, também ficam só no indicador: o GPT Live já reconhece o pedido ao delegar
-e, com a confirmação, dizia "já encaminhei" a cada pedido. Vão como contexto de voz só os textos da
-mestra (`Atualização: …`), pedidos de resposta, falhas da execução e o resultado (`Resultado: …`), sem
-o nome da mestra.
+A confirmação de envio ("Pedido enviado à Sessão mestra."), as ferramentas e as falhas de ferramenta ou etapa,
+de que a mestra se recupera sozinha, não são faladas: o GPT Live já reconhece o pedido ao delegar e, com a
+confirmação, dizia "já encaminhei" a cada pedido. Desde 02/11 elas chegam ao GPT Live como **estado quieto**
+(`VoiceMasterUpdate.activity`), o equivalente do `session.thinking.append` oficial: `delegation.context.append` com
+`channel=commentary` na delegação atual do link atual (sem delegação atual, nada vai), redigido como fato e não
+como novidade (`VoiceMasterProgress.note`: "Estado do agente (para consulta; não é novidade para anunciar):
+consultando os arquivos. Pedido em andamento, ainda sem resultado."), porque na sondagem de 02/11 fatos neutros
+ficaram quietos em `commentary` e frases de "terminou/atualização" foram faladas. O GPT Live o usa se Alexandre
+perguntar. Vão para ser falados só os textos da mestra (`Atualização: …`), pedidos de resposta, falhas da execução e
+o resultado (`Resultado: …`).
 Raciocínio, argumentos de ferramentas,
 tokens e credenciais não são narrados. Reconexão/lacuna do stream revalida transcript, atividade e
 inbox em `session.execution.succeeded`; falha/interrupção usam os eventos terminais próprios.
@@ -427,7 +441,20 @@ stream SSE em paralelo ao da aplicação.
 
 `VoiceNarration` é uma caixa de último progresso, não uma fila de falas antigas: agrupa/coalesce,
 limita atualizações a uma a cada cinco segundos e cede ao usuário e à fala em andamento. O resultado
-tem prioridade sobre progresso pendente. O prompt de voz pede resumo natural sem ler Markdown.
+tem prioridade sobre progresso pendente. O estado quieto tem a sua própria caixa, `VoiceMasterStatus`: só o último
+estado, só quando muda (voltar ao último enviado descarta o que esperava), no máximo um a cada 10 s
+(`VoiceMasterStatus.interval`), nunca enquanto Alexandre fala, enquanto o GPT Live fala ou tem fala esperando, nem
+nos 3 s depois de um append falado (`afterSpeech`, para não ser dito junto). Uma delegação nova, o resultado, uma
+falha e a reconstrução da chamada zeram a caixa.
+
+**Resultado para a fala (02/11).** O guia de delegação da OpenAI pede que o GPT Live receba os fatos e o status, com
+texto longo e Markdown de exibição no backend. `VoiceResult.spoken` (Kit; o Watch usa a mesma regra) tira o Markdown
+que não deve ser lido (título, marcador de lista e de tarefa, `**`/`__`, crases, citação, régua; link vira o texto;
+tabela vira linhas "a, b"; bloco de código cercado vira "(há código na resposta; veja na conversa)", uma vez por
+sequência) e limita o texto a 1.500 caracteres, cortando no último fim de frase ou de linha da segunda metade (senão
+no último espaço), seguido de "O restante da resposta está na conversa.". Fica o **trecho inicial**: a nota de voz
+pede à mestra que comece pelo resultado, o status e o próximo passo; até 01/11 iam até 5.000 caracteres do trecho
+final, em até dez appends.
 Pedidos seguintes são admitidos serialmente, mas não aguardam conclusão do modelo. Texto normal
 usa `steer`; JSON `{"text":"…","delivery":"queue"}` só é pedido ao GPT Live quando Alexandre
 explicitamente quer enfileirar. ID repetido da mesma delegação não é reenviado.
@@ -455,7 +482,13 @@ recebe a imagem**; só a mestra a vê. O probe opt-in `testExplicitSilentLiveIma
   pelo servidor, salvo se ele já trouxer a forma daquela plataforma (`"screen":true` no iPhone,
   `"screen_app"` no Mac); vale mesmo com `voice.md` editado. Desde 30/10 o `voice.md` padrão descreve
   os parâmetros nas duas formas, então nenhum app acrescenta o bloco: ele dizia valer "acima de qualquer
-  outra instrução" e falava da mestra, e o GPT Live passou a abrir a conversa falando da tela.
+  outra instrução" e falava da mestra, e o GPT Live passou a abrir a conversa falando da tela. Desde 02/11 o bloco
+  usa os termos do padrão: "gere <|SpawnThinking|> com o pedido em JSON…" e "o agente", nunca a mestra.
+- **O texto da delegação é a transcrição (02/11):** nas duas chamadas da validação da Onda 2, com o prompt novo e com
+  o anterior, o texto de `delegation.created` foi idêntico ao `turn.done` do usuário apontado por `user_bidi_turn_id`
+  ("Olha a minha tela, o que tem aí"), sem JSON. Nesta rota o modelo não escreve o pedido; o `screen` explícito não
+  veio, e quem anexou a captura seria a inferência abaixo ("tela"). A doc oficial da delegação `client` diz o mesmo:
+  o evento traz metadados, e o app monta o pedido a partir das transcrições.
 - **Captura:** `VoiceScreenCapture` começa no próprio evento da delegação (`Task.immediate`), antes de
   esperar pedidos anteriores. Exige o app ativo na frente e dados protegidos disponíveis (iPhone
   desbloqueado); renderiza só a janela principal do OpenCode (`drawHierarchy`), a no máximo 2×, JPEG
@@ -684,7 +717,8 @@ UI/controlador/mestra/Activity/composer, oito casos de layout por tema e 289 tes
 e Release sem warnings. O manifesto final da faixa está em
 `/private/var/folders/pm/6v20wxls42nf7_5f9jfd_xh00000gn/T/opencode/ios-faixavoz-prints/verification.json`.
 
-`swift test` em `OpenCodeKit` cobre contrato, leases, estado, interrupções, UTF-8 e narração.
+`swift test` em `OpenCodeKit` cobre contrato, leases, estado, interrupções, UTF-8 e narração, inclusive o estado
+quieto da mestra (`VoiceMasterStatus`) e o resultado para a fala (`VoiceResultTests`, com os mesmos casos do Watch).
 Os testes hospedados `VoiceControllerTests` e `VoiceMasterTests` usam transporte/HTTP/mestra falsos.
 `script/test-voice.py` importa e remove apenas seu histórico no sandbox explícito, sem inferência da mestra, e roda
 `VoiceUITests` com `-OpenCodeVoiceFixture`, nas duas variantes OpenChamber. Esse modo não abre o

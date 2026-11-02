@@ -10,7 +10,7 @@ import { makeStats } from "../src/watch/stats"
 import { limits as gatewayLimits, redact } from "../src/watch/gateway"
 import { chunks, closedByModeration, limits as voiceLimits, rejectsVoice, upstreamError } from "../src/watch/voice"
 import { sanitize } from "../src/voice/sanitize"
-import { describeTool, limits as delegationLimits, parse } from "../src/watch/delegation"
+import { limits as delegationLimits, parse, spoken, statusNote, toolActivity } from "../src/watch/delegation"
 import { Watch } from "../src/watch/rpc"
 import { key as memoryKey, lateLabel, limits as memoryLimits, makeVoice } from "../src/voice"
 import { Voice } from "../src/voice/rpc"
@@ -447,7 +447,7 @@ it.effect("new watch calls reload server instructions and fail before reserving 
   }).pipe(Effect.map(() => undefined)),
 )
 
-it.effect("delegations keep tool activity on screen and send only updates and results to speech", () =>
+it.effect("delegations keep tool activity off speech and send only updates and results to be spoken", () =>
   Effect.gen(function* () {
     const { sidebands, server, json } = yield* setup()
     const created = yield* json("POST", "/voice/calls", { sdp: offerSDP })
@@ -464,10 +464,17 @@ it.effect("delegations keep tool activity on screen and send only updates and re
     expect(server.prompts).toEqual([
       { sessionID: "ses_master", text: "Quantas sessões estão rodando agora?", delivery: "steer" },
     ])
-    const appends = () =>
-      (socket?.sent ?? []).map((text) => JSON.parse(text)).filter((event) => event.type === "delegation.context.append")
-    // Admission only reaches the screen: GPT Live acknowledges the request itself.
+    const appends = () => contextAppends(socket, "speakable")
+    // Admission is not spoken (GPT Live acknowledges the request itself); GPT Live only keeps it as quiet state.
     expect(appends()).toEqual([])
+    expect(contextAppends(socket, "commentary")).toEqual([
+      {
+        type: "delegation.context.append",
+        delegation_item_id: "item_d1",
+        channel: "commentary",
+        content: [{ type: "input_text", text: statusNote("começando o pedido") }],
+      },
+    ])
     // Routine tools update the screen, never the speech mailbox, even after its throttle expires.
     yield* PubSub.publish(server.bus, masterEvents.toolStarted("ses_master", "call_1", "sessions.list"))
     yield* PubSub.publish(server.bus, masterEvents.toolCalled("ses_master", "call_1", {}))
@@ -526,6 +533,68 @@ const delegate = (socket: { deliver: (event: object) => void } | undefined, id: 
     type: "delegation.created",
     item: { id, type: "delegation", target: "client", content: [{ type: "input_text", text }] },
   })
+
+/** The `delegation.context.append` commands sent on one channel. */
+const contextAppends = (socket: { sent: string[] } | undefined, channel: "speakable" | "commentary") =>
+  (socket?.sent ?? [])
+    .map((text) => JSON.parse(text))
+    .filter((event) => event.type === "delegation.context.append" && event.channel === channel)
+
+it.effect("the Mestra's activity reaches GPT Live as quiet state: latest only, spaced, never over speech", () =>
+  Effect.gen(function* () {
+    const { sidebands, server, json } = yield* setup()
+    yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    const socket = sidebands.opened[0]
+    const notes = () => contextAppends(socket, "commentary").map((event) => event.content[0].text)
+    const tool = (id: string, name: string) =>
+      Effect.all([
+        PubSub.publish(server.bus, masterEvents.toolStarted("ses_master", id, name)),
+        PubSub.publish(server.bus, masterEvents.toolCalled("ses_master", id, {})),
+      ]).pipe(Effect.andThen(settled))
+    delegate(socket, "item_n1", "Quais arquivos mudaram?")
+    yield* settled
+    expect(notes()).toEqual([statusNote("começando o pedido")])
+    // Within the interval only the latest state waits.
+    yield* tool("call_1", "sessions.list")
+    yield* tool("call_2", "read")
+    yield* TestClock.adjust(delegationLimits.noteMs - 1_000)
+    yield* settled
+    expect(notes()).toHaveLength(1)
+    // Alexandre speaks as the interval ends: the state waits for him.
+    socket?.deliver({ type: "input_transcript.added", item: { id: "item_u", text: " Espera" } })
+    yield* settled
+    yield* TestClock.adjust(1_000)
+    yield* settled
+    expect(notes()).toHaveLength(1)
+    yield* TestClock.adjust(voiceLimits.speakingMs - 1_000)
+    yield* settled
+    expect(notes()).toEqual([statusNote("começando o pedido"), statusNote("consultando os arquivos")])
+    // The same state is not sent again; a new one waits for the interval.
+    yield* tool("call_3", "grep")
+    yield* tool("call_4", "execute")
+    yield* TestClock.adjust(delegationLimits.noteMs - 1_000)
+    // A spoken line just before the interval ends holds the state a little longer.
+    yield* PubSub.publish(server.bus, masterEvents.text("ses_master", "Achei três arquivos."))
+    yield* settled
+    expect(contextAppends(socket, "speakable")).toHaveLength(1)
+    yield* TestClock.adjust(1_000)
+    yield* settled
+    expect(notes()).toHaveLength(2)
+    yield* TestClock.adjust(delegationLimits.noteAfterSpeechMs - 1_000)
+    yield* settled
+    expect(notes().at(-1)).toBe(statusNote("consultando as ferramentas"))
+    expect(notes()).toHaveLength(3)
+    // The result ends the request: a state still waiting is dropped.
+    yield* tool("call_5", "glob")
+    server.messages.set("ses_master", [assistant("msg_reply", "Mudaram dois arquivos."), assistant("msg_prompt1", "")])
+    yield* PubSub.publish(server.bus, masterEvents.succeeded("ses_master"))
+    yield* settled
+    yield* TestClock.adjust(delegationLimits.noteMs)
+    yield* settled
+    expect(notes()).toHaveLength(3)
+    expect(contextAppends(socket, "speakable").at(-1)?.content[0].text).toBe("Mudaram dois arquivos.")
+  }).pipe(Effect.map(() => undefined)),
+)
 
 it.effect("an upstream error is logged with its fields, nested or top level, sanitized and correlated", () => {
   const logs = logCollector()
@@ -909,24 +978,96 @@ it.effect("a Mestra reply that arrives after the call ends reaches voice memory 
 it.effect("delegation narration knows the session tools by their current and former names", () =>
   Effect.sync(() => {
     for (const name of ["sessions.read", "sessions_read", "opencode.session_read", "session_read", "sessions.status"])
-      expect(describeTool(name)).toBe("A mestra está conferindo uma sessão.")
+      expect(toolActivity(name)).toBe("conferindo uma sessão")
     for (const name of ["sessions.list", "mestra.sessions_list", "opencode.sessions_list"])
-      expect(describeTool(name)).toBe("A mestra está consultando suas sessões.")
+      expect(toolActivity(name)).toBe("consultando suas sessões")
     for (const [current, former, text] of [
-      ["sessions.send", "mestra.session_send", "A mestra está encaminhando seu pedido."],
-      ["sessions.create", "mestra.session_create", "A mestra está criando a sessão solicitada."],
-      ["sessions.wait", "mestra.session_wait", "A mestra está acompanhando o trabalho da sessão."],
-      ["sessions.requests", "mestra.requests_list", "A mestra está verificando os pedidos pendentes."],
-      ["sessions.answer", "mestra.request_answer", "A mestra está respondendo ao pedido autorizado."],
+      ["sessions.send", "mestra.session_send", "encaminhando seu pedido"],
+      ["sessions.create", "mestra.session_create", "criando a sessão solicitada"],
+      ["sessions.wait", "mestra.session_wait", "acompanhando o trabalho da sessão"],
+      ["sessions.requests", "mestra.requests_list", "verificando os pedidos pendentes"],
+      ["sessions.answer", "mestra.request_answer", "respondendo ao pedido autorizado"],
     ]) {
-      expect(describeTool(current)).toBe(text)
-      expect(describeTool(former)).toBe(text)
+      expect(toolActivity(current)).toBe(text)
+      expect(toolActivity(former)).toBe(text)
     }
     // Short session tool names never shadow the native tools that share them.
-    expect(describeTool("read")).toBe("A mestra está consultando os arquivos.")
-    expect(describeTool("search")).toBe("A mestra está usando uma ferramenta.")
-    expect(describeTool("sessions.unknown")).toBe("A mestra está usando uma ferramenta.")
-    expect(describeTool("execute")).toBe("A mestra está consultando as ferramentas.")
+    expect(toolActivity("read")).toBe("consultando os arquivos")
+    expect(toolActivity("search")).toBe("usando uma ferramenta")
+    expect(toolActivity("sessions.unknown")).toBe("usando uma ferramenta")
+    expect(toolActivity("execute")).toBe("consultando as ferramentas")
+    // GPT Live's quiet state is a standing fact, never news.
+    expect(statusNote("consultando os arquivos")).toBe(
+      "Estado do agente (para consulta; não é novidade para anunciar): consultando os arquivos. Pedido em andamento, ainda sem resultado.",
+    )
+  }),
+)
+
+/** The iPhone's `VoiceResultTests` use the same cases: one rule on both platforms. */
+it.effect("a result is spoken without display Markdown and cut at a sentence end with a pointer to the rest", () =>
+  Effect.sync(() => {
+    expect(
+      spoken(
+        [
+          "## Resumo",
+          "",
+          "- **Sessão A**: rodando, veja [o PR](https://github.com/x/y/pull/1).",
+          "- [x] `bun test` passou",
+          "1. __Primeiro__ passo",
+          "",
+          "> Nota: cuidado",
+          "",
+          "| Sessão | Estado |",
+          "|:---|---:|",
+          "| A | rodando |",
+          "",
+          "```ts",
+          "const x = 1",
+          "```",
+          "~~~",
+          "echo oi",
+          "~~~",
+          "",
+          "---",
+          "Fim. ![diagrama](d.png)",
+        ].join("\r\n"),
+      ),
+    ).toBe(
+      [
+        "Resumo",
+        "",
+        "Sessão A: rodando, veja o PR.",
+        "bun test passou",
+        "Primeiro passo",
+        "",
+        "Nota: cuidado",
+        "",
+        "Sessão, Estado",
+        "A, rodando",
+        "",
+        "(há código na resposta; veja na conversa)",
+        "",
+        "Fim. diagrama",
+      ].join("\n"),
+    )
+    // An unclosed block runs to the end; a fence with an info string does not close it.
+    expect(spoken("Rode:\n```sh\nbun test\n```js\nainda código")).toBe(
+      "Rode:\n(há código na resposta; veja na conversa)",
+    )
+    // Short text goes as is.
+    expect(spoken("Duas sessões estão rodando.")).toBe("Duas sessões estão rodando.")
+    // Long text: cut at the last sentence or line end within the limit, in its second half.
+    const sentence = "A sessão do Abacato terminou os testes e abriu o PR. "
+    const long = sentence.repeat(40)
+    const cut = spoken(long)
+    expect(cut.endsWith("\n\nO restante da resposta está na conversa.")).toBe(true)
+    const body = cut.slice(0, -"\n\nO restante da resposta está na conversa.".length)
+    expect(body.length).toBeLessThanOrEqual(delegationLimits.spokenChars)
+    expect(body.length).toBeGreaterThan(delegationLimits.spokenChars - sentence.length)
+    expect(long.startsWith(body) && body.endsWith("PR.")).toBe(true)
+    // Without a sentence end, at the last space; without spaces, a hard cut.
+    expect(spoken("palavra ".repeat(300)).split("\n\n")[0]).toBe("palavra ".repeat(187).trim())
+    expect(spoken("a".repeat(2_000)).split("\n\n")[0]).toBe("a".repeat(delegationLimits.spokenChars))
   }),
 )
 

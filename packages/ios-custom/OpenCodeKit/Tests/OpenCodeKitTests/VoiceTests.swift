@@ -196,6 +196,42 @@ struct VoiceTests {
     narration.offer("Concluído")
     #expect(narration.take(now: 20, speaking: false, userUntil: 0) == nil)
   }
+  /// The master's quiet state: latest only, never the same twice, spaced by the interval, never while Alexandre
+  /// speaks nor right after a spoken append.
+  @Test func masterStatusSendsTheLatestChangeSpacedAndOutOfSpeech() {
+    let interval = VoiceMasterStatus.interval
+    var status = VoiceMasterStatus()
+    status.offer("Começando")
+    #expect(status.take(now: 1, userUntil: 2) == nil, "Alexandre is speaking")
+    #expect(status.take(now: 2, userUntil: 2) == "Começando")
+    status.offer("Consultando as sessões"); status.offer("Consultando os arquivos")
+    #expect(status.take(now: 2 + interval - 1, userUntil: 0) == nil)
+    #expect(status.take(now: 2 + interval, userUntil: 0) == "Consultando os arquivos")
+    status.offer("Consultando as ferramentas"); status.offer("Consultando os arquivos")
+    #expect(status.take(now: 100, userUntil: 0) == nil, "back to the state GPT Live already has")
+    status.offer("Consultando as ferramentas")
+    status.spoke(at: 99)
+    #expect(status.take(now: 99 + VoiceMasterStatus.afterSpeech - 1, userUntil: 0) == nil)
+    #expect(status.take(now: 99 + VoiceMasterStatus.afterSpeech, userUntil: 0) == "Consultando as ferramentas")
+  }
+  @Test func masterActivityIsQuietStateAndItsOwnTextIsNews() throws {
+    func event(_ json: String) throws -> ConversationEvent { try JSONDecoder().decode(ConversationEvent.self, from: Data(json.utf8)) }
+    let list = try event(#"{"type":"session.tool.called","data":{"name":"sessions.list"}}"#)
+    #expect(VoiceMasterProgress.activity(list) == "consultando suas sessões")
+    #expect(VoiceMasterProgress.describe(list) == "A mestra está consultando suas sessões.")
+    let failed = try event(#"{"type":"session.tool.failed","data":{}}"#)
+    #expect(VoiceMasterProgress.describe(failed) == "Uma ferramenta falhou. A mestra está verificando o resultado.")
+    #expect(VoiceMasterProgress.activity(failed) == "verificando o retorno de uma ferramenta que deu erro")
+    #expect(VoiceMasterProgress.activity(try event(#"{"type":"session.text.ended","data":{"text":"Achei."}}"#)) == nil)
+    #expect(VoiceMasterProgress.note("consultando os arquivos")
+      == "Estado do agente (para consulta; não é novidade para anunciar): consultando os arquivos. Pedido em andamento, ainda sem resultado.")
+    #expect(VoiceMasterProgress.admitted(.steer) == "começando o pedido")
+    #expect(VoiceMasterProgress.admitted(.queue) == "com o pedido na fila, esperando o trabalho atual")
+    let frames = try VoiceProtocol.append(id: "ask-1", text: VoiceMasterProgress.note("começando o pedido"), channel: .commentary)
+    #expect(try JSONDecoder().decode(JSONValue.self, from: #require(frames.first)).object?["channel"]?.string == "commentary")
+    #expect(try JSONDecoder().decode(JSONValue.self, from: #require(VoiceProtocol.append(id: "ask-1", text: "x").first))
+      .object?["channel"]?.string == "speakable")
+  }
   @Test func followupsUseExplicitDeliveryOnly() {
     #expect(VoiceMasterRequest("Confira minha sessão").delivery == .steer)
     #expect(VoiceMasterRequest(#"{"text":"Continue depois","delivery":"queue"}"#).delivery == .queue)

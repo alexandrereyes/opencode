@@ -176,11 +176,13 @@ export type EnsureContext = Pick<ModelContext, "storage" | "model"> & {
 
 /**
  * Session context the Mestra has only while a voice call delegates to it, so typed conversations keep their normal
- * formatting. As a keyed session instruction, turning it on or off never rewrites the cached system prompt.
+ * formatting. As a keyed session instruction, turning it on or off never rewrites the cached system prompt. It follows
+ * the backend prompt of OpenAI's live delegation guide: transcripts can be wrong, so ask instead of guessing; return the
+ * facts, status and next step; report an action as done only once a tool confirms it.
  */
 export const voiceNote = {
   key: "chamada-de-voz",
-  text: "Alexandre está numa chamada de voz: um assistente de voz repassa os pedidos dele e lê suas respostas em voz alta. Responda para ser ouvido: frases curtas, sem Markdown, listas, tabelas, IDs, caminhos ou código.",
+  text: "Alexandre está numa chamada de voz: um assistente de voz repassa os pedidos dele e lê suas respostas em voz alta. O pedido vem de uma transcrição, que pode ter erros, frases incompletas e correções: use o contexto mais recente e, se faltar um detalhe necessário, pergunte em vez de adivinhar. Responda para ser ouvido, em frases curtas, sem Markdown, listas, tabelas, IDs, caminhos ou código: comece pelo resultado, depois o status e o próximo passo. Só diga que algo foi feito depois que a ferramenta confirmar; se o resultado não estiver claro, diga isso e o que precisa ser conferido.",
 } as const
 
 declare global {

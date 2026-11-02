@@ -62,7 +62,10 @@ authenticated normal plugin transport, for example
   limits. It neither allocates storage nor invokes inference.
 - **`instructions({})`** returns `{instructions:string}` for both iPhone and Watch. It reads `voice.md`
   from `OPENCODE_CONFIG_DIR` (otherwise `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`) on each request.
-  The entire file replaces the bundled `src/voice/voice.md` default; only a missing file uses that default.
+  The entire file replaces the bundled `src/voice/voice.md` default; only a missing file uses that default. Since
+  2026-11-02 the default follows OpenAI's recommended GPT Live prompt structure (role and style, `Backchannel policy`,
+  `Interruption policy`, `Delegation policy` with `Backend tools` and `<|SpawnThinking|>`), labels in English and
+  content in Portuguese; an edited copy keeps whatever structure it has.
   An empty or unreadable file fails. Clients fetch before each new GPT Live call, so Markdown edits apply
   without a restart or rebuild. This additive method is independent of memory; new iPhone builds require it
   and do not start a provider call if instructions cannot be fetched. Updating the backend precedes the initial

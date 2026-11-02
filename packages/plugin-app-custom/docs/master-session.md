@@ -46,7 +46,12 @@ through `opencode2 api` from the shell).
 Since 2026-10-30 the voice-specific answer style is not in the system prompt but in a keyed session instruction
 (`ctx.session.instructions`, upstream #56550), `voiceNote` in `src/master/index.ts`: key `chamada-de-voz`, a short pt-BR
 text saying a voice assistant relays Alexandre's requests and reads the answers aloud, so answers are short spoken
-sentences without Markdown, lists, tables, IDs, paths or code. Core renders it as a context block at the next step,
+sentences without Markdown, lists, tables, IDs, paths or code. Since 2026-11-02 it also carries the points of the
+backend prompt in OpenAI's live delegation guide: the request comes from a transcript that can have errors, unfinished
+phrases and corrections, so use the latest context and ask for a missing detail instead of guessing; lead with the
+result, then the status and the next step; say something was done only after the tool confirms it; and when the
+outcome is unclear, say so and what needs checking. The voice apps speak at most the first 1,500 characters of the
+answer (`VoiceResult.spoken`). Core renders it as a context block at the next step,
 and a later removal as a one-line "no longer applies"; neither rewrites the cached system prompt, starts a turn or is
 lost to compaction.
 

@@ -47,7 +47,7 @@ private actor VoiceMasterHTTP {
       value = .object(["output": .object(["data": .array([
         .object(["id": .string("answer"), "type": .string("assistant"),
           "time": .object(["created": .number(0), "completed": .number(1)]),
-          "content": .array([.object(["type": .string("text"), "text": .string("Resposta final confirmada.")])])]),
+          "content": .array([.object(["type": .string("text"), "text": .string("**Resposta** final confirmada.")])])]),
         .object(["id": .string(promptID ?? "missing"), "type": .string("user"), "time": .object(["created": .number(0)])]),
       ])])])
     default:
@@ -105,41 +105,40 @@ private actor VoiceMasterHTTP {
     XCTAssertEqual(prompts.map(\.delivery), [.steer, .queue])
     XCTAssertEqual(prompts.map(\.text), ["Primeiro pedido", "Segundo pedido"])
     XCTAssertEqual(updates.count, 2)
-    // Admission is shown, never spoken: GPT Live acknowledges the request itself.
-    for update in updates {
-      guard case .progress(_, let narrate) = update else { return XCTFail("Missing admission") }
-      XCTAssertFalse(narrate)
+    // Admission is never spoken (GPT Live acknowledges the request itself): it is quiet state for GPT Live.
+    for (update, delivery) in zip(updates, [PromptDelivery.steer, .queue]) {
+      guard case .activity(_, let note) = update else { return XCTFail("Missing admission") }
+      XCTAssertEqual(note, VoiceMasterProgress.note(VoiceMasterProgress.admitted(delivery)))
     }
     let failedTool = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
       {"type":"session.tool.failed","data":{"sessionID":"\(firstID!)"}}
       """.utf8))
     await master.receive(failedTool)
-    guard case .progress(_, let narrateFailure) = updates.last else { return XCTFail("Missing tool failure") }
-    XCTAssertFalse(narrateFailure)
+    guard case .activity(_, let failureNote) = updates.last else { return XCTFail("Missing tool failure") }
+    XCTAssertEqual(failureNote, VoiceMasterProgress.note("verificando o retorno de uma ferramenta que deu erro"))
     let text = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
       {"type":"session.text.ended","data":{"sessionID":"\(firstID!)","text":"Achei duas sessões."}}
       """.utf8))
     await master.receive(text)
-    guard case .progress(let update, let narrateText) = updates.last else { return XCTFail("Missing text update") }
+    guard case .progress(let update) = updates.last else { return XCTFail("Missing text update") }
     XCTAssertEqual(update, "Atualização: Achei duas sessões.")
-    XCTAssertTrue(narrateText)
     let event = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
       {"type":"session.tool.called","data":{"sessionID":"\(firstID!)","name":"sessions.read"}}
       """.utf8))
     await master.receive(event)
-    guard case .progress(let message, let narrate) = updates.last else { return XCTFail("Missing progress") }
+    guard case .activity(let message, let note) = updates.last else { return XCTFail("Missing progress") }
     XCTAssertEqual(message, "A mestra está conferindo uma sessão.")
-    XCTAssertFalse(narrate)
+    XCTAssertEqual(note, VoiceMasterProgress.note("conferindo uma sessão"))
     let attention = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
       {"type":"permission.asked","data":{"sessionID":"\(firstID!)"}}
       """.utf8))
     await master.receive(attention)
-    guard case .progress(_, let narrateAttention) = updates.last else { return XCTFail("Missing attention") }
-    XCTAssertTrue(narrateAttention)
+    guard case .progress = updates.last else { return XCTFail("Missing attention") }
     let completed = try JSONDecoder().decode(ConversationEvent.self, from: Data("""
       {"type":"session.execution.succeeded","data":{"sessionID":"\(firstID!)"}}
       """.utf8))
     await master.receive(completed)
+    // As GPT Live should say it: no display Markdown.
     guard case .finished(let result) = updates.last else { return XCTFail("Missing final answer") }
     XCTAssertEqual(result, "Resposta final confirmada.")
     master.stop()
@@ -240,7 +239,7 @@ private actor VoiceMasterHTTP {
     let attempts = await http.promptIDs
     XCTAssertEqual(attempts.count, 3)
     XCTAssertEqual(Set(attempts.compactMap { $0 }).count, 1)
-    guard case .progress(_, narrate: false) = updates.last else { return XCTFail("Missing admission") }
+    guard case .activity = updates.last else { return XCTFail("Missing admission") }
     master.stop()
   }
 }

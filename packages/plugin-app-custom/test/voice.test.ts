@@ -106,6 +106,16 @@ test("voice instructions reload the editable Markdown and reject empty or unread
   expect(defaults).toContain(`"screen":true`)
   expect(defaults).toContain(`"screen_app"`)
   expect(defaults.toLowerCase()).not.toContain("mestra")
+  // OpenAI's recommended structure for gpt-live-1, with its labels kept in English.
+  for (const label of [
+    "\nBackchannel policy: ",
+    "\nInterruption policy: ",
+    "\nDelegation policy:\nBackend tools:\n",
+    "\nGenerate <|SpawnThinking|> when:\n",
+    "\nDo not generate <|SpawnThinking|> when:\n",
+    "\nGenerate <|SpawnThinking|> before giving an answer that depends on backend work. Do not guess the result while waiting.\n",
+  ])
+    expect(defaults).toContain(label)
   await Bun.write(file, "Primeiro prompt")
   expect(await Effect.runPromise(loadInstructions(file))).toBe("Primeiro prompt")
   await Bun.write(file, "Segundo prompt")

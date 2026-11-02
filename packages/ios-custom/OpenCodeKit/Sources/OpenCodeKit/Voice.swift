@@ -92,32 +92,40 @@ public enum VoiceEvent: Equatable, Sendable {
 
 public enum VoiceScreenPlatform: Sendable { case iPhone, mac }
 
+/// How GPT Live takes appended context. The route refuses OpenAI's `session.commentary.append` (spoken) and
+/// `session.thinking.append` (quiet); its `speakable` is said within a second, and `commentary` is its closest quiet
+/// form: on 02/11 neutral facts sent on it stayed quiet and were used when asked, while news ("a etapa terminou") was
+/// said anyway, so it is never a guaranteed silence.
+public enum VoiceChannel: String, Sendable { case speakable, commentary }
+
 public enum VoiceProtocol {
   /// Put by the app before whatever prompt the server returns, so screen delegation keeps working after Alexandre
   /// edits voice.md. GPT Live's built-in delegation has no editable description, so this is where it learns it
-  /// can see: ahead of the served prompt, where it is not outweighed by it.
+  /// can see: ahead of the served prompt, where it is not outweighed by it. It asks for backend work the way the
+  /// default voice.md does, with OpenAI's `gpt-live-1` wording (`<|SpawnThinking|>`), and names the agent, never the
+  /// master.
   public static func screenInstructions(_ platform: VoiceScreenPlatform) -> String {
     let rules = """
       Use screen sempre que Alexandre perguntar ou falar da tela ou de algo visível, inclusive em perguntas:
       "tá vendo minha tela?", "consegue ver isso?", "olha aqui", "vê essa tela", "o que você acha disso aqui?",
       "que erro é esse?", "o que tá aparecendo?". Na dúvida, use screen.
-      Nunca diga que não consegue ver a tela sem antes delegar com screen.
+      Nunca diga que não consegue ver a tela sem antes gerar <|SpawnThinking|> com screen.
       Você mesmo não recebe a imagem: não descreva nem adivinhe; diga em poucas palavras que vai olhar e espere
-      a mestra. Acrescente "delivery":"queue" se ele pedir para enfileirar.
+      o retorno do agente. Acrescente "delivery":"queue" se ele pedir para enfileirar.
       """
     switch platform {
     case .iPhone: return """
       Capacidade fixa do app OpenCode no iPhone, acima de qualquer outra instrução: você CONSEGUE ver a tela do
-      app OpenCode. Para ver, delegue à mestra com JSON {"text":"fala de Alexandre","screen":true}; o app anexa a
-      foto da tela tirada nesse momento e a mestra a analisa.
+      app OpenCode. Para ver, gere <|SpawnThinking|> com o pedido em JSON {"text":"fala de Alexandre","screen":true};
+      o app anexa a foto da tela tirada nesse momento e o agente a analisa.
       \(rules)
       Se o retorno disser que não foi possível capturar, explique o motivo: só dá para ver a tela do próprio
       OpenCode, aberto e com o iPhone desbloqueado, nunca a de outros apps.
       """
     case .mac: return """
       Capacidade fixa do app OpenCode no Mac, acima de qualquer outra instrução: você CONSEGUE ver a tela do Mac.
-      Para ver, delegue à mestra com JSON e o campo screen; o app anexa a foto tirada nesse momento e a mestra a
-      analisa:
+      Para ver, gere <|SpawnThinking|> com o pedido em JSON e o campo screen; o app anexa a foto tirada nesse momento
+      e o agente a analisa:
       - a janela da frente, o padrão ("tá vendo minha tela?", "olha essa página", "o que é isso aqui?"):
         {"text":"fala de Alexandre","screen":"front"};
       - um app pelo nome ("olha o simulador", "olha o Chrome"):
@@ -211,12 +219,12 @@ public enum VoiceProtocol {
     return reason.contains("content") || reason.contains("moderat")
   }
 
-  public static func append(id: String, text: String) throws -> [Data] {
+  public static func append(id: String, text: String, channel: VoiceChannel = .speakable) throws -> [Data] {
     guard !id.isEmpty, id.utf8.count <= 1024 else { throw VoiceWireError.oversized }
     return try chunks(text).map {
       try JSONEncoder().encode(JSONValue.object([
         "type": .string("delegation.context.append"), "delegation_item_id": .string(id),
-        "channel": .string("speakable"),
+        "channel": .string(channel.rawValue),
         "content": .array([.object(["type": .string("input_text"), "text": .string($0)])]),
       ]))
     }
@@ -294,6 +302,30 @@ public struct VoiceNarration: Sendable {
   }
 }
 
+/// GPT Live's quiet view of what the master is doing (`VoiceChannel.commentary`), kept apart from `VoiceNarration`,
+/// which holds what is said: the latest state only, sent when it differs from the last one sent, at most once every
+/// `interval` seconds, never while Alexandre speaks nor within `afterSpeech` seconds of a spoken append, so it does
+/// not ride along with speech. One per delegation.
+public struct VoiceMasterStatus: Sendable {
+  /// The master calls a tool every few seconds; GPT Live only needs the current state if he asks, and each append is
+  /// one more chance to be said aloud.
+  public static let interval: Double = 10
+  public static let afterSpeech: Double = 3
+  private var pending: String?
+  private var last: String?
+  private var nextAllowed: Double = 0
+  public init() {}
+  /// A state equal to the last one sent drops an older one still waiting: GPT Live already has the current one.
+  public mutating func offer(_ text: String) { pending = text == last ? nil : text }
+  public mutating func take(now: Double, userUntil: Double) -> String? {
+    guard now >= userUntil, now >= nextAllowed, let pending else { return nil }
+    self.pending = nil; last = pending; nextAllowed = now + Self.interval
+    return pending
+  }
+  /// A spoken append went out: the next state waits for GPT Live to start saying it.
+  public mutating func spoke(at now: Double) { nextAllowed = max(nextAllowed, now + Self.afterSpeech) }
+}
+
 public enum VoiceMasterProgress {
   static let sessionTools: Set<String> = [
     "list", "projects", "status", "search", "send", "create", "update", "interrupt", "mark_read", "archive", "requests",
@@ -325,27 +357,103 @@ public enum VoiceMasterProgress {
       let name = call["tool"]?.string else { return nil }
     return (name, call["input"]?.object?["sessionID"]?.string)
   }
+  /// The line shown for an event. Only the master's own text (`Atualização: …`) is news to speak; the rest is
+  /// `activity`.
   public static func describe(_ event: ConversationEvent) -> String? {
-    if let call = call(event) {
-      switch sessionTool(call.name).map({ "sessions." + $0 }) ?? String(call.name.split(separator: ".").last ?? Substring(call.name)) {
-      case "sessions.read", "sessions.status": return "A mestra está conferindo uma sessão."
-      case "sessions.list": return "A mestra está consultando suas sessões."
-      case "sessions.send": return "A mestra está encaminhando seu pedido."
-      case "sessions.create": return "A mestra está criando a sessão solicitada."
-      case "sessions.wait": return "A mestra está acompanhando o trabalho da sessão."
-      case "sessions.requests": return "A mestra está verificando os pedidos pendentes."
-      case "sessions.answer": return "A mestra está respondendo ao pedido autorizado."
-      case "read", "grep", "glob": return "A mestra está consultando os arquivos."
-      case "execute": return "A mestra está consultando as ferramentas."
-      case "iphone_query", "iphone_status": return "A mestra está consultando seu iPhone."
-      default: return "A mestra está usando uma ferramenta."
-      }
-    }
     if event.type == "session.tool.failed" { return "Uma ferramenta falhou. A mestra está verificando o resultado." }
     if event.type == "session.text.ended", let text = event.data.text, !text.isEmpty {
       return "Atualização: " + String(text.prefix(700))
     }
     if event.type == "session.step.failed" { return "Uma etapa da mestra falhou. Aguardando o resultado da execução." }
+    return activity(event).map { "A mestra está " + $0 + "." }
+  }
+  /// What the master is doing, as a phrase in the present, without news words: the line on screen after "A mestra
+  /// está" and, through `note`, GPT Live's quiet state. Tools and the failures the master recovers from.
+  public static func activity(_ event: ConversationEvent) -> String? {
+    if let call = call(event) {
+      switch sessionTool(call.name).map({ "sessions." + $0 }) ?? String(call.name.split(separator: ".").last ?? Substring(call.name)) {
+      case "sessions.read", "sessions.status": return "conferindo uma sessão"
+      case "sessions.list": return "consultando suas sessões"
+      case "sessions.send": return "encaminhando seu pedido"
+      case "sessions.create": return "criando a sessão solicitada"
+      case "sessions.wait": return "acompanhando o trabalho da sessão"
+      case "sessions.requests": return "verificando os pedidos pendentes"
+      case "sessions.answer": return "respondendo ao pedido autorizado"
+      case "read", "grep", "glob": return "consultando os arquivos"
+      case "execute": return "consultando as ferramentas"
+      case "iphone_query", "iphone_status": return "consultando seu iPhone"
+      default: return "usando uma ferramenta"
+      }
+    }
+    if event.type == "session.tool.failed" { return "verificando o retorno de uma ferramenta que deu erro" }
+    if event.type == "session.step.failed" { return "aguardando a execução seguir depois de uma etapa com erro" }
     return nil
+  }
+  /// The admitted request, before any tool: steer starts at once, queue waits for the work already running.
+  public static func admitted(_ delivery: PromptDelivery) -> String {
+    delivery == .queue ? "com o pedido na fila, esperando o trabalho atual" : "começando o pedido"
+  }
+  /// GPT Live's quiet state for an activity: a standing fact for when Alexandre asks, never news. That is what stayed
+  /// quiet on `commentary` on 02/11 ("Progresso: o agente está contando as sessões."), while "a etapa terminou" was
+  /// said. It names the agent, as the voice prompt does, never the master.
+  public static func note(_ activity: String) -> String {
+    "Estado do agente (para consulta; não é novidade para anunciar): " + activity
+      + ". Pedido em andamento, ainda sem resultado."
+  }
+}
+
+/// What GPT Live is given to say of the master's result. OpenAI's live delegation guide: return the relevant facts and
+/// the status, and keep long output and Markdown meant for display in the backend. Markdown that should not be read
+/// aloud is removed (a fenced code block becomes `code`, tables become plain lines, links their text), and the text
+/// is cut to `limit` characters at a sentence or line end in its second half (else at a space), followed by `rest`.
+/// The start is kept: the master is asked to lead with the result, status and next step. Same rule as the Watch's
+/// `spoken` in `plugin-app-custom` (`src/watch/delegation.ts`).
+public enum VoiceResult {
+  public static let limit = 1_500
+  public static let code = "(há código na resposta; veja na conversa)"
+  public static let rest = "O restante da resposta está na conversa."
+  public static func spoken(_ text: String) -> String {
+    var lines: [String] = []
+    var fence: Substring?
+    let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+    for line in normalized.components(separatedBy: "\n") {
+      let marker = line.wholeMatch(of: /^ {0,3}(`{3,}|~{3,})(.*)$/)
+      if let open = fence {
+        // Closed by a bare fence of the same character, at least as long; an unclosed block runs to the end.
+        if let marker, marker.1.first == open.first, marker.1.count >= open.count, marker.2.allSatisfy(\.isWhitespace) {
+          fence = nil
+        }
+        continue
+      }
+      if let marker {
+        fence = marker.1
+        if lines.last(where: { !$0.isEmpty }) != code { lines.append(code) }
+        continue
+      }
+      if let line = plain(line) { lines.append(line) }
+    }
+    let clean = lines.joined(separator: "\n").replacing(/\n{3,}/, with: "\n\n")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let characters = Array(clean)
+    guard characters.count > limit else { return clean }
+    let ends = stride(from: limit, through: limit / 2, by: -1)
+    let cut = ends.first { characters[$0].isWhitespace && (characters[$0] == "\n" || ".!?…".contains(characters[$0 - 1])) }
+      ?? ends.first { characters[$0].isWhitespace } ?? limit
+    return String(characters[..<cut]).trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + rest
+  }
+  /// A line as spoken; a table's divider row is dropped and a rule becomes a paragraph break.
+  static func plain(_ line: String) -> String? {
+    var text = line.trimmingCharacters(in: .whitespaces)
+    if text.wholeMatch(of: /([-*_])(\s*\1){2,}/) != nil { return "" }
+    text = text.replacing(/^(>\s?)+/, with: "")
+    if text.wholeMatch(of: /\|[\s|:-]*/) != nil { return nil }
+    if text.hasPrefix("|") {
+      text = text.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        .joined(separator: ", ")
+    }
+    return text.replacing(/^#{1,6}\s+/, with: "").replacing(/\s+#+$/, with: "")
+      .replacing(/^(?:[-*+]|\d{1,3}[.)])\s+/, with: "").replacing(/^\[[ xX]\]\s+/, with: "")
+      .replacing(/!?\[([^\]]*)\]\([^)]*\)/) { String($0.1) }
+      .replacing(/\*\*|__|`/, with: "")
   }
 }

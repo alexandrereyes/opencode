@@ -2,7 +2,13 @@ import Foundation
 import OpenCodeKit
 
 enum VoiceMasterUpdate: Sendable {
-  case progress(String, narrate: Bool = true), finished(String), failed(String), disconnected
+  /// Shown and spoken: the master's own text and what needs Alexandre.
+  case progress(String)
+  /// Shown, and given to GPT Live only as quiet state (`note`): admission, tools and failures the master recovers from.
+  case activity(String, note: String)
+  /// The result as GPT Live should say it (`VoiceResult.spoken`).
+  case finished(String)
+  case failed(String), disconnected
 }
 
 @MainActor protocol VoiceMasterServing: AnyObject {
@@ -69,9 +75,9 @@ extension VoiceMasterServing {
     // prompt ID, which the server admits once, so a reply lost on the way never delivers the request twice.
     try await retrying { try await sessions.client.prompt(prompt, sessionID: masterID) }
     admitted = true
-    // Shown, not spoken: GPT Live already acknowledges the request and would announce it again.
-    update(.progress(request.delivery == .queue ? "Pedido na fila da Sessão mestra." : "Pedido enviado à Sessão mestra.",
-      narrate: false))
+    // Not spoken: GPT Live already acknowledges the request and would announce it again.
+    update(.activity(request.delivery == .queue ? "Pedido na fila da Sessão mestra." : "Pedido enviado à Sessão mestra.",
+      note: VoiceMasterProgress.note(VoiceMasterProgress.admitted(request.delivery))))
     if terminalPending { await reconcile() }
   }
   /// Repeats one step while the OpenCode server is unreachable or overloaded; a refusal fails at once.
@@ -118,10 +124,12 @@ extension VoiceMasterServing {
     if let call = VoiceMasterProgress.call(event), ["read", "status", "wait"].contains(VoiceMasterProgress.sessionTool(call.name)),
       let id = call.sessionID,
       let title = sessions.entries.first(where: { $0.session.id == id })?.session.displayTitle {
-      update(.progress("A mestra está conferindo a sessão “" + String(title.prefix(120)) + "”.", narrate: false))
+      let activity = "conferindo a sessão “" + String(title.prefix(120)) + "”"
+      update(.activity("A mestra está " + activity + ".", note: VoiceMasterProgress.note(activity)))
     } else if let text = VoiceMasterProgress.describe(event) {
-      // Tools and failures the master recovers from stay on screen; only its own text is news to speak.
-      update(.progress(text, narrate: event.type == "session.text.ended"))
+      // Tools and failures the master recovers from are not news worth interrupting the conversation for: shown, and
+      // GPT Live keeps them as quiet state. Only its own text is spoken.
+      update(VoiceMasterProgress.activity(event).map { .activity(text, note: VoiceMasterProgress.note($0)) } ?? .progress(text))
     }
     if event.type == "session.execution.succeeded" {
       terminalPending = true
@@ -162,9 +170,7 @@ extension VoiceMasterServing {
       let text = messages.last(where: { $0.type == "assistant" && !$0.responseText.isEmpty })?.responseText ?? ""
       guard !text.isEmpty else { return }
       waiting = false
-      update(.finished(text.count > 5000
-        ? "A resposta é longa. Segue o trecho final; confira a resposta completa na conversa. " + String(text.suffix(5000))
-        : text))
+      update(.finished(VoiceResult.spoken(text)))
     } catch { if self.revision == revision, waiting { update(.disconnected) } }
   }
   func stop() {

@@ -36,6 +36,11 @@ export const limits = {
   /** Lease margin from the iPhone contract: a lease is considered lost this long before it expires. */
   leaseMarginMs: 10_000,
   appendBytes: 500,
+  /**
+   * Alexandre or GPT Live counts as speaking this long after a transcript piece of theirs (the iPhone's `userUntil`);
+   * GPT Live's own `turn.done` ends it. The Mestra's quiet state waits for both.
+   */
+  speakingMs: 2_000,
 }
 
 export const model = "gpt-live-1-codex"
@@ -97,6 +102,8 @@ type Call = {
   seq: number
   changed: Deferred.Deferred<void>
   captions: { user: string; assistant: string }
+  /** Until when (epoch ms) each side counts as speaking (`limits.speakingMs`). */
+  speaking: { user: number; assistant: number }
   ending?: Deferred.Deferred<void>
   ended?: string
   /** Serial work off the sideband reader, in order: memory appends and delegation admissions. */
@@ -225,6 +232,7 @@ export function makeVoice(input: {
       seq: 0,
       changed: Deferred.makeUnsafe<void>(),
       captions: { user: "", assistant: "" },
+      speaking: { user: 0, assistant: 0 },
       recent: [],
       contextItems: 0,
     }
@@ -375,6 +383,7 @@ export function makeVoice(input: {
       case "output_transcript.added": {
         const role = event.type === "input_transcript.added" ? "user" : "assistant"
         call.captions[role] += event.item?.text ?? ""
+        call.speaking[role] = (yield* Clock.currentTimeMillis) + limits.speakingMs
         if (!call.captions[role].trim()) return
         return yield* emit(call, { type: "caption", role, text: call.captions[role].trim(), final: false })
       }
@@ -382,6 +391,8 @@ export function makeVoice(input: {
         const role = event.turn?.role === "assistant" ? "assistant" : "user"
         const spoken = (event.turn?.transcript ?? call.captions[role]).trim()
         call.captions[role] = ""
+        // The user's `turn.done` only comes when GPT Live answers, so only GPT Live's ends a speaking window.
+        if (role === "assistant") call.speaking.assistant = 0
         if (!spoken) return
         yield* emit(call, { type: "caption", role, text: spoken, final: true })
         return yield* lane(
@@ -536,22 +547,25 @@ export function makeVoice(input: {
       if (existing) return existing
       const ctx = input.ctx()
       if (!ctx) return undefined
+      const context = (itemID: string, text: string, channel: "speakable" | "commentary") =>
+        Effect.forEach(
+          chunks(text),
+          (chunk) =>
+            send(call, {
+              type: "delegation.context.append",
+              delegation_item_id: itemID,
+              channel,
+              content: [{ type: "input_text", text: chunk }],
+            }),
+          { discard: true },
+        )
       const created = makeDelegator(
         ctx,
         {
-          append: (itemID, text) =>
-            Effect.forEach(
-              chunks(text),
-              (chunk) =>
-                send(call, {
-                  type: "delegation.context.append",
-                  delegation_item_id: itemID,
-                  channel: "speakable",
-                  content: [{ type: "input_text", text: chunk }],
-                }),
-              { discard: true },
-            ),
+          append: (itemID, text) => context(itemID, text, "speakable"),
+          note: (itemID, text) => context(itemID, text, "commentary"),
           master: (state, text) => emit(call, { type: "master", state, text }),
+          quietAt: () => Math.max(call.speaking.user, call.speaking.assistant),
         },
         call.scope,
       )

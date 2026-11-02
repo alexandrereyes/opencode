@@ -1749,7 +1749,9 @@ The waveform in **Sessões** starts a native, full-duplex GPT Live call through 
 on tabs and sits above the composer; mute/end also appear in the Live Activity/Dynamic Island extension.
 Audio continues in the background after microphone consent. Real actions and answers are delegated
 to the existing **Sessão mestra**, with throttled live progress rather than waiting silently for the
-final answer. Ending the call does not interrupt work already submitted to OpenCode. Ending a session
+final answer: the master's own text, what needs Alexandre and the result are spoken; its tools and admission reach
+GPT Live only as quiet state (`commentary`) it uses when asked; the result is spoken without display Markdown and
+cut to 1,500 characters (`VoiceResult.spoken`). Ending the call does not interrupt work already submitted to OpenCode. Ending a session
 that started sends `session.close` and waits up to 2 s for `session.closed` (or the data channel
 closing) before the transport and lease go; that close never reconnects or reports a loss. A moderation `error` only
 clears voice memory when the session ends within 5 s of it; otherwise the call goes on with its memory.
@@ -3232,7 +3234,7 @@ address in the foreground, last known position in the background), `health` (rea
 summary protected until first unlock (`Application Support/OpenCode/DeviceData`) answers instead. In the
 conversation the tool reads **Consultou o iPhone · Saúde** with the `iphone` symbol; voice, which follows only the
 Sessão mestra, shows **A mestra está consultando seu iPhone.** in its progress indicator without automatically
-narrating the tool activity. The footer and the iOS permission prompts say that
+narrating the tool activity (GPT Live gets it only as quiet state). The footer and the iOS permission prompts say that
 the OpenCode agents read this data when Alexandre asks.
 
 Requirements: `OpenCode/OpenCode.entitlements` (HealthKit, no clinical records), the usage descriptions

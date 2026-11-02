@@ -46,8 +46,13 @@ struct VoiceScreenTests {
     #expect(edited.hasPrefix("Capacidade fixa do app OpenCode no iPhone, acima de qualquer outra instrução: você CONSEGUE ver"))
     #expect(edited.contains(#"{"text":"fala de Alexandre","screen":true}"#))
     #expect(edited.contains("tá vendo minha tela?") && edited.contains("Na dúvida, use screen"))
-    #expect(edited.contains("Nunca diga que não consegue ver a tela sem antes delegar com screen"))
+    #expect(edited.contains("Nunca diga que não consegue ver a tela sem antes gerar <|SpawnThinking|> com screen"))
     #expect(edited.contains("nunca a de outros apps"))
+    // The default voice.md's terms: OpenAI's `gpt-live-1` wording for backend work, and the agent, never the master.
+    for platform in [VoiceScreenPlatform.iPhone, .mac] {
+      let rules = VoiceProtocol.screenInstructions(platform)
+      #expect(rules.contains("gere <|SpawnThinking|> com o pedido em JSON") && !rules.lowercased().contains("mestra"))
+    }
     let documented = #"Use {"text":"x","screen":true} para a tela."#
     #expect(VoiceProtocol.withScreen(documented, for: .iPhone) == documented)
     // The Mac adds its own targets even over the iPhone's form, and stays idempotent.
