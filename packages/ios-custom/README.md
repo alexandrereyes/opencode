@@ -604,7 +604,7 @@ marks retained after relaunch. No physical device, production mutation or new ba
 `ComposerEditor`, configured by `ComposerComment` (placeholder, the message draft's other attachment bytes for the
 shared 25 MiB limit, and the commit action), instead of a separate text field. It keeps the same card, `ComposerTextView`
 (label **Comentário**, identifier `comment-composer`), `@`/`&`/`$`/`/` suggestions and tokens, focus, dictation (hold, lock,
-pending download; a finished transcription refocuses the comment) and the **+** menu with **Fotos** and **Arquivos**.
+pending download; a finished transcription refocuses the comment) and the **+** menu with **Câmera**, **Fotos** and **Arquivos**.
 It omits the model/effort, MCP and agent selectors (they belong to the message, as on the web, whose comment editor has
 none), `#` commands (they only run at the start of the message itself; the web's comment editor has no commands either)
 and **Expandir compositor** (the sheet already rises to full height with the keyboard; a fullscreen cover over a sheet
@@ -5615,6 +5615,19 @@ the intended two tasks. The root shell, queue, B's permission and D's question a
   only up to 20 MiB and when the selected model advertises the matching input. Other files remain path references
   with `Attached file: …` and `metadata.attachments`. Chips show a bounded thumbnail or file icon, filename and remove
   action; preparation/upload progress and failures use the shared toast. No camera, paste or drag/drop was added.
+- **Câmera (Alexandre, 02/11).** The `+` menu now lists **Câmera** (`camera`) between **Expandir compositor** and
+  **Fotos**, in every composer that has Fotos (conversation, Nova sessão, Sessão mestra, the expanded composer and the
+  comment sheet), each presenting the camera once from its own `ComposerEditor`. It opens the system camera
+  (`UIImagePickerController`, photo mode, `ComposerCameraPicker`); the QR pairing's `DataScannerViewController` only
+  reads codes, so it is not reused. Usar Foto imports the photo through `store.importAttachment`, as Fotos does (a
+  full-quality JPEG with its EXIF orientation; `AttachmentEncoding.prepare` makes it an upright JPEG within 2048 px),
+  and nothing is sent; Cancelar returns to the composer as it was. Camera access is asked only on the tap
+  (`AVCaptureDevice`); denied offers **Abrir Ajustes**, restricted and a missing camera explain themselves, and the
+  draft is untouched. Nothing is saved to the photo library, and neither Photos nor microphone access is asked.
+  `NSCameraUsageDescription` now covers photos and the QR code. The Mac is unchanged. Verification: hosted
+  `ComposerCameraTests` (orientation and conversion, the usage text) and `ComposerCameraUITests` on the dictation
+  fixture's offline composer, where `-OpenCodeCameraFixture photo|denied|restricted|unavailable` stands in for the
+  camera the simulator lacks; the real camera was not exercised there.
 - The small, muted in-card expand button (over three lines or with attachments), `+` menu and upward swipe open the same composer UI full screen, with the same draft,
   attachments and selection controls. Recollection preserves cursor and tokens. An explicit editor owner prevents
   the outgoing sheet and incoming compact editor from competing for first responder during the transition.

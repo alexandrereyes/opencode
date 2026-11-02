@@ -30,6 +30,8 @@ struct ComposerEditor: View {
   @State private var photos = false
   @State private var files = false
   @State private var selectedPhotos: [PhotosPickerItem] = []
+  @State private var camera = false
+  @State private var cameraProblem: ComposerCamera.Access?
   @State private var editorID = UUID()
   @State private var longText = false
   @State private var suggestionReturn = ComposerSuggestionReturn()
@@ -58,6 +60,20 @@ struct ComposerEditor: View {
     guard canSubmit else { return }
     if let comment { return comment.commit() }
     Task { await store.send(draft) }
+  }
+  private func tookPhoto(_ image: UIImage?) {
+    camera = false
+    guard let image else { return }
+    Task {
+      draft.importing = true
+      defer { draft.importing = false }
+      guard let data = await Task.detached(priority: .userInitiated, operation: { ComposerCamera.jpeg(image) }).value else {
+        return store.toast.show("Não foi possível importar a foto.", kind: .error)
+      }
+      await store.importAttachment(
+        data, name: "Foto-\(UUID().uuidString.prefix(6)).jpg", mime: "image/jpeg", draft: draft,
+        reservedBytes: comment?.reservedBytes ?? 0)
+    }
   }
   private func choose(_ item: ComposerSuggestion, replacing trigger: ComposerTrigger) {
     if item.token.kind == .command && item.token.value == "client"
@@ -251,6 +267,30 @@ struct ComposerEditor: View {
         }
       }
     }
+    // A photo from the camera joins the draft like one from Fotos; Cancelar leaves the draft as it was.
+    .fullScreenCover(isPresented: $camera) {
+      Group {
+        #if DEBUG
+        if ComposerCameraFixture.mode != nil {
+          ComposerCameraFixtureView(finish: tookPhoto)
+        } else {
+          ComposerCameraPicker(finish: tookPhoto)
+        }
+        #else
+        ComposerCameraPicker(finish: tookPhoto)
+        #endif
+      }.ignoresSafeArea()
+    }
+    .alert(cameraProblem?.title ?? "", isPresented: Binding(get: { cameraProblem != nil }, set: { if !$0 { cameraProblem = nil } }),
+      presenting: cameraProblem)
+    { problem in
+      if problem == .denied {
+        Button("Abrir Ajustes") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
+        Button("Cancelar", role: .cancel) {}
+      } else {
+        Button("OK", role: .cancel) {}
+      }
+    } message: { Text($0.message) }
     .fileImporter(isPresented: $files, allowedContentTypes: [.item], allowsMultipleSelection: true)
     { result in
       Task {
@@ -331,6 +371,13 @@ struct ComposerEditor: View {
           Button(
             "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right", action: expand
           )
+        }
+        Button("Câmera", systemImage: "camera") {
+          draft.focused = false
+          Task {
+            let access = await ComposerCamera.request()
+            if access == .ready { camera = true } else { cameraProblem = access }
+          }
         }
         Button("Fotos", systemImage: "photo.on.rectangle") {
           draft.focused = false
