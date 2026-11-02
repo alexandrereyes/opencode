@@ -65,20 +65,14 @@ public struct VoiceMemoryContext: Codable, Sendable, Equatable {
   }
 }
 
-public struct VoiceInitialItem: Encodable, Sendable, Equatable {
+/// One message a call starts with (`initial_items`, written by `VoiceProtocol.creation`).
+public struct VoiceInitialItem: Sendable, Equatable {
   /// The turns keep who said them; what the app tells GPT Live (memory summary, Mestra state, requests a rebuilt call
-  /// carries) is a `developer` message, which the route accepts in `initial_items` (02/11).
-  public enum Role: String, Encodable, Sendable { case developer, user, assistant }
+  /// carries) is a `developer` message.
+  public enum Role: String, Sendable { case developer, user, assistant }
   public let role: Role
   public let text: String
   public init(role: Role, text: String) { self.role = role; self.text = text }
-  public func encode(to encoder: any Encoder) throws {
-    enum Key: CodingKey { case type, role, content }
-    var value = encoder.container(keyedBy: Key.self)
-    try value.encode("message", forKey: .type)
-    try value.encode(role, forKey: .role)
-    try value.encode([["type": role == .assistant ? "output_text" : "input_text", "text": text]], forKey: .content)
-  }
 }
 
 public enum VoiceHistoryBudget {

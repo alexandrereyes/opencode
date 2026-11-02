@@ -78,11 +78,17 @@ import UIKit
   @ObservationIgnored private var continuity = VoiceContinuity()
   /// The served prompt of this conversation; a rebuilt call reuses it instead of waiting for the server.
   @ObservationIgnored private var servedInstructions: String?
-  /// A result sent as call context after a rebuild; an error right after it puts it back for the next delegation.
-  @ObservationIgnored private var contextAppend: (text: String, at: TimeInterval)?
+  /// GPT Live refused a result as call context after a rebuild: it waits for the next delegation instead.
   @ObservationIgnored private var contextRejected = false
   /// The type of the last command sent on the data channel, for diagnostics.
   @ObservationIgnored private var lastSent: (type: String, at: TimeInterval)?
+  /// The current link's commands by `event_id`: which one an error names and which appends GPT Live took.
+  @ObservationIgnored private var commands = VoiceCommandLog()
+  /// The last result sent on the current link and the `event_id`s of its parts GPT Live has not taken yet: a link
+  /// lost before it took them all hands the result to the next one. `context`: it went as the call's context.
+  @ObservationIgnored private var delivery: (text: String, parts: Set<String>, context: Bool)?
+  /// GPT Live's ID of the current link's call (the creation's `Location`), for diagnostics.
+  @ObservationIgnored private var remoteCall: String?
   /// After a moderation reset: links open without memory or carried requests until one connects.
   @ObservationIgnored private var freshContext = false
   /// Whether the current link started with memory or carried requests, and whether it answered normally since: a
@@ -202,7 +208,7 @@ import UIKit
     recentSpeech = []; conversation = VoiceRequestContext()
     trail = VoiceEventTrail(); lastSent = nil
     freshContext = false; linkHadContext = false; linkAnswered = false; masterStale = false; moderation = nil
-    graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; contextAppend = nil; contextRejected = false
+    graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; delivery = nil; contextRejected = false
     state.apply(.start); detail = "Preparando o microfone"; publish()
     inputItemID = nil; outputItemID = nil; interruptedAssistant = false; interruptedUser = false; capturedTurns = []
     partial = [:]
@@ -305,7 +311,7 @@ import UIKit
   private func open(token: UUID, timeout: Double, message: String) async throws {
     let current = UUID()
     link = current; ready = false; mediaConnected = false; graceUntil = nil; lease = VoiceLeaseClock()
-    contextAppend = nil; moderation = nil; moderationTimer?.cancel()
+    commands = VoiceCommandLog(); remoteCall = nil; moderation = nil; moderationTimer?.cancel()
     armWatchdog(token: token, seconds: timeout, message: message, reason: .attemptTimeout)
     // A rebuilt call is the same conversation: its prompt does not wait for (or depend on) the OpenCode server.
     let instructions = if let servedInstructions { servedInstructions } else { try await instructions() }
@@ -339,7 +345,7 @@ import UIKit
       resuming: resuming, request: { [self] in try await perform($0) })
     try Task.checkCancellation()
     guard epoch == token, link == current else { throw CancellationError() }
-    callVoice = answer.voice
+    callVoice = answer.voice; remoteCall = answer.call
     try await transport.answer(answer.sdp)
     if let notice = answer.fallbackNotice { toast.show(notice, kind: .error) }
     VoiceTransport.log.notice("phase=answer-applied")
@@ -523,7 +529,12 @@ import UIKit
       }
     }
     switch event {
-    case .ready: ready = true; if mediaConnected { connected() }
+    case .ready(let call, let expiresAt):
+      if let expiresAt {
+        VoiceTransport.log.notice("phase=session-started expires_in=\(expiresAt - Date.now.timeIntervalSince1970, format: .fixed(precision: 0), privacy: .public)")
+      }
+      if let call, call != remoteCall { report(.tolerated, .callMismatch(call)) }
+      ready = true; if mediaConnected { connected() }
     case .input(let piece):
       inputItemID = piece.id ?? inputItemID
       partial[.user, default: ""] += piece.text
@@ -549,11 +560,11 @@ import UIKit
       }
       else { userUntil = ProcessInfo.processInfo.systemUptime + 1; inputItemID = nil; interruptedUser = false }
       publish()
-    case .failure(let code, let detail) where VoiceProtocol.isModeration(code):
+    case .failure(let code, let detail, let id) where VoiceProtocol.isModeration(code):
       // Some moderations end the session and others only cut the current speech (OpenAI's live conversations
       // guide): the memory is cleared only when the session ends within the window (`lose`).
       VoiceTransport.log.notice("phase=moderated")
-      report(.tolerated, .moderationPending(code, detail: detail))
+      report(.tolerated, .moderationPending(code, detail: detail), command: commands.failed(id))
       moderation = (Self.now, code, detail)
       let token = epoch, current = link
       moderationTimer?.cancel()
@@ -563,16 +574,27 @@ import UIKit
         moderation = nil
         report(.tolerated, .moderationNonFatal(pending.code, detail: pending.detail))
       }
-    case .failure(let code, let detail):
+    case .failure(let code, let detail, let id):
       VoiceTransport.log.notice("phase=service-error")
-      if let sent = contextAppend, Self.now - sent.at < 3 {
+      // The command the error names by its `event_id`; an error without one of ours names none.
+      let command = commands.failed(id)
+      if let command, command.purpose == .context, let delivery, delivery.parts.contains(command.id) {
         // The service did not take the result as call context: it waits for the next delegation instead.
-        contextAppend = nil; contextRejected = true
-        narration.retry(sent.text); finalNarration = true
+        self.delivery = nil; contextRejected = true
+        narration.retry(delivery.text); finalNarration = true
       }
       // GPT Live keeps its session after most errors; only an expired one is rebuilt (VoiceProtocol.endsSession).
-      guard VoiceProtocol.endsSession(code) else { report(.tolerated, .service(code, detail: detail)); return }
+      guard VoiceProtocol.endsSession(code) else {
+        report(.tolerated, .service(code, detail: detail), command: command)
+        return
+      }
       lose("O serviço de voz encerrou a sessão. Reconectando…", .service(code, detail: detail))
+    case .appended(let target):
+      // The context reached the model, which is not to say it was spoken; a result is delivered once every part is.
+      guard let part = commands.confirmed(target)?.id, delivery?.parts.remove(part) != nil,
+        delivery?.parts.isEmpty == true else { return }
+      if delivery?.context == true { report(.tolerated, .contextAppend) }
+      delivery = nil
     case .closed(let reason, let audioMs):
       guard !VoiceProtocol.closedByModeration(reason) else {
         clearContext(code: moderation?.code ?? reason, detail: moderation?.detail)
@@ -770,25 +792,21 @@ import UIKit
       let text = narration.take(now: Self.now, speaking: false, userUntil: userUntil, final: finalNarration) else { return }
     let token = epoch, current = link, final = finalNarration, delegation = currentDelegation
     finalNarration = false; status.spoke(at: Self.now)
-    let frames: [Data]
+    let parts: [VoiceCommand]
     do {
-      frames = if let delegation { try VoiceProtocol.append(id: delegation, text: text) }
+      parts = if let delegation { try VoiceProtocol.append(id: delegation, text: text) }
         else { try VoiceProtocol.contextAppend("Retorno do agente que chegou durante a reconexão. " + text) }
     } catch {
       report(.tolerated, .init("narration_oversized"))
       return
     }
+    // Before sending: a confirmation may arrive while the parts go out. Not taken when the link drops (a failed send
+    // included), the result goes to the rebuilt call.
+    if final { delivery = (text, Set(parts.map(\.id)), delegation == nil) }
     do {
-      for data in frames {
-        guard epoch == token, link == current else { return }
-        lastSent = (delegation == nil ? "session.context.append" : "delegation.context.append", Self.now)
-        try await transport.send(data)
-      }
-      if delegation == nil { contextAppend = (text, Self.now); report(.tolerated, .contextAppend) }
+      try await send(parts, delegation == nil ? .context : .narration, on: transport)
     } catch {
       guard epoch == token, link == current else { return }
-      // Not heard: the rebuilt call gets it.
-      if final { narration.retry(text); finalNarration = true }
       lose("Não foi possível transmitir a atualização da Sessão mestra. Reconectando…", .sendFailed)
     }
   }
@@ -797,14 +815,10 @@ import UIKit
   private func flushStatus() async {
     guard let transport, let delegation = currentDelegation, state.phase == .listening, narration.waiting == nil,
       let note = status.take(now: Self.now, userUntil: userUntil),
-      let frames = try? VoiceProtocol.append(id: delegation, text: note, channel: .commentary) else { return }
+      let parts = try? VoiceProtocol.append(id: delegation, text: note, channel: .commentary) else { return }
     let token = epoch, current = link
     do {
-      for data in frames {
-        guard epoch == token, link == current else { return }
-        lastSent = ("delegation.context.append", Self.now)
-        try await transport.send(data)
-      }
+      try await send(parts, .status, on: transport)
     } catch {
       guard epoch == token, link == current else { return }
       lose("Não foi possível transmitir a atualização da Sessão mestra. Reconectando…", .sendFailed)
@@ -812,19 +826,25 @@ import UIKit
   }
   /// Answers one delegation right away, without the master; the call goes on.
   private func answer(_ id: String, _ text: String) {
-    guard let transport, let frames = try? VoiceProtocol.append(id: id, text: text) else { return }
+    guard let transport, let parts = try? VoiceProtocol.append(id: id, text: text) else { return }
     let token = epoch, current = link
     status.spoke(at: Self.now)
     Task { [weak self] in
       do {
-        for data in frames {
-          self?.lastSent = ("delegation.context.append", Self.now)
-          try await transport.send(data)
-        }
+        try await self?.send(parts, .answer, on: transport)
       } catch {
         guard let self, epoch == token, link == current else { return }
         lose("Não foi possível transmitir a resposta ao serviço de voz. Reconectando…", .sendFailed)
       }
+    }
+  }
+  /// Sends commands in order while `transport` is the current link's, each logged by its `event_id` before it goes,
+  /// so an error or a confirmation that arrives meanwhile finds it.
+  private func send(_ parts: [VoiceCommand], _ purpose: VoiceCommandLog.Purpose, on transport: any VoiceTransporting) async throws {
+    for command in parts where self.transport === transport {
+      commands.record(command, purpose: purpose, at: Self.now)
+      lastSent = (command.type, Self.now)
+      try await transport.send(command.data)
     }
   }
   func mute() { state.muted.toggle(); transport?.mute(state.muted); publish() }
@@ -868,13 +888,15 @@ import UIKit
 
   /// Queues one report for the server (`custom.voice` → `diagnostics`, logged as `Voice diagnostics`) and tries to
   /// send it; a report the server did not take goes with the next one or on the next connection. Only categories,
-  /// event names and device state, never speech. `tolerated` is for failures the call survives.
-  func report(_ kind: VoiceDiagnostic.Kind, _ reason: VoiceFailureReason) {
+  /// event names and device state, never speech. `tolerated` is for failures the call survives. `command` is the one
+  /// a GPT Live error named.
+  func report(_ kind: VoiceDiagnostic.Kind, _ reason: VoiceFailureReason, command: VoiceCommandLog.Entry? = nil) {
     let entry = VoiceDiagnostic(kind: kind, reason: reason, build: Self.build, at: .now, call: sessionID,
       connectedSeconds: connectedAt.map { Date.now.timeIntervalSince($0) }, phase: String(describing: state.phase),
       recovering: recovery.active, events: trail, app: Self.appState, audio: Self.audioState,
       network: network.current.satisfied ? network.current.interfaces.joined(separator: ",") : "unsatisfied",
-      lastSent: lastSent.map { ($0.type, Self.now - $0.at) })
+      lastSent: lastSent.map { ($0.type, Self.now - $0.at) }, remoteCall: remoteCall,
+      failedCommand: command.map { ($0.type, Self.now - $0.at) })
     let outbox = diagnostics
     let client = client
     let previous = diagnosticsTask
@@ -967,11 +989,13 @@ import UIKit
     if state.phase == .speaking { interruptedAssistant = true }
     if inputItemID != nil { interruptedUser = true }
     // Delegation items belong to the old call; the next call learns the master's state from memory and the
-    // requests still running from `continuity`. Stale progress is dropped, but a result not yet heard is kept.
-    let unheard = finalNarration && !clearing ? narration.waiting : nil
+    // requests still running from `continuity`. Stale progress is dropped, but a result not yet heard is kept: one
+    // still waiting to be sent, else one sent whose parts GPT Live had not all taken.
+    let unheard = clearing ? nil : (finalNarration ? narration.waiting : nil) ?? delivery?.text
     currentDelegation = nil; narration = VoiceNarration(); status = VoiceMasterStatus(); finalNarration = false
+    delivery = nil
     if let unheard { narration.retry(unheard); finalNarration = true }
-    ready = false; mediaConnected = false; graceUntil = nil; contextAppend = nil
+    ready = false; mediaConnected = false; graceUntil = nil
     connection?.cancel(); renewal?.cancel(); watchdog?.cancel(); leaseDeadline?.cancel()
     connection = nil; renewal = nil; watchdog = nil; leaseDeadline = nil
     state.apply(network.current.satisfied ? .reconnect : .offline)
@@ -985,7 +1009,7 @@ import UIKit
     let memory = memory
     recoveryTask = Task { [weak self] in
       // Best effort, without waiting: a session still open on the service ends now, not when its media times out.
-      try? await transport?.send(VoiceProtocol.close)
+      try? await transport?.send(VoiceProtocol.close().data)
       await transport?.close()
       guard let self else { return }
       if clearing {
@@ -1039,7 +1063,7 @@ import UIKit
     watchdog = nil; renewal = nil; leaseDeadline = nil
     let transport = transport; self.transport = nil
     let signal = signaling; signaling = nil
-    try? await transport?.send(VoiceProtocol.close)
+    try? await transport?.send(VoiceProtocol.close().data)
     await transport?.close()
     if let signal, let request = try? signal.leaseRequest(method: "DELETE") {
       Task { [self] in _ = try? await perform(request) }
@@ -1109,7 +1133,7 @@ import UIKit
       transport.mute(true)
       closeWait = Task { [seconds = policy.closeWait] in try? await Task.sleep(for: .seconds(seconds)) }
     }
-    do { try await transport.send(VoiceProtocol.close) } catch { closeWait?.cancel() }
+    do { try await transport.send(VoiceProtocol.close().data) } catch { closeWait?.cancel() }
     await closeWait?.value
     closeWait = nil
   }

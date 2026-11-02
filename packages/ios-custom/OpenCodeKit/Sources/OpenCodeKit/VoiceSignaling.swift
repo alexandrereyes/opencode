@@ -43,17 +43,9 @@ public struct VoiceSignaling: Sendable {
       "session-id": sessionID.uuidString, "thread-id": sessionID.uuidString,
       "x-session-id": sessionID.uuidString, "x-gpt-live-generation": generation.uuidString
     ].forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-    var session: [String: JSONValue] = [
-        "model": .string("gpt-live-1-codex"), "instructions": .string(instructions),
-        "audio": .object(["output": .object(["voice": .string(voice.rawValue)])]),
-        "delegation": .object(["type": .string("client")]),
-    ]
     // Without server memory, a rebuilt call still starts with what the lost one was waiting for.
     let items = (history ?? (resuming == nil ? nil : VoiceMemoryContext()))?.initialItems(resuming: resuming) ?? []
-    if !items.isEmpty {
-      session["initial_items"] = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(items))
-    }
-    request.httpBody = try JSONEncoder().encode(JSONValue.object(["sdp": .string(sdp), "session": .object(session)]))
+    request.httpBody = try VoiceProtocol.creation(sdp: sdp, instructions: instructions, voice: voice, items: items)
     return request
   }
   public func createCall(sdp: String, instructions: String, voice: GPTLiveVoice, history: VoiceMemoryContext? = nil,
@@ -67,25 +59,12 @@ public struct VoiceSignaling: Sendable {
       guard let response = response as? HTTPURLResponse else { throw VoiceWireError.invalidAnswer }
       // Only an explicit voice validation rejection proves creation did not happen.
       // Timeouts, malformed 201s and unrelated HTTP errors must never create a second call.
-      if candidate != candidates.last && Self.rejectsVoice(data, response: response) { continue }
-      return VoiceCallAnswer(sdp: try Self.parseAnswer(data, response: response), voice: candidate,
+      if candidate != candidates.last && VoiceProtocol.rejectsVoice(data, status: response.statusCode) { continue }
+      return VoiceCallAnswer(sdp: try Self.parseAnswer(data, response: response), call: Self.callID(response),
+        voice: candidate,
         fallbackNotice: candidate == voice ? nil : "A voz \(voice.title) não está disponível; usando \(candidate.title)")
     }
     throw VoiceWireError.invalidAnswer
-  }
-  static func rejectsVoice(_ data: Data, response: HTTPURLResponse) -> Bool {
-    guard [400, 422].contains(response.statusCode), data.count <= 256 * 1024,
-      let root = try? JSONDecoder().decode(JSONValue.self, from: data).object else { return false }
-    if let error = root["error"]?.object {
-      if ["invalid_voice", "unsupported_voice"].contains(error["code"]?.string ?? "") { return true }
-      if error["type"]?.string == "invalid_request_error",
-        ["session.audio.output.voice", "audio.output.voice", "voice"].contains(error["param"]?.string ?? "") { return true }
-    }
-    return root["detail"]?.array?.contains { error in
-      let path = error.object?["loc"]?.array?.compactMap(\.string) ?? []
-      return Array(path.suffix(4)) == ["session", "audio", "output", "voice"]
-        && ["enum", "literal_error", "value_error"].contains(error.object?["type"]?.string ?? "")
-    } == true
   }
   public func parseLease(_ data: Data, status: Int) throws -> VoiceLease {
     guard status == 200 else { throw VoiceWireError.unavailable(status) }
@@ -114,10 +93,18 @@ public struct VoiceSignaling: Sendable {
     }
     return sdp
   }
+  /// GPT Live's ID of the call: the last segment of the creation's `Location` (`/v1/realtime/calls/rtc_…`), which
+  /// `session.started` repeats as `session.id` (02/11).
+  public static func callID(_ response: HTTPURLResponse) -> String? {
+    let path = response.value(forHTTPHeaderField: "Location")?.split(separator: "?").first ?? ""
+    let id = path.split(separator: "/").last.map(String.init) ?? ""
+    return id.isEmpty || id.utf8.count > 1024 ? nil : id
+  }
 }
 
 public struct VoiceCallAnswer: Sendable {
   public let sdp: String
+  public let call: String?
   public let voice: GPTLiveVoice
   public let fallbackNotice: String?
 }

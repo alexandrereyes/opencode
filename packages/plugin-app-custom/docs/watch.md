@@ -104,7 +104,11 @@ VoiceEvent = { seq: number, at: number } & (
 the call with `POST /backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas` and the iPhone's headers
 (see `packages/ios-custom/docs/voice.md`, "Contrato privado do llm-proxy"), returns the answer SDP, and attaches the
 sideband (`/v1/live` through the llm-proxy). The watch offer is audio-only Opus with no data channel and no local
-candidates; the answer must be ICE-lite with UDP candidates, otherwise `502 {code:"unsupported_answer"}`.
+candidates; the answer must be ICE-lite with UDP candidates, otherwise `502 {code:"unsupported_answer"}`. The
+route's names (paths, headers, the creation's body, sideband events and commands) live in `src/watch/protocol.ts`;
+the table "Rota do Codex e API oficial" in
+[`packages/ios-custom/docs/voice.md`](../../ios-custom/docs/voice.md#rota-do-codex-e-api-oficial) maps each to OpenAI's
+official Live API, on both platforms, for a later move.
 
 - **Session config is built by the backend**, equivalent to the iPhone's (`OpenCodeKit/Voice.swift`): model,
   `voiceID`, the same pt-BR instructions, and `initial_items` from voice memory (`custom.voice`, scope `global`).
@@ -252,8 +256,9 @@ Disagreements or gaps go to the coordinator; until resolved, implement the contr
 ## Backend implementation notes
 
 Code: `src/watch/` (`rpc.ts` RPC and wire types, `devices.ts` pairing and tokens, `gateway.ts` listener, routes,
-authentication and rate limit, `requests.ts` form/permission mapping, `voice.ts` GPT Live calls, `delegation.ts`
-Sessão mestra delegation, `widget.ts` WidgetKit pushes, `index.ts` wiring). Tests: `test/watch.test.ts`, plus the
+authentication and rate limit, `requests.ts` form/permission mapping, `voice.ts` GPT Live calls, `protocol.ts` GPT
+Live's wire on the Codex route, `delegation.ts` Sessão mestra delegation, `widget.ts` WidgetKit pushes, `index.ts`
+wiring). Tests: `test/watch.test.ts`, plus the
 widget push type in `test/live-activity-apns.test.ts`.
 
 **One gateway per process.** The plugin module is evaluated again for every Location, so the gateway lives in the
@@ -328,14 +333,23 @@ after the reset cannot bring them back. The watch shows "Limpou o contexto…" (
 and Tentar de novo; its retry is a new, empty call. The watch does not reconnect by itself: that would need a new offer
 from its media engine, a separate flow.
 
-**Voice diagnostics (rev. 2026-10-31, 2026-11-02).** Four log lines, never a transcript or speech; every service text goes
+**Voice diagnostics (rev. 2026-10-31, 2026-11-02).** Five log lines, never a transcript or speech; every service text goes
 through `sanitize` (`src/voice/sanitize.ts`: control characters out, quoted spans over 32 characters as `"…"`,
-whitespace collapsed, bounded), since an error message can quote the request it rejects:
+whitespace collapsed, bounded), since an error message can quote the request it rejects. Every command the gateway
+sends carries its own `event_id` (`oc_` and 16 hex digits; rev. 2026-11-02, fourth wave): the route accepts one on any
+command and returns it only in an `error` about that command, as `error.event_id`. The call keeps the newest 64
+(`limits.commands`) with their type, time and purpose (`narration`, `status`, `close`).
 
-- `Watch call upstream error`: `call`, then the error's `type`, `code`, `param` (120), `message` (240) and `eventID`,
-  read from `error.*` or else the event's top level (a string `error` is the message; empty or non-scalar values are
-  left out); then the correlation: `elapsedMs` since the call started, `lastSent` (the type of the last command this
-  server sent on the sideband, or `none`) with `lastSentAgoMs`, and `recent`, the last 12 event types received.
+- `Watch call session started` (fourth wave): `call`, `remoteID` (the last segment of the creation's `Location`), and
+  `session.started`'s `sessionID` (`session.id`, the same ID on 02/11) and `expiresAt` (epoch seconds: the creation
+  plus 2 h), when readable.
+- `Watch call upstream error`: `call`, then the error's `type`, `code`, `param` (120) and `message` (240), read from
+  `error.*` or else the event's top level (a string `error` is the message; empty or non-scalar values are left out);
+  `clientEventID`, ours (`error.event_id`), and `serverEventID`, the event's own top-level `event_id`, kept apart
+  (until the fourth wave one `eventID` took either); when `clientEventID` is one of the call's commands,
+  `failedCommand` (its type), `failedPurpose` and `failedAgoMs`; then the correlation: `elapsedMs` since the call
+  started, `lastSent` (the type of the last command this server sent on the sideband, or `none`) with `lastSentAgoMs`,
+  and `recent`, the last 12 event types received.
 - `Watch call sideband closed`: `call`, `by` (`local` when this server sent `session.close` first, `remote`
   otherwise), the WebSocket `code`, `reason` (120) and `clean`, `transportError: true` when the socket failed before
   closing, and the same correlation.
@@ -360,7 +374,10 @@ the call's memory `end`), one replacement ensure when the prompt fails, prompt
 text only, duplicate delegation IDs ignored. Progress
 lines are the iPhone's pt-BR texts (tool names from `session.tool.input.started`, Code Mode `toolCalls`, text,
 failures, pending requests). Only text updates (`Atualização: …`), pending requests, results and execution failures
-are spoken, at most one every 5 s keeping only the latest; results and failures skip the wait.
+are spoken, at most one every 5 s keeping only the latest; results and failures skip the wait. Since the fourth wave
+(rev. 2026-11-02) every spoken line also waits until neither Alexandre nor GPT Live is speaking (`output.quietAt`, as
+the iPhone narrates only while GPT Live listens and Alexandre is silent): progress stays a latest-value box, and a
+result or failure drops the progress waiting and always goes out, on its own item, once the speaking ends.
 
 **Request built by the gateway (rev. 2026-11-02, third wave).** On this route the text of `delegation.created` is the
 literal transcript of the user turn that delegated (the `turn.done` its `user_bidi_turn_id` names, recognition errors

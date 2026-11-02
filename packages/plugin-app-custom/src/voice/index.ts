@@ -119,6 +119,11 @@ export function diagnosticFields(event: Voice.Diagnostic) {
     ...(event.lastSent && event.lastSentSeconds !== undefined
       ? { lastSentAgoSeconds: Math.round(event.lastSentSeconds * 10) / 10 }
       : {}),
+    ...(event.remoteCall ? { remoteCall: event.remoteCall } : {}),
+    ...(event.failedCommand ? { failedCommand: event.failedCommand } : {}),
+    ...(event.failedCommand && event.failedCommandSeconds !== undefined
+      ? { failedCommandAgoSeconds: Math.round(event.failedCommandSeconds * 10) / 10 }
+      : {}),
     events: event.events.join(","),
   }
 }

@@ -142,6 +142,39 @@ O protocolo é o privado GPT Live/Codex, **não** `/v1/realtime` público. O can
 `session.commentary.append`/`session.thinking.append` oficiais), até 500 bytes UTF-8 por parte. Eventos e texto têm
 limites locais. Erros remotos não são despejados em logs.
 
+Desde 02/11 (quarta onda) o fio fica num lugar só por plataforma: no iPhone e no Mac, `VoiceProtocol` (Kit,
+`VoiceProtocol.swift`) tem os eventos, os comandos, os nomes de campo e o corpo da criação, e `VoiceSignaling` fica com
+o transporte HTTP (URL, query, cabeçalhos, lease); no Watch, `packages/plugin-app-custom/src/watch/protocol.ts` tem
+tudo isso, e `voice.ts` a orquestração. Todo comando leva um `event_id` gerado pelo app (`oc_` e 16 dígitos
+hexadecimais); a rota o aceita e o devolve só nos erros, em `error.event_id` (o `event_id` do topo do `error` é do
+servidor; sem um nosso, `error.event_id` vem `null`). As confirmações (`session.context.appended`,
+`delegation.context.appended`) não trazem ID: valem pela ordem, a de uma delegação pela ordem do seu item
+(`VoiceCommandLog`). Numa chamada real de 02/11 (8,5 s, sem fala nem delegação), os bytes montados pelo Kit e pelo
+`protocol.ts` foram aceitos como estão: `session.context.append` confirmado em 0,15 s; dois
+`delegation.context.append` para itens inexistentes (um do Kit, um do Watch) voltaram como `error` com o nosso
+`oc_…` em `error.event_id` em 0,12–0,14 s; `session.close` com `event_id` teve `session.closed` (`client_request`) em
+0,56 s e o canal fechou em 0,98 s; `session.started` trouxe o mesmo `rtc_…` do `Location`.
+
+### Rota do Codex e API oficial
+
+O que muda numa troca futura para a API oficial (`/v1/live/sessions`, guias de conversas ao vivo e de delegação da
+OpenAI). Comportamento segue a doc oficial; nomes e formatos, a rota. O `openai/codex` tem um TODO para alinhar a rota à
+API oficial.
+
+| Tema | Rota do Codex (o que os apps usam) | API oficial | iPhone/Mac | Watch (gateway) |
+|---|---|---|---|---|
+| Criação | `POST /backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas` com `OpenAI-Alpha: quicksilver=v2`; corpo `{sdp, session}` (`model: gpt-live-1-codex`, `instructions`, `audio.output.voice`, `delegation.type: client`); 201 com SDP e `Location` `…/rtc_…`; `session.started` traz `session.id` (o do `Location`) e `expires_at` (+2 h) | `POST /v1/live/sessions` com `transport.sdp`; resposta e `session.started` com `session.id` | `VoiceSignaling` + `VoiceProtocol.creation`; canal `oai-events`; ID da chamada nos diagnósticos (`remoteCall`) | `createPath`, `creation`; sideband `/v1/live/<id>` (WebSocket); ID e `expires_at` no log |
+| Histórico | `session.initial_items` (`message` `developer`/`user`/`assistant`) | `session.input` (mesmas mensagens) | `VoiceProtocol.message` | `message` |
+| Transcrições | `input_transcript.added`/`output_transcript.added` (`item.text`) | `session.input_transcript.delta`/`session.output_transcript.delta` (`delta`) | legenda, fala recente, fala parcial | legendas |
+| Fim de turno | `turn.done` (`turn.role`, `turn.transcript`); o do usuário só com o turno seguinte do assistente | não há: o app agrupa os deltas | memória e contexto do pedido | idem |
+| Delegação | `delegation.created` (`item.id`, texto = transcrição do turno, `user_bidi_turn_id`, `offset_ms`) | `session.delegation.created` (`delegation.id`, sem texto) | `delegate` | `receive` |
+| Fala | `delegation.context.append` `channel: speakable`; confirmação `delegation.context.appended` (`delegation_item_id`, por ordem) | `session.commentary.append` (`delegation_id`, `content` texto); `session.commentary.appended` com `client_event_id` | resultado ouvido só com todas as confirmações | confirmações ignoradas |
+| Contexto quieto | `delegation.context.append` `channel: commentary` (sem garantia de silêncio) | `session.thinking.append` / `.appended` | `VoiceMasterStatus` | `note` |
+| Contexto da sessão | `session.context.append` (canal omitido = `speakable`); `session.context.appended` só por ordem | `session.commentary.append` ou `session.thinking.append` com `delegation_id: null` | resultado depois de uma reconstrução | não usa |
+| Fechamento e motivo | `session.close` → `session.closed` (`reason: client_request`, `usage.audio_duration_ms`) | `session.close` → `session.closed` (`reason: close_requested`, `expired`, `content`, `remote_hangup`, `connection_lost`; `usage.seconds`) | `VoiceProtocol.close()`, espera até 2 s; `closedByModeration` | `close()`, espera o socket até 4 s; `closedByModeration` |
+| Correlação de erros | `event_id` nosso em todo comando, de volta só em `error.event_id`; o do topo é do servidor | `event_id`; `client_event_id` no `error` e nas confirmações | `VoiceEvent.failure(command:)`, `VoiceCommandLog`; `failedCommand` nos diagnósticos | `clientEventID`/`serverEventID`; `failedCommand` no log |
+| Mute | `input_audio.pause`/`input_audio.resume` (confirmados; não usados) | `session.input_audio.mute`/`unmute` | trilha local desligada | no relógio; o gateway não participa |
+
 ### Escolha da voz
 
 **Você → Conversa por voz → Voz** apresenta Rio e Viola em **Brasileiras**, antes das demais vozes.
@@ -290,10 +323,14 @@ na hora (a queda de 31/10, 08:48); agora cada caso tem uma regra:
   rede: cada passo (info, ensure, sessão, anexo, prompt) é repetido em erro passageiro por até cerca de
   15 s (1, 2, 4 e 8 s), e o prompt leva o mesmo ID nas tentativas; o servidor admite um ID uma vez só.
 - **Resultado durante a queda:** os itens de delegação ficam na chamada antiga, então o progresso pendente
-  é descartado, mas um resultado (ou falha) ainda não ouvido é guardado. Na chamada nova, ele vai para a
+  é descartado, mas um resultado (ou falha) ainda não ouvido é guardado: o que ainda esperava na caixa e, desde a
+  quarta onda (02/11), o que já saiu mas não teve todas as partes confirmadas pelo GPT Live
+  (`delegation.context.appended`/`session.context.appended`, que dizem que o contexto chegou ao modelo, não que foi
+  falado, em 0,12–0,25 s). Um resultado todo confirmado não é reenviado. Na chamada nova, ele vai para a
   próxima delegação; se nenhuma vier, vai logo como contexto da chamada (`session.context.append`, que o
-  serviço aceita com texto, conferido em 29/10). **Se o GPT Live o fala sem ser perguntado ainda não foi
-  verificado numa chamada real.** Um `error` nos 3 s seguintes devolve o texto para a próxima delegação.
+  serviço aceita com texto, conferido em 29/10; sem canal ele é `speakable`, e em 02/11 um fato assim foi falado em
+  menos de um segundo). Um `error` cujo `error.event_id` é de uma parte desse append devolve o texto para a próxima
+  delegação; um erro sem um ID nosso não conta (até a quarta onda, contava qualquer `error` nos 3 s seguintes).
 - **Limites:** janela de **2 minutos** desde a primeira perda, até **6 tentativas** com espera de 1, 2, 4,
   8, 15 e 15 s, cada uma com **20 s** para ficar pronta. Sem rede, nenhuma tentativa é gasta: o estado é
   **Sem conexão** e a rede é conferida a cada 250 ms até voltar ou a janela acabar. Esgotado, a faixa
@@ -302,9 +339,10 @@ na hora (a queda de 31/10, 08:48); agora cada caso tem uma regra:
 - **Diagnóstico:** cada falha tolerada e cada reconexão vão ao servidor (`Voice diagnostics`, seção
   "Motivo da queda"): `tolerated` com `service_error`, `invalid_event`, `ice_disconnected`,
   `ice_recovered`, `network_changed`, `lease_retry`, `reconnect_failed`, `delegation_overflow`,
-  `delegation_repeat`, `context_append`, `moderation_pending`, `moderation_nonfatal` e `reconnected`
-  (`code=attempts_N`); `lost` em cada perda (`session_closed` leva o `reason` do serviço como `code` e
-  `audio_duration_ms=…` como `detail`).
+  `delegation_repeat`, `context_append` (quando o GPT Live confirmou todas as partes), `call_mismatch`
+  (`session.started` com outro ID que o do `Location`, que vai como `code`), `moderation_pending`,
+  `moderation_nonfatal` e `reconnected` (`code=attempts_N`); `lost` em cada perda (`session_closed` leva o `reason` do
+  serviço como `code` e `audio_duration_ms=…` como `detail`).
 - **Falhas antes da primeira conexão** continuam encerrando com erro, sem retry (deadline de 45 s).
 - **Feedback:** faixa e Live Activity mostram **Reconectando…** ou **Sem conexão**. `VoiceCuePlayer`
   toca dois tons descendentes na perda, um tique suave a cada 3 s durante a recuperação, dois tons
@@ -723,7 +761,11 @@ Falar com a mestra**.
   do erro sanitizados por `VoiceDiagnosticText` (sem caracteres de controle, trechos entre aspas com mais de 32
   caracteres viram `"…"`, até 300 caracteres; o servidor aplica as mesmas regras de novo), e todo relatório leva o
   tipo do último comando enviado no canal (`lastSent`, `delegation.context.append` ou `session.context.append`) e há
-  quantos segundos. Nada de fala ou transcrição. Vai a `custom.voice` →
+  quantos segundos. Desde 02/11 (quarta onda) leva também o ID da chamada no GPT Live (`remoteCall`, o último trecho
+  do `Location` da criação, limitado como os nomes) e, num erro do GPT Live que nomeia um comando nosso pelo
+  `event_id`, o tipo dele e há quantos segundos saiu (`failedCommand`, `failedCommandSeconds`); `session.started`
+  traz o mesmo ID e o fim da sessão (`expires_at`, registrado no os_log como `expires_in`). Nada de fala ou
+  transcrição. Vai a `custom.voice` →
   `diagnostics`; o servidor grava `Voice diagnostics` em `~/.local/share/opencode/log/opencode.log`. Sem
   servidor ou sem essa RPC, o app guarda até 20 em `Application Support/voice-diagnostics.json` e manda na
   próxima conexão do fluxo de eventos (`EventHub`). Em todo build, o os_log `VoiceStartup` registra

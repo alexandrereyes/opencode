@@ -1759,7 +1759,11 @@ what he is saying or last said. The app also decides from his words whether to a
 "enfileira", "coloca na fila", "sem interromper"). Ending the call does not interrupt work already submitted to OpenCode. Ending a session
 that started sends `session.close` and waits up to 2 s for `session.closed` (or the data channel
 closing) before the transport and lease go; that close never reconnects or reports a loss. A moderation `error` only
-clears voice memory when the session ends within 5 s of it; otherwise the call goes on with its memory.
+clears voice memory when the session ends within 5 s of it; otherwise the call goes on with its memory. GPT Live's
+wire (the Codex route, not OpenAI's official Live API) lives in `VoiceProtocol` (OpenCodeKit, `VoiceProtocol.swift`);
+every command carries the app's own `event_id`, which GPT Live returns only in an `error` about it, and a result
+counts as heard once GPT Live confirms every part (`*.context.appended`): a call lost before that hands it to the
+rebuilt call. [`docs/voice.md`](docs/voice.md#rota-do-codex-e-api-oficial) maps each name to the official API.
 
 The same call starts without opening the app from the **Falar com a mestra** Control (Action
 button, Control Center, Lock Screen) or the App Shortcut of the same name: only the Live Activity

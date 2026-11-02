@@ -70,8 +70,11 @@ public struct VoiceFailureReason: Equatable, Sendable {
   public static func reconnected(attempts: Int) -> Self { Self("reconnected", code: "attempts_\(attempts)") }
   /// A rebuilt call delegated again a request the master already had; it was not sent twice.
   public static let delegationRepeat = Self("delegation_repeat")
-  /// A result that arrived during a rebuild went to the new call as context (`session.context.append`).
+  /// A result that arrived during a rebuild went to the new call as context (`session.context.append`), and GPT Live
+  /// took every part of it (`session.context.appended`).
   public static let contextAppend = Self("context_append")
+  /// `session.started` named another call than the creation's `Location`; `code` is the one it named.
+  public static func callMismatch(_ call: String?) -> Self { Self("call_mismatch", code: call) }
   /// GPT Live sent a moderation `error`; whether it ends the session is seen within `moderationWindow`.
   public static func moderationPending(_ code: String?, detail: String? = nil) -> Self {
     Self("moderation_pending", code: code, detail: detail)
@@ -192,13 +195,22 @@ public struct VoiceDiagnostic: Codable, Equatable, Sendable {
   /// The type of the last command sent on the data channel, and how many seconds before the report.
   public let lastSent: String?
   public let lastSentSeconds: Double?
+  /// GPT Live's ID of the call (`rtc_…`, from the creation's `Location`), once one was created.
+  public let remoteCall: String?
+  /// The command a GPT Live `error` named by its `event_id`, and how many seconds before the report it was sent.
+  public let failedCommand: String?
+  public let failedCommandSeconds: Double?
 
   public init(kind: Kind, reason: VoiceFailureReason, build: String, at: Date, call: UUID?, connectedSeconds: Double?,
     phase: String, recovering: Bool, events: VoiceEventTrail, app: App, audio: Audio?, network: String?,
-    lastSent: (type: String, seconds: Double)? = nil) {
+    lastSent: (type: String, seconds: Double)? = nil, remoteCall: String? = nil,
+    failedCommand: (type: String, seconds: Double)? = nil) {
     self.kind = kind; self.reason = reason.category; self.code = reason.code; self.detail = reason.detail
     self.lastSent = lastSent.map { VoiceDiagnosticName.label($0.type) }.flatMap { $0.isEmpty ? nil : $0 }
     self.lastSentSeconds = self.lastSent == nil ? nil : lastSent.map { max(0, $0.seconds) }
+    self.remoteCall = remoteCall.map(VoiceDiagnosticName.label).flatMap { $0.isEmpty ? nil : $0 }
+    self.failedCommand = failedCommand.map { VoiceDiagnosticName.label($0.type) }.flatMap { $0.isEmpty ? nil : $0 }
+    self.failedCommandSeconds = self.failedCommand == nil ? nil : failedCommand.map { max(0, $0.seconds) }
     #if os(macOS)
     platform = "macos"
     #else

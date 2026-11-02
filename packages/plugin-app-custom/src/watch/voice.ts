@@ -4,6 +4,25 @@ import { masterLabel, summaryLabel, turnText } from "../voice/index.js"
 import { sanitize } from "../voice/sanitize.js"
 import { hear, makeDelegator, masterRequest, parse, queues, type DelegationContext, type Heard } from "./delegation.js"
 import { fail } from "./failure.js"
+import {
+  alphaHeaders,
+  append,
+  callID,
+  close,
+  closed,
+  closedByModeration,
+  createPath,
+  creation,
+  decodeEvent,
+  decodeType,
+  message,
+  moderated,
+  rejectsVoice,
+  sidebandPath,
+  started,
+  upstreamError,
+  type Command,
+} from "./protocol.js"
 import { Watch } from "./rpc.js"
 
 export const limits = {
@@ -35,7 +54,8 @@ export const limits = {
   recentEvents: 12,
   /** Lease margin from the iPhone contract: a lease is considered lost this long before it expires. */
   leaseMarginMs: 10_000,
-  appendBytes: 500,
+  /** Commands kept by `event_id`, newest last, to name the one an upstream error is about. */
+  commands: 64,
   /**
    * Alexandre or GPT Live counts as speaking this long after a transcript piece of theirs (the iPhone's `userUntil`);
    * GPT Live's own `turn.done` ends it. The Mestra's quiet state waits for both.
@@ -43,9 +63,7 @@ export const limits = {
   speakingMs: 2_000,
 }
 
-export const model = "gpt-live-1-codex"
 export const proxyOrigin = "http://llm-proxy-svc:8080"
-const codexHeaders = { "OpenAI-Alpha": "quicksilver=v2", originator: "a2a-chat" }
 
 /** HTTP to the llm-proxy; production uses `fetch` against `proxyOrigin`, tests a local handler. */
 export type Proxy = {
@@ -116,6 +134,8 @@ type Call = {
   /** Correlation for diagnostics: the last command sent (type only) and the latest received event types. */
   lastSent?: { readonly type: string; readonly at: number }
   recent: string[]
+  /** The commands sent, by the `event_id` each carries (the newest `limits.commands`). */
+  sent: Map<string, { readonly type: string; readonly at: number; readonly purpose: "narration" | "status" | "close" }>
   /** How many memory items the call started with: with none, clearing memory cannot help a moderated call. */
   contextItems: number
   /** A moderation `error` waiting `limits.moderationMs` to see whether the session ends; `code` is its `type/code`. */
@@ -136,46 +156,6 @@ const Lease = Schema.Struct({
   leaseExpiresAt: Schema.String,
 })
 const decodeLease = Schema.decodeUnknownOption(Schema.fromJsonString(Lease))
-
-const SidebandEvent = Schema.Struct({
-  type: Schema.String,
-  item: Schema.optionalKey(
-    Schema.Struct({
-      id: Schema.optionalKey(Schema.String),
-      type: Schema.optionalKey(Schema.String),
-      text: Schema.optionalKey(Schema.String),
-      target: Schema.optionalKey(Schema.String),
-      user_bidi_turn_id: Schema.optionalKey(Schema.String),
-      content: Schema.optionalKey(
-        Schema.Array(Schema.Struct({ type: Schema.String, text: Schema.optionalKey(Schema.String) })),
-      ),
-    }),
-  ),
-  turn: Schema.optionalKey(
-    Schema.Struct({
-      id: Schema.optionalKey(Schema.String),
-      role: Schema.optionalKey(Schema.String),
-      transcript: Schema.optionalKey(Schema.String),
-      status: Schema.optionalKey(Schema.String),
-      interrupted: Schema.optionalKey(Schema.Boolean),
-    }),
-  ),
-  // Free-form on purpose: an error's fields must reach the log whatever their shape, nested or at the top level.
-  error: Schema.optionalKey(Schema.Unknown),
-  code: Schema.optionalKey(Schema.Unknown),
-  message: Schema.optionalKey(Schema.Unknown),
-  param: Schema.optionalKey(Schema.Unknown),
-  event_id: Schema.optionalKey(Schema.Unknown),
-  // `session.closed`, read field by field below: a field of an unexpected type must not lose the event.
-  reason: Schema.optionalKey(Schema.Unknown),
-  usage: Schema.optionalKey(Schema.Unknown),
-})
-const decodeEvent = Schema.decodeUnknownOption(Schema.fromJsonString(SidebandEvent))
-const decodeType = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({ type: Schema.String })))
-const decodeClosedReason = Schema.decodeUnknownOption(Schema.Struct({ reason: Schema.String }))
-const decodeClosedUsage = Schema.decodeUnknownOption(
-  Schema.Struct({ usage: Schema.Struct({ audio_duration_ms: Schema.Finite }) }),
-)
 
 /**
  * GPT Live calls for paired watches: the gateway reserves the llm-proxy lease, creates the call, attaches the
@@ -241,6 +221,7 @@ export function makeVoice(input: {
       delegated: new Set(),
       speaking: { user: 0, assistant: 0 },
       recent: [],
+      sent: new Map(),
       contextItems: 0,
     }
     calls.set(call.id, call)
@@ -273,7 +254,9 @@ export function makeVoice(input: {
     const memory = yield* initialItems(ctx)
     call.contextItems = memory.length
     const voices = [...new Set([offer.voiceID ?? Watch.defaultVoiceID, "rio", "cove"])]
-    const answer = yield* createCall(call, offer.sdp, voices, memory, instructions)
+    const created = yield* createCall(call, offer.sdp, voices, memory, instructions)
+    const answer = created.sdp
+    call.remoteID = created.remoteID
     if (!/^a=ice-lite\s*$/m.test(answer) || !answer.split(/\r?\n/).some(isUdpCandidate))
       return yield* fail(502, "unsupported_answer", "O serviço de voz não ofereceu um caminho de áudio compatível.")
     yield* Queue.take(call.inbox).pipe(
@@ -282,8 +265,8 @@ export function makeVoice(input: {
       Effect.forkIn(call.scope, { startImmediately: true }),
     )
     call.sideband = input.sideband(
-      input.proxy.origin.replace(/^http/, "ws") + `/v1/live/${call.remoteID}`,
-      codexHeaders,
+      input.proxy.origin.replace(/^http/, "ws") + sidebandPath(created.remoteID),
+      alphaHeaders,
       {
         message: (text) => Queue.offerUnsafe(call.inbox, text),
         closed: (close) => {
@@ -307,24 +290,23 @@ export function makeVoice(input: {
     return answer
   })
 
-  const createCall = (call: Call, sdp: string, voices: readonly string[], memory: readonly unknown[], instructions: string) =>
+  const createCall = (
+    call: Call,
+    sdp: string,
+    voices: readonly string[],
+    items: readonly ReturnType<typeof message>[],
+    instructions: string,
+  ) =>
     Effect.gen(function* () {
       for (const [index, voice] of voices.entries()) {
-        const session = {
-          model,
-          instructions,
-          audio: { output: { voice } },
-          delegation: { type: "client" },
-          ...(memory.length > 0 ? { initial_items: memory } : {}),
-        }
         const response = yield* http(
           "POST",
-          "/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas",
+          createPath,
           {
-            body: JSON.stringify({ sdp, session }),
+            body: JSON.stringify(creation({ sdp, instructions, voice, items })),
             headers: {
               accept: "application/sdp",
-              ...codexHeaders,
+              ...alphaHeaders,
               "user-agent": "OpenCode-Watch/1.0",
               "session-id": call.sessionId,
               "thread-id": call.sessionId,
@@ -337,11 +319,10 @@ export function makeVoice(input: {
         const body = yield* Effect.promise(() => response.text())
         // Only an explicit voice rejection proves the call was not created; anything else is never retried.
         if (index < voices.length - 1 && rejectsVoice(response.status, body)) continue
-        const location = response.headers.get("location") ?? ""
-        call.remoteID = location.split("?")[0]?.replace(/\/$/, "").split("/").pop() || undefined
-        if (response.status !== 201 || !body.startsWith("v=0") || !call.remoteID)
+        const remoteID = callID(response.headers.get("location") ?? "")
+        if (response.status !== 201 || !body.startsWith("v=0") || !remoteID)
           return yield* fail(502, "create_failed", "O serviço de voz recusou a chamada.")
-        return body
+        return { sdp: body, remoteID }
       }
       return yield* fail(502, "create_failed", "O serviço de voz recusou a chamada.")
     })
@@ -384,8 +365,16 @@ export function makeVoice(input: {
     if (call.recent.length > limits.recentEvents) call.recent.splice(0, call.recent.length - limits.recentEvents)
     if (!event || call.ended || call.moderated) return
     switch (event.type) {
-      case "session.started":
+      case "session.started": {
+        const session = started(event)
+        yield* Effect.logInfo("Watch call session started", {
+          call: call.id,
+          remoteID: call.remoteID,
+          ...(session.id === undefined ? {} : { sessionID: sanitize(session.id, 64) }),
+          ...(session.expiresAt === undefined ? {} : { expiresAt: session.expiresAt }),
+        })
         return yield* emit(call, { type: "status", status: "live" })
+      }
       case "input_transcript.added":
       case "output_transcript.added": {
         const role = event.type === "input_transcript.added" ? "user" : "assistant"
@@ -458,19 +447,25 @@ export function makeVoice(input: {
       case "error": {
         // Most errors leave the session open; it ends when the service closes the sideband.
         const error = upstreamError(event)
+        // The command the error is about, when it names one of ours.
+        const failed = call.sent.get(error.clientEventID)
         yield* Effect.logWarning("Watch call upstream error", {
           call: call.id,
           ...error,
+          ...(failed
+            ? {
+                failedCommand: failed.type,
+                failedPurpose: failed.purpose,
+                failedAgoMs: (yield* Clock.currentTimeMillis) - failed.at,
+              }
+            : {}),
           ...(yield* correlation(call)),
         })
         if (moderated(error)) return yield* pendModeration(call, [error.type, error.code].filter(Boolean).join("/"))
         return yield* emit(call, { type: "error", code: "voice_error", message: "O serviço de voz informou um erro." })
       }
       case "session.closed": {
-        call.closed = {
-          reason: Option.getOrUndefined(decodeClosedReason(event))?.reason,
-          audioMs: Option.getOrUndefined(decodeClosedUsage(event))?.usage.audio_duration_ms,
-        }
+        call.closed = closed(event)
         // The answer to our own `session.close`: the end already running finishes.
         if (call.ending) return
         if ((yield* moderationEnded(call)) || closedByModeration(call.closed.reason)) return yield* moderate(call)
@@ -550,11 +545,19 @@ export function makeVoice(input: {
   const settleLane = (fiber: Fiber.Fiber<void> | undefined, ms: number) =>
     fiber ? Fiber.await(fiber).pipe(Effect.timeoutOption(ms), Effect.asVoid) : Effect.void
 
-  /** Sends one command on the sideband and remembers its type for the next diagnostic. */
-  const send = (call: Call, command: { readonly type: string } & Record<string, unknown>) =>
+  /**
+   * Sends commands in order on the sideband, each kept by its `event_id` for an upstream error that names it, and
+   * remembers the last one's type for the next diagnostic.
+   */
+  const send = (call: Call, commands: readonly Command[], purpose: "narration" | "status" | "close") =>
     Effect.gen(function* () {
-      call.lastSent = { type: command.type, at: yield* Clock.currentTimeMillis }
-      call.sideband?.send(JSON.stringify(command))
+      for (const command of commands) {
+        const at = yield* Clock.currentTimeMillis
+        call.lastSent = { type: command.type, at }
+        call.sent.set(command.event_id, { type: command.type, at, purpose })
+        if (call.sent.size > limits.commands) call.sent.delete(call.sent.keys().next().value ?? "")
+        call.sideband?.send(JSON.stringify(command))
+      }
     })
 
   /** When in the call it happened, and what preceded it: the last command sent and the latest events received. */
@@ -575,23 +578,11 @@ export function makeVoice(input: {
       if (existing) return existing
       const ctx = input.ctx()
       if (!ctx) return undefined
-      const context = (itemID: string, text: string, channel: "speakable" | "commentary") =>
-        Effect.forEach(
-          chunks(text),
-          (chunk) =>
-            send(call, {
-              type: "delegation.context.append",
-              delegation_item_id: itemID,
-              channel,
-              content: [{ type: "input_text", text: chunk }],
-            }),
-          { discard: true },
-        )
       const created = makeDelegator(
         ctx,
         {
-          append: (itemID, text) => context(itemID, text, "speakable"),
-          note: (itemID, text) => context(itemID, text, "commentary"),
+          append: (itemID, text) => send(call, append(itemID, text, "speakable"), "narration"),
+          note: (itemID, text) => send(call, append(itemID, text, "commentary"), "status"),
           master: (state, text) => emit(call, { type: "master", state, text }),
           quietAt: () => Math.max(call.speaking.user, call.speaking.assistant),
         },
@@ -629,7 +620,7 @@ export function makeVoice(input: {
           // After the service's own `session.closed` its socket follows: there is nothing to ask.
           if (!call.closed) {
             call.closingAt = yield* Clock.currentTimeMillis
-            yield* send(call, { type: "session.close" })
+            yield* send(call, [close()], "close")
           }
           yield* Deferred.await(call.sidebandClosed).pipe(Effect.timeoutOption(limits.closeMs))
           call.sideband.close()
@@ -771,57 +762,6 @@ const initialItems = (ctx: VoiceContext) =>
     ),
   )
 
-/** Turns keep their speaker; what the server tells GPT Live (summary, Mestra state) is a developer message. */
-function message(role: "developer" | "user" | "assistant", text: string) {
-  return { type: "message", role, content: [{ type: role === "assistant" ? "output_text" : "input_text", text }] }
-}
-
-const ErrorFields = Schema.Struct({
-  type: Schema.optionalKey(Schema.Unknown),
-  code: Schema.optionalKey(Schema.Unknown),
-  message: Schema.optionalKey(Schema.Unknown),
-  param: Schema.optionalKey(Schema.Unknown),
-  event_id: Schema.optionalKey(Schema.Unknown),
-})
-const decodeErrorFields = Schema.decodeUnknownOption(ErrorFields)
-
-/** The service's moderation error, by its structured `type` or `code`; never by its message. */
-export function moderated(error: ReturnType<typeof upstreamError>) {
-  return error.type === "content_filter" || error.code === "content_filter"
-}
-
-/**
- * Same rule as the iPhone's `VoiceProtocol.closedByModeration`: a `session.closed` reason that names moderation.
- * OpenAI documents `content`; this route was only seen sending `client_request`, so any reason mentioning content or
- * moderation counts.
- */
-export function closedByModeration(reason: string | undefined) {
-  const value = reason?.toLowerCase() ?? ""
-  return value.includes("content") || value.includes("moderat")
-}
-
-/**
- * An upstream `error` event's fields for the log, from `error.*` or else the top level (a string `error` is its
- * message). Every value is sanitized and bounded; the message may quote a request, never a transcript.
- */
-export function upstreamError(event: typeof ErrorFields.Type & { readonly error?: unknown }) {
-  const nested = Option.getOrUndefined(decodeErrorFields(event.error))
-  const field = (name: keyof typeof ErrorFields.Type, max: number) => {
-    const value = nested?.[name] ?? (name === "type" ? undefined : event[name])
-    return typeof value === "string" || typeof value === "number" ? sanitize(String(value), max) : undefined
-  }
-  const message = field("message", 240) ?? (typeof event.error === "string" ? sanitize(event.error, 240) : undefined)
-  return Object.fromEntries(
-    Object.entries({
-      type: field("type", 64),
-      code: field("code", 64),
-      param: field("param", 120),
-      message,
-      eventID: field("event_id", 64),
-    }).filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== ""),
-  )
-}
-
 /** Same rule as the iPhone's `VoiceLeaseClock.isTransient`: 408, 429 and any 5xx are retried. */
 function transientStatus(status: number) {
   return status === 408 || status === 429 || status >= 500
@@ -829,51 +769,6 @@ function transientStatus(status: number) {
 
 function isUdpCandidate(line: string) {
   return line.startsWith("a=candidate:") && line.split(" ")[2]?.toLowerCase() === "udp"
-}
-
-/** Splits text into parts of at most 500 UTF-8 bytes without breaking a code point. */
-export function chunks(text: string) {
-  return Array.from(text).reduce<string[]>((parts, char) => {
-    const last = parts.at(-1)
-    if (last !== undefined && Buffer.byteLength(last + char) <= limits.appendBytes)
-      parts[parts.length - 1] = last + char
-    else parts.push(char)
-    return parts
-  }, [])
-}
-
-const VoiceRejection = Schema.Struct({
-  error: Schema.optionalKey(
-    Schema.Struct({
-      code: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      type: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      param: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    }),
-  ),
-  detail: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({ loc: Schema.optionalKey(Schema.Array(Schema.Unknown)), type: Schema.optionalKey(Schema.String) }),
-    ),
-  ),
-})
-const decodeRejection = Schema.decodeUnknownOption(Schema.fromJsonString(VoiceRejection))
-
-/** Same rule as the iPhone's `VoiceSignaling.rejectsVoice`. */
-export function rejectsVoice(status: number, body: string) {
-  if (status !== 400 && status !== 422) return false
-  const root = Option.getOrUndefined(decodeRejection(body))
-  if (!root) return false
-  if (["invalid_voice", "unsupported_voice"].includes(root.error?.code ?? "")) return true
-  if (
-    root.error?.type === "invalid_request_error" &&
-    ["session.audio.output.voice", "audio.output.voice", "voice"].includes(root.error.param ?? "")
-  )
-    return true
-  return (root.detail ?? []).some(
-    (item) =>
-      (item.loc ?? []).slice(-4).join(".") === "session.audio.output.voice" &&
-      ["enum", "literal_error", "value_error"].includes(item.type ?? ""),
-  )
 }
 
 /** Bun's WebSocket client, which accepts headers; the sideband needs the Codex alpha headers. */

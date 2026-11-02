@@ -659,6 +659,9 @@ test("voice diagnostics carry categories and names only and log one line each", 
     [{ ...diagnostic, code: "x".repeat(121) }],
     [{ ...diagnostic, detail: "x".repeat(301) }],
     [{ ...diagnostic, lastSent: "tipo com espaço".repeat(5) }],
+    [{ ...diagnostic, remoteCall: "" }],
+    [{ ...diagnostic, failedCommand: "x".repeat(65) }],
+    [{ ...diagnostic, failedCommand: "session.context.append", failedCommandSeconds: -1 }],
     [{ ...diagnostic, events: [...diagnostic.events, "y".repeat(65)] }],
     [{ ...diagnostic, events: Array.from({ length: 25 }, () => "error") }],
     [{ ...diagnostic, app: { state: "suspended", locked: true } }],
@@ -680,14 +683,29 @@ test("voice diagnostics carry categories and names only and log one line each", 
           // The service's `session.closed` reason as the code and the audio it counted as the detail (02/11).
           { ...diagnostic, kind: "lost", reason: "session_closed", code: "expired", detail: "audio_duration_ms=86800" },
           { ...diagnostic, kind: "tolerated", reason: "moderation_nonfatal", code: "content_filter/content_filter" },
+          // GPT Live's ID of the call and the command its error named by `event_id` (rev. 2026-11-02, optional).
+          {
+            ...diagnostic,
+            kind: "tolerated",
+            reason: "service_error",
+            remoteCall: "rtc_u4_Efq67p3oLtxKR6Dyslddk62KIpvyfJwS",
+            failedCommand: "session.context.append",
+            failedCommandSeconds: 0.24,
+          },
         ],
       }),
     ).pipe(
       Effect.provideService(Logger.CurrentLoggers, new Set([Logger.make((entry) => logged.push({ message: entry.message }))])),
     ),
   )
-  expect(result).toEqual({ accepted: 4 })
-  expect(logged.map((entry) => (entry.message as unknown[])[0])).toEqual(Array(4).fill("Voice diagnostics"))
+  expect(result).toEqual({ accepted: 5 })
+  expect(logged.map((entry) => (entry.message as unknown[])[0])).toEqual(Array(5).fill("Voice diagnostics"))
+  expect((logged[4]?.message as unknown[])[1]).toMatchObject({
+    reason: "service_error",
+    remoteCall: "rtc_u4_Efq67p3oLtxKR6Dyslddk62KIpvyfJwS",
+    failedCommand: "session.context.append",
+    failedCommandAgoSeconds: 0.2,
+  })
   expect((logged[2]?.message as unknown[])[1]).toMatchObject({
     kind: "lost",
     reason: "session_closed",

@@ -4,7 +4,10 @@ import { Clock, Effect, Option, Schema, Scope, Semaphore, Stream } from "effect"
 import { sessionTool } from "../sessions/index.js"
 
 export const limits = {
-  /** Progress narration is a latest-value mailbox spoken at most this often; results skip the wait. */
+  /**
+   * Progress narration is a latest-value mailbox spoken at most this often; results skip the wait. Both wait for
+   * nobody to be speaking (`DelegationOutput.quietAt`).
+   */
   narrationMs: 5_000,
   /**
    * The quiet state (`note`) is another latest-value box, sent at most this often and not this soon after a spoken
@@ -303,36 +306,45 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
     yield* say(itemID, spoken(reply), true)
   })
 
-  /** Speaks now, or keeps only the latest progress line until the narration slot opens. */
+  /**
+   * Speaks once neither Alexandre nor GPT Live is speaking (`output.quietAt`), as the iPhone does. Progress is a
+   * latest-value box that also waits for the narration slot; a result or failure (`final`) skips the slot, drops the
+   * progress and the quiet state still waiting, and always goes out, on its own item.
+   */
   const say = (itemID: string, text: string, final = false): Effect.Effect<void> =>
     Effect.gen(function* () {
-      const now = yield* Clock.currentTimeMillis
       yield* output.master(final ? "idle" : "running", text)
-      // A result or failure ends the request: a state still waiting is stale.
-      if (final) state.note.pending = undefined
-      if (final || now - state.lastSpokenAt >= limits.narrationMs) {
+      if (final) {
+        state.note.pending = undefined
         state.pending = undefined
-        state.lastSpokenAt = now
-        return yield* output.append(itemID, text)
+        return yield* sayFinal(itemID, text).pipe(Effect.forkIn(scope, { startImmediately: true }), Effect.asVoid)
       }
       state.pending = text
       if (state.flushing) return
       state.flushing = true
-      yield* Effect.sleep(state.lastSpokenAt + limits.narrationMs - now).pipe(
-        Effect.andThen(
-          Effect.suspend(() => {
-            state.flushing = false
-            const pending = state.pending
-            if (!pending || !state.itemID) return Effect.void
-            state.pending = undefined
-            return Clock.currentTimeMillis.pipe(
-              Effect.tap((at) => Effect.sync(() => (state.lastSpokenAt = at))),
-              Effect.andThen(output.append(state.itemID, pending)),
-            )
-          }),
-        ),
-        Effect.forkIn(scope, { startImmediately: true }),
-      )
+      yield* flushSay().pipe(Effect.forkIn(scope, { startImmediately: true }))
+    })
+
+  const flushSay = (): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      const at = Math.max(state.lastSpokenAt + limits.narrationMs, output.quietAt())
+      if (at > now) return yield* Effect.sleep(at - now).pipe(Effect.andThen(flushSay()))
+      state.flushing = false
+      const pending = state.pending
+      if (!pending || !state.itemID) return
+      state.pending = undefined
+      state.lastSpokenAt = now
+      yield* output.append(state.itemID, pending)
+    })
+
+  const sayFinal = (itemID: string, text: string): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      const quiet = output.quietAt()
+      if (quiet > now) return yield* Effect.sleep(quiet - now).pipe(Effect.andThen(sayFinal(itemID, text)))
+      state.lastSpokenAt = now
+      yield* output.append(itemID, text)
     })
 
   /**
@@ -355,7 +367,10 @@ export function makeDelegator(ctx: DelegationContext, output: DelegationOutput, 
       const at = Math.max(
         state.note.sentAt + limits.noteMs,
         state.lastSpokenAt + limits.noteAfterSpeechMs,
-        state.pending ? state.lastSpokenAt + limits.narrationMs + limits.noteAfterSpeechMs : -Infinity,
+        // A progress line waiting goes first, when the slot opens and nobody speaks.
+        state.pending
+          ? Math.max(state.lastSpokenAt + limits.narrationMs, output.quietAt()) + limits.noteAfterSpeechMs
+          : -Infinity,
         output.quietAt(),
       )
       if (at > now) return yield* Effect.sleep(at - now).pipe(Effect.andThen(flushNote()))

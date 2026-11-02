@@ -40,6 +40,7 @@ struct VoicePreferencesTests {
       request: { await http.respond($0) })
     #expect(result.voice == .cove)
     #expect(result.fallbackNotice == "A voz Maple não está disponível; usando Cove")
+    #expect(result.call == "test", "GPT Live's ID of the call, from the Location")
     let requests = await http.requests
     let bodies = try requests.map { try JSONDecoder().decode(JSONValue.self, from: #require($0.httpBody)) }
     #expect(bodies.map { $0.object?["session"]?.object?["audio"]?.object?["output"]?.object?["voice"]?.string } == ["maple", "rio", "cove"])
@@ -76,10 +77,7 @@ struct VoicePreferencesTests {
   @Test(arguments: ["invalid_voice", "unsupported_voice"])
   func explicitVoiceErrorCodesRequireAValidationStatus(_ code: String) throws {
     let data = try JSONEncoder().encode(["error": ["code": code]])
-    for status in [400, 422, 500] {
-      let response = try #require(HTTPURLResponse(url: VoiceSignaling.baseURL, statusCode: status, httpVersion: nil, headerFields: nil))
-      #expect(VoiceSignaling.rejectsVoice(data, response: response) == (status != 500))
-    }
+    for status in [400, 422, 500] { #expect(VoiceProtocol.rejectsVoice(data, status: status) == (status != 500)) }
   }
   @Test func exhaustedFallbackFailsWithoutAnotherAttempt() async {
     let http = VoiceOfferHTTP(statuses: [400, 400, 400])

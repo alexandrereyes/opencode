@@ -105,7 +105,11 @@ authenticated normal plugin transport, for example
   call phase, the app state (`active`/`inactive`/`background`, locked), the audio session and route on the
   iPhone, and the network path. Since 31/10 a `service_error` also carries `detail`, GPT Live's error message
   and `param` (≤ 300 characters), and every report the type of the last command sent on the data channel
-  (`lastSent`, logged with `lastSentAgoSeconds`). The app sanitizes `detail` with `VoiceDiagnosticText` and the
+  (`lastSent`, logged with `lastSentAgoSeconds`). Since 02/11 (fourth wave, optional, so older apps still fit) a
+  report also carries GPT Live's ID of the call (`remoteCall`, from the creation's `Location`) and, for an error that
+  names one of the app's commands by its `event_id`, that command's type (`failedCommand`, logged with
+  `failedCommandAgoSeconds`); the categories add `call_mismatch` (`session.started` named another call, as `code`).
+  The app sanitizes `detail` with `VoiceDiagnosticText` and the
   server again with `sanitize` (`src/voice/sanitize.ts`), by the same rules: no control characters, quoted spans over
   32 characters (which could echo speech) as `"…"`. No speech or transcript fits the schema; older servers ignore
   the new fields. The app keeps up to 20 unsent reports and sends them on the next event-stream connection. Read

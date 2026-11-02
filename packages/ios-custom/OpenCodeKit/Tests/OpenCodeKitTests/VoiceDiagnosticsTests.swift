@@ -50,6 +50,7 @@ struct VoiceDiagnosticsTests {
       (.contextReset("content_filter/content_filter"), "context_reset"), (.moderated("content_filter/content_filter"), "moderated"),
       (.moderationPending("content_filter/content_filter"), "moderation_pending"),
       (.moderationNonFatal("content_filter/content_filter"), "moderation_nonfatal"), (.sessionClosed(nil), "session_closed"),
+      (.contextAppend, "context_append"), (.callMismatch(nil), "call_mismatch"),
     ]
     for (reason, category) in reasons { #expect(reason.category == category) }
     #expect(Set(reasons.map(\.1)).count == reasons.count)
@@ -96,11 +97,17 @@ struct VoiceDiagnosticsTests {
     let service = VoiceDiagnostic(kind: .tolerated, reason: .service("server_error", detail: "Falhou."), build: "b",
       at: Date(timeIntervalSince1970: 1), call: nil, connectedSeconds: 12, phase: "listening", recovering: false,
       events: trail, app: .init(state: .active, locked: false), audio: nil, network: nil,
-      lastSent: (type: "delegation.context.append", seconds: 1.5))
+      lastSent: (type: "delegation.context.append", seconds: 1.5), remoteCall: "rtc_u4_Efq67p3o com espaço",
+      failedCommand: (type: "session.context.append", seconds: -0.2))
     let fields = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(service)).object ?? [:]
     #expect(fields["detail"]?.string == "Falhou.")
     #expect(fields["lastSent"]?.string == "delegation.context.append")
     #expect(fields["lastSentSeconds"] == .number(1.5))
+    // GPT Live's ID of the call and the command its error named, as bounded names.
+    #expect(fields["remoteCall"]?.string == "rtc_u4_Efq67p3ocomespao")
+    #expect(fields["failedCommand"]?.string == "session.context.append")
+    #expect(fields["failedCommandSeconds"] == .number(0))
+    #expect(VoiceFailureReason.callMismatch("rtc_outra").summary == "call_mismatch code=rtc_outra")
     // A report queued by an older build still decodes.
     let old = #"{"kind":"lost","reason":"ice_failed","platform":"ios","build":"b","at":1,"phase":"p","recovering":false,"events":[],"app":{"state":"active","locked":false}}"#
     #expect(try JSONDecoder().decode(VoiceDiagnostic.self, from: Data(old.utf8)).detail == nil)

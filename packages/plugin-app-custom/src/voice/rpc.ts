@@ -49,8 +49,8 @@ const Label = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
 const Short = Schema.String.check(Schema.isMaxLength(120))
 /**
  * Why an app's GPT Live call failed, was lost or ended, without speech: a category, the error code or event type,
- * the provider's sanitized error message and param, the last command sent, the names of the last events and the
- * device's state. Logged by the server as `Voice diagnostics`.
+ * the provider's sanitized error message and param, the last command sent and the one an error named, GPT Live's ID of
+ * the call, the names of the last events and the device's state. Logged by the server as `Voice diagnostics`.
  */
 export const Diagnostic = Schema.Struct({
   kind: Schema.Literals(["failed", "lost", "interrupted", "ended", "tolerated"]),
@@ -61,6 +61,11 @@ export const Diagnostic = Schema.Struct({
   /** The type of the last command the app sent on the data channel, and how long before the report. */
   lastSent: Schema.optionalKey(Label),
   lastSentSeconds: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+  /** GPT Live's ID of the call (`rtc_…`, the creation's `Location`), once one was created (rev. 2026-11-02). */
+  remoteCall: Schema.optionalKey(Label),
+  /** The command a GPT Live `error` named by its `event_id`, and how long before the report it was sent. */
+  failedCommand: Schema.optionalKey(Label),
+  failedCommandSeconds: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
   platform: Schema.Literals(["ios", "macos"]),
   build: Short,
   at: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),

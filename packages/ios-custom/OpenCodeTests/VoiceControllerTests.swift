@@ -14,20 +14,41 @@ import XCTest
   var sendFails = false
   /// The service answers `session.close` with `session.closed`, as on 02/11; off, ending waits for something else.
   var answersClose = true
+  /// The service confirms each append (`*.context.appended`, within 0.25 s on 02/11, here at once); off, none.
+  var confirms = true
+  /// The call ID `session.started` names (`session.id`); nil names none.
+  var startedCall: String?
   func offer() async throws -> String { "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n" }
   func answer(_ sdp: String) async throws {
     guard connects else { answered?(); return }
-    event?(.connected); event?(.data(Data(#"{"type":"session.started"}"#.utf8))); answered?()
+    var started: [String: JSONValue] = ["type": .string("session.started")]
+    if let startedCall {
+      started["session"] = .object(["id": .string(startedCall), "status": .string("active"), "expires_at": .number(1_793_647_619)])
+    }
+    event?(.connected); event?(.data(try JSONEncoder().encode(JSONValue.object(started)))); answered?()
   }
   func send(_ data: Data) async throws {
     if sendFails { throw VoiceWireError.invalidEvent }
     frames.append(data)
-    if answersClose, data == VoiceProtocol.close {
+    let object = (try? JSONDecoder().decode(JSONValue.self, from: data))?.object
+    switch object?["type"]?.string {
+    case "session.close" where answersClose:
       event?(.data(Data(#"{"type":"session.closed","reason":"client_request","usage":{"audio_duration_ms":4200,"backend_model_usage":[]}}"#.utf8)))
+    case "session.context.append" where confirms:
+      event?(.data(Data(#"{"type":"session.context.appended","start_ms":12200,"end_ms":12400}"#.utf8)))
+    case "delegation.context.append" where confirms:
+      event?(.data(try JSONEncoder().encode(JSONValue.object(["type": .string("delegation.context.appended"),
+        "delegation_item_id": object?["delegation_item_id"] ?? .null, "start_ms": .number(30600), "end_ms": .number(30800)]))))
+    default: break
     }
   }
   /// The type of every frame sent on this call, in order.
   var types: [String] { frames.compactMap(VoiceProtocol.eventType) }
+  /// The `event_id` of the last frame of one type sent on this call.
+  func eventID(_ type: String) -> String? {
+    frames.compactMap { (try? JSONDecoder().decode(JSONValue.self, from: $0))?.object }
+      .last { $0["type"]?.string == type }?["event_id"]?.string
+  }
   /// The text of every frame of one type sent on this call, joined: by default what GPT Live says (a frame without a
   /// channel is spoken), `.commentary` for its quiet state.
   func sent(_ type: String, item: String? = nil, channel: VoiceChannel = .speakable) -> String {
@@ -107,9 +128,11 @@ private actor VoiceTestInstructions {
   var transports: [VoiceTestTransport] = []
   var connects = true
   var answersClose = true
+  var confirms = true
   func make(_ event: @escaping @MainActor @Sendable (VoiceTransportEvent) -> Void) -> any VoiceTransporting {
     let transport = VoiceTestTransport()
     transport.event = event; transport.connects = connects; transport.answersClose = answersClose
+    transport.confirms = confirms
     transports.append(transport)
     return transport
   }
@@ -258,7 +281,7 @@ private actor LiveMemoryHTTP {
   init(_ expectation: XCTestExpectation) { self.expectation = expectation }
   func receive(_ event: VoiceTransportEvent) {
     if case .connected = event { media = true }
-    if case .data(let data) = event, (try? VoiceProtocol.decode(data)) == .ready { protocolReady = true }
+    if case .data(let data) = event, case .ready = try? VoiceProtocol.decode(data) { protocolReady = true }
     if media && protocolReady && !fulfilled { fulfilled = true; expectation.fulfill() }
   }
 }
@@ -1034,9 +1057,10 @@ private actor LiveMemoryHTTP {
     await call.controller.end()
   }
 
-  /// When the service refuses the result as call context, it waits for the next delegation of the new call.
-  func testRejectedContextWaitsForTheNextDelegation() async throws {
-    let call = await resilient()
+  /// Rebuilds the call and has the master's result go to it as call context, which GPT Live does not confirm; returns
+  /// the rebuilt call's transport.
+  private func resultAsContext(_ call: Resilient) async throws -> VoiceTestTransport {
+    call.pool.confirms = false
     let asked = expectation(description: "asked")
     call.master.asked = { asked.fulfill() }
     call.pool.transports[0].event?(delegation("a", "Confira a sessão"))
@@ -1047,14 +1071,126 @@ private actor LiveMemoryHTTP {
     call.master.update?(.finished("Está tudo certo."))
     let sent = await until(3) { !call.pool.transports[1].sent("session.context.append").isEmpty }
     XCTAssertTrue(sent)
-    call.pool.transports[1].event?(.data(Data(#"{"type":"error","error":{"type":"invalid_request_error","code":"unknown_parameter"}}"#.utf8)))
+    return call.pool.transports[1]
+  }
+
+  /// An `error` naming the result's call context by its `event_id` is a refusal: the result waits for the next
+  /// delegation of the new call, and the report names the command and GPT Live's call.
+  func testRejectedContextWaitsForTheNextDelegation() async throws {
+    let call = await resilient()
+    let transport = try await resultAsContext(call)
+    let id = try XCTUnwrap(transport.eventID("session.context.append"))
+    transport.event?(.data(try JSONEncoder().encode(JSONValue.object(["type": .string("error"), "event_id": .string("event_srv"),
+      "error": .object(["type": .string("invalid_request_error"), "code": .string("unknown_parameter"), "event_id": .string(id)])]))))
     let next = expectation(description: "next")
     call.master.asked = { next.fulfill() }
-    call.pool.transports[1].event?(delegation("b", "E agora?"))
+    transport.event?(delegation("b", "E agora?"))
     await fulfillment(of: [next], timeout: 3)
-    let delivered = await until(3) { call.pool.transports[1].sent("delegation.context.append", item: "b").contains("Resultado: Está tudo certo.") }
+    let delivered = await until(3) { transport.sent("delegation.context.append", item: "b").contains("Resultado: Está tudo certo.") }
     XCTAssertTrue(delivered)
+    let errors = await call.reports("service_error")
+    let error = try XCTUnwrap(errors.first)
+    XCTAssertEqual(error.failedCommand, "session.context.append")
+    XCTAssertLessThan(try XCTUnwrap(error.failedCommandSeconds), 3)
+    XCTAssertEqual(error.remoteCall, "test")
     await call.controller.end()
+  }
+
+  /// An `error` that names none of the app's commands (no `error.event_id`, or only the service's at the top) is not
+  /// a refusal of the result: it is not sent again, and the report names no command.
+  func testErrorWithoutTheAppsEventIDIsNotARefusal() async throws {
+    let call = await resilient()
+    let transport = try await resultAsContext(call)
+    for json in [#"{"type":"error","event_id":"event_srv","error":{"type":"invalid_request_error","code":"unknown_parameter","event_id":null}}"#,
+      #"{"type":"error","event_id":"event_srv","error":{"type":"server_error","code":"internal","event_id":"oc_0000000000000000"}}"#] {
+      transport.event?(.data(Data(json.utf8)))
+    }
+    let next = expectation(description: "next")
+    call.master.asked = { next.fulfill() }
+    transport.event?(delegation("b", "E agora?"))
+    await fulfillment(of: [next], timeout: 3)
+    try await Task.sleep(for: .milliseconds(1_200))
+    XCTAssertFalse(transport.sent("delegation.context.append", item: "b").contains("Está tudo certo"))
+    let errors = await call.reports("service_error")
+    XCTAssertEqual(errors.count, 2)
+    XCTAssertTrue(errors.allSatisfy { $0.failedCommand == nil && $0.failedCommandSeconds == nil })
+    await call.controller.end()
+  }
+
+  /// A call lost after its result went out but before GPT Live took every part of it hands the result to the
+  /// rebuilt call, as call context; GPT Live taking it there is reported once.
+  func testResultLostBeforeItsConfirmationReachesTheRebuiltCall() async throws {
+    let call = await resilient()
+    let asked = expectation(description: "asked")
+    call.master.asked = { asked.fulfill() }
+    let first = call.pool.transports[0]
+    first.confirms = false
+    first.event?(delegation("a", "Pesquise o preço do Mac Studio"))
+    await fulfillment(of: [asked], timeout: 3)
+    call.master.update?(.finished("Custa 10 mil reais."))
+    let said = await until(3) { first.sent("delegation.context.append", item: "a").contains("Resultado: Custa 10 mil reais.") }
+    XCTAssertTrue(said)
+    first.event?(.failed(.iceFailed))
+    let heard = await until(5) { call.pool.transports.count == 2
+      && call.pool.transports[1].sent("session.context.append").contains("Resultado: Custa 10 mil reais.") }
+    XCTAssertTrue(heard)
+    let delivered = await until { await call.reports("context_append").count == 1 }
+    XCTAssertTrue(delivered)
+    XCTAssertEqual(call.master.requests.count, 1)
+    await call.controller.end()
+  }
+
+  /// A result GPT Live took (every part confirmed) is not sent again after a loss.
+  func testConfirmedResultIsNotSentAgainAfterALoss() async throws {
+    let call = await resilient()
+    let asked = expectation(description: "asked")
+    call.master.asked = { asked.fulfill() }
+    let first = call.pool.transports[0]
+    first.event?(delegation("a", "Pesquise o preço do Mac Studio"))
+    await fulfillment(of: [asked], timeout: 3)
+    // In several parts, each confirmed.
+    let result = String(repeating: "Custa 10 mil reais. ", count: 60)
+    call.master.update?(.finished(result))
+    let said = await until(3) { first.sent("delegation.context.append", item: "a") == "Resultado: " + result }
+    XCTAssertTrue(said)
+    first.event?(.failed(.iceFailed))
+    let rebuilt = await until(5) { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    try await Task.sleep(for: .milliseconds(1_200))
+    XCTAssertEqual(call.pool.transports[1].sent("session.context.append"), "")
+    let delivered = await call.reports("context_append")
+    XCTAssertTrue(delivered.isEmpty)
+    await call.controller.end()
+  }
+
+  /// `session.started` naming another call than the creation's `Location` is reported, and the call goes on.
+  func testSessionStartedNamingAnotherCallIsReported() async throws {
+    let outbox = VoiceDiagnosticsOutbox(url: FileManager.default.temporaryDirectory.appending(path: "voice-diagnostics-\(UUID()).json"))
+    let transport = VoiceTestTransport(), http = VoiceTestHTTP()
+    transport.startedCall = "rtc_outra"
+    let answered = expectation(description: "answered")
+    transport.answered = { answered.fulfill() }
+    let controller = VoiceController(testing: .init(transport: { event in transport.event = event; return transport },
+      master: { _ in VoiceTestMaster() }, request: { try await http.respond($0) }, diagnostics: outbox))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [answered], timeout: 3)
+    XCTAssertEqual(controller.state.phase, .listening)
+    let reported = await until { await outbox.pending().contains { $0.reason == "call_mismatch" } }
+    XCTAssertTrue(reported)
+    let pending = await outbox.pending()
+    let mismatch = try XCTUnwrap(pending.first { $0.reason == "call_mismatch" })
+    XCTAssertEqual(mismatch.kind, .tolerated)
+    XCTAssertEqual(mismatch.code, "rtc_outra")
+    XCTAssertEqual(mismatch.remoteCall, "test", "the Location's")
+    await controller.end()
+    transport.startedCall = "test"
+    let again = expectation(description: "again")
+    transport.answered = { again.fulfill() }
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    await fulfillment(of: [again], timeout: 3)
+    await controller.end()
+    let mismatches = await outbox.pending().filter { $0.reason == "call_mismatch" }
+    XCTAssertEqual(mismatches.count, 1, "the same ID is no mismatch")
   }
 
   /// The rebuilt call starts with the requests the master still has, and the same request delegated again is not
@@ -1722,7 +1858,7 @@ private actor LiveMemoryHTTP {
         let response = try XCTUnwrap(result as? HTTPURLResponse)
         let accepted = response.statusCode == 201
         if accepted { _ = try VoiceSignaling.parseAnswer(data, response: response) }
-        let rejected = VoiceSignaling.rejectsVoice(data, response: response)
+        let rejected = VoiceProtocol.rejectsVoice(data, status: response.statusCode)
         await transport.close()
         let (_, release) = try await URLSession.shared.data(for: signal.leaseRequest(method: "DELETE"))
         let released = (release as? HTTPURLResponse)?.statusCode ?? 0

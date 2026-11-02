@@ -8,7 +8,8 @@ import { devicesKey, makeDevices } from "../src/watch/devices"
 import { key, limits as widgetLimits, makeWidgetPush } from "../src/watch/widget"
 import { makeStats } from "../src/watch/stats"
 import { limits as gatewayLimits, redact } from "../src/watch/gateway"
-import { chunks, closedByModeration, limits as voiceLimits, rejectsVoice, upstreamError } from "../src/watch/voice"
+import { limits as voiceLimits } from "../src/watch/voice"
+import { chunks, closedByModeration, rejectsVoice, upstreamError } from "../src/watch/protocol"
 import { sanitize } from "../src/voice/sanitize"
 import {
   contextLabel,
@@ -60,6 +61,20 @@ const logCollector = () => {
     provide: Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
   }
 }
+
+/**
+ * The commands sent on a sideband, parsed. Each carries its own `event_id` (`oc_` and 16 hex digits), checked here and
+ * left out of what is returned.
+ */
+const sentCommands = (socket: { sent: string[] } | undefined) => {
+  const sent = socket?.sent ?? []
+  const ids = sent.map((text) => JSON.parse(text).event_id)
+  expect(ids.every((id) => /^oc_[0-9a-f]{16}$/.test(id))).toBe(true)
+  expect(new Set(ids).size).toBe(ids.length)
+  // No command nests an `event_id`: only the command's own is left out.
+  return sent.map((text) => JSON.parse(text, (name, value) => (name === "event_id" ? undefined : value)))
+}
+const sentTypes = (socket: { sent: string[] } | undefined) => sentCommands(socket).map((command) => command.type)
 
 /** Starts a gateway with one Location member and one paired watch. */
 const setup = (input: { proxy?: Parameters<typeof gateway>[0]["proxy"] } = {}) =>
@@ -357,7 +372,7 @@ it.effect("the lease is renewed only while heartbeats arrive; 30 s without one e
       yield* settled
     }
     expect(renewals()).toBe(6 + voiceLimits.livenessMs / voiceLimits.renewMs - 1)
-    expect(sidebands.opened[0]?.sent).toContain(JSON.stringify({ type: "session.close" }))
+    expect(sentTypes(sidebands.opened[0])).toContain("session.close")
     expect(proxy.log.at(-1)).toMatchObject({ method: "DELETE" })
     expect(proxy.log.at(-1)?.path).toContain("?generation=")
     const page = yield* json("GET", `/voice/calls/${created.callID}/events?after=0`)
@@ -633,9 +648,7 @@ it.effect("a repeated delegation is admitted once and leaves the context to the 
 
 /** The `delegation.context.append` commands sent on one channel. */
 const contextAppends = (socket: { sent: string[] } | undefined, channel: "speakable" | "commentary") =>
-  (socket?.sent ?? [])
-    .map((text) => JSON.parse(text))
-    .filter((event) => event.type === "delegation.context.append" && event.channel === channel)
+  sentCommands(socket).filter((event) => event.type === "delegation.context.append" && event.channel === channel)
 
 it.effect("the Mestra's activity reaches GPT Live as quiet state: latest only, spaced, never over speech", () =>
   Effect.gen(function* () {
@@ -693,6 +706,46 @@ it.effect("the Mestra's activity reaches GPT Live as quiet state: latest only, s
   }).pipe(Effect.map(() => undefined)),
 )
 
+it.effect("spoken narration waits for silence: progress keeps the latest, the result always goes out after it", () =>
+  Effect.gen(function* () {
+    const { sidebands, server, json } = yield* setup()
+    yield* json("POST", "/voice/calls", { sdp: offerSDP })
+    const socket = sidebands.opened[0]
+    const spokenLines = () => contextAppends(socket, "speakable").map((event) => event.content[0].text)
+    delegate(socket, "item_s1", "Quais arquivos mudaram?")
+    yield* settled
+    // Alexandre is speaking: the Mestra's updates wait for him, and only the latest goes.
+    socket?.deliver({ type: "input_transcript.added", item: { id: "item_u", text: " E os testes" } })
+    yield* settled
+    yield* PubSub.publish(server.bus, masterEvents.text("ses_master", "Achei dois."))
+    yield* PubSub.publish(server.bus, masterEvents.text("ses_master", "Achei três."))
+    yield* settled
+    yield* TestClock.adjust(voiceLimits.speakingMs - 1)
+    yield* settled
+    expect(spokenLines()).toEqual([])
+    yield* TestClock.adjust(1)
+    yield* settled
+    expect(spokenLines()).toEqual(["Atualização: Achei três."])
+    // GPT Live is speaking when the result arrives: it waits, without the narration slot, and still goes out.
+    yield* TestClock.adjust(500)
+    socket?.deliver({ type: "output_transcript.added", item: { id: "item_a", text: "Dois arquivos" } })
+    yield* settled
+    server.messages.set("ses_master", [assistant("msg_reply", "Mudaram três arquivos."), assistant("msg_prompt1", "")])
+    yield* PubSub.publish(server.bus, masterEvents.succeeded("ses_master"))
+    yield* settled
+    yield* TestClock.adjust(1_500)
+    socket?.deliver({ type: "output_transcript.added", item: { id: "item_a", text: " e o README" } })
+    yield* settled
+    yield* TestClock.adjust(voiceLimits.speakingMs - 1)
+    yield* settled
+    expect(spokenLines()).toHaveLength(1)
+    yield* TestClock.adjust(1)
+    yield* settled
+    // 4 s after the previous line, inside the narration slot it skips.
+    expect(spokenLines()).toEqual(["Atualização: Achei três.", "Mudaram três arquivos."])
+  }).pipe(Effect.map(() => undefined)),
+)
+
 it.effect("an upstream error is logged with its fields, nested or top level, sanitized and correlated", () => {
   const logs = logCollector()
   return Effect.gen(function* () {
@@ -701,8 +754,10 @@ it.effect("an upstream error is logged with its fields, nested or top level, san
     const socket = sidebands.opened[0]
     socket?.deliver({ type: "session.started" })
     yield* TestClock.adjust(2_000)
+    // Ours is `error.event_id`; the event's own `event_id` is the service's (02/11).
     socket?.deliver({
       type: "error",
+      event_id: "event_Efq6Nz",
       error: {
         type: "invalid_request_error",
         code: "invalid_value",
@@ -717,8 +772,22 @@ it.effect("an upstream error is logged with its fields, nested or top level, san
     yield* PubSub.publish(server.bus, masterEvents.text("ses_master", "Duas sessões estão rodando."))
     yield* settled
     yield* TestClock.adjust(1_500)
-    // The same fields at the top level; the event's own `type` is not the error type.
-    socket?.deliver({ type: "error", code: "server_error", message: "The server had an error.", param: null })
+    // The same fields at the top level; the event's own `type` is not the error type, nor its `event_id` ours.
+    socket?.deliver({
+      type: "error",
+      event_id: "event_Efq6Q1",
+      code: "server_error",
+      message: "The server had an error.",
+      param: null,
+    })
+    yield* settled
+    yield* TestClock.adjust(500)
+    // An error about one of our commands names it: here the spoken line, sent 2 s before.
+    const spokenID = JSON.parse(socket?.sent.at(-1) ?? "{}").event_id
+    socket?.deliver({
+      type: "error",
+      error: { type: "invalid_request_error", code: "invalid_value", event_id: spokenID },
+    })
     yield* settled
     expect(logs.named("Watch call upstream error")).toEqual([
       {
@@ -728,7 +797,8 @@ it.effect("an upstream error is logged with its fields, nested or top level, san
         param: "item.content[0].text",
         // Control characters and a long quoted span (possibly speech) never reach the log.
         message: 'Invalid value: "…". Retry later.',
-        eventID: "evt_42",
+        clientEventID: "evt_42",
+        serverEventID: "event_Efq6Nz",
         elapsedMs: 2_000,
         lastSent: "none",
         recent: "session.started,error",
@@ -737,16 +807,33 @@ it.effect("an upstream error is logged with its fields, nested or top level, san
         call: created.callID,
         code: "server_error",
         message: "The server had an error.",
+        serverEventID: "event_Efq6Q1",
         elapsedMs: 3_500,
         lastSent: "delegation.context.append",
         lastSentAgoMs: 1_500,
         recent: "session.started,error,delegation.created,error",
       },
+      {
+        call: created.callID,
+        type: "invalid_request_error",
+        code: "invalid_value",
+        clientEventID: spokenID,
+        failedCommand: "delegation.context.append",
+        failedPurpose: "narration",
+        failedAgoMs: 2_000,
+        elapsedMs: 4_000,
+        lastSent: "delegation.context.append",
+        lastSentAgoMs: 2_000,
+        recent: "session.started,error,delegation.created,error,error",
+      },
+    ])
+    expect(contextAppends(socket, "speakable").map((event) => event.content[0].text)).toEqual([
+      "Atualização: Duas sessões estão rodando.",
     ])
     // The watch only gets the generic notice, and the call goes on.
     const page = yield* json("GET", `/voice/calls/${created.callID}/events?after=0`)
     expect(page.ended).toBe(false)
-    expect(page.events.filter((event: Watch.VoiceEvent) => event.type === "error")).toHaveLength(2)
+    expect(page.events.filter((event: Watch.VoiceEvent) => event.type === "error")).toHaveLength(3)
   }).pipe(
     logs.provide,
     Effect.map(() => undefined),
@@ -765,7 +852,7 @@ it.effect("a sideband close is logged with its code, reason and side, and ends t
     sidebands.opened[0]?.remoteClose({ code: 1011, reason: "Internal error\nkeepalive" })
     yield* settled
     expect((yield* events(first.callID)).events.at(-1)).toMatchObject({ status: "ended", reason: "sideband_closed" })
-    expect(sidebands.opened[0]?.sent).not.toContain(JSON.stringify({ type: "session.close" }))
+    expect(sentTypes(sidebands.opened[0])).not.toContain("session.close")
     // A transport failure before the close is flagged.
     const second = yield* json("POST", "/voice/calls", { sdp: offerSDP })
     sidebands.opened[1]?.remoteClose({ code: 1006, transportError: true })
@@ -910,7 +997,7 @@ it.effect("a moderation the session ends with clears voice memory once and keeps
     expect(server.masters.ensured).toBe(0)
     expect([...server.sessions.keys()]).toEqual(sessionsBefore)
     // The service ended the session: nothing was asked of it.
-    expect(sidebands.opened[0]?.sent).not.toContain(JSON.stringify({ type: "session.close" }))
+    expect(sentTypes(sidebands.opened[0])).not.toContain("session.close")
   }).pipe(Effect.map(() => undefined)),
 )
 
@@ -947,7 +1034,7 @@ it.effect(
       expect(logs.named("Watch call ended")).toMatchObject([
         { call: created.callID, reason: "session_closed", closedReason: "expired", audioDurationMs: 86_800 },
       ])
-      expect(sidebands.opened[0]?.sent).not.toContain(JSON.stringify({ type: "session.close" }))
+      expect(sentTypes(sidebands.opened[0])).not.toContain("session.close")
     }).pipe(
       logs.provide,
       Effect.map(() => undefined),
@@ -1000,7 +1087,7 @@ it.effect("ending keeps what was said since each role's last turn in memory, onc
     socket?.deliver({ type: "input_transcript.added", item: { id: "item_3", text: " outra coisa" } })
     yield* settled
     yield* json("DELETE", `/voice/calls/${created.callID}`)
-    expect(sidebands.opened[0]?.sent).toContain(JSON.stringify({ type: "session.close" }))
+    expect(sentTypes(sidebands.opened[0])).toContain("session.close")
     expect(server.memory.appended).toEqual([
       { id: `${created.callID}:turn_a`, role: "assistant", text: "Resposta completa.", at: T },
       {

@@ -95,7 +95,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
       guard peer.addTransceiver(with: track, init: transceiver) != nil else { throw VoiceWireError.invalidAnswer }
       let settings = RTCDataChannelConfiguration()
       settings.isOrdered = true
-      guard let channel = peer.dataChannel(forLabel: "oai-events", configuration: settings) else {
+      guard let channel = peer.dataChannel(forLabel: VoiceProtocol.dataChannel, configuration: settings) else {
         throw VoiceWireError.invalidAnswer
       }
       self.channel = channel
