@@ -2,7 +2,7 @@ import XCTest
 
 /// The Sessões quota strip (rev. 2026-11-01): every account of every plan as a mark, with the stubbed proxy
 /// (`SubscriptionMarksFixture`, no proxy or model call). It stays within the old rings' row (38 pt) above the
-/// project chips and inside the screen margin, falls back to counts with many accounts, and opens the details.
+/// project chips and inside the screen margin, scrolls sideways with many accounts, and opens the details.
 /// Run in both themes and on a narrow iPhone (`script/test-subscriptions.py` with `OPENCODE_TEST_THEME`).
 @MainActor final class SessionQuotaMarksTests: XCTestCase {
   private var theme: String { ProcessInfo.processInfo.environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark" }
@@ -132,17 +132,60 @@ import XCTest
     XCTAssertTrue(app.buttons["proxy-strip-codex"].waitForExistence(timeout: 10))
   }
 
-  func testManyAccountsFallBackToCountsInTheSameRow() throws {
+  /// The iPhone (rev. 2026-11-02): a line that does not fit scrolls sideways, its bar hidden, and keeps every mark
+  /// with its balance or wait instead of falling back to counts. A drag never opens the details, an update keeps the
+  /// line where it was, and a deliberate tap still opens them.
+  func testManyAccountsScrollWithinTheirLineWithoutOpeningTheDetails() throws {
     let app = try launch("many")
     defer { app.terminate() }
     let claude = app.buttons["proxy-strip-anthropic"]
-    // 16 Max 5x (every third extra one stopped by the 5-hour window), the plan without a name and an unknown one:
-    // each provider falls back to counts within its own line.
+    // 16 Max 5x (every third extra one stopped by the 5-hour window), the plan without a name and an unknown one.
     // A plan's label comes back when the states split it: Pro Max ready, then Pro Max needing login.
     wait(claude, value: "5x:100,72,64,50,50,50,50,50,50,50,50,41|Outro:90|Team:40|5x:B45m,B2h,B2h,B3h|20x:E3d,E3d")
     wait(app.buttons["proxy-strip-codex"], value: "Pro Max:64|Plus:33|5x:B3h,E2d|Pro Max:!|5x:?")
     checkGeometry(app)
     shot("muitas")
+
+    // To the end of the line, where the last waits and the resets are: every ring is there, so it scrolls far.
+    for _ in 0..<10 {
+      if let place = scroll(claude), place.end > 0, place.offset >= place.end - 1 { break }
+      claude.swipeLeft(velocity: .fast)
+    }
+    let end = try XCTUnwrap(scroll(claude), "a linha não rolou: \(claude.value ?? "-")")
+    XCTContext.runActivity(named: "rolagem do Claude: \(end.offset) de \(end.end) pt") { _ in }
+    XCTAssertGreaterThan(end.end, 150, "as marcas não passam da largura: \(end)")
+    XCTAssertGreaterThanOrEqual(end.offset, end.end - 1, "não chegou ao fim: \(end)")
+    XCTAssertFalse(app.buttons["proxy-close"].exists, "arrastar abriu os detalhes")
+    checkGeometry(app)
+    shot("muitas-fim")
+
+    // A vertical drag (80 pt; `swipeDown` on a 16 pt line moves the finger only a few points, a tap) neither scrolls
+    // the line sideways nor opens the details.
+    let center = claude.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    center.press(forDuration: 0.05, thenDragTo: center.withOffset(CGVector(dx: 0, dy: 80)))
+    XCTAssertFalse(app.buttons["proxy-close"].waitForExistence(timeout: 1.5), "o arraste vertical abriu os detalhes")
+    XCTAssertEqual(scroll(claude)?.offset, end.offset, "o arraste vertical moveu a linha")
+
+    // Back from the background the quota is read again: the line stays where it was.
+    XCUIDevice.shared.press(.home)
+    Thread.sleep(forTimeInterval: 1)
+    app.activate()
+    XCTAssertTrue(claude.waitForExistence(timeout: 10))
+    Thread.sleep(forTimeInterval: 3)
+    XCTAssertEqual(scroll(claude)?.offset, end.offset, "a atualização levou a linha de volta ao início")
+
+    // A deliberate tap opens Claude's details.
+    claude.tap()
+    XCTAssertTrue(app.buttons["proxy-close"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["proxy-provider-anthropic"].isSelected)
+    app.buttons["proxy-close"].tap()
+  }
+
+  /// The sideways offset and how far the line goes, from the DEBUG value (`…@120/300`); nil at rest.
+  private func scroll(_ element: XCUIElement) -> (offset: Int, end: Int)? {
+    guard let value = element.value as? String, let at = value.lastIndex(of: "@") else { return nil }
+    let parts = value[value.index(after: at)...].split(separator: "/").compactMap { Int($0) }
+    return parts.count == 2 ? (parts[0], parts[1]) : nil
   }
 
   func testLargeTextStacksTheProvidersInsideTheMargins() throws {

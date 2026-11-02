@@ -6,8 +6,9 @@ import SwiftUI
 /// (`SubscriptionMarks.runs`, which repeats a plan's label when the states split it), and how many are ready now.
 /// It replaces the rings, which averaged one plan's weekly percent, within their row (38 pt), and keeps the 33 pt
 /// of the marks before it: one provider per line, never side by side; a line whose marks do not fit shows, within the
-/// same line, counts by state per plan, the ready share per plan, or the provider's counts by state. A provider opens
-/// its subscription details.
+/// same line, counts by state per plan, the ready share per plan, or the provider's counts by state. On the iPhone
+/// (rev. 2026-11-02) a line never falls back: every mark scrolls sideways within it, with no scroll bar. A provider
+/// opens its subscription details.
 struct SessionQuotaMarks: View {
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
   let quota: SubscriptionStore
@@ -26,15 +27,27 @@ struct SessionQuotaMarks: View {
     ForEach(quota.providers) { provider in
       let row = SessionQuotaProvider(provider: provider, marks: quota.strip(provider),
         status: quota.snapshot?.pool(provider).status, now: quota.now, style: style)
-      Button { open(provider) } label: { row }
-      .buttonStyle(.plain)
+      tappable(row) { open(provider) }
       .accessibilityLabel(row.spoken)
-      #if DEBUG
-      .accessibilityValue(row.fixture)
-      #endif
       .accessibilityIdentifier("proxy-strip-" + provider.rawValue)
       .accessibilityHint("Ver contas, limites e renovações do LLM proxy")
     }
+  }
+
+  /// On the iPhone a touch that ends where it began (within 8 pt), alongside the line's own scrolling and the list's:
+  /// a drag, sideways or vertical, never opens the details, even one that scrolls nothing (a plain tap or a button
+  /// still fires on lifting the finger inside). Still a button for VoiceOver. On the Mac a plain button.
+  @ViewBuilder private func tappable(_ row: SessionQuotaProvider, _ action: @escaping () -> Void) -> some View {
+    #if os(iOS)
+    row.contentShape(Rectangle())
+      .simultaneousGesture(DragGesture(minimumDistance: 0).onEnded { touch in
+        if abs(touch.translation.width) < 8, abs(touch.translation.height) < 8 { action() }
+      })
+      .accessibilityAddTraits(.isButton)
+      .accessibilityAction { action() }
+    #else
+    Button(action: action) { row }.buttonStyle(.plain)
+    #endif
   }
 }
 
@@ -59,6 +72,10 @@ private struct SessionQuotaProvider: View {
   let status: String?
   let now: Date
   let style: Style
+  #if os(iOS) && DEBUG
+  /// What the UI tests read of the sideways scroll: the offset and how far it goes (`@120/300`, nothing at rest).
+  @State private var scrolled = ""
+  #endif
 
   var body: some View {
     HStack(alignment: .center, spacing: 8) {
@@ -67,6 +84,25 @@ private struct SessionQuotaProvider: View {
         // The marks with the provider's manual resets first; then counts, whose summary also says when the next
         // ones are back (`+1 em 35m`, then `+1 35m`): plans give way before the summary does.
         let help = marks.resets.map { SubscriptionMarks.capitalized($0.spoken(now: now)) + ". Não inclui créditos nem a redefinição automática." }
+        #if os(iOS)
+        // Every mark, its balance or wait included, and the resets: what does not fit scrolls sideways, the bar
+        // hidden, instead of falling back to counts. The ScrollView keeps its offset across updates. 2 pt above and
+        // below keep the highlight dash from being clipped, without changing the line's height.
+        ScrollView(.horizontal, showsIndicators: false) {
+          lines(plans(marks.runs) { group in each(group, collapse: false) }, marks.strip(now: now, next: false),
+            help: help)
+            .monospacedDigit()
+            .padding(.vertical, 2)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .padding(.vertical, -2)
+        #if DEBUG
+        .onScrollGeometryChange(for: String.self) { geometry in
+          let end = max(0, geometry.contentSize.width - geometry.containerSize.width)
+          return geometry.contentOffset.x > 0.5 ? "@\(Int(geometry.contentOffset.x.rounded()))/\(Int(end.rounded()))" : ""
+        } action: { _, value in scrolled = value }
+        #endif
+        #else
         ViewThatFits(in: .horizontal) {
           lines(plans(marks.runs) { group in each(group) }, marks.strip(now: now, next: false), help: help)
           ForEach(Self.fallbacks, id: \.self) { fallback in
@@ -75,6 +111,7 @@ private struct SessionQuotaProvider: View {
           }
         }
         .monospacedDigit()
+        #endif
       } else {
         summary(line)
       }
@@ -82,7 +119,20 @@ private struct SessionQuotaProvider: View {
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
     .accessibilityElement(children: .ignore)
+    #if DEBUG
+    .accessibilityValue(debugValue)
+    #endif
   }
+
+  #if DEBUG
+  private var debugValue: String {
+    #if os(iOS)
+    fixture + scrolled
+    #else
+    fixture
+    #endif
+  }
+  #endif
 
   var spoken: String { marks?.spoken(provider.title, now: now, balances: true) ?? "\(provider.title), \(line)" }
 
@@ -143,9 +193,10 @@ private struct SessionQuotaProvider: View {
   }
 
   /// One mark per account: a ring with its balance when ready, the state's symbol otherwise; past 12 accounts a run
-  /// shows its counts instead. The highlighted account gets a short dash below its mark, outside any ring.
-  @ViewBuilder private func each(_ group: SubscriptionMarks.Group) -> some View {
-    if group.accounts.count > 12 {
+  /// shows its counts instead, unless it scrolls (`collapse: false`, the iPhone). The highlighted account gets a short
+  /// dash below its mark, outside any ring.
+  @ViewBuilder private func each(_ group: SubscriptionMarks.Group, collapse: Bool = true) -> some View {
+    if collapse && group.accounts.count > 12 {
       counts(group)
     } else {
       HStack(spacing: 2) {

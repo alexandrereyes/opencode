@@ -2746,6 +2746,19 @@ Verification: `SessionQuotaMarksTests` assert Codex above Claude with the same l
 (`marks`, `waits`, `many`, large text), 33 pt, in both themes and on iPhone SE; Mac `script/test-mac-ajustes.sh cotas`
 counts two provider icons stacked in the left margin of every render (272, 302 and 452 pt, both themes).
 
+### Sessões strip: sideways scroll on the iPhone — 2 November
+
+**Alexandre, 2/11:** a narrow iPhone line fell back to counts (`5x ●×1 ◷×4`) and hid each account's balance and wait.
+On iOS each provider's line now keeps its icon fixed and scrolls the rest sideways, the bar hidden
+(`ScrollView(.horizontal, showsIndicators: false)`): every run with every mark (no counts, and no collapse past 12
+accounts), then `· redef. N`. Codex above Claude, 33 pt, the same order, labels and data. A provider opens with a
+touch that ends where it began (within 8 pt, alongside the line's and the list's own scrolling), so a drag, sideways
+or vertical, never opens the details; VoiceOver keeps it a button whose label says every balance and wait, including
+the ones scrolled out of sight. The ScrollView keeps its offset across quota updates and timer ticks. Accessibility
+sizes scroll the same way, the summary below the marks. The Mac keeps its fallbacks. Checks:
+`SessionQuotaMarksTests.testManyAccountsScrollWithinTheirLineWithoutOpeningTheDetails` (to the end of the line, a
+vertical drag, an update on returning from the background, then a tap), on iPhone 17 Pro and SE.
+
 ### Sessões strip: `×` counts, `redef. N` and no Codex Free — 1 November
 
 Approved mockup: the main proposal of `.agent-artifacts/cotas-assinaturas/contagens-redefinicoes/` in the main checkout,
