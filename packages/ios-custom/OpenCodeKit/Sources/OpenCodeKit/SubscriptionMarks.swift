@@ -193,9 +193,10 @@ public struct SubscriptionMarks: Sendable {
   /// does not measure) go last, apart.
   public let groups: [Group]
   /// The strip's order: ready accounts first (plans in the proxy's order, the larger balance first, then the proxy's
-  /// order), then stopped ones by their release (unknown last), exhausted, needing login and unmeasured (each by plan,
-  /// then the proxy's order). Consecutive accounts of one plan form a run, so a plan's label comes back when the
-  /// states split it. Balances order accounts only within one plan.
+  /// order); then every stopped or exhausted account with a known return, the soonest first whatever its state or plan
+  /// (rev. 2026-11-02: `20h` before `3d`); then those without one, stopped and then exhausted, needing login and
+  /// unmeasured (each by plan, then the proxy's order). Consecutive accounts of one plan form a run, so a plan's label
+  /// comes back when the order splits it. Balances order accounts only within one plan.
   public let runs: [Group]
   /// Ready subscriptions: a count of accounts, not of quota.
   public var ready: Int { groups.reduce(0) { $0 + $1.ready } }
@@ -305,14 +306,16 @@ public struct SubscriptionMarks: Sendable {
     }
   }
 
-  /// State first; then what orders that state; the proxy's order last, so ties never swap between reads.
+  /// State first; then what orders that state; the proxy's order last, so ties never swap between reads. A known
+  /// return is the instant the strip counts down to (`Wait.until`, the end of the last blocker), never its rounded text.
   static func key(_ account: Account, plan: Double, position: Double) -> [Double] {
-    switch account.mark {
+    if let wait = account.wait { return [1, wait.until.timeIntervalSince1970, plan, position] }
+    return switch account.mark {
     case .ready: [0, plan, -Double(account.balance?.percent ?? 0), position]
-    case .blocked(let until): [1, until?.timeIntervalSince1970 ?? .greatestFiniteMagnitude, plan, position]
-    case .exhausted: [2, plan, position, 0]
-    case .attention: [3, plan, position, 0]
-    case .unmeasured: [4, plan, position, 0]
+    case .blocked: [2, plan, position, 0]
+    case .exhausted: [3, plan, position, 0]
+    case .attention: [4, plan, position, 0]
+    case .unmeasured: [5, plan, position, 0]
     }
   }
 

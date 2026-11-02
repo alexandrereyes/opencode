@@ -1864,7 +1864,7 @@ import SwiftUI
     await waits.refresh()
     _ = try highlight(waits, claude: "Faia")
     print("MacAjustes cotas prazos: Claude \(plans(waits, .anthropic)) · Codex \(plans(waits, .codex))")
-    guard plans(waits, .anthropic) == "5x:100,9,B35m,B2h^,B|20x:E2d",
+    guard plans(waits, .anthropic) == "5x:100,9,B35m,B2h^|20x:E2d|5x:B",
       plans(waits, .codex) == "Pro Max:78^|Plus:B2h|Pro Max:!",
       waits.strip(.codex)?.resets?.label == "redef. 3", waits.strip(.anthropic)?.resets?.label == "redef. 0" else {
       throw Failure(description: "prazos: \(plans(waits, .anthropic)) · \(plans(waits, .codex))")

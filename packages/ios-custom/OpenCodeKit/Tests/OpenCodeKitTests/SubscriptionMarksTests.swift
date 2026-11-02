@@ -147,12 +147,13 @@ private func markAccount(_ id: String, plan: String?, weekly: Double? = nil, fiv
     markAccount("login", plan: "max20x", weekly: 50, authenticated: false),
     markAccount("a-why", plan: "max5x", weekly: 40, fiveHour: 30, capacity: false),
   ], pinned: "a-9", now: marksNow)
-  #expect(marks.runs.map(\.label) == ["5x", "20x", "5x", "20x", "Free"])
+  #expect(marks.runs.map(\.label) == ["5x", "20x", "5x", "20x", "5x", "20x", "Free"])
   #expect(marks.runs.map { $0.accounts.map(\.id) } == [
     // Larger balance first within the plan; equal ones keep the proxy's order.
     ["a-100", "a-100b", "a-9"], ["b-64"],
-    // Stopped ones by release, the unexplained one last; then exhausted, login and unmeasured.
-    ["a-soon", "a-wait", "a-why"], ["b-off", "login"], ["free"],
+    // Every known return by its instant, the exhausted week (renewing 05/11) after today's stops; then the
+    // unexplained stop, login and unmeasured.
+    ["a-soon", "a-wait"], ["b-off"], ["a-why"], ["login"], ["free"],
   ])
   #expect(Set(marks.runs.map(\.id)).count == marks.runs.count)
   // Groups, which the details read, keep the plans whole in the proxy's order.
@@ -312,4 +313,43 @@ private func withResets(_ account: Subscriptions.Account, _ available: Double?, 
   // Only Codex: another provider's Free plan stays.
   #expect(SubscriptionMarks.strip(accounts, provider: .anthropic).count == 4)
   #expect(SubscriptionMarks(accounts: [], now: marksNow, hidden: 3).strip(now: marksNow, next: true) == "só contas Free")
+}
+
+@Test func unavailableAccountsWithAKnownReturnGoSoonestFirstWhateverTheirStateOrPlan() {
+  let marks = SubscriptionMarks(accounts: [
+    markAccount("ready", plan: "max5x", fiveHour: 89),
+    // The capture of 02/11: two exhausted 20x weeks, the later one first in the proxy's order.
+    markAccount("week-3d", plan: "max20x", weekly: 0, capacity: false, resetAt: "2026-11-04T09:00:00Z"),
+    markAccount("week-20h", plan: "max20x", weekly: 0, capacity: false, resetAt: "2026-11-02T07:00:00Z"),
+    // A stop of 2 hours and one of 35 minutes, in that order at the proxy.
+    markAccount("stop-2h", plan: "max5x", weekly: 60, fiveHour: 0, fiveHourResetAt: "2026-11-01T13:20:00Z", capacity: false),
+    markAccount("stop-35m", plan: "max5x", weekly: 60, fiveHour: 40, capacity: false, cooldown: 35 * 60),
+    // Both read `2h` but return 15 minutes apart: the instant decides, not the text.
+    markAccount("stop-2h-late", plan: "max20x", weekly: 60, fiveHour: 0, fiveHourResetAt: "2026-11-01T13:35:00Z",
+      capacity: false),
+    // No known return: after every account with one, keeping its own state.
+    markAccount("why", plan: "max5x", weekly: 60, fiveHour: 30, capacity: false),
+    markAccount("week-unknown", plan: "max20x", weekly: 0, capacity: false, resetAt: nil),
+    markAccount("login", plan: "max5x", weekly: 50, authenticated: false),
+    markAccount("stale", plan: "max5x", weekly: 50, stale: true),
+  ], now: marksNow)
+  let order = marks.runs.flatMap(\.accounts)
+  #expect(order.map(\.id) == ["ready", "stop-35m", "stop-2h", "stop-2h-late", "week-20h", "week-3d", "why",
+    "week-unknown", "login", "stale"])
+  #expect(order.compactMap { $0.wait?.short(now: marksNow) } == ["35m", "2h", "2h", "20h", "3d"])
+  // A plan's label comes back as the order moves between plans; the counts are unchanged.
+  #expect(marks.runs.map(\.label) == ["5x", "20x", "5x", "20x", "5x"])
+  #expect(marks.count(.exhausted) == 3 && marks.count(.blocked) == 4 && marks.ready == 1)
+
+  // Equal instants keep the proxy's order, read after read.
+  let tied = SubscriptionMarks(accounts: [
+    markAccount("b", plan: "max20x", weekly: 0, capacity: false, resetAt: "2026-11-02T07:00:00Z"),
+    markAccount("a", plan: "max20x", weekly: 0, capacity: false, resetAt: "2026-11-02T07:00:00Z"),
+  ], now: marksNow)
+  #expect(tied.runs.flatMap(\.accounts).map(\.id) == ["b", "a"])
+  // The order follows instants, not the clock's time zone: the same accounts read from another zone keep it.
+  #expect(SubscriptionMarks(accounts: [
+    markAccount("late", plan: "max20x", weekly: 0, capacity: false, resetAt: "2026-11-04T09:00:00-03:00"),
+    markAccount("soon", plan: "max20x", weekly: 0, capacity: false, resetAt: "2026-11-02T07:00:00+09:00"),
+  ], now: marksNow).runs.flatMap(\.accounts).map(\.id) == ["soon", "late"])
 }

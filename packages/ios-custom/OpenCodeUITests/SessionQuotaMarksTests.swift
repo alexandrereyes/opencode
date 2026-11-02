@@ -93,8 +93,8 @@ import XCTest
     defer { app.terminate() }
     let claude = app.buttons["proxy-strip-anthropic"]
     let codex = app.buttons["proxy-strip-codex"]
-    // Stopped by release, the unexplained one last and without a time; then the week, back in 1 day and 22 hours.
-    wait(claude, value: "5x:100,9,B35m,B2h,B|20x:E2d")
+    // Every known return soonest first, the week (back in 1 day and 22 hours) included; the unexplained stop last.
+    wait(claude, value: "5x:100,9,B35m,B2h|20x:E2d|5x:B")
     // Kauri's 5-hour window is back in 50 minutes, but the proxy waits 2 hours: the later one.
     wait(codex, value: "Pro Max:78|Plus:B2h|Pro Max:!")
     XCTAssertTrue(codex.label.contains(". 3 redefinições manuais disponíveis (Iris 1, Kauri 2), a primeira vence "), codex.label)

@@ -2697,6 +2697,10 @@ renewal reported, the warning sign for login, `?` for no measurement (Free). Dis
   keeps when the next accounts are back, any wait or renewal (`14 prontas · +1 em 45m`, then `+1 45m`); plans give way
   to counts by state before it goes. The counts show the renewal arrow for exhausted weeks when every one has a known
   renewal, ⊘ otherwise.
+- **Order since 2/11:** after the ready ones, every stopped or exhausted account with a known return goes soonest
+  first by its instant (`Wait.until`), whatever its state or plan (`20h` before `3d`, two `2h` by their minutes, equal
+  instants in the proxy's order); then those without one, stopped, exhausted, login, unmeasured. The plan's label
+  repeats when the order moves between plans.
 - **Unchanged:** the order (ready by balance, stopped by release, exhausted, login, unmeasured), the plan runs, the
   pinned dash, the 33 pt height (32–33 pt on the Mac) and the fallbacks. `SessionQuotaRow` now splits an overflowing
   row as evenly as possible between each provider's narrowest form and what it needs, so both keep their next return
