@@ -11,7 +11,7 @@ import XCTest
     URL(fileURLWithPath: try XCTUnwrap(ProcessInfo.processInfo.environment[audio ? "OPENCODE_VIEWER_VIDEO_SOUND" : "OPENCODE_VIEWER_VIDEO_SILENT"]))
   }
 
-  func testVideoWithoutAudioMixesWithOtherAppsAndRestoresTheSession() async throws {
+  func testSilentVideoMixesAndSoundPlaysOnTheUserRouteThenTheSessionReturns() async throws {
     let session = AVAudioSession.sharedInstance()
     let silent = try video(audio: false)
     let sound = try video(audio: true)
@@ -43,13 +43,40 @@ import XCTest
     XCTAssertEqual(session.category, .playback)
     XCTAssertEqual(session.mode, .spokenAudio)
 
-    // With an audio track the player behaves as before.
-    let normal = FileVideoAudio()
-    await normal.prepare(sound, appAudioActive: false)
-    XCTAssertEqual(normal.policy, .unchanged)
+    // With an audio track, after dictation left play-and-record with `.defaultToSpeaker` (no A2DP): the movie used
+    // to play under that category, on the iPhone's speaker with AirPods connected (the reported failure). It now
+    // gets media playback, which follows the user's route, and the earlier category comes back on exit.
+    try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+    let movie = FileVideoAudio()
+    await movie.prepare(sound, appAudioActive: false)
+    XCTAssertEqual(movie.policy, .playback(movie: true))
     XCTAssertEqual(session.category, .playback)
-    await normal.restore()
+    XCTAssertEqual(session.mode, .moviePlayback)
+    XCTAssertFalse(session.categoryOptions.contains(.mixWithOthers))
+    XCTAssertFalse(session.categoryOptions.contains(.defaultToSpeaker))
+    // AVKit keeps it while playing, with external playback (its route button) allowed.
+    let playing = AVPlayerViewController()
+    playing.player = AVPlayer(url: sound)
+    window.rootViewController = playing
+    playing.player?.play()
+    try await Task.sleep(for: .seconds(1.5))
     XCTAssertEqual(session.category, .playback)
+    XCTAssertEqual(session.mode, .moviePlayback)
+    XCTAssertEqual(playing.player?.allowsExternalPlayback, true)
+    playing.player?.pause()
+    await movie.restore()
+    XCTAssertEqual(session.category, .playAndRecord)
+    XCTAssertTrue(session.categoryOptions.contains(.defaultToSpeaker))
+
+    // An audio file plays the same way, in the default mode.
+    let track = URL(fileURLWithPath: try XCTUnwrap(ProcessInfo.processInfo.environment["OPENCODE_VIEWER_AUDIO_ONLY"]))
+    let listening = FileVideoAudio()
+    await listening.prepare(track, appAudioActive: false)
+    XCTAssertEqual(listening.policy, .playback(movie: false))
+    XCTAssertEqual(session.category, .playback)
+    XCTAssertEqual(session.mode, .default)
+    await listening.restore()
+    XCTAssertEqual(session.category, .playAndRecord)
 
     // During a voice call the session belongs to the call.
     try session.setCategory(.playAndRecord, mode: .voiceChat)

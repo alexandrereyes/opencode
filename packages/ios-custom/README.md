@@ -1480,8 +1480,16 @@ VoiceActivity extension's copy/strip warning. No backend, seed, model or product
   actions.
 - A video **without an audio track** (`VideoAudioPolicy`) sets the session to `.ambient` + `.mixWithOthers` before
   AVPlayer activates it, so other apps keep playing; leaving restores the previous category and deactivates with
-  `.notifyOthersOnDeactivation`. A video with an audio track, even a silent one, keeps the normal player
-  behaviour. During a voice call or a reading the session is not touched.
+  `.notifyOthersOnDeactivation`. During a voice call or a reading the session is not touched.
+- A video or audio file **with sound** (even a silent track) sets Apple's media playback category, `.playback`
+  (`.moviePlayback` mode for a video, `.default` for audio), with no options, and restores the earlier category on
+  exit (3/11). Before, it played under whatever the app left: after dictation or a voice call that is
+  `.playAndRecord` + `.defaultToSpeaker` with no A2DP, so the iPhone's speaker played the movie with AirPods
+  connected and the route menu did not offer them. Playback follows the route the user chose (AirPods and other
+  Bluetooth A2DP outputs, AirPlay, the speaker), AVKit's own route button (top left with the player's controls)
+  changes it, and iOS's usual route changes apply (AirPods taken out pause the player). No microphone or HFP route
+  is requested. `FileVideoAudioTests` reproduces the old play-and-record category; the Simulator has no Bluetooth,
+  so AirPods themselves are checked on a device.
 
 Run `packages/ios-custom/script/test-file-viewer.py` after `build-for-testing` with `OPENCODE_SANDBOX_HOME`,
 `OPENCODE_TEST_SERVER_URL`, `OPENCODE_TEST_DEVICE`, `OPENCODE_TEST_DERIVED` and `OPENCODE_TEST_EVIDENCE`; it creates

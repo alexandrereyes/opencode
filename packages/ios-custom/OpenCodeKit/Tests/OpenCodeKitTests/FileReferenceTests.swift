@@ -292,7 +292,9 @@ import Testing
 
 @Test func videosWithoutAudioMixWithOtherAppsUnlessTheAppIsUsingAudio() {
   #expect(VideoAudioPolicy.decide(hasAudioTrack: false, appAudioActive: false) == .mixWithOthers)
-  #expect(VideoAudioPolicy.decide(hasAudioTrack: true, appAudioActive: false) == .unchanged)
+  #expect(VideoAudioPolicy.decide(hasAudioTrack: true, appAudioActive: false) == .playback(movie: true))
+  #expect(VideoAudioPolicy.decide(hasAudioTrack: true, hasVideoTrack: false, appAudioActive: false) == .playback(movie: false))
+  #expect(VideoAudioPolicy.decide(hasAudioTrack: true, hasVideoTrack: false, appAudioActive: true) == .unchanged)
   #expect(VideoAudioPolicy.decide(hasAudioTrack: false, appAudioActive: true) == .unchanged)
   #expect(VideoAudioPolicy.decide(hasAudioTrack: true, appAudioActive: true) == .unchanged)
   #expect(VideoAudioPolicy.deactivatesOnExit(appAudioActive: false))

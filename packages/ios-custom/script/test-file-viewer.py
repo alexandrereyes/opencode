@@ -110,6 +110,7 @@ try:
     environment["OPENCODE_VIEWER_VIDEO_SILENT"] = str(media / "sem-audio.mp4")
     environment["OPENCODE_VIEWER_VIDEO_SOUND"] = str(media / "com-audio.mp4")
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=660", "-t", "30", "-c:a", "aac", str(folder / "l-audio.m4a")], check=True)
+    environment["OPENCODE_VIEWER_AUDIO_ONLY"] = str(folder / "l-audio.m4a")
     (folder / "m-binario.opaque").write_bytes(bytes(range(256)))
     (folder / "n-texto.txt").write_text("Texto simples do visualizador.\n", encoding="utf8")
     # Markdown documents: the app's formatting fixture, a large real README and edge cases.

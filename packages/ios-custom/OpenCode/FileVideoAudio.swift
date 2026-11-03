@@ -1,7 +1,7 @@
 import AVFoundation
 import OpenCodeKit
 
-/// The shared audio session around one video in the file viewer (see `VideoAudioPolicy`).
+/// The shared audio session around one video or audio file in the file viewer (see `VideoAudioPolicy`).
 @MainActor final class FileVideoAudio {
   private struct Saved: Sendable {
     let category: AVAudioSession.Category
@@ -17,21 +17,32 @@ import OpenCodeKit
     (try? await AVURLAsset(url: file).loadTracks(withMediaType: .audio).isEmpty == false) ?? true
   }
 
+  static func hasVideoTrack(_ file: URL) async -> Bool {
+    (try? await AVURLAsset(url: file).loadTracks(withMediaType: .video).isEmpty == false) ?? true
+  }
+
   /// `appAudioActive` is the voice call; a reading is checked here.
   func prepare(_ file: URL, appAudioActive voice: Bool) async {
     let busy = voice || ReadAloudPlayer.isActive
     appAudioActive = busy
-    let policy = VideoAudioPolicy.decide(hasAudioTrack: await Self.hasAudioTrack(file), appAudioActive: busy)
+    let policy = VideoAudioPolicy.decide(hasAudioTrack: await Self.hasAudioTrack(file),
+      hasVideoTrack: await Self.hasVideoTrack(file), appAudioActive: busy)
     self.policy = policy
-    guard policy == .mixWithOthers else { return }
+    let (category, mode, options): (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)
+    switch policy {
+    case .unchanged: return
+    case .mixWithOthers: (category, mode, options) = (.ambient, .default, [.mixWithOthers])
+    // No options: playback reaches A2DP and AirPlay outputs by itself, and no microphone route (HFP) is asked for.
+    case .playback(let movie): (category, mode, options) = (.playback, movie ? .moviePlayback : .default, [])
+    }
     let previous = AVAudioSession.sharedInstance()
     saved = Saved(category: previous.category, mode: previous.mode, options: previous.categoryOptions)
     await DictationAudioSession.perform { session in
-      try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+      try? session.setCategory(category, mode: mode, options: options)
     }
   }
 
-  /// Gives other apps their audio back and puts the category the app had before the video.
+  /// Gives other apps their audio back and puts the category the app had before the file.
   func restore() async {
     guard policy != nil, VideoAudioPolicy.deactivatesOnExit(appAudioActive: appAudioActive || ReadAloudPlayer.isActive)
     else { return }
