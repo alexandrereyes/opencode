@@ -23,7 +23,7 @@ public enum ContextColumn {
 
   /// A subagent's cost, including the subagents it started in turn.
   public static func cost(of childID: String, members: [Session]) -> Double? {
-    cost(of: childID, members: members, parents: parents(members))
+    costs(members, parents: parents(members))[childID]
   }
 
   /// The direct child of `rootID` that `sessionID` belongs to (itself, or the child it descends from).
@@ -37,11 +37,21 @@ public enum ContextColumn {
     Dictionary(members.map { ($0.id, $0.parentID) }, uniquingKeysWith: { first, _ in first })
   }
 
-  private static func cost(of childID: String, members: [Session], parents: [String: String?]) -> Double? {
-    let costs = members.filter {
-      $0.id == childID || branch(of: $0.id, rootID: childID, parents: parents, limit: members.count) != nil
-    }.compactMap(\.cost)
-    return costs.isEmpty ? nil : costs.reduce(0, +)
+  /// Every session's cost with the subagents it started, for each one with a cost below it: one walk up from each
+  /// member, instead of a pass over the family for each subagent (quadratic in its size).
+  private static func costs(_ members: [Session], parents: [String: String?]) -> [String: Double] {
+    var sums: [String: Double] = [:]
+    for member in members {
+      guard let cost = member.cost else { continue }
+      var current = member.id
+      sums[current, default: 0] += cost
+      for _ in 0..<members.count + 1 {
+        guard let parent = parents[current] ?? nil else { break }
+        sums[parent, default: 0] += cost
+        current = parent
+      }
+    }
+    return sums
   }
 
   private static func branch(of sessionID: String, rootID: String, parents: [String: String?], limit: Int) -> String? {
@@ -168,6 +178,7 @@ public enum ContextColumn {
   ) -> Subagents {
     let sessions = Dictionary(members.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let parents = parents(members)
+    let subtreeCosts = costs(members, parents: parents)
     let rows = work.filter { $0.kind == .agent }.map { work -> Subagent in
       let child = work.sessionID
       let owns = { (id: String) -> Bool in
@@ -185,7 +196,7 @@ public enum ContextColumn {
         work: work, session: session, status: status,
         usage: context.flatMap { ContextUsage(tokens: $0.tokens, limit: ContextUsage.limit($0.model, models: models)) },
         cacheHit: ContextUsage.cacheHit(session?.tokens ?? context?.tokens),
-        cost: child.flatMap { cost(of: $0, members: members, parents: parents) },
+        cost: child.flatMap { subtreeCosts[$0] },
         permission: permission,
         resources: resources.filter { resource in
           inUse(resource) && resource.owner.map { owns($0.sessionID) } == true

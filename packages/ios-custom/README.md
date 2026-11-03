@@ -2066,7 +2066,21 @@ Approved mockups: indicator option B with the long press of option A, and "Agent
   (reloaded by the owner's session events: the shell's notice wakes it) returns the line to the finished ones.
   `script/test-background-agents.py` (`BackgroundAgentsTests`) checks it end to end against an isolated sandbox with
   a fake model and two real `sleep`s; `BackgroundWorkTests` (OpenCodeKit) covers classification, order, collapse,
-  requests, the other worktree, another family in the same folder and the last shell ending. **`☑ 2/4`** (a 44-pt target) opens
+  requests, the other worktree, another family in the same folder and the last shell ending.
+- **Fluidez com famílias grandes (Alexandre, 03/11).** The screen projects the family once per update (`Listing` in
+  `ConversationAgentsView`): rows, their 1-s clocks and `agora: …` lines read that projection instead of each
+  recomputing it (before, one update ran it about 16 times and every running row's clock ran it every second, the
+  Progresso lookup scanning the Sessões rows for each of the 244 subagents). A subagent's cost with its branch is
+  summed in one walk up the family (`ContextColumn.costs`, it was quadratic) and `SessionStore.entry(_:)` indexes
+  the rows once per list. Measure with the in-memory family (`AgentsFixture`, DEBUG: `-OpenCodeAgentsFixture
+  <subagents>`, its events, the running children's growth, a background child and a grandchild in another worktree,
+  through the real client, stores and event hub) and `script/profile-agents.py`, which runs scenarios interleaved
+  (`--app before=… --app after=…` for an A/B) and reports frame intervals, main-thread CPU, bodies and projection
+  time; `-OpenCodeFixtureNoShimmer` and `-OpenCodeFixtureNoClock` switch the title shimmer and the clock off for
+  diagnosis only. `script/summarize-time-profile.py` summarizes a Time Profiler export. On the iPhone 17 Pro simulator
+  (Debug with `-O`, 3 interleaved rounds, 12 s each, 244 subagents, 5 running, 20 events/s): frames over 50 ms
+  23 → 0, the longest 139 → 42 ms, main-thread CPU 2.0 → 0.7 s, projection 600 → 112 ms; at 1000 subagents p95
+  439 → 16.7 ms and the longest 777 → 64 ms. The shimmer and the clock alone made no difference to those hitches. **`☑ 2/4`** (a 44-pt target) opens
   the subagent's Progresso (`ConversationProgressList`, live while open) with **Abrir subagente**.
 - **Where the Progresso comes from** (`SessionStore.progress(_:family:)`): the list the app folded from live events
   wins, else the family snapshot's `progress` (the plugin's Live Activity hub, which saw every `todowrite` since the

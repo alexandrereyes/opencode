@@ -34,45 +34,48 @@ struct ConversationAgentsView: View {
     let progress: SessionProgress
     var id: String { work.id }
   }
-  private var ordered: [SessionWork] {
-    let index = Dictionary(shown.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
-    return work.enumerated()
-      .sorted { (index[$0.element.id] ?? Int.max, $0.offset) < (index[$1.element.id] ?? Int.max, $1.offset) }
-      .map(\.element)
+  /// What the screen lists, projected once per update of the family. Its rows, their 1-s clocks and their activity
+  /// lines read it instead of projecting the family again each.
+  private struct Listing {
+    let work: [SessionWork]
+    let agents: [SessionWork]
+    let scripts: [SessionWork]
+    /// Subagents working only in the background (their shells or subagents), from the Sessões rows.
+    let background: [String: FamilyWork.Background]
+    /// Each subagent's open Progresso: the app's live list, else the family snapshot's (`SessionStore.progress`).
+    let progress: [String: SessionProgress]
+    /// Live first, then the newest finished up to five, the rest behind "+N concluídos" (`ContextColumn.subagents`).
+    let subagents: ContextColumn.Subagents
   }
-  /// Subagents working only in the background (their shells or subagents), from the Sessões rows.
-  private var background: [String: FamilyWork.Background] { probe { store.background(sessions.entries) } }
-  private var work: [SessionWork] { probe { store.work(background: background) } }
-  private var agents: [SessionWork] { ordered.filter { $0.kind == .agent } }
-  private var scripts: [SessionWork] { ordered.filter { $0.kind == .script } }
+  private var listing: Listing {
+    probe {
+      let background = store.background(sessions.entries)
+      let work = store.work(background: background)
+      let index = Dictionary(shown.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+      let ordered = work.enumerated()
+        .sorted { (index[$0.element.id] ?? Int.max, $0.offset) < (index[$1.element.id] ?? Int.max, $1.offset) }
+        .map(\.element)
+      let agents = ordered.filter { $0.kind == .agent }
+      let progress = Dictionary(agents.compactMap(\.sessionID).compactMap { id in
+        sessions.progress(id, family: store.family).flatMap { $0.open ? (id, $0) : nil }
+      }, uniquingKeysWith: { first, _ in first })
+      let subagents = ContextColumn.subagents(
+        work: agents, rootID: store.id, members: store.children, models: store.displayModels,
+        permissions: store.family?.permissions ?? [], forms: store.family?.forms ?? [], resources: store.resources,
+        progress: progress.mapValues { ContextColumn.Progress(done: $0.done, total: $0.total) })
+      return Listing(work: work, agents: agents, scripts: ordered.filter { $0.kind == .script },
+        background: background, progress: progress, subagents: subagents)
+    }
+  }
   private func reorder(_ ids: [String]) {
     guard !scrolling, ids != shown else { return }
     withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { shown = ids }
   }
-  /// Each subagent's open Progresso: the app's live list, else the family snapshot's (`SessionStore.progress`).
-  private var progress: [String: SessionProgress] {
-    Dictionary(agents.compactMap(\.sessionID).compactMap { id in
-      sessions.progress(id, family: store.family).flatMap { $0.open ? (id, $0) : nil }
-    }, uniquingKeysWith: { first, _ in first })
-  }
-  /// Live first, then the newest finished up to five, the rest behind "+N concluídos" (`ContextColumn.subagents`).
-  private var subagents: ContextColumn.Subagents {
-    probe {
-      ContextColumn.subagents(
-        work: agents, rootID: store.id, members: store.children, models: store.displayModels,
-        permissions: store.family?.permissions ?? [], forms: store.family?.forms ?? [], resources: store.resources,
-        progress: progress.mapValues { ContextColumn.Progress(done: $0.done, total: $0.total) })
-    }
-  }
   /// Changes when a live subagent takes a step, so its `agora: …` is read again.
-  private var activityKey: String {
+  private func activityKey(_ agents: [SessionWork]) -> String {
     agents.filter(\.live).compactMap(\.sessionID).map { id in
       id + ":" + String(store.children.first { $0.id == id }?.time.updated ?? 0)
     }.joined(separator: ",")
-  }
-  /// Resources used by this session itself (or by descendants without a row here).
-  private var ownResources: [SessionResource] {
-    store.resources.filter { resource in !agents.contains { $0.sessionID != nil && $0.sessionID == resource.owner?.sessionID } }
   }
   static func runningLabel(agents: Int, scripts: Int) -> String {
     let parts = [
@@ -85,23 +88,24 @@ struct ConversationAgentsView: View {
     #if DEBUG
     let _ = TranscriptCounters.agentsBodies.add(1, ordering: .relaxed)
     #endif
+    let listing = self.listing
     List {
       switch tab {
-      case .agents: agentsTab
-      case .scripts: scriptsTab
+      case .agents: agentsTab(listing)
+      case .scripts: scriptsTab(listing.scripts)
       }
     }
     .onScrollPhaseChange { _, phase in
       scrolling = phase != .idle
-      reorder(work.map(\.id))
+      reorder(listing.work.map(\.id))
     }
-    .onChange(of: work.map(\.id), initial: true) { _, ids in
+    .onChange(of: listing.work.map(\.id), initial: true) { _, ids in
       if shown.isEmpty { shown = ids } else { reorder(ids) }
     }
     .safeAreaInset(edge: .top, spacing: 0) {
       Picker("Lista", selection: $tab) {
-        Text("Agentes (\(agents.count))").tag(Tab.agents)
-        Text("Scripts (\(scripts.count))").tag(Tab.scripts)
+        Text("Agentes (\(listing.agents.count))").tag(Tab.agents)
+        Text("Scripts (\(listing.scripts.count))").tag(Tab.scripts)
       }
       .pickerStyle(.segmented)
       .padding(.horizontal, AppLayout.margin).padding(.vertical, 8)
@@ -125,7 +129,7 @@ struct ConversationAgentsView: View {
       guard scenePhase == .active else { return }
       await thumbnails.run({ store.resources }, client: sessions.client)
     }
-    .task(id: activityKey) {
+    .task(id: activityKey(listing.agents)) {
       // Coalesces a burst of steps; at most a few previews at a time, like the Sessões rows.
       try? await Task.sleep(for: .milliseconds(600))
       guard !Task.isCancelled else { return }
@@ -151,7 +155,11 @@ struct ConversationAgentsView: View {
       Text(stopping?.title ?? "")
     }
   }
-  @ViewBuilder private var agentsTab: some View {
+  @ViewBuilder private func agentsTab(_ listing: Listing) -> some View {
+    // Resources used by this session itself (or by descendants without a row here).
+    let ownResources = store.resources.filter { resource in
+      !listing.agents.contains { $0.sessionID != nil && $0.sessionID == resource.owner?.sessionID }
+    }
     if !ownResources.isEmpty {
       Section {
         ForEach(ownResources) { resource in
@@ -161,10 +169,10 @@ struct ConversationAgentsView: View {
         Text("Esta sessão" + (store.session?.agent.map { " · \($0)" } ?? ""))
       }
     }
-    let subagents = self.subagents
+    let subagents = listing.subagents
     Section {
       ForEach(subagents.shown + (expanded ? subagents.hidden : [])) { subagent in
-        agentRow(subagent)
+        agentRow(subagent, listing)
         // A subagent without resources shows nothing below its row.
         if let child = subagent.work.sessionID {
           ForEach(store.resources.filter { $0.owner?.sessionID == child }) { resource in
@@ -188,7 +196,7 @@ struct ConversationAgentsView: View {
         .listRowBackground(theme.color(.surface))
         .accessibilityIdentifier("agents-finished-toggle")
       }
-      if agents.isEmpty {
+      if listing.agents.isEmpty {
         Text("Nenhum subagente nesta sessão.").foregroundStyle(theme.color(.textSecondary))
           .listRowBackground(theme.color(.surface))
       }
@@ -196,7 +204,7 @@ struct ConversationAgentsView: View {
       if !store.resources.isEmpty { Text("Subagentes") }
     }
   }
-  @ViewBuilder private var scriptsTab: some View {
+  @ViewBuilder private func scriptsTab(_ scripts: [SessionWork]) -> some View {
     Section {
       ForEach(scripts) { work in workRow(work) }
       if scripts.isEmpty {
@@ -307,7 +315,7 @@ struct ConversationAgentsView: View {
   }
   // MARK: Subagent line
 
-  private func agentRow(_ subagent: ContextColumn.Subagent) -> some View {
+  private func agentRow(_ subagent: ContextColumn.Subagent, _ listing: Listing) -> some View {
     let work = subagent.work
     let agent = store.agents.first { $0.id == work.agent }
     return HStack(alignment: .top, spacing: 8) {
@@ -342,8 +350,8 @@ struct ConversationAgentsView: View {
         .buttonStyle(.plain).disabled(work.sessionID == nil && work.toolID == nil)
         .accessibilityValue(work.state.label)
         .accessibilityIdentifier("agent-work-" + work.id)
-        metrics(subagent)
-        activityLine(subagent)
+        metrics(subagent, progress: listing.progress)
+        activityLine(subagent, listing)
       }
       // Finished rows keep the stop column so every row lines up.
       if work.running {
@@ -395,22 +403,24 @@ struct ConversationAgentsView: View {
 
   /// `◔ 48% · 606,9k / 1,1M · ⚡ 100% · US$ 8,58 · 4m28s · ☑ 2/4`: the tokens drop when it does not fit; the
   /// Progresso opens its whole list.
-  private func metrics(_ subagent: ContextColumn.Subagent) -> some View {
+  private func metrics(_ subagent: ContextColumn.Subagent, progress: [String: SessionProgress]) -> some View {
     TimelineView(.periodic(from: .now, by: subagent.work.running && !noClock ? 1 : 3_600)) { context in
       let work = subagent.work
       let elapsed = work.running
         ? ConversationProjection.duration(context.date.timeIntervalSince1970 * 1000 - work.started)
         : work.duration.map(ConversationProjection.duration)
       ViewThatFits(in: .horizontal) {
-        metricsRow(subagent, elapsed: elapsed, narrow: false)
-        metricsRow(subagent, elapsed: elapsed, narrow: true)
+        metricsRow(subagent, elapsed: elapsed, narrow: false, progress: progress)
+        metricsRow(subagent, elapsed: elapsed, narrow: true, progress: progress)
       }
     }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("agent-metrics-" + subagent.id)
   }
 
-  private func metricsRow(_ subagent: ContextColumn.Subagent, elapsed: String?, narrow: Bool) -> some View {
+  private func metricsRow(
+    _ subagent: ContextColumn.Subagent, elapsed: String?, narrow: Bool, progress: [String: SessionProgress]
+  ) -> some View {
     HStack(spacing: 5) {
       ContextMetricsLine(
         metrics: ContextColumn.metrics(usage: subagent.usage, cacheHit: subagent.cacheHit, cost: subagent.cost,
@@ -440,7 +450,7 @@ struct ConversationAgentsView: View {
 
   /// `agora: <item do Progresso>` or the current tool; what it asks Alexandre, with Permitir · Negar or
   /// Responder; a finished line says how it ended.
-  private func activityLine(_ subagent: ContextColumn.Subagent) -> some View {
+  private func activityLine(_ subagent: ContextColumn.Subagent, _ listing: Listing) -> some View {
     let waiting = subagent.status == .permission || subagent.status == .question
     let background = subagent.status == .background
     return HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -448,7 +458,7 @@ struct ConversationAgentsView: View {
       if background {
         Circle().fill(theme.color(.success)).frame(width: 7, height: 7).accessibilityHidden(true)
       }
-      Text(activity(subagent)).appFont(.caption)
+      Text(activity(subagent, listing)).appFont(.caption)
         .foregroundStyle(theme.color(waiting ? .warning : background ? .success : .textSecondary))
         .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("agent-activity-" + subagent.id)
@@ -469,7 +479,7 @@ struct ConversationAgentsView: View {
     }
   }
 
-  private func activity(_ subagent: ContextColumn.Subagent) -> String {
+  private func activity(_ subagent: ContextColumn.Subagent, _ listing: Listing) -> String {
     let child = subagent.work.sessionID
     let current: String
     if let permission = subagent.permission {
@@ -478,9 +488,9 @@ struct ConversationAgentsView: View {
       current = store.family?.forms.first { $0.sessionID == child }.map { "Pergunta: " + $0.preview }
         ?? "Aguardando sua resposta"
     } else if subagent.status == .background {
-      current = child.flatMap { background[$0]?.label } ?? "em segundo plano"
+      current = child.flatMap { listing.background[$0]?.label } ?? "em segundo plano"
     } else if subagent.status.live {
-      current = "agora: " + (child.flatMap { progress[$0]?.current?.content } ?? child.flatMap { activities[$0] }
+      current = "agora: " + (child.flatMap { listing.progress[$0]?.current?.content } ?? child.flatMap { activities[$0] }
         ?? (subagent.status == .starting ? "iniciando" : "pensando"))
     } else {
       current = subagent.status.label.lowercased()
@@ -490,7 +500,8 @@ struct ConversationAgentsView: View {
 
   /// The live subagents without a Progresso, at most eight, read their transcript tail for the current tool.
   private func loadActivities() async {
-    let live = agents.filter(\.live).compactMap(\.sessionID).filter { progress[$0] == nil }.prefix(8)
+    let listing = self.listing
+    let live = listing.agents.filter(\.live).compactMap(\.sessionID).filter { listing.progress[$0] == nil }.prefix(8)
     var next: [String: String] = [:]
     await withTaskGroup(of: (String, String?).self) { group in
       for child in live {
@@ -504,7 +515,7 @@ struct ConversationAgentsView: View {
 
   /// The Progresso of one subagent, live while open, and "Abrir subagente".
   private func progressSheetView(_ sheet: ProgressSheet) -> some View {
-    let current = sheet.work.sessionID.flatMap { progress[$0] } ?? sheet.progress
+    let current = sheet.work.sessionID.flatMap { listing.progress[$0] } ?? sheet.progress
     return VStack(alignment: .leading, spacing: 10) {
       Text(sheet.work.title).appFont(.caption).foregroundStyle(theme.color(.textSecondary)).lineLimit(1)
         .padding(.horizontal, 16)

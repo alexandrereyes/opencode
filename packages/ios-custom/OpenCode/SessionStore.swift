@@ -10,7 +10,7 @@ import UserNotifications
 final class SessionStore {
   let acceptsLaunchSession: Bool
   // The inputs of `rows`: each change drops the rows built from them.
-  private(set) var entries: [NavigationEntry] = [] { didSet { derived = nil } }
+  private(set) var entries: [NavigationEntry] = [] { didSet { derived = nil; entryIndex = nil } }
   private(set) var projects: [Project] = [] { didSet { derived = nil } }
   private(set) var preferences: Preferences? { didSet { derived = nil } }
   let quota: SubscriptionStore
@@ -159,6 +159,8 @@ final class SessionStore {
   /// `rows` and `filtered`, built once per change of their inputs instead of on every read: windows, rows and
   /// toolbars read them many times per update.
   @ObservationIgnored private var derived: (rows: [SessionRow], filtered: [SessionRow]?)?
+  /// Each row's position in `entries`, built on the first lookup after a list: subagent lists look up hundreds.
+  @ObservationIgnored private var entryIndex: [String: Int]?
   @ObservationIgnored private var reloadPending = false
   @ObservationIgnored private var scheduled: Task<Void, Never>?
   @ObservationIgnored private var lastReloadStarted: ContinuousClock.Instant?
@@ -275,7 +277,14 @@ final class SessionStore {
   }
   /// A session's latest known Progresso list (open or not), for a conversation whose loaded tail does not reach it.
   func progress(_ id: String) -> SessionProgress? {
-    liveProgress[id] ?? entries.first { $0.session.id == id }?.progress.map { SessionProgress(items: $0.todos) }
+    liveProgress[id] ?? entry(id)?.progress.map { SessionProgress(items: $0.todos) }
+  }
+  /// The Sessões row of `id`, like `entries.first { $0.session.id == id }`.
+  func entry(_ id: String) -> NavigationEntry? {
+    let entries = entries
+    let index = entryIndex ?? Dictionary(entries.indices.map { (entries[$0].session.id, $0) }, uniquingKeysWith: { first, _ in first })
+    entryIndex = index
+    return index[id].map { entries[$0] }
   }
   /// A subagent's Progresso in the lists ("Agentes e tarefas", Contexto): the list this app folded from live events,
   /// else its family snapshot's (the server saw the calls the app missed: before it opened or while suspended).

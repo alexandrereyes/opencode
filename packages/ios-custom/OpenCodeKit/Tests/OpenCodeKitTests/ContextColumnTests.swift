@@ -51,6 +51,24 @@ private let family = """
   #expect(ContextColumn.costs(session: nil, family: nil, members: []).total == nil)
 }
 
+/// Each subagent's cost is its whole branch at any depth, members without a cost adding nothing, as `cost(of:)`.
+@Test func contextColumnSumsEachSubagentsWholeBranch() throws {
+  let members = try decode([Session].self, """
+    [\(session("a", parent: "root", cost: 1)), \(session("a1", parent: "a", cost: 2)),
+     \(session("a1x", parent: "a1", cost: 4)), \(session("b", parent: "root")), \(session("b1", parent: "b", cost: 8)),
+     \(session("c", parent: "root"))]
+    """)
+  let work = ConversationProjection.work(
+    ownerID: "root", viewedID: "root", messages: [], children: members, active: [], shells: [])
+  let subagents = ContextColumn.subagents(
+    work: work, rootID: "root", members: members, models: [], permissions: [], forms: [], resources: [])
+  let costs = Dictionary(uniqueKeysWithValues: (subagents.shown + subagents.hidden).map { ($0.id, $0.cost ?? -1) })
+  #expect(costs == ["a": 7, "b": 8, "c": -1])
+  #expect(ContextColumn.cost(of: "a1", members: members) == 6)
+  #expect(ContextColumn.cost(of: "root", members: members) == 15)
+  #expect(ContextColumn.cost(of: "c", members: members) == nil)
+}
+
 @Test func contextColumnFindsTheDirectSubagentOfADescendant() throws {
   let members = try decode([Session].self, family)
   #expect(ContextColumn.branch(of: "a1", rootID: "root", members: members) == "a")
