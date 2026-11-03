@@ -87,7 +87,8 @@ struct ConversationView: View {
     return conversation.located?.branch ?? (showLocation ? conversation.branch : "")
   }
   private var headerStatus: String {
-    conversation.waiting ? "aguardando você" : conversation.working ? "trabalhando…" : ""
+    conversation.waiting ? "aguardando você" : conversation.working ? "trabalhando…"
+      : conversation.workingInBackground(sessions.entries) ? "em segundo plano" : ""
   }
   var body: some View {
     VStack(spacing: 0) {
@@ -452,12 +453,16 @@ struct ConversationView: View {
       // A subagent always has it (the grey square when there is nothing): its header has no … button.
       if !conversation.work.isEmpty || !conversation.resources.isEmpty || subagent != nil {
         let resources = conversation.resources.filter(\.state.running).count
+        // No model of the family executes but its shells or subagents below still work: a still green grid,
+        // where an executing agent or own script animates it.
+        let background = running == 0 && conversation.workingInBackground(sessions.entries)
         Button {
           leavePosition()
           sessions.conversationPath.append(.init(id: conversation.id, agents: true))
         } label: {
           HStack(spacing: 6) {
-            AgentPixels(color: theme.color(running > 0 ? .success : .textSecondary), size: 16, running: running > 0)
+            AgentPixels(color: theme.color(running > 0 || background ? .success : .textSecondary), size: 16,
+              running: running > 0, grid: background)
             if running > 0 { Text("\(running)").appFont(.secondary).monospacedDigit() }
             if !conversation.resources.isEmpty {
               Rectangle().fill(theme.color(.border)).frame(width: 1, height: 16)
@@ -470,6 +475,7 @@ struct ConversationView: View {
             .regular.interactive(), in: .capsule)
         }.buttonStyle(.plain).accessibilityLabel(
           ConversationAgentsView.runningLabel(agents: conversation.runningAgents, scripts: running - conversation.runningAgents)
+            + (background ? ", trabalho em segundo plano" : "")
             + (conversation.resources.isEmpty ? "" : resources == 1 ? ", 1 recurso ativo" : ", \(resources) recursos ativos"))
           .accessibilityIdentifier("conversation-agents")
       }

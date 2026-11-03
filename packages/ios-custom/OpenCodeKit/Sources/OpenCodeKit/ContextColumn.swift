@@ -110,11 +110,12 @@ public enum ContextColumn {
   // MARK: Subagents
 
   public enum Status: Sendable, Equatable {
-    case starting, running, permission, question, completed, failed, interrupted, ended
+    case starting, running, background, permission, question, completed, failed, interrupted, ended
     public var label: String {
       switch self {
       case .starting: "Iniciando"
       case .running: "Em execução"
+      case .background: "Em segundo plano"
       case .permission: "Pede permissão"
       case .question: "Pergunta"
       case .completed: "Concluído"
@@ -123,8 +124,11 @@ public enum ContextColumn {
       case .ended: "Encerrado"
       }
     }
-    /// Still working (or waiting for Alexandre): listed above the finished ones and never collapsed.
+    /// Its model works (or waits for Alexandre).
     public var live: Bool { [.starting, .running, .permission, .question].contains(self) }
+    /// Live, or its model finished while its shells or subagents still work: listed above the finished ones, never
+    /// collapsed or dimmed.
+    public var ongoing: Bool { live || self == .background }
   }
 
   public struct Subagent: Identifiable, Sendable {
@@ -145,7 +149,7 @@ public enum ContextColumn {
   }
 
   public struct Subagents: Sendable {
-    /// Live work, then the most recent finished rows up to `minimumShown`.
+    /// Ongoing work (live, then in the background), then the most recent finished rows up to `minimumShown`.
     public let shown: [Subagent]
     /// The remaining finished rows, behind "+N concluídos".
     public let hidden: [Subagent]
@@ -173,7 +177,7 @@ public enum ContextColumn {
       let permission = permissions.first { owns($0.sessionID) }
       let status: Status =
         permission != nil ? .permission
-        : forms.contains(where: { owns($0.sessionID) }) && work.live ? .question
+        : forms.contains(where: { owns($0.sessionID) }) && (work.live || work.state == .background) ? .question
         : status(work.state)
       let session = child.flatMap { sessions[$0] }
       let context = session?.context
@@ -188,8 +192,8 @@ public enum ContextColumn {
         },
         progress: status.live ? child.flatMap { progress[$0] } : nil)
     }
-    let live = rows.filter(\.status.live)
-    let finished = rows.filter { !$0.status.live }
+    let live = rows.filter(\.status.ongoing)
+    let finished = rows.filter { !$0.status.ongoing }
     let extra = max(0, minimumShown - live.count)
     return Subagents(shown: live + finished.prefix(extra), hidden: Array(finished.dropFirst(extra)))
   }
@@ -210,6 +214,7 @@ public enum ContextColumn {
     switch state {
     case .starting: .starting
     case .running: .running
+    case .background: .background
     case .completed: .completed
     case .failed: .failed
     case .interrupted: .interrupted

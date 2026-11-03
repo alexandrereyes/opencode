@@ -70,7 +70,12 @@ import SwiftUI
   var active: Set<String> { sessions.active.union(family?.active.map(\.id) ?? []) }
   var work: [SessionWork] {
     ConversationProjection.work(
-      ownerID: id, viewedID: id, messages: messages, children: members, active: active, shells: shells)
+      ownerID: id, viewedID: id, messages: messages, children: members, active: active, shells: shells,
+      background: Set(background.keys))
+  }
+  /// Its subagents whose model finished while their shells or subagents still work, from the Sessões rows.
+  var background: [String: FamilyWork.Background] {
+    FamilyWork.background(members.filter { $0.parentID == id }.map(\.id), entries: sessions.entries, active: active)
   }
   var subagents: ContextColumn.Subagents {
     ContextColumn.subagents(

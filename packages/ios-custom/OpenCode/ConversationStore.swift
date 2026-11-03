@@ -323,10 +323,21 @@ import UniformTypeIdentifiers
   var details: ContextDetails {
     ContextDetails(messages: messages, models: displayModels, session: session, family: family)
   }
-  /// This session's own subagents and background shells; a subagent lists its own, not its siblings.
-  var work: [SessionWork] {
+  /// This session's own subagents and background shells; a subagent lists its own, not its siblings. A subagent in
+  /// `background` (`background(_:)`) is listed as working there, its shells staying its own.
+  var work: [SessionWork] { work() }
+  func work(background: [String: FamilyWork.Background] = [:]) -> [SessionWork] {
     ConversationProjection.work(
-      ownerID: id, viewedID: id, messages: messages, children: children, active: active, shells: shells)
+      ownerID: id, viewedID: id, messages: messages, children: children, active: active, shells: shells,
+      background: Set(background.keys))
+  }
+  /// Its subagents whose model finished while their shells or subagents still work, from the Sessões rows.
+  func background(_ entries: [NavigationEntry]) -> [String: FamilyWork.Background] {
+    FamilyWork.background(children.filter { $0.parentID == id }.map(\.id), entries: entries, active: active)
+  }
+  /// Only what it started still works, in the background: no model of the family executes (`working`).
+  func workingInBackground(_ entries: [NavigationEntry]) -> Bool {
+    !working && FamilyWork.working(id, entries: entries, active: active)
   }
   var runningCount: Int { work.filter(\.running).count }
   var runningAgents: Int { work.filter { $0.kind == .agent && $0.running }.count }

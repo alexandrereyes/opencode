@@ -5,11 +5,14 @@ public struct SessionWork: Identifiable, Sendable, Equatable {
   /// Agents are subagent sessions, in the foreground or background; scripts are background shells.
   public enum Kind: Sendable, Equatable { case agent, script }
   public enum State: Sendable, Equatable {
-    case starting, running, completed, failed, interrupted, ended
+    /// `background`: a subagent whose model finished while its shells or its own subagents still work
+    /// (`FamilyWork.background`); it is neither running nor finished.
+    case starting, running, background, completed, failed, interrupted, ended
     public var label: String {
       switch self {
       case .starting: "Iniciando"
       case .running: "Em execução"
+      case .background: "Em segundo plano"
       case .completed: "Concluído"
       case .failed: "Erro"
       case .interrupted: "Interrompido"
@@ -37,6 +40,8 @@ public struct SessionWork: Identifiable, Sendable, Equatable {
   public var running: Bool { state == .running }
   /// Running or about to run: listed before finished work.
   public var live: Bool { state == .running || state == .starting }
+  /// Live first, then work going on in the background, then finished work.
+  var rank: Int { live ? 0 : state == .background ? 1 : 2 }
 }
 
 public struct ContextDetails: Sendable {
@@ -72,24 +77,26 @@ public struct ContextDetails: Sendable {
 
 extension ConversationProjection {
   /// Every subagent of the owner and every background shell it started. Running (or starting) work comes
-  /// first, then finished work, each by most recent activity. Agents and scripts never mix: a shell is never an
-  /// agent placeholder.
+  /// first, then subagents working only in the background (`background`, from `FamilyWork.background`), then
+  /// finished work, each by most recent activity. Agents and scripts never mix: a shell is never an agent
+  /// placeholder, and a subagent's shells stay its own.
   public static func work(
     ownerID: String, viewedID: String, messages: [ConversationMessage], children: [Session],
-    active: Set<String>, shells: [ShellInfo]
+    active: Set<String>, shells: [ShellInfo], background: Set<String> = []
   ) -> [SessionWork] {
     let tools = messages.flatMap(\.tools)
-    return (agents(ownerID: ownerID, viewedID: viewedID, tools: tools, children: children, active: active, shells: shells)
+    return (agents(ownerID: ownerID, viewedID: viewedID, tools: tools, children: children, active: active,
+      background: background, shells: shells)
       + scripts(ownerID: ownerID, tools: tools, shells: shells))
       .sorted {
-        if $0.live != $1.live { return $0.live }
+        if $0.rank != $1.rank { return $0.rank < $1.rank }
         return $0.activity != $1.activity ? $0.activity > $1.activity : $0.id < $1.id
       }
   }
 
   private static func agents(
     ownerID: String, viewedID: String, tools: [ConversationPart], children: [Session], active: Set<String>,
-    shells: [ShellInfo]
+    background: Set<String>, shells: [ShellInfo]
   ) -> [SessionWork] {
     let links = subagentLinks(tools: tools, children: children, ownerID: ownerID)
     var work: [SessionWork] = children.filter { $0.parentID == ownerID && $0.id != viewedID }.map { child in
@@ -97,7 +104,9 @@ extension ConversationProjection {
       let tool = linked.first
       // A continued child is started again by its latest call; a background call completes at once.
       let latest = linked.last.flatMap { $0.time?.ran ?? $0.time?.created }
-      let state = active.contains(child.id) ? .running : finishedState(child.outcome, tool: linked.last?.status)
+      // Work left running below outranks how the model's turn ended, like a working row in Sessões.
+      let state: SessionWork.State = active.contains(child.id) ? .running
+        : background.contains(child.id) ? .background : finishedState(child.outcome, tool: linked.last?.status)
       let ended = child.time.idle ?? child.time.updated
       return SessionWork(
         id: child.id, kind: .agent, sessionID: child.id, shellID: nil, toolID: tool?.id,

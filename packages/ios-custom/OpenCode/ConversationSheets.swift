@@ -17,8 +17,9 @@ struct ConversationAgentsView: View {
   @State private var tab = Tab.agents
   enum Tab: Hashable { case agents, scripts }
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  /// The order on screen. It follows `store.work` (running first, then by latest activity) but only changes
-  /// while the list is not being scrolled, with a short animation, so a finishing agent never moves under a finger.
+  /// The order on screen. It follows `work` (running first, then in the background, then by latest activity) but
+  /// only changes while the list is not being scrolled, with a short animation, so a finishing agent never moves
+  /// under a finger.
   @State private var shown: [String] = []
   @State private var scrolling = false
   /// The finished subagents past the first ones, behind "+N concluídos".
@@ -35,10 +36,13 @@ struct ConversationAgentsView: View {
   }
   private var ordered: [SessionWork] {
     let index = Dictionary(shown.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
-    return store.work.enumerated()
+    return work.enumerated()
       .sorted { (index[$0.element.id] ?? Int.max, $0.offset) < (index[$1.element.id] ?? Int.max, $1.offset) }
       .map(\.element)
   }
+  /// Subagents working only in the background (their shells or subagents), from the Sessões rows.
+  private var background: [String: FamilyWork.Background] { store.background(sessions.entries) }
+  private var work: [SessionWork] { store.work(background: background) }
   private var agents: [SessionWork] { ordered.filter { $0.kind == .agent } }
   private var scripts: [SessionWork] { ordered.filter { $0.kind == .script } }
   private func reorder(_ ids: [String]) {
@@ -84,9 +88,9 @@ struct ConversationAgentsView: View {
     }
     .onScrollPhaseChange { _, phase in
       scrolling = phase != .idle
-      reorder(store.work.map(\.id))
+      reorder(work.map(\.id))
     }
-    .onChange(of: store.work.map(\.id), initial: true) { _, ids in
+    .onChange(of: work.map(\.id), initial: true) { _, ids in
       if shown.isEmpty { shown = ids } else { reorder(ids) }
     }
     .safeAreaInset(edge: .top, spacing: 0) {
@@ -275,7 +279,7 @@ struct ConversationAgentsView: View {
     HStack(spacing: 5) {
       switch work.state {
       case .starting: Image(systemName: "hourglass").foregroundStyle(theme.color(.textSecondary))
-      case .running: Circle().fill(theme.color(.success)).frame(width: 7, height: 7)
+      case .running, .background: Circle().fill(theme.color(.success)).frame(width: 7, height: 7)
       case .completed: Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.color(.success))
       case .failed: Image(systemName: "xmark.circle.fill").foregroundStyle(theme.color(.error))
       case .interrupted: Image(systemName: "stop.circle.fill").foregroundStyle(theme.color(.warning))
@@ -346,7 +350,7 @@ struct ConversationAgentsView: View {
     }
     .padding(.vertical, 5)
     // A finished line steps back, below a running title's dimmer base between passes.
-    .opacity(subagent.status.live ? 1 : 0.55)
+    .opacity(subagent.status.ongoing ? 1 : 0.55)
     .contentShape(.rect)
     .onTapGesture { open(work) }
     .swipeActions { if work.running { Button("Parar", role: .destructive) { stopping = work } } }
@@ -429,8 +433,14 @@ struct ConversationAgentsView: View {
   /// Responder; a finished line says how it ended.
   private func activityLine(_ subagent: ContextColumn.Subagent) -> some View {
     let waiting = subagent.status == .permission || subagent.status == .question
+    let background = subagent.status == .background
     return HStack(alignment: .firstTextBaseline, spacing: 8) {
-      Text(activity(subagent)).appFont(.caption).foregroundStyle(theme.color(waiting ? .warning : .textSecondary))
+      // Work going on without the model, like a running script's dot and Sessões' green "em segundo plano".
+      if background {
+        Circle().fill(theme.color(.success)).frame(width: 7, height: 7).accessibilityHidden(true)
+      }
+      Text(activity(subagent)).appFont(.caption)
+        .foregroundStyle(theme.color(waiting ? .warning : background ? .success : .textSecondary))
         .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("agent-activity-" + subagent.id)
       if let permission = subagent.permission {
@@ -458,6 +468,8 @@ struct ConversationAgentsView: View {
     } else if subagent.status == .question {
       current = store.family?.forms.first { $0.sessionID == child }.map { "Pergunta: " + $0.preview }
         ?? "Aguardando sua resposta"
+    } else if subagent.status == .background {
+      current = child.flatMap { background[$0]?.label } ?? "em segundo plano"
     } else if subagent.status.live {
       current = "agora: " + (child.flatMap { progress[$0]?.current?.content } ?? child.flatMap { activities[$0] }
         ?? (subagent.status == .starting ? "iniciando" : "pensando"))

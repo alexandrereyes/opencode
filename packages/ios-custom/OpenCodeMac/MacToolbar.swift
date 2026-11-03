@@ -167,6 +167,8 @@ struct MacChatTitle: View {
     let title = master && runtime.selection.childID == nil ? "Sessão mestra"
       : conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode"
     let running = conversation?.working ?? (row?.state == .running || shownID.map(store.active.contains) == true)
+    // No model of the family executes but its shells or subagents below still work (Sessões' "em segundo plano").
+    let background = !running && conversation?.workingInBackground(store.entries) == true
     let subtitle = subtitle(row)
     HStack(spacing: 9) {
       MacChatAvatar(
@@ -176,7 +178,8 @@ struct MacChatTitle: View {
         icon: row.flatMap { $0.chat ? nil : ProjectIcon.of($0.project) })
       ConversationTitle(
         title: master ? "Sessão mestra" : title, subtitle: subtitle,
-        status: running ? "trabalhando…" : "", waiting: row?.state == .permission || row?.state == .question)
+        status: running ? "trabalhando…" : background ? "em segundo plano" : "",
+        waiting: row?.state == .permission || row?.state == .question)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(width: width, alignment: .leading)
@@ -184,7 +187,8 @@ struct MacChatTitle: View {
     .background(MacSearchAnchor(role: .title))
     .fixedSize()
     .accessibilityElement(children: .combine)
-    .accessibilityLabel([title, subtitle, running ? "trabalhando" : nil].compactMap { $0 }.joined(separator: ", "))
+    .accessibilityLabel([title, subtitle, running ? "trabalhando" : background ? "em segundo plano" : nil]
+      .compactMap { $0 }.joined(separator: ", "))
     .accessibilityAddTraits(.isHeader)
   }
 

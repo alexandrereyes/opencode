@@ -2024,8 +2024,8 @@ Approved mockups: indicator option B with the long press of option A, and "Agent
   number when all finished. A subagent no longer reads its parent's transcript nor refreshes on its siblings' events,
   so opening one costs one request less.
 - **No … button in a subagent (31 October).** The right side is only that capsule, the same component as a top-level
-  session's: the agents icon always (the green animated grid with the running count, a grey square without a number
-  when nothing runs), then, when the subagent has resources, a divider and the devices icon with the count of those
+  session's: the agents icon always (the green animated grid with the running count, a still green grid while only
+  background work below goes on, a grey square without a number when nothing runs), then, when the subagent has resources, a divider and the devices icon with the count of those
   running. Its resources are those whose `owner.sessionID` is the subagent or one of its descendants
   (`ConversationStore.scheduleResources`; a top-level session also matches `owner.rootSessionID`). So: subagents and
   resources show both halves, only resources the grey square and the devices half, only subagents the agents icon
@@ -2051,7 +2051,22 @@ Approved mockups: indicator option B with the long press of option A, and "Agent
   eight live subagents without a Progresso, read again on their steps). A subagent waiting for Alexandre carries an amber
   `?` and says what it asks, with **Permitir · Negar** for a permission or **Responder ›** for a question; a finished
   line is dimmed and says how it ended. Live first, then the newest finished up to five, the rest behind
-  **+N concluídos ›** (`ContextColumn.subagents`). Stop, swipe and the menu stay. **`☑ 2/4`** (a 44-pt target) opens
+  **+N concluídos ›** (`ContextColumn.subagents`). Stop, swipe and the menu stay.
+- **Em segundo plano (Alexandre, 03/11).** A subagent whose model finished while its background shells, or those
+  or the execution of a descendant at any depth and Location (another worktree included), still go on is
+  `.background` (`FamilyWork.background`, from the Sessões rows' `backgroundCount` and active sessions: no read per
+  subagent). Its line lists right after the running ones, never dimmed or behind **+N concluídos**, with a green dot
+  and `em segundo plano · 3 scripts · python3 servico.py core` (or `· 1 subagente trabalhando`). It is not running:
+  no shimmer, no Parar, no `agora: …` read, and the capsule's "N agentes em execução" and the Mac's `ativos` leave it
+  out. A request outranks it; it outranks how the model ended, a failure included, like a working row in Sessões. The
+  shells stay their owner's: the parent's Scripts lists only its own, and opening the subagent shows them in its
+  Scripts. The parent's header says so too: the capsule's agents icon becomes a still green grid ("trabalho em segundo
+  plano"; animated only while an agent or own script runs) and the status line reads `em segundo plano` (the Mac's
+  title too, `MacChatTitle`) while no model of the family executes. When the last shell ends, the next Sessões list
+  (reloaded by the owner's session events: the shell's notice wakes it) returns the line to the finished ones.
+  `script/test-background-agents.py` (`BackgroundAgentsTests`) checks it end to end against an isolated sandbox with
+  a fake model and two real `sleep`s; `BackgroundWorkTests` (OpenCodeKit) covers classification, order, collapse,
+  requests, the other worktree, another family in the same folder and the last shell ending. **`☑ 2/4`** (a 44-pt target) opens
   the subagent's Progresso (`ConversationProgressList`, live while open) with **Abrir subagente**.
 - **Where the Progresso comes from** (`SessionStore.progress(_:family:)`): the list the app folded from live events
   wins, else the family snapshot's `progress` (the plugin's Live Activity hub, which saw every `todowrite` since the

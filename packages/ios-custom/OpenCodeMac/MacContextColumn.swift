@@ -380,14 +380,19 @@ private struct SubagentLine: View {
         .accessibilityIdentifier("subagent-model-" + subagent.id)
       metrics
       HStack(alignment: .firstTextBaseline, spacing: 8) {
-        Text(activity).appFont(.caption).foregroundStyle(theme.color(waiting ? .warning : .textSecondary))
+        // Work going on without the model, like a running script's dot and Sessões' green "em segundo plano".
+        if subagent.status == .background {
+          Circle().fill(theme.color(.success)).frame(width: 7, height: 7).accessibilityHidden(true)
+        }
+        Text(activity).appFont(.caption)
+          .foregroundStyle(theme.color(waiting ? .warning : subagent.status == .background ? .success : .textSecondary))
           .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
         actions
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.vertical, 9)
-    .opacity(subagent.status.live ? 1 : 0.45)
+    .opacity(subagent.status.ongoing ? 1 : 0.45)
     .contentShape(Rectangle())
     .onTapGesture(perform: open)
     .contextMenu {
@@ -467,6 +472,8 @@ private struct SubagentLine: View {
       current = permission.preview
     } else if subagent.status == .question {
       current = store.question(subagent.work.sessionID).map { "Pergunta: " + $0.preview } ?? "Aguardando sua resposta"
+    } else if subagent.status == .background {
+      current = subagent.work.sessionID.flatMap { store.background[$0]?.label } ?? "em segundo plano"
     } else if subagent.status.live {
       current = "agora: " + (subagent.work.sessionID.flatMap { store.activities[$0] } ?? "pensando")
     } else {

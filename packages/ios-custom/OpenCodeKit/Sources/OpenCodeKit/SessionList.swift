@@ -72,8 +72,13 @@ public enum FamilyWork {
 
   /// The session and its descendants at any depth among `entries`: the work it started, below it.
   public static func subtree(_ id: String, entries: [NavigationEntry]) -> [NavigationEntry] {
-    let children = Dictionary(grouping: entries) { $0.session.parentID ?? "" }
-    var members = entries.filter { $0.session.id == id }
+    subtree(id, own: entries.filter { $0.session.id == id }, children: Dictionary(grouping: entries) { $0.session.parentID ?? "" })
+  }
+
+  private static func subtree(_ id: String, own: [NavigationEntry], children: [String: [NavigationEntry]])
+    -> [NavigationEntry]
+  {
+    var members = own
     var frontier = [id]
     var seen: Set<String> = [id]
     while let parent = frontier.popLast() {
@@ -91,6 +96,42 @@ public enum FamilyWork {
     descendants: [Session] = []) -> Bool
   {
     active.contains(id) || !descendants.isEmpty || working(subtree(id, entries: entries), active: active)
+  }
+
+  /// A subagent whose model no longer executes while its branch still works: background shells of it or of a
+  /// descendant, at any Location, or a descendant that executes.
+  public struct Background: Sendable, Equatable {
+    public let shells: Int
+    /// The command of one of those shells, when the server named it (`backgroundTitle`).
+    public let title: String?
+    public let agents: Int
+    /// `em segundo plano · 3 scripts · python3 servico.py`, `em segundo plano · 1 subagente trabalhando`.
+    public var label: String {
+      let parts = [
+        shells == 0 ? nil : shells == 1 ? "1 script" : "\(shells) scripts",
+        agents == 0 ? nil : agents == 1 ? "1 subagente trabalhando" : "\(agents) subagentes trabalhando",
+        title.flatMap { $0.isEmpty ? nil : $0 },
+      ].compactMap { $0 }
+      return (["em segundo plano"] + parts).joined(separator: " · ")
+    }
+  }
+
+  /// Which of `ids` (subagents of one conversation) work only in the background (`Background`), in one pass over
+  /// the Sessões rows: no read per subagent. An executing one, or one whose branch is idle or not listed, is absent.
+  public static func background(_ ids: [String], entries: [NavigationEntry], active: Set<String>)
+    -> [String: Background]
+  {
+    let rows = Dictionary(entries.map { ($0.session.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let children = Dictionary(grouping: entries) { $0.session.parentID ?? "" }
+    return Dictionary(ids.compactMap { id -> (String, Background)? in
+      guard !active.contains(id), let own = rows[id] else { return nil }
+      let members = subtree(id, own: [own], children: children)
+      let shells = members.filter { ($0.backgroundCount ?? 0) > 0 }
+      let agents = members.filter { $0.session.id != id && active.contains($0.session.id) }.count
+      guard !shells.isEmpty || agents > 0 else { return nil }
+      return (id, Background(shells: shells.reduce(0) { $0 + ($1.backgroundCount ?? 0) },
+        title: shells.lazy.compactMap(\.backgroundTitle).first, agents: agents))
+    }, uniquingKeysWith: { first, _ in first })
   }
 }
 
