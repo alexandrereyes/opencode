@@ -110,6 +110,8 @@ final class SessionStore {
   }
   /// Você (settings) as a sheet over Sessões, opened from the header avatar.
   var settingsOpen = false
+  /// Você opens on Servidores (Gerenciar servidores in Sessões' server list).
+  var settingsServers = false
   /// Recently opened conversations and those on the stack, so screens pushed above one share its store
   /// and returning to one finds it as it was left.
   @ObservationIgnored let conversations = ConversationRegistry()

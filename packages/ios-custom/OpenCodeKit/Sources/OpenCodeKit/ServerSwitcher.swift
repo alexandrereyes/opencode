@@ -1,7 +1,8 @@
 import Foundation
 
-/// The Mac's quick server switch (the avatar at the foot of the project rail, its menu and Ir ▸ Servidores),
-/// from the saved servers alone: the other servers' state needs connections of their own and is not shown yet.
+/// The quick server switch of both apps, from the saved servers alone: the server title atop Sessões (avatar, name and
+/// the current server's connection), its server list (an iPhone sheet, a Mac panel) and the Mac's Ir ▸ Servidores.
+/// The other servers' state needs connections of their own and is not shown.
 public enum ServerSwitcher {
   /// ⌃⌘1…⌃⌘9, in Ajustes' order; servers past the ninth have no shortcut.
   public static let shortcuts = 9
@@ -32,9 +33,19 @@ public enum ServerSwitcher {
       case .disconnected: "Desconectado"
       }
     }
+
+    /// The dot beside the server's name.
+    public var role: ThemeRole {
+      switch self {
+      case .connected: .success
+      case .connecting: .warning
+      case .disconnected: .error
+      }
+    }
   }
 
-  /// Only when there is a choice: with one saved server the rail and the Ir menu stay as they were.
+  /// Only when there is a choice: with one saved server the Mac's Ir ▸ Servidores and its ⌃⌘ shortcuts stay out.
+  /// The server title shows in any case.
   public static func visible(_ servers: [SavedServer]) -> Bool { servers.count > 1 }
 
   public static func entries(_ servers: [SavedServer], activeID: String) -> [Entry] {

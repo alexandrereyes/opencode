@@ -34,6 +34,11 @@ struct OpenCodeApp: App {
     #if DEBUG && targetEnvironment(simulator)
     // On the Simulator only tests run the app: never the saved servers or the real default, only a sandbox.
     let sandbox = TestInstall.sandbox(launch: .override(), defaults: .standard, credentials: ServerCredentials())
+    // `-OpenCodeFixtureServers`: the sandbox as "Mac de Alexandre" and two unreachable loopback servers, in memory.
+    if let sandbox, ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureServers") {
+      return ServerStore.fixture([("escritorio", "Mac mini do escritório — clientes", "http://127.0.0.1:4243"),
+        ("ci", "Servidor Linux de CI", "http://127.0.0.1:4244")], builtinName: "Mac de Alexandre", launchOverride: sandbox)
+    }
     return ServerStore(launchOverride: sandbox, testWithoutSandbox: sandbox == nil)
     #else
     return ServerStore(launchOverride: .override())
@@ -46,6 +51,8 @@ struct OpenCodeApp: App {
   var appliedRevision = -1
   var switching = false
   var error: String?
+  /// A switch made in Você reopens it on the new server; one made from Sessões' server title stays in Sessões.
+  @ObservationIgnored private var reopensSettings = true
   @ObservationIgnored private var building: Task<Void, Never>?
   @ObservationIgnored private var voiceSessions: Task<Void, Never>?
   /// Builds the store for the active server only when it is missing or stale; the scene and an
@@ -58,6 +65,24 @@ struct OpenCodeApp: App {
     await task.value
     building = nil
     return appliedRevision == servers.revision ? store : nil
+  }
+  /// The switch of both server lists (Sessões' title and Você ▸ Servidores): `ServerStore.select`, then the store is
+  /// rebuilt for the new server (drafts and reading places stay, by address). Ask first with `callActive`: it ends
+  /// the voice call.
+  func select(_ server: SavedServer, fromSettings: Bool) throws {
+    guard server.id != servers.activeID else { return }
+    reopensSettings = fromSettings
+    do { try servers.select(server.id) } catch {
+      reopensSettings = true
+      throw error
+    }
+  }
+  /// A voice call the switch would end.
+  var callActive: Bool {
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("-OpenCodeFixtureCallActive") { return true }
+    #endif
+    return voice.sessionID != nil
   }
   /// AppShell runs the store only with a scene; a call started without one still needs the
   /// event stream for Sessão mestra progress, until that call ends.
@@ -80,8 +105,9 @@ struct OpenCodeApp: App {
     guard !Task.isCancelled else { return }
     do {
       let replacement = SessionStore(configuration: try servers.configuration(), acceptsLaunchSession: previous == nil)
-      // A server chosen in Você reopens it on the new store.
-      if previous != nil { replacement.settingsOpen = true }
+      // A server chosen in Você reopens it on the new store; one chosen from Sessões' title stays in Sessões.
+      if previous != nil, reopensSettings { replacement.settingsOpen = true }
+      reopensSettings = true
       store = replacement
       appliedRevision = servers.revision
       identity = UUID()

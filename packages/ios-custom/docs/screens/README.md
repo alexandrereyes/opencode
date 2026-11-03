@@ -15,7 +15,10 @@ salvo quando a proposta pedir uma mudança explícita. Os PNGs ficam versionados
   de assinaturas/voz. O transporte é fechado em memória: requisições desconhecidas falham;
   não existe fallback para rede. A URL de lançamento é apenas um identificador de isolamento.
 - Os recursos são exemplos da **lista**, não streams ativos. Sessões é a raiz do app, sem barra
-  de abas. Você abre como folha pelo avatar AR no cabeçalho.
+  de abas. Você abre como folha pelo avatar AR no cabeçalho. Desde 3 de novembro o título é o servidor
+  atual (`-OpenCodeFixtureServers`: "Mac de Alexandre", conectado), que abre a lista de servidores; as capturas
+  de `testSections` (`sessions-sections-*`) não foram refeitas, porque esse teste já falhava em `custom`
+  ("Precisa de você" conta 6, não 3, e não há mais a seção Fixadas na fixture).
 - Os PNGs são reduzidos de 3× para 2× (804 × 1748) pelo `sips` do macOS, quantizados com
   `pngquant --quality=85-95 --speed 3 --strip --skip-if-larger` e recomprimidos com zlib.
   A resolução continua 2×; apenas a paleta tem perdas controladas. PNGs que não atingem a qualidade

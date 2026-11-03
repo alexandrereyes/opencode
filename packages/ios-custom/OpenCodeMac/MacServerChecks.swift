@@ -3,9 +3,10 @@ import AppKit
 import OpenCodeKit
 import SwiftUI
 
-/// The rail's server switch in the closed fixture: `-OpenCodeMacServers <n>` replaces the saved servers with `n`
+/// The server title's switch in the closed fixture: `-OpenCodeMacServers <n>` replaces the saved servers with `n`
 /// fake ones held in memory (never the app's defaults or the Keychain), and `-OpenCodeMacAjustes servidores` drives
-/// the avatar, its menu, the voice confirmation, Ir ▸ Servidores with ⌃⌘2 and the rail with one server left.
+/// the title in the session column's title bar, its menu, the voice confirmation, Ir ▸ Servidores with ⌃⌘2, the
+/// rail without a server avatar and the title with one server left.
 /// Every switch rebuilds the same fixture: only the saved servers change.
 @MainActor enum MacServerChecks {
   /// Overrides the voice call the switch asks about, and the connection the avatar shows (the fixture has no event
@@ -24,12 +25,7 @@ import SwiftUI
     guard MacLaunch.fixture, let count = MacFixture.value("-OpenCodeMacServers").flatMap(Int.init), count > 0
     else { return nil }
     let fake = [("host6", "host-6 · produção", "http://host-6.interno:4096"), ("sandbox", "Sandbox", "http://127.0.0.1:4199")]
-      .prefix(count - 1).map { #"{"id":"\#($0.0)","name":"\#($0.1)","url":"\#($0.2)"}"# }
-    let defaults = MacServerDefaults(values: [
-      "OpenCodeServers": Data(("[" + fake.joined(separator: ",") + "]").utf8),
-      "OpenCodeServers.builtinName": "Mac de Alexandre",
-    ])
-    return ServerStore(defaults: defaults, credentials: ServerCredentials(backend: MacServerCredentials()),
+    return ServerStore.fixture(Array(fake.prefix(count - 1)), builtinName: "Mac de Alexandre",
       builtinURL: MacRuntime.localURL)
   }
 
@@ -64,15 +60,15 @@ import SwiftUI
     try expect(servers.servers.map(\.title) == ["Mac de Alexandre", "host-6 · produção", "Sandbox"],
       "servidores falsos: \(servers.servers.map(\.title))")
     overrides.connection = .connected
-    // Closed: the avatar under Ajustes, the menu hidden.
-    try await wait("avatar do servidor conectado (\(MacServerButton.shown ?? "ausente"))") {
-      MacServerButton.shown == "Servidor Mac de Alexandre, conectado" ? true : nil
+    // Closed: the title after the traffic lights, the menu hidden, no server avatar left in the rail.
+    try await wait("título do servidor conectado (\(MacServerTitle.shown ?? "ausente"))") {
+      MacServerTitle.shown == "Servidor Mac de Alexandre, conectado" ? true : nil
     }
     try await Task.sleep(for: .milliseconds(500))
     shot("fechada")
 
-    // Open: upward from the avatar, beside the rail; it never takes the keyboard.
-    NotificationCenter.default.post(name: MacServerButton.openRequest, object: nil)
+    // Open: down from the title, aligned with it; it never takes the keyboard.
+    NotificationCenter.default.post(name: MacServerTitle.openRequest, object: nil)
     let menu = try await wait("menu aberto") { MacServerMenu.shown.flatMap { $0.visible ? $0 : nil } }
     let rows = try await wait("linhas do menu") { MacServerMenuList.shown.isEmpty ? nil : MacServerMenuList.shown }
     try expect(rows == [
@@ -81,11 +77,16 @@ import SwiftUI
       "SA Sandbox · 127.0.0.1:4199 · ⌃⌘3",
       "Gerenciar servidores… ⌘,", "Adicionar servidor…",
     ], "linhas: \(rows)")
-    let anchor = try require(menu.anchor, "âncora do avatar")
+    let anchor = try require(menu.anchor, "âncora do título")
     let tile = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
     let panel = menu.window.frame
-    try expect(abs(panel.minY - tile.minY) < 1 && panel.maxY > tile.maxY + 60 && panel.minX >= tile.maxX,
-      "menu fora do lugar: \(NSStringFromRect(panel)) avatar \(NSStringFromRect(tile))")
+    // The title sits in the title bar, after the traffic lights, and the menu hangs just under it.
+    // In the session column's part of the title bar: after the traffic lights, before the column's ~380-pt edge.
+    try expect(tile.maxY > window.frame.maxY - 52 && tile.minX > window.frame.minX + 60
+      && tile.maxX < window.frame.minX + 440,
+      "título fora da barra da coluna de sessões: \(NSStringFromRect(tile)) janela \(NSStringFromRect(window.frame))")
+    try expect(abs(panel.maxY - (tile.minY - 4)) < 1 && abs(panel.minX - tile.minX) < 1,
+      "menu fora do lugar: \(NSStringFromRect(panel)) título \(NSStringFromRect(tile))")
     try expect(!menu.window.canBecomeKey && !menu.window.isKeyWindow, "o menu tomou o teclado")
     try await Task.sleep(for: .milliseconds(400))
     shot("menu")
@@ -96,7 +97,7 @@ import SwiftUI
 
     // With a voice call, choosing another server asks first; Cancelar keeps the server.
     overrides.callActive = true
-    NotificationCenter.default.post(name: MacServerButton.openRequest, object: nil)
+    NotificationCenter.default.post(name: MacServerTitle.openRequest, object: nil)
     try await wait("menu reaberto") { menu.visible ? true : nil }
     menu.choose(.server("host6"))
     let alert = try await wait("confirmação") { window.attachedSheet }
@@ -117,26 +118,36 @@ import SwiftUI
     let session = try front().selection.sessionID
     try await Task.sleep(for: .milliseconds(700))
 
-    // Ir ▸ Servidores and ⌃⌘2, which SwiftUI fills only for the active app: the copy comes forward for this part.
-    if MacLaunch.background {
-      NSApp.setActivationPolicy(.regular)
-      NSApp.activate(ignoringOtherApps: true)
+    // Ir ▸ Servidores and ⌃⌘2, which SwiftUI fills only for the active app: the copy comes forward for this part. A
+    // locked screen lets no app become active: then the switch goes through the title's menu and says so.
+    let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool == true
+    if locked {
+      print("MacAjustes servidores: tela bloqueada, Ir ▸ Servidores e ⌃⌘2 não verificados; troca pelo menu do título")
+      overrides.connection = nil
+      NotificationCenter.default.post(name: MacServerTitle.openRequest, object: nil)
+      try await wait("menu reaberto para trocar") { menu.visible ? true : nil }
+      menu.choose(.server("host6"))
+    } else {
+      if MacLaunch.background {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+      }
+      window.makeKeyAndOrderFront(nil)
+      NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+      let items = try await wait("Ir ▸ Servidores") { serverItems().count == 3 ? serverItems() : nil }
+      try expect(items.map(\.title) == ["Mac de Alexandre", "host-6 · produção", "Sandbox"]
+        && items.map(\.keyEquivalent) == ["1", "2", "3"]
+        && items.allSatisfy { $0.keyEquivalentModifierMask == [.control, .command] }
+        && items.map(\.state) == [.on, .off, .off],
+        "Ir ▸ Servidores: \(items.map { "\($0.title) \($0.keyEquivalent) \($0.state.rawValue)" })")
+      overrides.connection = nil
+      _ = NSApp.mainMenu?.performKeyEquivalent(with: key("2", code: 19, flags: [.control, .command], window: window))
     }
-    window.makeKeyAndOrderFront(nil)
-    NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
-    let items = try await wait("Ir ▸ Servidores") { serverItems().count == 3 ? serverItems() : nil }
-    try expect(items.map(\.title) == ["Mac de Alexandre", "host-6 · produção", "Sandbox"]
-      && items.map(\.keyEquivalent) == ["1", "2", "3"]
-      && items.allSatisfy { $0.keyEquivalentModifierMask == [.control, .command] }
-      && items.map(\.state) == [.on, .off, .off],
-      "Ir ▸ Servidores: \(items.map { "\($0.title) \($0.keyEquivalent) \($0.state.rawValue)" })")
-    overrides.connection = nil
-    _ = NSApp.mainMenu?.performKeyEquivalent(with: key("2", code: 19, flags: [.control, .command], window: window))
-    try await wait("⌃⌘2 escolheu host-6") { servers.activeID == "host6" ? true : nil }
+    try await wait(locked ? "o menu escolheu host-6" : "⌃⌘2 escolheu host-6") { servers.activeID == "host6" ? true : nil }
     try await Task.sleep(for: .milliseconds(150))
     shot("trocando")
     try await wait("janela recarregada em host-6", timeout: 15) {
-      app.appliedRevision == servers.revision && MacServerButton.shown?.hasPrefix("Servidor host-6") == true
+      app.appliedRevision == servers.revision && MacServerTitle.shown?.hasPrefix("Servidor host-6") == true
         ? true : nil
     }
     try await Task.sleep(for: .milliseconds(600))
@@ -158,22 +169,31 @@ import SwiftUI
       && UserDefaults.standard.object(forKey: "OpenCodeServers.active") == nil,
       "os servidores falsos foram gravados nos ajustes do app")
 
-    // One server left: the avatar and Ir ▸ Servidores go away and the rail is as before.
+    // One server left: the title stays (it says where Sessões come from) and its menu keeps the current server,
+    // Gerenciar and Adicionar; Ir ▸ Servidores and its shortcuts go away.
     try servers.remove("sandbox")
     try servers.remove("host6")
-    try await wait("sem avatar com um servidor", timeout: 15) {
+    try await wait("título com um servidor", timeout: 15) {
       app.appliedRevision == servers.revision && app.windows.values.contains { $0.window === window }
-        && MacServerButton.shown == nil ? true : nil
+        && MacServerTitle.shown?.hasPrefix("Servidor Mac de Alexandre") == true ? true : nil
     }
     try await Task.sleep(for: .seconds(1.5))
-    try expect(MacServerButton.shown == nil && serverItems().isEmpty, "controle visível com um servidor")
+    try expect(serverItems().isEmpty, "Ir ▸ Servidores com um servidor")
     shot("um-servidor")
+    NotificationCenter.default.post(name: MacServerTitle.openRequest, object: nil)
+    let single = try await wait("linhas com um servidor") { MacServerMenuList.shown.count == 3 ? MacServerMenuList.shown : nil }
+    try expect(single == ["✓ MA Mac de Alexandre · 127.0.0.1:4096 · Conectado · ⌃⌘1", "Gerenciar servidores… ⌘,",
+      "Adicionar servidor…"], "linhas com um servidor: \(single)")
+    try await Task.sleep(for: .milliseconds(400))
+    shot("um-servidor-menu")
+    NSApp.postEvent(key("\u{1b}", code: 53, window: window), atStart: false)
     // The window's draft and reading place, written to this Mac's Application Support under the fixture's key.
     let key = try require(app.store, "sessões").client.configuration.url.absoluteString + "#window=" + front().id.uuidString
     try? FileManager.default.removeItem(at: DraftPersistence(server: key, sessionID: MacFixture.rootID).directory
       .deletingLastPathComponent())
     try? FileManager.default.removeItem(at: ReadingPositionStore(server: key).file)
-    print("MacAjustes servidores: menu, Esc, confirmação com voz, ⌃⌘2, sessão e rascunho de volta, um servidor sem avatar")
+    print("MacAjustes servidores: título na coluna de sessões, menu, Esc, confirmação com voz, "
+      + (locked ? "troca pelo menu do título" : "Ir ▸ Servidores e ⌃⌘2") + ", sessão e rascunho de volta, um servidor com título")
   }
 
   /// Ir ▸ Servidores' items, once SwiftUI filled the menu.
@@ -209,27 +229,5 @@ import SwiftUI
     }
     throw MacAjustesChecks.Failure(description: "tempo esgotado: \(what)")
   }
-}
-
-/// The fake servers' defaults, in memory: `ServerStore` reads and writes through `object(forKey:)` and
-/// `set(_:forKey:)`, so the app's domain never sees them.
-private final class MacServerDefaults: UserDefaults, @unchecked Sendable {
-  private var values: [String: Any] = [:]
-  convenience init(values: [String: Any]) {
-    self.init(suiteName: nil)!
-    self.values = values
-  }
-  override func object(forKey defaultName: String) -> Any? { values[defaultName] }
-  override func set(_ value: Any?, forKey defaultName: String) { values[defaultName] = value }
-  override func removeObject(forKey defaultName: String) { values[defaultName] = nil }
-  override func data(forKey defaultName: String) -> Data? { values[defaultName] as? Data }
-  override func string(forKey defaultName: String) -> String? { values[defaultName] as? String }
-}
-
-/// No Keychain for the fake servers.
-private final class MacServerCredentials: CredentialBackend {
-  private var values: [String: Data] = [:]
-  func read(_ account: String) throws -> Data? { values[account] }
-  func write(_ data: Data?, account: String) throws { values[account] = data }
 }
 #endif

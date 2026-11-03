@@ -14,6 +14,9 @@ struct SessionsView: View {
   @State private var showArchived = false
   @State private var appliedLaunch = false
   @State private var proxyProvider: SubscriptionProvider?
+  @State private var showServers = false
+  /// Gerenciar servidores in the server list: Você opens on Servidores once the list has closed.
+  @State private var manageServers = false
   @State private var selection = SessionSelection()
   @State private var presentation = SessionListPresentation()
   @State private var viewport = CGRect.zero
@@ -163,6 +166,14 @@ struct SessionsView: View {
       .sheet(item: $proxyProvider) { provider in
         SubscriptionDetailSheet(store: store.quota, initialProvider: provider).sessionAlertOverlay()
       }
+      .sheet(isPresented: $showServers, onDismiss: {
+        guard manageServers else { return }
+        manageServers = false
+        store.settingsServers = true
+        store.settingsOpen = true
+      }) {
+        ServerSwitcherSheet(runtime: AppRuntime.shared, store: store) { manageServers = true }.sessionAlertOverlay()
+      }
       .alert(
         SessionBulkCopy.deleteTitle(bulkDelete?.count ?? 0),
         isPresented: Binding(get: { bulkDelete != nil }, set: { if !$0 { bulkDelete = nil } }),
@@ -248,7 +259,21 @@ struct SessionsView: View {
           .init(id: "draft_" + UUID().uuidString, newSession: true, startInChats: true))
       },
       newSessionDisabled: store.preferences == nil,
-      selection: selectionActions)
+      selection: selectionActions,
+      server: server)
+  }
+
+  /// The current server where "Sessões" was; its connection is this store's event stream.
+  private var server: SessionColumnHeader.Server? {
+    let servers = AppRuntime.shared.servers
+    guard let entry = ServerSwitcher.entries(servers.servers, activeID: servers.activeID).first(where: \.active)
+    else { return nil }
+    var connection = ServerSwitcher.Connection(connected: store.connected, failed: store.error != nil)
+    #if DEBUG
+    // The offline fixtures (the screen catalog) have no event stream to connect.
+    if ScrollFixtures.mode != nil { connection = .connected }
+    #endif
+    return .init(entry: entry, connection: connection) { showServers = true }
   }
 
   /// A List covered by a conversation can be laid out with another viewport and clamp a bottom-aligned position.

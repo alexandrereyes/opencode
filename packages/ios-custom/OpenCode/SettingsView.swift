@@ -9,6 +9,8 @@ struct SettingsView: View {
   let runtime: AppRuntime
   let store: SessionStore
   @State private var proxyProvider: SubscriptionProvider?
+  /// Servidores, pushed at once when Sessões' server list asked for Gerenciar servidores.
+  @State private var showServers = false
   @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsibleUserMessages = true
   var body: some View {
     @Bindable var appearance = runtime.appearance
@@ -119,6 +121,12 @@ struct SettingsView: View {
       .sheet(item: $proxyProvider) { provider in
         SubscriptionDetailSheet(store: store.quota, initialProvider: provider).sessionAlertOverlay()
       }
+      .navigationDestination(isPresented: $showServers) { ServerListView(runtime: runtime, store: store) }
+      .onAppear {
+        guard store.settingsServers else { return }
+        store.settingsServers = false
+        showServers = true
+      }
     }
   }
 }
@@ -161,6 +169,8 @@ struct ServerListView: View {
   @State private var removing: SavedServer?
   @State private var pairing = false
   @State private var error: String?
+  /// A switch that would end the voice call, waiting for its confirmation.
+  @State private var request: SavedServer?
   var body: some View {
     List {
       Section("Servidor ativo") {
@@ -181,8 +191,8 @@ struct ServerListView: View {
         ForEach(runtime.servers.servers) { server in
           HStack {
             Button {
-              do { try runtime.servers.select(server.id) }
-              catch { self.error = error.localizedDescription }
+              if runtime.callActive, server.id != runtime.servers.activeID { request = server }
+              else { choose(server) }
             } label: {
               HStack(spacing: 12) {
                 Image(systemName: server.id == runtime.servers.activeID ? "checkmark.circle.fill" : "circle")
@@ -220,6 +230,7 @@ struct ServerListView: View {
         Text("Senhas e tokens ficam apenas no Chaves deste iPhone. Trocar de servidor fecha a conversa atual; rascunhos e posições de leitura ficam preservados por endereço.")
       }.listRowBackground(theme.color(.surface))
     }.settingsList(theme).navigationTitle("Servidores").navigationBarTitleDisplayMode(.inline)
+      .serverSwitchConfirmation($request, perform: choose)
       .sheet(item: $editor) { route in
         ServerEditor(servers: runtime.servers, server: route.server).sessionAlertOverlay()
       }
@@ -238,6 +249,10 @@ struct ServerListView: View {
       .alert("Não foi possível alterar o servidor", isPresented: Binding(
         get: { error != nil }, set: { if !$0 { error = nil } }
       )) { Button("OK") { error = nil } } message: { Text(error ?? "") }
+  }
+  private func choose(_ server: SavedServer) {
+    do { try runtime.select(server, fromSettings: true) }
+    catch { self.error = error.localizedDescription }
   }
 }
 

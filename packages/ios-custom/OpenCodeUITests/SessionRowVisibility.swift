@@ -1,8 +1,11 @@
 import XCTest
 
 @MainActor extension XCUIApplication {
-  /// The Sessões column header's title; the screen has no navigation bar.
-  var sessionsTitle: XCUIElement { staticTexts["sessions-title"] }
+  /// The Sessões column header's title, the current server's since 3 November; the screen has no navigation bar.
+  var sessionsTitle: XCUIElement {
+    descendants(matching: .any).matching(NSPredicate(format: "identifier IN {'sessions-server', 'sessions-title'}"))
+      .firstMatch
+  }
   /// The lowest edge of the header (title and buttons) plus its soft fade, above which rows are covered.
   var sessionsTop: CGFloat {
     let selection = buttons["sessions-selection-done"]

@@ -22,6 +22,8 @@ struct MacSessionColumn: View {
   @AppStorage("OpenCodeSessionSections") private var collapse = SessionSectionCollapse()
   /// Holds the rows' order and sections still while the list scrolls, like the iPhone's Sessões.
   @State private var presentation = SessionListPresentation()
+  /// The list's width, for the server title's room in the title bar.
+  @State private var listWidth: CGFloat = 382
 
   private struct ProjectAction: Identifiable {
     let name: String
@@ -35,9 +37,7 @@ struct MacSessionColumn: View {
     let _ = MacPerf.count("MacSessionColumn")
     #endif
     HStack(spacing: 0) {
-      MacProjectRail(store: store, disk: runtime.app.disk,
-        server: ServerSwitcher.visible(runtime.app.servers.servers) ? MacServerButton(runtime: runtime) : nil
-      ) { name, intent in
+      MacProjectRail(store: store, disk: runtime.app.disk) { name, intent in
         projectAction = ProjectAction(name: name, intent: intent)
       } add: { showProjects = true } shortcuts: { runtime.shortcutsVisible = true } space: {
         runtime.diskVisible = true
@@ -96,9 +96,16 @@ struct MacSessionColumn: View {
     .clipped()
     // The approved title bar has no sidebar button: Sessões collapses with ⌃⌘S and Visualizar.
     .toolbar(removing: .sidebarToggle)
-    // Voice and Nova sessão at the column's right edge, like Mail's and Notes' sidebar items; they hide with the
-    // column (⌘N and Nova sessão at the bar's end and the menus still reach them). Ajustes is at the rail's foot.
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { listWidth = $0 }
+    // The current server where Sessões' title would be, after the traffic lights; voice and Nova sessão at the
+    // column's right edge, like Mail's and Notes' sidebar items. They hide with the column (⌘N and Nova sessão at the
+    // bar's end and the menus still reach them). Ajustes is at the rail's foot.
     .toolbar {
+      // The column's own items (`.automatic`): `.navigation` would land in the conversation's title bar.
+      MacPlainToolbarItem {
+        // The column is the 52-pt rail and the list; the traffic lights take about 78 pt of it, voice and Nova sessão 74.
+        MacServerTitle(runtime: runtime, width: max(110, listWidth - 110), avatarOnly: selectionActions != nil)
+      }
       MacToolbarFlexibleSpace()
       MacPlainToolbarItem {
         if let selection = selectionActions {

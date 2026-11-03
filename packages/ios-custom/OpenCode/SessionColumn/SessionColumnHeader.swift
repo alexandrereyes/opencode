@@ -40,9 +40,9 @@ struct SessionSelectionBar: View {
   }
 }
 
-/// The title row of the Sessões column: "Sessões", then voice, the optional Configurações, Nova sessão and the
-/// optional Você avatar. The iPhone passes `account` (it has no tab bar); the Mac passes `settings` for the gear and
-/// keeps its avatar in its title bar.
+/// The title row of the Sessões column: "Sessões" or, with `server`, the current server (`SessionServerTitle`), then
+/// voice, the optional Configurações, Nova sessão and the optional Você avatar. The iPhone passes `account` (it has no
+/// tab bar); the Mac passes `settings` for the gear and keeps its avatar in its title bar.
 struct SessionColumnHeader: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -57,6 +57,14 @@ struct SessionColumnHeader: View {
   var selection: SessionColumnSelection?
   var close: (() -> Void)?
   var newSessionIdentifier = "new-session"
+  /// The current server in place of "Sessões", opening the server list.
+  var server: Server?
+
+  struct Server {
+    let entry: ServerSwitcher.Entry
+    let connection: ServerSwitcher.Connection
+    let open: () -> Void
+  }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -68,7 +76,8 @@ struct SessionColumnHeader: View {
         }
       } else {
         HStack(spacing: 12) {
-          title.lineLimit(1).minimumScaleFactor(0.8)
+          // A server's name keeps its size and is cut in the middle instead (`SessionServerTitle`).
+          title.lineLimit(1).minimumScaleFactor(server == nil ? 0.8 : 1)
           Spacer(minLength: 0)
           buttons
         }
@@ -93,11 +102,18 @@ struct SessionColumnHeader: View {
     }
   }
 
-  private var title: some View {
-    Text("Sessões").appFont(.largeTitle, weight: .bold)
-      .foregroundStyle(theme.color(.textStrong))
-      .accessibilityAddTraits(.isHeader)
-      .accessibilityIdentifier("sessions-title")
+  @ViewBuilder private var title: some View {
+    if let server {
+      Button(action: server.open) { SessionServerTitle(entry: server.entry, connection: server.connection) }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("sessions-server")
+    } else {
+      Text("Sessões").appFont(.largeTitle, weight: .bold)
+        .foregroundStyle(theme.color(.textStrong))
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("sessions-title")
+    }
   }
 
   private var buttons: some View {

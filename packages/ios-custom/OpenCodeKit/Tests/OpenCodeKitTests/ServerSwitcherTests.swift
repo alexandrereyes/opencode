@@ -56,3 +56,21 @@ import Testing
   #expect([ServerSwitcher.Connection.connected, .connecting, .disconnected].map(\.label)
     == ["Conectado", "Conectando…", "Desconectado"])
 }
+
+@Test func serverConnectionLabelsAndDotRoles() {
+  #expect(ServerSwitcher.Connection(connected: true, failed: true) == .connected)
+  #expect(ServerSwitcher.Connection(connected: false, failed: false) == .connecting)
+  #expect(ServerSwitcher.Connection(connected: false, failed: true) == .disconnected)
+  #expect([ServerSwitcher.Connection.connected, .connecting, .disconnected].map(\.label)
+    == ["Conectado", "Conectando…", "Desconectado"])
+  #expect([ServerSwitcher.Connection.connected, .connecting, .disconnected].map(\.role) == [.success, .warning, .error])
+}
+
+@Test @MainActor func serverFixtureKeepsFakeServersInMemory() throws {
+  let store = ServerStore.fixture([("escritorio", "Mac mini do escritório — clientes", "http://127.0.0.1:4243")],
+    builtinName: "Mac de Alexandre", builtinURL: URL(string: "http://127.0.0.1:4096")!)
+  #expect(store.servers.map(\.title) == ["Mac de Alexandre", "Mac mini do escritório — clientes"])
+  try store.select("escritorio")
+  #expect(store.active.id == "escritorio" && store.revision == 1)
+  #expect(UserDefaults.standard.object(forKey: "OpenCodeServers") == nil)
+}

@@ -9,7 +9,7 @@ import XCTest
     let app = XCUIApplication()
     app.launchArguments = ["-OpenCodeServerURL", "http://127.0.0.1:4183", "-OpenCodeTheme", "openchamber-" + theme,
       "-OpenCodeScrollFixture", "catalog", "-OpenCodeFixturePosition", "top",
-      "-OpenCodeCollapsibleUserMessages", "YES"] + extra
+      "-OpenCodeCollapsibleUserMessages", "YES", "-OpenCodeFixtureServers"] + extra
     app.launchEnvironment["OPENCODE_PROXY_STUB"] = proxy
     app.launch()
     XCTAssertTrue(app.buttons["Nova sessão"].waitForExistence(timeout: 20))

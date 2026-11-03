@@ -3489,7 +3489,9 @@ thread), `MacDiskCleaner.swift` and `MacDiskSheet.swift`.
 ### Troca rápida de servidor — 30 October
 
 Approved option A of `.agent-artifacts/mac-troca-servidor/` (`prancha.png`), with the avatar at the rail's foot
-instead of its top. Stage 1 only: no new data or connection. The iPhone keeps switching in Você.
+instead of its top. Stage 1 only: no new data or connection. The iPhone keeps switching in Você. Since 3 November
+the avatar is the server title atop the session column, on both apps (next section); its menu, switch and shortcuts
+below are unchanged.
 
 - **Avatar** (`MacServerSwitcher.swift`, `MacServerButton`): the last item of the project rail, under Ajustes, in
   the rail's tile. The current server's initials (`ServerSwitcher.initials`: the monogram, skipping joining words, so
@@ -3524,6 +3526,48 @@ session with its draft after the rebuild, then one server left: no avatar and no
 `servidores-fechada`, `-menu`, `-confirmacao`, `-trocando`, `-conectando`, `-trocado`, `-desconectado` and
 `-um-servidor`. Every switch rebuilds the same in-memory fixture, so the check ends the run itself
 (`MacServerChecks.pending`).
+
+### Servidor no título de Sessões — 3 November
+
+Approved option B of `.agent-artifacts/server-title-switcher/` (`ios/opcao-b-*.png`, `mac/opcao-b-*.png`) in both
+apps: the current server's avatar, name and connection where "Sessões" was, opening the server list. It replaces the
+Mac's avatar at the rail's foot (30 October, above): the same switch, moved, and nothing new to connect to.
+
+- **Shared** (`OpenCode/SessionColumn/SessionServerTitle.swift`, both targets): `SessionServerTitle` (the
+  `ServerSwitcher.initials` avatar on its ID's color with the connection dot, the name cut in the middle, a chevron
+  and, on the iPhone, "Conectado / Conectando… / Desconectado" below) and `ServerAvatar`, which the Mac's menu rows
+  use too. The dot is `ServerSwitcher.Connection.role` (success, warning, error) of the current server's event stream
+  only; the others are never shown with a state. It shows with one server too: the list then holds the current one,
+  Gerenciar and Adicionar.
+- **iPhone**: `SessionColumnHeader(server:)` puts it in place of "Sessões", same row and height as voice, + and AR
+  (the name gets about 140 pt at headline size, shrinking to 85% before it is cut; accessibility sizes give it its own
+  lines below the buttons, as the title had). A tap opens `ServerSwitcherSheet`: Atual (✓, connection and address),
+  Trocar para (name and address), then Gerenciar (Você opens on Servidores, `SessionStore.settingsServers`, once the
+  sheet has closed), Adicionar (`ServerEditor`) and QR code (`PairingSheet`), the views Você ▸ Servidores uses. A switch
+  from here (`AppRuntime.select(_:fromSettings: false)`) rebuilds the store and stays in Sessões; from Você it reopens
+  Você as before. Drafts and reading places stay, by address. The Sessões switcher sheet over a conversation keeps
+  "Sessões".
+- **Voice**: with a GPT Live call on, both lists (Sessões' and Você ▸ Servidores) ask first, like the Mac:
+  "Trocar para …? A conversa por voz será encerrada…" (`serverSwitchConfirmation`). Cancelar keeps the call and the
+  server; Trocar uses the normal switch, whose rebuild ends the call.
+- **Mac**: `MacServerTitle` is the session column's first title-bar item, after the traffic lights (`.automatic`:
+  `.navigation` would land in the conversation's bar), with the room the column leaves beside voice and Nova sessão
+  (the list's width minus 110 pt) and a tooltip with the full name. A click opens the same `MacServerMenu` panel,
+  now under the title and aligned with it. While the column selects sessions, the title keeps only the avatar. The
+  rail no longer has a server avatar. Ir ▸ Servidores, ⌃⌘1…⌃⌘9 (with two or more servers), the confirmation and the
+  app-wide switch (every window reloads on its session and draft) are unchanged.
+
+Checks: `swift test --filter ServerSwitcher` (adds the connection's labels and dot, and `ServerStore.fixture`, the
+in-memory servers both apps' fixtures now share from OpenCodeKit). iPhone: `script/test-server-header.py` runs
+`OpenCodeUITests/ServerHeaderTests` against an explicit sandbox, importing one session for the draft; the other
+servers are `-OpenCodeFixtureServers` (two unreachable loopback servers in memory) and the call is
+`-OpenCodeFixtureCallActive` (no call is placed): one server (Atual only, Adicionar, QR code, Gerenciar opening
+Você ▸ Servidores), several (switch, stays in Sessões, long name clear of the buttons, Desconectado, back with the
+draft restored), the voice confirmation (Cancelar keeps, Trocar switches) and accessibility sizes, in both themes.
+Mac: `script/test-mac-ajustes.sh servidores`, updated for the title (its place in the session column's bar, the menu
+under it, one server keeping the title and a menu with the current one, Gerenciar and Adicionar). With the screen
+locked no app can become active, so the check then switches through the title's menu and says it did not check
+Ir ▸ Servidores and ⌃⌘2.
 
 ### Chat (polish 1) — 27 October
 

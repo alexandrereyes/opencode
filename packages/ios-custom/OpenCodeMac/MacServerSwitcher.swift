@@ -3,7 +3,7 @@ import OpenCodeKit
 import SwiftUI
 
 extension MacRuntime {
-  /// The rail's server menu and ⌃⌘1…⌃⌘9: Ajustes' "Usar" (`ServerStore.select`, then `rebuild`: every window
+  /// The server title's menu and ⌃⌘1…⌃⌘9: Ajustes' "Usar" (`ServerStore.select`, then `rebuild`: every window
   /// reloads on the session it showed on that server, drafts kept). While a voice call is on, `window` asks first,
   /// since the switch ends it.
   func requestServer(_ id: String, from window: MacWindowRuntime) {
@@ -38,21 +38,24 @@ extension MacRuntime {
 
 enum MacServerMenuAction: Equatable { case server(String), manage, add }
 
-/// The current server, last in the project rail under Ajustes (approved option A, at the foot): its initials on a
-/// color chosen from its ID, a turning ring while it connects and dimmed while it is unreachable. A click opens
-/// `MacServerMenu` upward. The rail shows it only with two or more saved servers (`ServerSwitcher.visible`).
-struct MacServerButton: View {
+/// The current server where Sessões' title would be, in the session column's title bar (approved option B, 3
+/// November; it replaces the avatar that sat at the foot of the project rail): its avatar with the connection dot,
+/// its name and a chevron, with every saved server count, one included. A click opens `MacServerMenu` below it.
+/// While the column selects sessions, its batch actions take the room and the title keeps only the avatar.
+struct MacServerTitle: View {
   @Environment(\.appTheme) private var theme
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.openSettings) private var openSettings
   let runtime: MacWindowRuntime
-  /// Another server needs Alexandre: the rail's request dot. The other servers' state (stage 2, each one's
-  /// `custom.live-activity` snapshot) sets it; nothing does yet.
+  /// The room left beside voice and Nova sessão.
+  let width: CGFloat
+  var avatarOnly = false
+  /// Another server needs Alexandre: the other servers' state (stage 2, each one's `custom.live-activity`
+  /// snapshot) sets it; nothing does yet.
   var othersNeedYou = false
   @State private var menu = MacServerMenu()
   #if DEBUG
-  static let openRequest = Notification.Name("MacServerButton.open")
-  /// What the avatar shows, for the checks: the background copy builds no accessibility tree.
+  static let openRequest = Notification.Name("MacServerTitle.open")
+  /// What the title shows, for the checks: the background copy builds no accessibility tree.
   static var shown: String?
   #endif
 
@@ -62,35 +65,27 @@ struct MacServerButton: View {
     let connection = runtime.app.serverConnection
     let label = "Servidor \(servers.active.title), \(connection.label.lowercased())"
     Button { menu.toggle(list) } label: {
-      ZStack {
-        RoundedRectangle(cornerRadius: 10).fill(theme.color(.surface)).frame(width: 40, height: 42)
-        if let entry { MacServerAvatar(entry: entry, size: 28).opacity(connection == .disconnected ? 0.45 : 1) }
-        if connection == .connecting {
-          MacSpinningArc(from: 0.05, to: 0.4, color: theme.nsColor(.primary), lineWidth: 1.6, period: 1.2,
-            animated: !reduceMotion)
-            .frame(width: 34, height: 34)
+      Group {
+        if let entry {
+          if avatarOnly {
+            ServerAvatar(entry: entry, size: 20, dot: connection.role)
+          } else {
+            SessionServerTitle(entry: entry, connection: connection, compact: true, othersNeedYou: othersNeedYou)
+          }
         }
       }
-      .frame(width: 52, height: 44)
-      .overlay(alignment: .bottomTrailing) {
-        if connection == .disconnected {
-          Image(systemName: "bolt.horizontal.circle.fill").font(.system(size: 11))
-            .foregroundStyle(theme.color(.textSecondary), theme.color(.background)).offset(x: -6)
-        }
-      }
-      .overlay(alignment: .topLeading) {
-        if othersNeedYou {
-          Circle().fill(theme.color(.accent)).frame(width: 7, height: 7)
-            .overlay { Circle().strokeBorder(theme.color(.background), lineWidth: 1) }.offset(x: 7)
-        }
-      }
+      .padding(.horizontal, 6).padding(.vertical, 3)
+      .frame(maxWidth: avatarOnly ? nil : width, alignment: .leading)
+      .fixedSize(horizontal: avatarOnly, vertical: false)
       .contentShape(Rectangle())
       .background(MacServerMenuAnchor(menu: menu))
     }
+    .buttonStyle(.plain)
     .help("\(servers.active.title) · \(connection.label) · trocar de servidor")
+    .accessibilityElement(children: .ignore)
     .accessibilityLabel(label + (othersNeedYou ? ", outro servidor precisa de você" : ""))
     .accessibilityHint("Abre a lista de servidores")
-    .accessibilityIdentifier("rail-server")
+    .accessibilityIdentifier("sessions-server")
     .onAppear { menu.perform = perform }
     .onDisappear { menu.hide() }
     #if DEBUG
@@ -119,20 +114,7 @@ struct MacServerButton: View {
   }
 }
 
-/// A server's initials on its color, from the project avatars' palette.
-private struct MacServerAvatar: View {
-  @Environment(\.appTheme) private var theme
-  let entry: ServerSwitcher.Entry
-  let size: CGFloat
-  var body: some View {
-    let colors = theme.avatar(entry.color)
-    Text(entry.initials).font(.system(size: size * 0.42, weight: .semibold))
-      .foregroundStyle(colors.text).frame(width: size, height: size)
-      .background(colors.background, in: Circle())
-  }
-}
-
-/// The server menu: a borderless, nonactivating child panel beside the avatar that grows upward from its foot,
+/// The server menu: a borderless, nonactivating child panel under the server title, aligned with its leading edge,
 /// like the bell's list (`MacBellPanel`). It never takes the keyboard; Esc, a click outside or a choice closes it.
 @MainActor final class MacServerMenu {
   #if DEBUG
@@ -192,9 +174,9 @@ private struct MacServerAvatar: View {
     // The host has no sizing options (it must not resize the panel), so its fitting size is zero: measure the list.
     let size = NSHostingController(rootView: content).sizeThatFits(in: CGSize(width: 300, height: 2000))
     let tile = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
-    // Its foot level with the avatar's, so it opens upward; never past the window's top.
-    let y = min(tile.minY, window.frame.maxY - 8 - size.height)
-    panel.setFrame(NSRect(x: tile.maxX + 6, y: y, width: size.width, height: size.height), display: false)
+    // Just under the title, opening downward; never past the window's foot.
+    let y = max(tile.minY - 4 - size.height, window.frame.minY + 8)
+    panel.setFrame(NSRect(x: tile.minX, y: y, width: size.width, height: size.height), display: false)
     panel.orderFront(nil)
     #if DEBUG
     Self.shown = self
@@ -211,7 +193,7 @@ private struct MacServerAvatar: View {
         return nil
       }
       if event.window === self.panel { return event }
-      // The avatar's own click toggles it.
+      // The title's own click toggles it.
       if let anchor = self.anchor, event.window === anchor.window,
         anchor.convert(anchor.bounds, to: nil).contains(event.locationInWindow) { return event }
       self.hide()
@@ -268,7 +250,7 @@ struct MacServerMenuList: View {
       ForEach(entries) { entry in
         MacServerMenuRow(action: { choose(.server(entry.id)) }) {
           HStack(spacing: 9) {
-            MacServerAvatar(entry: entry, size: 26)
+            ServerAvatar(entry: entry, size: 26)
             VStack(alignment: .leading, spacing: 1) {
               Text(entry.server.title).font(.system(size: 13, weight: .medium))
                 .foregroundStyle(theme.color(.textStrong)).lineLimit(1)
