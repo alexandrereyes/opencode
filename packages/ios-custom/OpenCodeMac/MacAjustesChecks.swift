@@ -709,7 +709,9 @@ import SwiftUI
   /// Hands-free outside the window (Alexandre, 03/11): leaving the app (⌘Tab, another app) and minimizing keep a
   /// hands-free dictation recording into the same composer, back in the app too; a hold whose release the app cannot
   /// see pauses and the key is forgotten, so the release made back in the app finishes nothing; a device change still
-  /// pauses. The app's notifications are the real ones AppKit posts; the window is really minimized.
+  /// pauses. Leaving the app is the notification AppKit posts for ⌘Tab (`didResignActive`, then the window's
+  /// `didResignKey`), posted here without another app coming forward; the minimizing is the window's own, verified
+  /// minimized before the recording is checked and verified restored after.
   private static func outsideApp(window: NSWindow, draft: ConversationDraft, option: (Bool, Bool) -> Void,
     shot: (String) -> Void) async throws
   {
@@ -728,13 +730,15 @@ import SwiftUI
     NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
     NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
     try await elapsing("outro app")
-    window.miniaturize(nil)
-    let minimized = (try? await wait("minimizada", timeout: 3) { window.isMiniaturized ? true : nil }) != nil
-    try await elapsing("janela minimizada")
-    if minimized {
-      window.deminiaturize(nil)
-      _ = try? await wait("restaurada", timeout: 3) { window.isMiniaturized ? nil : true }
+    guard window.styleMask.contains(.miniaturizable) else {
+      throw Failure(description: "a janela não minimiza (styleMask \(window.styleMask.rawValue))")
     }
+    window.miniaturize(nil)
+    try await wait("janela minimizada", timeout: 5) { window.isMiniaturized ? true : nil }
+    try await elapsing("janela minimizada")
+    window.deminiaturize(nil)
+    try await wait("janela restaurada", timeout: 5) { window.isMiniaturized ? nil : true }
+    print("MacAjustes dictation: janela minimizada e restaurada (isMiniaturized), gravando o tempo todo")
     NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
     try await elapsing("de volta")
     shot("fora-do-app")

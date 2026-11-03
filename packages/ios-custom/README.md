@@ -4281,7 +4281,7 @@ app, the immediate `offline`.
   to lock or left to discard; **⌃⌥Space in the editor** starts/stops. The fn key stays with macOS. Pause/preview/seek,
   retry, local pending audio and model management match iOS. The transcript lands in the composer itself, at the
   caret, which takes the focus to review and send it; there is no review sheet and it never sends automatically.
-  The **right Option key** dictates too (see [Adjustment round](#adjustment-round--28-october)). Device changes and app deactivation pause recording.
+  The **right Option key** dictates too (see [Adjustment round](#adjustment-round--28-october)). Device changes pause recording; leaving the app keeps a hands-free dictation going (below).
 - **Dictation outside the window (Alexandre, 03/11):** a hands-free dictation keeps recording into the same
   composer's draft when the user switches to another app (⌘Tab, a click elsewhere) or minimizes the window, and is
   still recording on the way back; nothing is sent. `NSApplication.didResignActive` now calls the recording's
