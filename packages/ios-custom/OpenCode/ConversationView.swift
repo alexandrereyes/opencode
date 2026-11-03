@@ -118,7 +118,7 @@ struct ConversationView: View {
             sessions.drafts.draft(conversation.id).dismissSuggestions()
             sessions.drafts.draft(conversation.id).focused = false
           }, including: conversation.mcps.isOpen ? .none : .all)
-      if floatingVoice?.visible(voice) == true {
+      if floatingVoice?.visible(voice) == true || DictationCaptures.shared.strip != nil {
         FloatingVoiceHost(sessions: sessions).padding(.horizontal, 12).padding(.top, 8)
       }
       bottomArea

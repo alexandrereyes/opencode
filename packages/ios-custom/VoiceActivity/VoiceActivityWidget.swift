@@ -8,6 +8,7 @@ import WidgetKit
   var body: some Widget {
     VoiceActivityWidget()
     AgentsActivityWidget()
+    DictationActivityWidget()
     VoiceStartControl()
   }
 }

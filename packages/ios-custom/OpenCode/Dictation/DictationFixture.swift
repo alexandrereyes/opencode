@@ -10,6 +10,17 @@ import SwiftUI
       ServerConfiguration.launch().isolatedTestSandbox else { return nil }
     return args[index + 1]
   }
+  /// `-OpenCodeDictationFake` (isolated sandbox launches only): the real app, every composer with the fake microphone
+  /// and the fake engine below, and the fixtures' reviewer instead of the server's (no model is called).
+  static var fakeInApp: Bool {
+    ProcessInfo.processInfo.arguments.contains("-OpenCodeDictationFake") && ServerConfiguration.launch().isolatedTestSandbox
+  }
+  static let fakeTranscription: TranscriptionController = {
+    let transcription = TranscriptionController(source: DictationFixtureSource(), engine: DictationFixtureEngine(),
+      monitorsNetwork: false)
+    transcription.start()
+    return transcription
+  }()
   nonisolated static let text = "Confira as sessões em andamento e prepare um resumo das alterações. Não envie esta mensagem antes da minha revisão."
   /// What the fake engine transcribes; the fixtures' reviewer turns it into `text`.
   nonisolated static let raw = "confira as sessões em andamento e prepare um resumo das alterações não envie esta mensagem antes da minha revisão"
@@ -25,7 +36,7 @@ import SwiftUI
     #if os(macOS)
     guard MacLaunch.fixture else { return nil }
     #else
-    guard DictationFixtures.mode == "fake" else { return nil }
+    guard DictationFixtures.mode == "fake" || DictationFixtures.fakeInApp else { return nil }
     #endif
     let args = ProcessInfo.processInfo.arguments
     let value = args.firstIndex(of: "-OpenCodeDictationReview").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }

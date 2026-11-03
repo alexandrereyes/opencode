@@ -101,6 +101,13 @@ struct FloatingVoiceHost: View {
           Button("Encerrar", role: .cancel) { presentation.end(voice) }
         } message: { Text(voice?.alert ?? "") }
       }
+      #if os(iOS)
+      // The composer dictation's strip, wherever the call's bar can show, while its composer is off screen.
+      if let sessions = sessions ?? contextSessions, DictationCaptures.shared.strip != nil,
+        presentation == nil || presentation?.presentations.last == presentationID {
+        DictationStripView(captures: .shared, sessions: sessions)
+      }
+      #endif
     }.sheet(isPresented: $transcript) {
       if let sessions = sessions ?? contextSessions { VoiceTranscriptView(memory: sessions.voiceMemory) }
     }
@@ -119,9 +126,17 @@ private struct FloatingVoiceInset: ViewModifier {
   @Environment(\.voicePresentationID) private var presentationID
   let sessions: SessionStore?
   let enabled: Bool
+  private static var dictation: Bool {
+    #if os(iOS)
+    DictationCaptures.shared.strip != nil
+    #else
+    false
+    #endif
+  }
   func body(content: Content) -> some View {
     content.safeAreaInset(edge: .bottom, spacing: 0) {
-      if enabled && presentation?.visible(voice) == true && presentation?.presentations.last == presentationID {
+      if enabled && (presentation?.visible(voice) == true || Self.dictation)
+        && presentation?.presentations.last == presentationID {
         FloatingVoiceHost(sessions: sessions).padding(.horizontal, 21).padding(.vertical, 8)
       }
     }

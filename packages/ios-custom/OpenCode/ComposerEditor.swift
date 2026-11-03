@@ -42,6 +42,13 @@ struct ComposerEditor: View {
     draft.hasText
       || !draft.attachments.isEmpty || !draft.quotes.isEmpty
   }
+  /// Where this composer's dictation lands, for the strip and the Live Activity when it is off screen.
+  private var dictationPlace: DictationPlace {
+    if comment != nil { return DictationPlace(title: "Comentário", route: nil) }
+    if store.isNewSession { return DictationPlace(title: "Nova sessão", route: .newSession) }
+    let title = store.session?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return DictationPlace(title: title?.isEmpty == false ? title! : "Conversa", route: .conversation(store.id))
+  }
   private var canSubmit: Bool {
     guard comment == nil else { return hasContent && draft.settled }
     return hasContent && !draft.sending && !draft.importing && !draft.recording.visible && store.ready
@@ -317,7 +324,11 @@ struct ComposerEditor: View {
       draft.editorOwner = editorID
       draft.recording.willUseAudio = { voice?.sessionID == nil }
       draft.useDictationReviewer(store)
+      draft.recording.place = dictationPlace
+      draft.recording.presented += 1
+      DictationCaptures.shared.appeared(draft.recording)
     }
+    .onChange(of: dictationPlace) { _, place in draft.recording.place = place }
     .onChange(of: voice?.sessionID) { _, id in if id != nil { draft.recording.suspend() } }
     .alert("Baixar transcrição no aparelho?", isPresented: $draft.recording.asksDownload) {
       Button("Baixar por Wi-Fi") { draft.recording.transcription.download(cellular: false) }
@@ -329,7 +340,9 @@ struct ComposerEditor: View {
       Button("Cancelar", role: .cancel) {}
     } message: { Text("Ative o microfone nos Ajustes para ditar mensagens. A transcrição é feita neste iPhone.") }
     .onDisappear {
-      draft.recording.suspend()
+      // Leaving is not Descartar: a hands-free dictation goes on, shown by the strip and the Live Activity.
+      draft.recording.presented = max(0, draft.recording.presented - 1)
+      draft.recording.leftScreen()
       if draft.editorOwner == editorID { draft.editorOwner = nil }
       Task { await draft.persist() }
     }

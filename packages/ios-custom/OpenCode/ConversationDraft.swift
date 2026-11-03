@@ -99,12 +99,18 @@ extension ComposerTokenKind {
   @ObservationIgnored var recordingFactory: ((URL) -> VoiceRecordingComposer)?
   @ObservationIgnored lazy var recording: VoiceRecordingComposer = {
     let file = persistence.directory.appending(path: "dictation.caf")
-    let recording = recordingFactory?(file) ?? VoiceRecordingComposer(file: file)
+    var recording = recordingFactory?(file) ?? VoiceRecordingComposer(file: file)
+    #if DEBUG && os(iOS)
+    if recordingFactory == nil, DictationFixtures.fakeInApp {
+      recording = VoiceRecordingComposer(file: file, capture: DictationFixtureCapture(), transcription: DictationFixtures.fakeTranscription)
+    }
+    #endif
     recording.pendingChanged = { [weak self] pending in
       self?.dictationPending = pending
       if pending { Task { await self?.persist() } }
     }
     recording.receive = { [weak self] edits in await self?.insertTranscription(edits) }
+    recording.keepAlive = { [weak self] in self }
     return recording
   }()
   /// The quoted passage of a comment's editor, for the dictation review's context.
@@ -607,6 +613,9 @@ extension ComposerTokenKind {
   func flush() async {
     for draft in values.values {
       draft.recording.suspend()
+      #if os(iOS)
+      DictationCaptures.shared.forget(draft.recording)
+      #endif
       draft.focused = false
       await draft.persist()
     }

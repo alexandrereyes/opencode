@@ -39,6 +39,14 @@ import AppKit
   @ObservationIgnored var reviser: (@MainActor (String) async -> String?)?
   @ObservationIgnored var pendingChanged: (Bool) -> Void = { _ in }
   @ObservationIgnored var willUseAudio: () -> Bool = { true }
+  /// The draft this recording writes into, kept alive with the recording while its audio is in flight.
+  @ObservationIgnored var keepAlive: () -> AnyObject? = { nil }
+  #if os(iOS)
+  /// Where the text goes and how to get back there (set by the composer showing it).
+  var place: DictationPlace?
+  /// Composers showing this recording now: none means the in-app strip shows it.
+  var presented = 0
+  #endif
   @ObservationIgnored private let capture: any VoiceRecordingCapture
   @ObservationIgnored private var task: Task<Void, Never>?
   @ObservationIgnored private var generation = UUID()
@@ -66,12 +74,13 @@ import AppKit
     let wasHolding = gesture.state == .holding
     switch gesture.handle(event) {
     case .startHolding, .startLocked: start()
-    case .handsFree: Haptics.play(.light)
+    case .handsFree: Haptics.play(.light); captureChanged()
     case .lock:
       #if os(iOS)
       UIImpactFeedbackGenerator(style: .medium).impactOccurred()
       #endif
       announce("Gravação travada. Pode soltar o dedo")
+      captureChanged()
     case .finish:
       // Releasing during the permission prompt never lets a capture open later. A release before one second is
       // not a dictation yet: keep recording hands-free, as in WhatsApp on iPhone.
@@ -80,6 +89,7 @@ import AppKit
       else if opening || capture.elapsed < VoiceRecordingGesture.minimumDuration {
         gesture.keepRecording()
         Haptics.play(.light)
+        captureChanged()
       } else { finish() }
     case .discard:
       if case .cancelled = event, wasHolding, keepsDraft {
@@ -100,9 +110,13 @@ import AppKit
   }
   private func start() {
     guard state == .idle, willUseAudio() else { gesture = VoiceRecordingGesture(); return }
+    #if os(iOS)
+    // One capture at a time: another composer recording keeps the microphone (Abacato's refusal).
+    guard !DictationCaptures.shared.refuses(self) else { gesture = VoiceRecordingGesture(); return }
+    #endif
     DictationAudioTrace.watch()
     DictationAudioTrace.record("dictation-start", detail: DictationAudioTrace.nowPlaying())
-    NotificationCenter.default.post(name: .audioCaptureWillStart, object: nil)
+    NotificationCenter.default.post(name: .audioCaptureWillStart, object: self)
     Self.audioOwner?.suspend()
     Self.audioOwner = self
     state = .authorizing
@@ -125,6 +139,9 @@ import AppKit
         state = .recording
         mark("recording")
         DictationAudioTrace.record("dictation-recording")
+        #if os(iOS)
+        DictationCaptures.shared.began(self)
+        #endif
         Haptics.play(.light)
         announce("Gravando para transcrever")
         startMeter()
@@ -144,6 +161,9 @@ import AppKit
         elapsed = capture.elapsed
         levels.removeFirst(); levels.append(capture.level)
         sampledAt = .now
+        #if os(iOS)
+        DictationCaptures.shared.sampled(self)
+        #endif
         if elapsed >= 86_400 { finish(); return }
       }
     }
@@ -156,9 +176,13 @@ import AppKit
     DictationAudioTrace.record("dictation-pause")
     announce("Gravação pausada")
     makePreview()
+    captureChanged()
   }
   func resume() {
     guard state == .paused, task == nil, willUseAudio() else { return }
+    #if os(iOS)
+    guard !DictationCaptures.shared.refuses(self) else { return }
+    #endif
     if Self.audioOwner !== self { Self.audioOwner?.suspend(); Self.audioOwner = self }
     clearPreview()
     let ticket = generation
@@ -167,6 +191,9 @@ import AppKit
         try await capture.resume()
         guard !Task.isCancelled, ticket == generation, state == .paused else { return }
         state = .recording; announce("Gravação retomada"); startMeter()
+        #if os(iOS)
+        DictationCaptures.shared.began(self)
+        #endif
       } catch {
         // finish() or discard() during activation stopped the capture and changed the state.
         guard ticket == generation, state == .paused else { return }
@@ -175,7 +202,18 @@ import AppKit
       }
     }
   }
-  /// Background, interruption, route change or another recorder: a locked recording, or a hold of one second or
+  /// The composer left the screen, or the app went to the background (Abacato's `leftScreen` and
+  /// `enteredBackground`): a hands-free recording goes on, owned by `DictationCaptures` with the strip and the Live
+  /// Activity; a hold the finger can no longer finish becomes a paused draft with one second or more, before that it
+  /// is discarded. The preview stops.
+  func leftScreen() {
+    if gesture.state == .holding {
+      if keepsDraft { gesture.keepRecording(); pause() }
+      else if state == .recording || state == .authorizing { discard() }
+    }
+    pausePreview()
+  }
+  /// Interruption, route change, a server switch or a GPT Live call: a locked recording, or a hold of one second or
   /// more, becomes a paused draft that never resumes on its own; a shorter hold is discarded.
   func suspend() {
     if state == .recording, gesture.state == .locked { pause() }
@@ -200,7 +238,7 @@ import AppKit
         MainActor.assumeIsolated { self?.suspend() }
       },
       center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-        MainActor.assumeIsolated { self?.suspend() }
+        MainActor.assumeIsolated { self?.leftScreen() }
       },
     ]
     #else
@@ -223,6 +261,7 @@ import AppKit
     clearPreview(); removeObservers(); capture.stop()
     DictationAudioTrace.record("dictation-finish")
     state = .pending
+    captureChanged()
     // discard() while the file is read (Esc, Descartar) deletes it: the failed read must not bring the panel back.
     let ticket = generation
     task = Task {
@@ -274,6 +313,9 @@ import AppKit
     pendingChanged(false)
     try? FileManager.default.removeItem(at: file)
     state = .idle; gesture = VoiceRecordingGesture(); job = nil; task = nil
+    #if os(iOS)
+    DictationCaptures.shared.delivered(self)
+    #endif
     announce("Texto transcrito. Revise a mensagem antes de enviar")
   }
   /// The sparkles or ⌥⌘E: while recording it turns the review on or off; during "Ajustando texto…" it is Usar
@@ -315,6 +357,9 @@ import AppKit
   }
   func discard() {
     if state != .idle { DictationAudioTrace.record("dictation-discard") }
+    #if os(iOS)
+    defer { DictationCaptures.shared.ended(self) }
+    #endif
     generation = UUID()
     task?.cancel(); task = nil
     clearPreview(); removeObservers(); capture.stop()
@@ -407,6 +452,11 @@ import AppKit
     if let previewFile { try? FileManager.default.removeItem(at: previewFile) }
     previewFile = nil
     previewReady = false; previewPosition = 0; previewDuration = 0
+  }
+  private func captureChanged() {
+    #if os(iOS)
+    DictationCaptures.shared.changed(self)
+    #endif
   }
   private func mark(_ name: String) {
     #if DEBUG

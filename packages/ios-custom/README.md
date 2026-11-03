@@ -1583,6 +1583,44 @@ uses background URLSession, resumable files, exact byte counts and SHA-256 befor
 starts only on-device in the foreground, one recording at a time, with the CPU preprocessor and Neural Engine;
 the model unloads after idle time. Download continuation is not a promise of background inference.
 
+**Ditado em segundo plano (Alexandre, 03/11), portado do Abacato V2.** A hands-free dictation no longer stops when
+its composer leaves the screen or the app goes to the background: the user can open Sessões, another conversation,
+Você, another app or lock the iPhone while it records. What changed, and what did not:
+
+- **Lifetime.** The recorder already lived in the draft (`ConversationDrafts`, per server, and the comment sheet's
+  editor); what killed it was `suspend()` on the composer's `onDisappear` and on `didEnterBackground`. Both now call
+  `leftScreen()`, Abacato's `leftScreen`/`enteredBackground`: hands-free goes on, a hold the finger can no longer
+  finish becomes a paused draft with one second or more (discarded before). `DictationCaptures` (after Abacato's
+  `VoiceRecordingDrafts` + `VoiceRecordingSurfaces`) keeps the recording and its draft alive until the text lands or it
+  is discarded. The microphone stays open through the audio session and the existing `audio` background mode; the
+  Live Activity only shows it. Interruptions, route changes, a server switch and a GPT Live call still pause it.
+- **Destination.** The transcription (with the AI review on by default, Usar original and the two undo steps) goes to
+  the draft the recording started in, never to the composer on screen, and nothing is sent. Off screen it shows as
+  "Texto pronto em {destino}" until that composer is seen.
+- **One capture at a time.** A microphone touched in another composer while one records is refused with "Pare a
+  gravação para gravar aqui." on the strip (Abacato's D7). Descartar still discards; the comment sheet's Cancelar,
+  Remover and swipe still discard its own dictation, and Concluir waits for it.
+- **Strip** (`DictationStripView`, Abacato's `VoiceRecordingStripView` in OpenCode's colors), wherever the call's bar can
+  show (`FloatingVoiceHost`) while the destination composer is off screen: level bars, "Gravando para {destino}", the
+  time and Parar; paused or transcribing, Revisar; "Texto pronto", Revisar and the X. A tap opens the destination
+  (`DictationPlace`: the conversation, the Sessão mestra or Nova sessão; a comment has none).
+- **Live Activity** (`DictationActivityAttributes` in VoiceShared, `DictationActivityWidget` in the VoiceActivity
+  extension, Abacato's `VoiceRecordingWidget`): from hands-free on, the title, the system timer and Parar gravação
+  (`StopDictationIntent`, a `LiveActivityIntent` run in the app without opening it); paused, saved ("Abra o OpenCode
+  para transcrever": the on-device transcription runs with the app open) or transcribing. Only the phase, the
+  destination's title and the time; updates on state changes and a 60 s heartbeat that renews a 3-minute `staleDate`
+  ("A gravação parou" if the app dies), never per frame. Relevance 75, between the call (100) and the agents (50);
+  neither of their activities is touched. A tap opens the destination (`br.com.alexandrem.opencode://dictation`).
+- **Not ported:** Abacato's durable manifest and recovery after the process dies, the watchdog notification, battery and
+  disk warnings. A force quit or reboot still loses a recording under way. The Mac is unchanged.
+
+Verification: `BackgroundDictationTests` (off screen and in the background, hold left, text only in its own draft and
+"Texto pronto", refusal, the activity's content and its start, pause, Parar by the intent and end) and, against an
+isolated sandbox with `-OpenCodeDictationFake`, `script/test-background-dictation.py`
+(`BackgroundDictationUITests`: recording, Sessões with the strip, another conversation refused, the Home Screen with
+the Dynamic Island and back, Parar on the strip, the text only in the first conversation, nothing sent). The simulator
+proves neither Bluetooth nor background under memory pressure nor other apps' audio.
+
 **Música que não volta depois do ditado (Alexandre, 03/11): diagnóstico.** With YouTube Music on the iPhone speaker,
 dictating paused it and it did not come back, and its Now Playing card disappeared; WhatsApp and Abacato V2 on the
 same iPhone give it back. The recorder's session path matches Abacato's (`VoiceAudioSession`,

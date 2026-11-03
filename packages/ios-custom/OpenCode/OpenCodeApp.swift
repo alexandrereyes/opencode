@@ -164,8 +164,17 @@ private struct AppRoot: View {
     .onChange(of: theme.id, initial: true) {
       runtime.voice.setTheme(theme)
       AgentsActivityAgent.shared.setTheme(theme)
+      DictationCaptures.shared.theme = theme
     }
     .onOpenURL { url in
+      // The dictation's Live Activity: back to the composer the text goes to.
+      if url.scheme == DictationActivityText.url.scheme, url.host() == DictationActivityText.url.host() {
+        let captures = DictationCaptures.shared
+        if let store = runtime.store, let place = captures.current?.place ?? captures.ready?.place {
+          DictationCaptures.open(place, sessions: store)
+        }
+        return
+      }
       guard let link = AgentsDeepLink(url: url) else { return }
       // `request` (a session alert's) opens the conversation at its pending requests.
       let request = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
