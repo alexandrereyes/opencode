@@ -309,6 +309,45 @@ it.effect("an activity that expires (about 8 h) while work goes on rearms push-t
   }),
 )
 
+it.effect("recreating the activity from the app: the new one is registered first, the old end changes nothing", () =>
+  Effect.gen(function* () {
+    // "Recriar Live Activity" (iOS, rev. 2026-11-03): `activity(new)` and only then `ended(old, "ended")`.
+    const swap = setup()
+    const working = yield* scene("working")
+    yield* swap.registry.register(iphone, T - minute)
+    yield* swap.registry.activity({ deviceID: iphone.deviceID, activityID: "act-old", pushToken: "bb22" }, T - minute)
+    yield* swap.evaluate(working, T)
+    yield* swap.registry.activity({ deviceID: iphone.deviceID, activityID: "act-new", pushToken: "ee55" }, T + 1000)
+    yield* swap.registry.ended({ deviceID: iphone.deviceID, activityID: "act-old", reason: "ended" }, T + 2000)
+    const after = (yield* swap.registry.list(T + 2000)).at(0)
+    expect(after).toMatchObject({
+      dismissed: false,
+      activity: { activityID: "act-new", pushToken: "ee55", registeredAt: T + 1000 },
+    })
+    expect(after?.rearm).toBeUndefined()
+    expect(after?.expired).toBeUndefined()
+    // Updates follow the new token and nothing starts another activity.
+    yield* swap.evaluate(working, T + limits.heartbeatMs)
+    const sent = swap.pushes.map((push) => [push.token, (push.body as { aps: { event: string } }).aps.event])
+    expect(sent.at(-1)).toEqual(["ee55", "update"])
+    expect(sent.filter(([, event]) => event !== "update")).toEqual([])
+
+    // Rollback when the app cannot confirm the new registration (a lost response): it points the server back at the
+    // old activity, ends the candidate, and that end changes nothing either.
+    const rollback = setup()
+    yield* rollback.registry.register(iphone, T - minute)
+    yield* rollback.registry.activity({ deviceID: iphone.deviceID, activityID: "act-old", pushToken: "bb22" }, T)
+    yield* rollback.registry.activity({ deviceID: iphone.deviceID, activityID: "act-new", pushToken: "ee55" }, T + 1000)
+    yield* rollback.registry.activity({ deviceID: iphone.deviceID, activityID: "act-old", pushToken: "bb22" }, T + 2000)
+    yield* rollback.registry.ended({ deviceID: iphone.deviceID, activityID: "act-new", reason: "ended" }, T + 3000)
+    const restored = (yield* rollback.registry.list(T + 3000)).at(0)
+    expect(restored).toMatchObject({ dismissed: false, activity: { activityID: "act-old", pushToken: "bb22" } })
+    expect(restored?.rearm).toBeUndefined()
+    yield* rollback.evaluate(working, T + limits.heartbeatMs)
+    expect(rollback.pushes.map((push) => push.token)).toEqual(["bb22"])
+  }),
+)
+
 it.effect("APNs invalid tokens are dropped; other failures retry on the next slot", () =>
   Effect.gen(function* () {
     const failing = setup((push) =>
