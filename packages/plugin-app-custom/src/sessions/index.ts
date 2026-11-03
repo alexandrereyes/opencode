@@ -210,7 +210,7 @@ const Changed = Schema.Struct({ sessionID: Session.ID, title: Schema.String })
 const Skipped = Schema.Struct({ sessionID: Session.ID, title: Schema.String, reason: Schema.String })
 
 /** Session control tools for every agent: `tools.sessions.<name>` in Code Mode. */
-export const registerSessions = Effect.fn("Sessions.register")(function* (ctx: Plugin.Context) {
+export const registerSessions = Effect.fn("Sessions.register")(function* (ctx: Omit<Plugin.Context, "storage">) {
   const preferences = ctx.rpc(Preferences.Definition)
   const chats = ctx.rpc(Chats.Definition)
   yield* ctx.tool.transform((editor) =>

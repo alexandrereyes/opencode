@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { Effect, Exit, Schema } from "effect"
+import { Effect, Exit } from "effect"
 import { FetchHttpClient } from "effect/http"
 import {
   clearPosition,
@@ -18,6 +18,7 @@ import {
   type SpeechContext,
 } from "../src/speech"
 import { Speech } from "../src/speech/rpc"
+import { storage } from "./fixture/storage"
 
 const directories: string[] = []
 afterEach(async () => {
@@ -138,20 +139,10 @@ test("maps gateway refusals and failures and caches nothing", async () => {
   }
 })
 
-function storage() {
-  const values = new Map<string, Schema.Json>()
-  const ctx: Pick<SpeechContext, "storage"> = {
-    storage: {
-      get: (key) => Effect.sync(() => values.get(key)),
-      update: (key, update) =>
-        Effect.sync(() => {
-          const [next, result] = update(values.get(key))
-          values.set(key, next)
-          return result
-        }),
-    },
-  }
-  return { ctx, values }
+function speechStorage() {
+  const shared = storage()
+  const ctx: Pick<SpeechContext, "storage"> = { storage: shared }
+  return { ctx, values: shared.values }
 }
 
 test("measures WAV durations from the format and data chunks", () => {
@@ -161,7 +152,7 @@ test("measures WAV durations from the format and data chunks", () => {
 
 test("learns the speaking rate from generated audio, not from cache hits", async () => {
   const fixture = await gateway(() => Response.json({ audio: wav(2).toBase64() }))
-  const memory = storage()
+  const memory = speechStorage()
   const read = () => Effect.runPromise(info(memory.ctx, fixture.options))
   try {
     expect(await read()).toEqual({
@@ -238,7 +229,7 @@ test("generates again audio that stopped early, cached or fresh, and learns only
 })
 
 test("saves, reads and clears a reading position per file", async () => {
-  const memory = storage()
+  const memory = speechStorage()
   const position = {
     path: "/repo/docs/guia.md",
     hash: "a".repeat(64),
@@ -261,7 +252,7 @@ test("saves, reads and clears a reading position per file", async () => {
 })
 
 test("keeps chat response places by session and message, apart from files", async () => {
-  const memory = storage()
+  const memory = speechStorage()
   const key = Speech.messageKey("ses_conversa", "msg_resposta")
   expect(key).toBe("message:ses_conversa/msg_resposta")
   const position = { path: key, hash: "d".repeat(64), offset: 50, characters: 400, sentence: "Uma frase.", seconds: 4 }
@@ -282,7 +273,7 @@ test("keeps chat response places by session and message, apart from files", asyn
 })
 
 test("keeps only the most recently saved positions", async () => {
-  const memory = storage()
+  const memory = speechStorage()
   const save = (index: number) =>
     Effect.runPromise(
       setPosition(memory.ctx, { path: `/docs/${index}.md`, hash: "b".repeat(64), offset: index, characters: 500, sentence: "" }),

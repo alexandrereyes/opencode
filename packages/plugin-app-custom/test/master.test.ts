@@ -16,6 +16,7 @@ import {
   resolveModel,
 } from "../src/master"
 import type { ModelContext } from "../src/master"
+import { storage } from "./fixture/storage"
 import {
   AnswerInput,
   ArchiveInput,
@@ -97,13 +98,10 @@ function catalogModel(providerID: string, id: string, variants: string[] = [], e
 }
 
 function modelFixture(sessions: Session.Info[] = []) {
-  const storage = new Map<string, Schema.Json>()
+  const shared = storage()
   const models: Model.Info[] = []
   const ctx: ModelContext = {
-    storage: {
-      get: (key) => Effect.sync(() => storage.get(key)),
-      set: (key, value) => Effect.sync(() => void storage.set(key, value)),
-    },
+    storage: shared,
     model: {
       list: () => Effect.sync(() => ({ location: { directory: AbsolutePath.make("/repo") }, data: [...models] })),
     },
@@ -114,7 +112,7 @@ function modelFixture(sessions: Session.Info[] = []) {
       },
     },
   }
-  return { ctx, models, storage, resolve: () => Effect.runPromise(resolveModel(ctx)) }
+  return { ctx, models, values: shared.values, resolve: () => Effect.runPromise(resolveModel(ctx)) }
 }
 
 const sol = catalogModel("llm-proxy", "gpt-6.1-sol-ultrafast", ["low", "medium", "high"])
@@ -169,7 +167,7 @@ test("a saved model that disappeared, was disabled, or lost its variant falls ba
   expect(await f.resolve()).toEqual(luna)
   f.models.splice(0)
   expect(await f.resolve()).toBeUndefined()
-  f.storage.set("master:model", { providerID: 1 })
+  f.values.set("master:model", { providerID: 1 })
   f.models.push(sol)
   expect(await f.resolve()).toEqual(preferredModel)
 })

@@ -38,10 +38,10 @@ import {
   question,
   request,
   session,
-  storage,
   user,
   world,
 } from "./fixture/watch"
+import { storage } from "./fixture/storage"
 
 const settle = Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 1)))
 const settled = Effect.gen(function* () {
@@ -1136,7 +1136,7 @@ it.effect("a Mestra reply that arrives after the call ends reaches voice memory 
     socket?.remoteClose()
     yield* settled
     expect((yield* json("GET", `/voice/calls/${first.callID}/events?after=0`)).ended).toBe(true)
-    expect(server.shared.values.get(VoiceWindow.key)).toBeNull()
+    expect(server.shared.values.has(VoiceWindow.key)).toBe(false)
     yield* TestClock.adjust(10_000)
     server.messages.set("ses_master", [
       assistant("msg_reply", "O voo mais barato custa R$ 820.", T + 20_000),

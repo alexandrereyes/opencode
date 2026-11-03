@@ -91,6 +91,10 @@ authenticated normal plugin transport, for example
   Short calls incur no summary request. No call/Session ID is required. It also
   removes the current Mestra's voice-call note (`docs/master-session.md`); a
   failure there is only logged. It also settles the call's late replies (below).
+  Since 03/11 it is **advisory** (`makeVoice(...).end`): a failure scheduling the check or settling the window is
+  logged as a warning (`Voice memory compaction could not be scheduled`, `Voice call window could not be settled`) and
+  the RPC still succeeds, with `compactionScheduled: false` when nothing was scheduled. The apps send their queue in
+  order and hold everything behind an operation that fails, so an `end` must never fail for good.
 - **`diagnostics({events:[...]})`** (1–20 reports) logs one `Voice diagnostics` line per report the iPhone or
   Mac app sends when a call fails (`failed`), is lost and reconnects (`lost`), has its audio interrupted
   (`interrupted`), survives a failure (`tolerated`) or is ended by Alexandre (`ended`). A report carries only
@@ -109,20 +113,40 @@ authenticated normal plugin transport, for example
   report also carries GPT Live's ID of the call (`remoteCall`, from the creation's `Location`) and, for an error that
   names one of the app's commands by its `event_id`, that command's type (`failedCommand`, logged with
   `failedCommandAgoSeconds`); the categories add `call_mismatch` (`session.started` named another call, as `code`).
+  Since 03/11 (fifth wave, optional) the reports of a call's end (`ended`, `lost`, `failed`) carry `quality`
+  (`Voice.Quality`): the audio quality of the call so far, summed by the app's `VoiceQualityMeter` from WebRTC
+  statistics read every 5 s. Only numbers and short labels: `seconds`, `windows`, `badWindows`, `links`, the optional
+  `lossInPct`, `lossOutPct`, `concealedPct`, `concealmentEvents`, `stretchedPct`, `compressedPct`, `jitterMs`,
+  `jitterMaxMs`, `bufferMs`, `rttMs`, `rttMaxMs`, the `worst` window (`atSeconds`, `cause` among `concealed`, `loss_in`,
+  `loss_out`, `jitter`, and its numbers), up to 4 `routes` (`inputs`, `outputs`, `sampleRate`) with `routeChanges`, and
+  up to 4 `paths` (`type/protocol/network` of the local candidate, never an address). Measures are finite and
+  non-negative; a report breaking that is refused with its whole batch, so the app builds them only from rounded,
+  clamped values, and the fixture both sides test (`packages/ios-custom/OpenCodeKit/Tests/OpenCodeKitTests/Fixtures/
+  voice-diagnostic-quality.json`) keeps them in step. The log line gets `quality="windows=… seconds=… links=… bad=…
+  lossIn=…% … rttMax=…ms"`, `qualityWorst`, `qualityAudio` (`out=… in=… 16000Hz; … changes=N`) and `qualityPaths`; how
+  to read them and the limits of a bad window are in `packages/ios-custom/docs/voice.md` ("Qualidade do áudio").
   The app sanitizes `detail` with `VoiceDiagnosticText` and the
   server again with `sanitize` (`src/voice/sanitize.ts`), by the same rules: no control characters, quoted spans over
-  32 characters (which could echo speech) as `"…"`. No speech or transcript fits the schema; older servers ignore
-  the new fields. The app keeps up to 20 unsent reports and sends them on the next event-stream connection. Read
+  32 characters (which could echo speech) as `"…"`. No speech or transcript fits the schema. `Diagnostic` is a struct
+  whose decoding drops unknown keys (checked in `test/voice.test.ts`), so older servers drop `quality` and any later
+  field instead of refusing the batch. The app keeps up to 20 unsent reports and sends them on the next event-stream connection. Read
   them with `grep 'Voice diagnostics' ~/.local/share/opencode/log/opencode.log`.
 
 ### Reset after moderation (rev. 2026-11-01)
 
-- **`reset({version:2, scope:"global"})`** clears what GPT Live is given back after the service moderated a call and
-  ended its session (a `content_filter` error and the session's end within 5 s of it, or a `session.closed` whose
+- **`reset({version:2, scope:"global", at?})`** clears what GPT Live is given back after the service moderated a call
+  and ended its session (a `content_filter` error and the session's end within 5 s of it, or a `session.closed` whose
   reason names moderation; a moderation the session outlives clears nothing, rev. 2026-11-02): the summary, every turn
   and the open late-reply window
-  (`voice/window`). It returns `resetAt` (server time) and keeps `seenTurnIDs`. Nothing else is touched: the Mestra,
+  (`voice/window`). It returns `resetAt` and keeps `seenTurnIDs`. Nothing else is touched: the Mestra,
   its messages, other sessions, drafts, questions and settings stay; work already admitted to the Mestra goes on.
+- `at` (optional, since 03/11, `Voice.Reset`) is when the app cleared its own memory, in epoch ms on the clock of its
+  turns' `at`. `resetAt` is `min(at, now)`, or now without it (the watch's server-side call, older apps). An app queues
+  the reset behind what it already sent, so it can reach the server hours later (03/11: it waited behind a failing
+  `end`); stamped with the server's time, it dropped everything said between the clear and its arrival. A reset the
+  app queued before 03/11 has no time: the app sends the earliest `at` among the turns queued after it, said after
+  the clear, or none if there are none. Old servers validate `reset` with `Target`, a struct whose decoding drops the
+  unknown `at` (checked in `test/voice.test.ts`), and stamp their own time as before.
 - What keeps the cleared conversation from coming back is `resetAt` in the record, the smallest mark the KV record
   allows: an `append` drops turns spoken before it (`at < resetAt`, a late append of the old call), `recordLate` skips
   a window opened before it (a late reply of the old call), and compaction drops a summary computed from turns read
@@ -140,8 +164,14 @@ the iPhone call dropped was asked again in the afternoon). Now:
 1. The first `custom.master/ensure` with `voice: true` of a call (iPhone, Mac or watch) opens the voice window,
    `voice/window` in KV: `{ sessionID, since }`. Later ensures keep it; a different Mestra or a window older than an
    hour starts a new one.
-2. The call's `end` takes the window atomically (it becomes `null`, so two ends never settle the same call) and, in
-   the background, waits until the Mestra leaves the running set (checked every 3 s, at most 10 minutes).
+2. The call's `end` takes the window atomically (the key is removed, so two ends never settle the same call) and, in
+   the background, waits until the Mestra leaves the running set (checked every 3 s, at most 10 minutes). From
+   31/10 to 03/11 `take` wrote `null`, which the `kv` table's NOT NULL column refuses: every `end` and `reset` failed
+   with HTTP 500 and held the apps' memory queues. The atomic `update` now removes a key whose next value is
+   `undefined`, and the plugin's `Storage` type refuses `null` in `update` and `set` (registrars that do not use
+   storage take `Omit<Plugin.Context, "storage">`, so the plugin's context still fits them); the tests' in-memory
+   storage (`test/fixture/storage.ts`) refuses `null` at run time too, and `test/server-voice.test.ts` drives the RPC
+   against a real server and SQLite. A failure here no longer fails the `end` (advisory, above).
 3. Then, for each user prompt the Mestra received inside the window, it takes the latest completed assistant text
    before the next prompt. If no assistant voice turn in memory is at or after that reply's completion, the call
    never voiced it, and it is appended as a user data item with ID `agent:<replyMessageID>`: the label `lateLabel`

@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { Effect, Fiber, Schema } from "effect"
+import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 import type { ToolEditor } from "@opencode/plugin/effect/tool"
 import { Agent } from "@opencode/schema/agent"
@@ -10,21 +10,7 @@ import { it } from "../../core/test/lib/effect"
 import { configureMaster, instructions, limits, makeDevice, registerTools } from "../src/device"
 import { Device } from "../src/device/rpc"
 import { agentID, configureAgent } from "../src/master"
-
-/** One plugin storage shared by every Location's instance, as the host's KV namespace is. */
-function storage() {
-  const values = new Map<string, Schema.Json>()
-  return {
-    values,
-    get: (key: string) => Effect.sync(() => values.get(key)),
-    update: <A>(key: string, update: (current: Schema.Json | undefined) => readonly [Schema.Json, A]) =>
-      Effect.sync(() => {
-        const [next, result] = update(values.get(key))
-        values.set(key, next)
-        return result
-      }),
-  }
-}
+import { storage } from "./fixture/storage"
 
 function instance(shared: ReturnType<typeof storage>, directory: string) {
   const emitted: Device.Request[] = []

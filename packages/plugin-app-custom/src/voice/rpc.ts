@@ -28,6 +28,14 @@ export const Record = Schema.Struct({
 })
 export type Record = typeof Record.Type
 export const Target = Schema.Struct({ version: Schema.Literal(version), scope: Scope })
+/**
+ * `reset`: `at` is when the app cleared its own memory (epoch ms, the clock of its turns' `at`; since 03/11), so a
+ * reset that waited in its queue still keeps the turns said after it. Without it, the server's time.
+ */
+export const Reset = Schema.Struct({
+  ...Target.fields,
+  at: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
+})
 export const Append = Schema.Struct({
   ...Target.fields,
   turns: Schema.Array(Turn).check(Schema.isMinLength(1), Schema.isMaxLength(128)),
@@ -47,6 +55,49 @@ export const Context = Schema.Struct({
 
 const Label = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
 const Short = Schema.String.check(Schema.isMaxLength(120))
+const Measure = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
+const Ports = Schema.Array(Label).check(Schema.isMaxLength(4))
+/**
+ * A call's audio quality as the iPhone or Mac app measured it from WebRTC statistics (`VoiceQualityMeter`, rev.
+ * 2026-11-03): 5 s windows summed over the call so far. Percentages are 0–100, times in milliseconds; a measure the
+ * statistics never had is absent. Numbers and short labels only.
+ */
+export const Quality = Schema.Struct({
+  seconds: Measure,
+  windows: Measure,
+  /** Windows past a limit: concealed > 3 %, loss either way > 2 % or jitter > 30 ms. */
+  badWindows: Measure,
+  links: Measure,
+  lossInPct: Schema.optionalKey(Measure),
+  lossOutPct: Schema.optionalKey(Measure),
+  concealedPct: Schema.optionalKey(Measure),
+  concealmentEvents: Schema.optionalKey(Measure),
+  stretchedPct: Schema.optionalKey(Measure),
+  compressedPct: Schema.optionalKey(Measure),
+  jitterMs: Schema.optionalKey(Measure),
+  jitterMaxMs: Schema.optionalKey(Measure),
+  bufferMs: Schema.optionalKey(Measure),
+  rttMs: Schema.optionalKey(Measure),
+  rttMaxMs: Schema.optionalKey(Measure),
+  /** The worst window: seconds since the call's first sample and the measure furthest past its limit. */
+  worst: Schema.optionalKey(
+    Schema.Struct({
+      atSeconds: Measure,
+      cause: Label,
+      concealedPct: Schema.optionalKey(Measure),
+      lossInPct: Schema.optionalKey(Measure),
+      lossOutPct: Schema.optionalKey(Measure),
+      jitterMs: Schema.optionalKey(Measure),
+    }),
+  ),
+  routes: Schema.Array(Schema.Struct({ inputs: Ports, outputs: Ports, sampleRate: Schema.optionalKey(Measure) })).check(
+    Schema.isMaxLength(4),
+  ),
+  routeChanges: Measure,
+  /** Local candidates the media used, `type/protocol/network`: never an address. */
+  paths: Schema.Array(Label).check(Schema.isMaxLength(4)),
+})
+export type Quality = typeof Quality.Type
 /**
  * Why an app's GPT Live call failed, was lost or ended, without speech: a category, the error code or event type,
  * the provider's sanitized error message and param, the last command sent and the one an error named, GPT Live's ID of
@@ -85,6 +136,8 @@ export const Diagnostic = Schema.Struct({
     }),
   ),
   network: Schema.optionalKey(Short),
+  /** On the reports of a call's end (`ended`, `lost`, `failed`) since 03/11; older servers drop the unknown key. */
+  quality: Schema.optionalKey(Quality),
 })
 export type Diagnostic = typeof Diagnostic.Type
 export const Diagnostics = Schema.Struct({
@@ -134,7 +187,7 @@ export const Definition = Rpc.define({
       errors,
     },
     reset: {
-      input: Schema.toStandardSchemaV1(Target),
+      input: Schema.toStandardSchemaV1(Reset),
       output: Schema.toStandardSchemaV1(Schema.Struct({ ...Target.fields, resetAt: Schema.Number })),
       errors,
     },

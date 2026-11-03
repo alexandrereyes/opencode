@@ -1,5 +1,5 @@
-import { Plugin } from "@opencode/plugin/effect"
 import { Effect, Option, Schema } from "effect"
+import type { Context } from "../context.js"
 import { AppMentions } from "./rpc.js"
 
 // Computer Use lists the host's apps, which do not depend on the Location. Plugin storage is shared by
@@ -9,7 +9,7 @@ const known = "app-mentions:computer-use"
 const decode = Schema.decodeUnknownOption(Schema.Array(AppMentions.App))
 const encode = Schema.encodeSync(Schema.Array(AppMentions.App))
 
-export const registerAppMentions = Effect.fn("AppMentions.register")(function* (ctx: Plugin.Context) {
+export const registerAppMentions = Effect.fn("AppMentions.register")(function* (ctx: Context) {
   yield* ctx.rpc
     .register(AppMentions.Definition, {
       list: (input) =>

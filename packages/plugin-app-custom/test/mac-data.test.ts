@@ -9,20 +9,7 @@ import { Tool } from "@opencode/schema/tool"
 import { it } from "../../core/test/lib/effect"
 import { limits, makeMac, Output, registerTools, toolName } from "../src/mac-data"
 import { MacData } from "../src/mac-data/rpc"
-
-/** One plugin storage shared by every Location's instance, as the host's KV namespace is. */
-function storage() {
-  const values = new Map<string, Schema.Json>()
-  return {
-    get: (key: string) => Effect.sync(() => values.get(key)),
-    update: <A>(key: string, update: (current: Schema.Json | undefined) => readonly [Schema.Json, A]) =>
-      Effect.sync(() => {
-        const [next, result] = update(values.get(key))
-        values.set(key, next)
-        return result
-      }),
-  }
-}
+import { storage } from "./fixture/storage"
 
 function instance(shared: ReturnType<typeof storage>, directory: string) {
   const emitted: MacData.Request[] = []

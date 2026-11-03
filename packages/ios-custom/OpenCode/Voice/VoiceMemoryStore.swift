@@ -30,9 +30,11 @@ import OpenCodeKit
     do { try await service.buffer.append(turn); await update(); resume() }
     catch { localError = true }
   }
-  /// Clears the voice memory here and on the server (in order, after what was already sent).
+  /// Clears the voice memory here and on the server (in order, after what was already sent), stamped with now on the
+  /// clock of the turns' `at`.
   func reset() async {
-    do { try await service.buffer.reset(UUID().uuidString); await update(); resume() }
+    let at = Date.now.timeIntervalSince1970 * 1000
+    do { try await service.buffer.reset(UUID().uuidString, at: at); await update(); resume() }
     catch { localError = true }
   }
   func finish(_ callID: UUID) async {

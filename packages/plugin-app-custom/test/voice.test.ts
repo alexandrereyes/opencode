@@ -24,6 +24,7 @@ import { Preferences } from "../src/preferences/rpc"
 import { tmpdir } from "../../core/test/fixture/tmpdir"
 import { loadInstructions } from "../src/voice/instructions"
 import { VoiceWindow } from "../src/voice/window"
+import { storage } from "./fixture/storage"
 
 const decode = Schema.decodeUnknownSync(Voice.Record)
 const encode = Schema.encodeSync(Voice.Record)
@@ -45,19 +46,12 @@ const record = (turns: readonly Voice.Turn[], summary = ""): Voice.Record => ({
 })
 
 function fixture(initial?: Voice.Record) {
-  const values = new Map<string, Schema.Json>(initial ? [[key("global"), encode(initial)]] : [])
+  const shared = storage(initial ? [[key("global"), encode(initial)]] : [])
+  const values = shared.values
   const generated: Array<Parameters<VoiceContext["generate"]["text"]>[0]> = []
   const state = { fail: false, text: "Alexandre prefere respostas curtas e café sem açúcar." }
   const ctx: VoiceContext = {
-    storage: {
-      get: (key) => Effect.sync(() => values.get(key)),
-      update: (key, update) =>
-        Effect.sync(() => {
-          const [next, result] = update(values.get(key))
-          values.set(key, next)
-          return result
-        }),
-    },
+    storage: shared,
     generate: {
       text: (input) =>
         Effect.suspend(() => {
@@ -71,7 +65,7 @@ function fixture(initial?: Voice.Record) {
     },
     message: { list: () => Effect.succeed({ data: [], cursor: {} }) },
   }
-  return { ctx, values, generated, state, read: () => decode(values.get(key("global"))) }
+  return { ctx, shared, values, generated, state, read: () => decode(values.get(key("global"))) }
 }
 
 test("KV protocol replaces the eco contract, validates batches and reserves future scopes", () => {
@@ -526,7 +520,7 @@ it.effect("the call's end takes its window once and records after the Mestra goe
     f.active["ses_m"] = { type: "running" }
     yield* voice.settle()
     yield* voice.settle()
-    expect(f.values.get(VoiceWindow.key)).toBeNull()
+    expect(f.values.has(VoiceWindow.key)).toBe(false)
     yield* TestClock.adjust(limits.latePollMs)
     expect(f.read().turns).toEqual([])
     delete f.active["ses_m"]
@@ -571,7 +565,7 @@ it.effect("reset clears what GPT Live gets back and keeps the old conversation f
     // Retry identities stay: the cleared conversation is still a duplicate.
     expect(f.read().seenTurnIDs).toEqual(["old-1", "old-2"])
     // The late-reply window of the cleared call is gone, and an older one cannot record either.
-    expect(f.values.get(VoiceWindow.key)).toBeNull()
+    expect(f.values.has(VoiceWindow.key)).toBe(false)
     expect(yield* voice.recordLate({ sessionID: "ses_m", since: 8_000 }, 10_000)).toBe(0)
     // A straggler of the old call (spoken before the reset) stays out; the new call's speech goes in.
     const late = yield* voice.append({ version: 2, scope: "global", turns: [{ ...turn("straggler"), at: 9_900 }] })
@@ -613,23 +607,125 @@ it.effect("a summary computed from the old turns is dropped when a reset happene
 
 it.effect("the voice window keeps a call's start, and restarts for a replaced Mestra or a stale window", () =>
   Effect.gen(function* () {
-    const values = new Map<string, Schema.Json>()
-    const storage = {
-      get: (key: string) => Effect.sync(() => values.get(key)),
-      set: (key: string, value: Schema.Json) => Effect.sync(() => void values.set(key, value)),
-    }
+    const shared = storage()
     yield* TestClock.setTime(10_000)
-    yield* VoiceWindow.open(storage, "ses_m")
+    yield* VoiceWindow.open(shared, "ses_m")
     yield* TestClock.adjust(60_000)
-    yield* VoiceWindow.open(storage, "ses_m")
-    expect(values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_m", since: 10_000 })
-    yield* VoiceWindow.open(storage, "ses_new")
-    expect(values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_new", since: 70_000 })
+    yield* VoiceWindow.open(shared, "ses_m")
+    expect(shared.values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_m", since: 10_000 })
+    yield* VoiceWindow.open(shared, "ses_new")
+    expect(shared.values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_new", since: 70_000 })
     yield* TestClock.adjust(VoiceWindow.staleMs)
-    yield* VoiceWindow.open(storage, "ses_new")
-    expect(values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_new", since: 70_000 + VoiceWindow.staleMs })
+    yield* VoiceWindow.open(shared, "ses_new")
+    expect(shared.values.get(VoiceWindow.key)).toEqual({ sessionID: "ses_new", since: 70_000 + VoiceWindow.staleMs })
   }),
 )
+
+it.effect("end and reset remove the window instead of storing null, with or without one open, and take it once", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = fixture(record([]))
+    const listed = { count: 0 }
+    const voice = makeVoice(
+      { ...f.ctx, message: { list: () => Effect.sync(() => (listed.count++, { data: [], cursor: {} })) } },
+      scope,
+    )
+    // No call delegated: nothing to take, nothing written.
+    expect(yield* voice.end("global")).toBe(false)
+    expect(f.values.has(VoiceWindow.key)).toBe(false)
+    expect(yield* VoiceWindow.take(f.shared)).toBeUndefined()
+    // A call that delegated: its end takes the window, and the idle Mestra's replies are read once.
+    yield* VoiceWindow.open(f.shared, "ses_m")
+    yield* voice.end("global")
+    expect(f.values.has(VoiceWindow.key)).toBe(false)
+    yield* settled
+    expect(listed.count).toBe(1)
+    // A retried end finds no window and settles nothing again.
+    yield* voice.end("global")
+    yield* settled
+    expect(listed.count).toBe(1)
+    // The moderation reset takes an open window the same way, and again when there is none.
+    yield* VoiceWindow.open(f.shared, "ses_m")
+    yield* voice.reset("global")
+    expect(f.values.has(VoiceWindow.key)).toBe(false)
+    yield* voice.reset("global")
+    expect(f.read()).toMatchObject({ turns: [], resetAt: 0 })
+    // The fake refuses null as the KV table does, so a regression fails here instead of in production.
+    const exit = yield* f.shared.set(VoiceWindow.key, null).pipe(Effect.exit)
+    expect(exit._tag).toBe("Failure")
+  }),
+)
+
+it.effect("end is advisory: a window or compaction check that fails is logged and the end still succeeds", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    const f = fixture(record(turns(121)))
+    const failing = (read: boolean): VoiceContext => ({
+      ...f.ctx,
+      storage: {
+        get: (name) =>
+          read && name === key("global") ? Effect.die(new Error("database is locked")) : f.shared.get(name),
+        update: (name, update) =>
+          name === VoiceWindow.key
+            ? Effect.die(new Error("NOT NULL constraint failed: kv.value"))
+            : f.shared.update(name, update),
+      },
+    })
+    yield* VoiceWindow.open(f.shared, "ses_m")
+    const logged: unknown[] = []
+    const ended = yield* Effect.all([
+      makeVoice(failing(true), scope).end("global"),
+      makeVoice(failing(false), scope).end("global"),
+    ]).pipe(
+      Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => logged.push((entry.message as unknown[])[0]))]),
+      ),
+    )
+    // Nothing scheduled when the record could not be read; the compaction a readable record needs still is.
+    expect(ended).toEqual([false, true])
+    expect(logged.filter((message) => message === "Voice memory compaction could not be scheduled")).toHaveLength(1)
+    expect(logged.filter((message) => message === "Voice call window could not be settled")).toHaveLength(2)
+    expect(f.values.has(VoiceWindow.key)).toBe(true)
+  }),
+)
+
+it.effect("a reset stamps when the app cleared its memory, never later than now", () =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope
+    yield* TestClock.setTime(50_000)
+    const voice = makeVoice(fixture(record([turn("old")])).ctx, scope)
+    expect(yield* voice.reset("global", 20_000)).toBe(20_000)
+    // Said after the app cleared its memory but delivered after the reset: kept. Said before: the cleared conversation.
+    const late = yield* voice.append({
+      version: 2,
+      scope: "global",
+      turns: [
+        { ...turn("after"), at: 20_000 },
+        { ...turn("before"), at: 19_999 },
+      ],
+    })
+    expect(late.appended).toBe(1)
+    expect(yield* voice.reset("global", 90_000)).toBe(50_000)
+    expect(yield* voice.reset("global")).toBe(50_000)
+  }),
+)
+
+test("reset's `at` is optional both ways: the schema before 03/11 drops it, and a reset without it still decodes", async () => {
+  // `Target` was the reset input until 03/11; the RPC validates through the standard schema.
+  const before = await Schema.toStandardSchemaV1(Voice.Target)["~standard"].validate({
+    version: 2,
+    scope: "global",
+    at: 1_793_691_500_000,
+  })
+  expect(before).toEqual({ value: { version: 2, scope: "global" } })
+  const input = Voice.Definition.methods.reset.input["~standard"]
+  expect(await input.validate({ version: 2, scope: "global" })).toEqual({ value: { version: 2, scope: "global" } })
+  expect(await input.validate({ version: 2, scope: "global", at: 5 })).toEqual({
+    value: { version: 2, scope: "global", at: 5 },
+  })
+  expect("issues" in (await input.validate({ version: 2, scope: "global", at: -1 }))).toBe(true)
+})
 
 const diagnostic = {
   kind: "failed",
@@ -695,7 +791,10 @@ test("voice diagnostics carry categories and names only and log one line each", 
         ],
       }),
     ).pipe(
-      Effect.provideService(Logger.CurrentLoggers, new Set([Logger.make((entry) => logged.push({ message: entry.message }))])),
+      Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => logged.push({ message: entry.message }))]),
+      ),
     ),
   )
   expect(result).toEqual({ accepted: 5 })
@@ -733,4 +832,53 @@ test("voice diagnostics carry categories and names only and log one line each", 
     lastSentAgoSeconds: 1.3,
     events: "delegation.created,transport.connected,error",
   })
+})
+
+test("a call's audio quality from the app's own fixture is accepted and logged; unknown keys never reject a report", async () => {
+  // Written by OpenCodeKit's `VoiceQualityTests`, which round-trips it through `VoiceDiagnostic`.
+  const fixture = await Bun.file(
+    `${import.meta.dir}/../../ios-custom/OpenCodeKit/Tests/OpenCodeKitTests/Fixtures/voice-diagnostic-quality.json`,
+  ).json()
+  const input = Voice.Definition.methods.diagnostics.input["~standard"]
+  const accepted = await input.validate(fixture)
+  if (!("value" in accepted)) throw new Error(JSON.stringify(accepted.issues))
+  expect(accepted.value).toEqual(fixture)
+  const logged: unknown[] = []
+  await Effect.runPromise(
+    logDiagnostics(accepted.value).pipe(
+      Effect.provideService(
+        Logger.CurrentLoggers,
+        new Set([Logger.make((entry) => logged.push((entry.message as unknown[])[1]))]),
+      ),
+    ),
+  )
+  expect(logged[0]).toMatchObject({
+    kind: "ended",
+    reason: "user_end",
+    route: "out=BluetoothHFP in=BluetoothHFP",
+    quality:
+      "windows=82 seconds=410 links=1 bad=6 lossIn=0.42% lossOut=0.1% concealed=2.35% concealments=57 stretched=1.2% " +
+      "compressed=0.85% jitter=14.2ms jitterMax=61.5ms buffer=92.4ms rtt=88.1ms rttMax=240ms",
+    qualityWorst: "at=215s cause=concealed concealed=11.6% lossIn=3.2% lossOut=0% jitter=48.5ms",
+    qualityAudio: "out=BluetoothHFP in=BluetoothHFP 16000Hz",
+    qualityPaths: "srflx/udp/cellular5g",
+  })
+
+  const [event] = fixture.events
+  const quality = event.quality
+  // A field a newer app adds is dropped, as servers before 03/11 drop `quality`: the batch still goes through.
+  const newer = await input.validate({
+    events: [{ ...event, future: { x: 1 }, quality: { ...quality, future: 1, worst: { ...quality.worst, more: 2 } } }],
+  })
+  expect(newer).toEqual({ value: fixture })
+  // Measures are non-negative numbers and lists stay short; a report breaking that is refused as a whole.
+  for (const broken of [
+    { ...quality, windows: -1 },
+    { ...quality, jitterMs: "14ms" },
+    { ...quality, routes: Array.from({ length: 5 }, () => quality.routes[0]) },
+    { ...quality, routes: [{ inputs: ["Bluetooth HFP ".repeat(10)], outputs: [] }] },
+    { ...quality, paths: [""] },
+    { ...quality, worst: { atSeconds: 1 } },
+  ])
+    expect("issues" in (await input.validate({ events: [{ ...event, quality: broken }] }))).toBe(true)
 })

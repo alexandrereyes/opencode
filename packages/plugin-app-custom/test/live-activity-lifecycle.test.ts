@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { Effect, Exit, Queue, Schema, Scope, Stream } from "effect"
+import { Effect, Exit, Queue, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
@@ -8,23 +8,9 @@ import { devicesKey, limits, makeLifecycle, makeRegistry } from "../src/live-act
 import type { LiveActivity } from "../src/live-activity/rpc"
 import type { Event, Tracker } from "../src/live-activity/tracker"
 import { T, created, execution, fixture, ids, minute, question, scene, session, world } from "./fixture/live-activity"
+import { storage } from "./fixture/storage"
 
 const host = "MacBook Pro"
-
-/** One plugin storage shared by every Location's instance, as the host's KV namespace is. */
-function storage() {
-  const values = new Map<string, Schema.Json>()
-  return {
-    values,
-    get: (key: string) => Effect.sync(() => values.get(key)),
-    update: <A>(key: string, update: (current: Schema.Json | undefined) => readonly [Schema.Json, A]) =>
-      Effect.sync(() => {
-        const [next, result] = update(values.get(key))
-        values.set(key, next)
-        return result
-      }),
-  }
-}
 
 function apns(answer: (push: Push) => Result = () => ({ status: "sent" })) {
   const pushes: Push[] = []

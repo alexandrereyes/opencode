@@ -25,7 +25,7 @@ export interface WorktreeContext {
   ) => ReturnType<Plugin.Context["worktree"]["remove"]>
 }
 
-export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx: Plugin.Context) {
+export const registerWorktrees = Effect.fn("Worktrees.register")(function* (ctx: Omit<Plugin.Context, "storage">) {
   const worktrees: WorktreeContext = {
     list: () => ctx.worktree.list({ projectID: ctx.location.project.id }),
     remove: (input) => ctx.worktree.remove({ ...input, projectID: ctx.location.project.id }),

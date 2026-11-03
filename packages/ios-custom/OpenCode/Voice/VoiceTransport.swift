@@ -7,6 +7,8 @@ import OSLog
 enum VoiceTransportEvent: Sendable {
   /// `failed` says which part of the link went down, for the call's diagnostics.
   case connected, interrupted, resumed, disconnected, data(Data), failed(VoiceFailureReason)
+  /// A reading of the link's statistics and audio route, for the call's quality summary only.
+  case quality(VoiceQualitySample)
 }
 
 protocol VoiceTransporting: AnyObject, Sendable {
@@ -37,6 +39,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
   private var channel: RTCDataChannel?
   private var pending: CheckedContinuation<String, any Error>?
   private var observers: [NSObjectProtocol] = []
+  private var statistics: DispatchSourceTimer?
   private var activations = 0
   private var iceConnected = false
   private var interrupted = false
@@ -166,6 +169,7 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
     await withCheckedContinuation { continuation in
       queue.async {
         self.closed = true
+        self.statistics?.cancel(); self.statistics = nil
         self.pending?.resume(throwing: CancellationError()); self.pending = nil
         self.observers.forEach { NotificationCenter.default.removeObserver($0) }; self.observers = []
         self.channel?.delegate = nil; self.channel?.close(); self.channel = nil
@@ -218,6 +222,40 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
   private func updateConnected() {
     if iceConnected, channel?.readyState == .open, !interrupted { emit(.connected) }
   }
+  /// Reads the link's statistics when ICE first connects (the baseline of its counters) and every
+  /// `VoiceQualityMeter.interval` until the transport closes. It only measures: nothing in the call depends on it.
+  private func measure() {
+    guard statistics == nil, !closed else { return }
+    let timer = DispatchSource.makeTimerSource(queue: queue)
+    timer.schedule(deadline: .now(), repeating: VoiceQualityMeter.interval)
+    timer.setEventHandler { [weak self] in self?.readStatistics() }
+    timer.resume()
+    statistics = timer
+  }
+  private func readStatistics() {
+    guard !closed, let peer else { return }
+    peer.statistics { [weak self] report in
+      let reading = VoiceQualitySample(at: ProcessInfo.processInfo.systemUptime,
+        statistics: report.statistics.mapValues { (type: $0.type, values: $0.values as [String: Any]) })
+      guard let self else { return }
+      self.queue.async {
+        guard !self.closed, self.peer === peer else { return }
+        var sample = reading
+        sample.route = Self.route
+        self.emit(.quality(sample))
+      }
+    }
+  }
+  /// The session's route and hardware sample rate (8 or 16 kHz on a Bluetooth HFP headset); the Mac has none.
+  private static var route: VoiceAudioRoute? {
+    #if os(iOS)
+    let session = AVAudioSession.sharedInstance()
+    return VoiceAudioRoute(inputs: session.currentRoute.inputs.map(\.portType.rawValue),
+      outputs: session.currentRoute.outputs.map(\.portType.rawValue), sampleRate: session.sampleRate)
+    #else
+    return nil
+    #endif
+  }
   private func installObservers() {
     #if os(iOS)
     observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.didBecomeInactiveNotification,
@@ -237,7 +275,13 @@ final class VoiceTransport: NSObject, VoiceTransporting, @unchecked Sendable {
     observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification,
       object: nil, queue: nil) { [weak self] _ in
         guard let self else { return }
-        self.queue.async { if !self.interrupted { self.reactivate() } }
+        self.queue.async {
+          // A route that changes back within one statistics interval still counts in the summary.
+          if !self.closed {
+            self.emit(.quality(VoiceQualitySample(at: ProcessInfo.processInfo.systemUptime, route: Self.route)))
+          }
+          if !self.interrupted { self.reactivate() }
+        }
       })
     observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification,
       object: nil, queue: nil) { [weak self] _ in
@@ -262,7 +306,7 @@ extension VoiceTransport: RTCPeerConnectionDelegate, RTCDataChannelDelegate {
   func peerConnection(_ peer: RTCPeerConnection, didChange state: RTCIceConnectionState) {
     queue.async {
       guard self.peer === peer, !self.closed else { return }
-      if state == .connected || state == .completed { self.iceConnected = true; self.updateConnected() }
+      if state == .connected || state == .completed { self.iceConnected = true; self.updateConnected(); self.measure() }
       if state == .disconnected { self.iceConnected = false; self.emit(.disconnected) }
       if state == .failed { self.emit(.failed(.iceFailed)) }
     }

@@ -11,27 +11,13 @@ import type { LiveActivity } from "../../src/live-activity/rpc"
 import { makeGateway, type GatewayOptions, type WatchContext } from "../../src/watch/gateway"
 import type { Sideband, SidebandClose, SidebandFactory } from "../../src/watch/voice"
 import type { Voice } from "../../src/voice/rpc"
+import { storage } from "./storage"
 
 export const T = 1793104860000
 
 type ServerEvent = Plugin.Context["event"]["subscribe"] extends () => Stream.Stream<infer A, infer _E, infer _R>
   ? A
   : never
-
-export function storage() {
-  const values = new Map<string, Schema.Json>()
-  return {
-    values,
-    get: (key: string) => Effect.sync(() => values.get(key)),
-    set: (key: string, value: Schema.Json) => Effect.sync(() => void values.set(key, value)),
-    update: <A>(key: string, update: (current: Schema.Json | undefined) => readonly [Schema.Json, A]) =>
-      Effect.sync(() => {
-        const [next, result] = update(values.get(key))
-        values.set(key, next)
-        return result
-      }),
-  }
-}
 
 export function session(id: string, extra: Record<string, unknown> = {}) {
   return Schema.decodeUnknownSync(Session.Info)({

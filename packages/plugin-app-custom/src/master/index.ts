@@ -8,6 +8,8 @@ import { Chats } from "../chats/rpc.js"
 import { Preferences } from "../preferences/rpc.js"
 import { available } from "../sessions/index.js"
 import { VoiceWindow } from "../voice/window.js"
+import type { Context } from "../context.js"
+import type { Storage } from "../storage.js"
 import { Master } from "./rpc.js"
 
 export const agentID = Master.agentID
@@ -78,7 +80,7 @@ export function configureAgent(editor: AgentEditor) {
   })
 }
 
-export const registerMaster = Effect.fn("Master.register")(function* (ctx: Plugin.Context) {
+export const registerMaster = Effect.fn("Master.register")(function* (ctx: Context) {
   yield* ctx.agent.transform((editor) => configureAgent(editor))
   yield* ctx.rpc
     .register(Master.Definition, {
@@ -128,7 +130,7 @@ export type ModelEvent =
     }
 
 export type ModelContext = {
-  storage: Pick<Plugin.Context["storage"], "get" | "set">
+  storage: Pick<Storage, "get" | "set">
   model: Pick<Plugin.Context["model"], "list">
   session: Pick<Plugin.Context["session"], "get">
 }

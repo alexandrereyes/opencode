@@ -68,6 +68,8 @@ import UIKit
   }
   /// Names of the last events of this conversation, sent with each diagnostic report.
   @ObservationIgnored private var trail = VoiceEventTrail()
+  /// The audio quality of this conversation's links, sent with the reports of its end.
+  @ObservationIgnored private var quality = VoiceQualityMeter()
   @ObservationIgnored private var diagnostics = VoiceDiagnosticsOutbox.standard
   @ObservationIgnored private var diagnosticsTask: Task<Void, Never>?
   @ObservationIgnored private var ready = false
@@ -206,7 +208,7 @@ import UIKit
     connectedAt = nil; currentSpokenLine = ""; masterProgressLine = ""
     handled = []; currentDelegation = nil; narration = VoiceNarration(); status = VoiceMasterStatus(); finalNarration = false
     recentSpeech = []; conversation = VoiceRequestContext()
-    trail = VoiceEventTrail(); lastSent = nil
+    trail = VoiceEventTrail(); lastSent = nil; quality = VoiceQualityMeter()
     freshContext = false; linkHadContext = false; linkAnswered = false; masterStale = false; moderation = nil
     graceUntil = nil; continuity = VoiceContinuity(); servedInstructions = nil; delivery = nil; contextRejected = false
     state.apply(.start); detail = "Preparando o microfone"; publish()
@@ -311,6 +313,7 @@ import UIKit
   private func open(token: UUID, timeout: Double, message: String) async throws {
     let current = UUID()
     link = current; ready = false; mediaConnected = false; graceUntil = nil; lease = VoiceLeaseClock()
+    quality.restart()
     commands = VoiceCommandLog(); remoteCall = nil; moderation = nil; moderationTimer?.cancel()
     armWatchdog(token: token, seconds: timeout, message: message, reason: .attemptTimeout)
     // A rebuilt call is the same conversation: its prompt does not wait for (or depend on) the OpenCode server.
@@ -444,15 +447,17 @@ import UIKit
     }
   }
   private func receive(_ event: VoiceTransportEvent) {
-    let name = switch event {
+    // Statistics arrive every few seconds and would push the events that matter out of the trail.
+    let name: String? = switch event {
     case .connected: "transport.connected"
     case .interrupted: "transport.interrupted"
     case .resumed: "transport.resumed"
     case .disconnected: "transport.disconnected"
     case .failed(let reason): "transport." + reason.category
     case .data(let data): VoiceProtocol.eventType(data) ?? "unreadable"
+    case .quality: nil
     }
-    trail.record(name)
+    if let name { trail.record(name) }
     if busy {
       // Ending, after our `session.close`: the channel going away only ends the wait; nothing reconnects or reports a
       // loss.
@@ -463,6 +468,7 @@ import UIKit
       }
     }
     switch event {
+    case .quality(let sample): quality.add(sample)
     case .connected:
       mediaConnected = true
       if graceUntil != nil, connectedAt != nil { report(.tolerated, .iceRecovered) }
@@ -888,15 +894,16 @@ import UIKit
 
   /// Queues one report for the server (`custom.voice` → `diagnostics`, logged as `Voice diagnostics`) and tries to
   /// send it; a report the server did not take goes with the next one or on the next connection. Only categories,
-  /// event names and device state, never speech. `tolerated` is for failures the call survives. `command` is the one
-  /// a GPT Live error named.
+  /// event names, device state and audio quality numbers, never speech. `tolerated` is for failures the call
+  /// survives. `command` is the one a GPT Live error named.
   func report(_ kind: VoiceDiagnostic.Kind, _ reason: VoiceFailureReason, command: VoiceCommandLog.Entry? = nil) {
     let entry = VoiceDiagnostic(kind: kind, reason: reason, build: Self.build, at: .now, call: sessionID,
       connectedSeconds: connectedAt.map { Date.now.timeIntervalSince($0) }, phase: String(describing: state.phase),
       recovering: recovery.active, events: trail, app: Self.appState, audio: Self.audioState,
       network: network.current.satisfied ? network.current.interfaces.joined(separator: ",") : "unsatisfied",
       lastSent: lastSent.map { ($0.type, Self.now - $0.at) }, remoteCall: remoteCall,
-      failedCommand: command.map { ($0.type, Self.now - $0.at) })
+      failedCommand: command.map { ($0.type, Self.now - $0.at) },
+      quality: [.ended, .lost, .failed].contains(kind) ? quality.summary : nil)
     let outbox = diagnostics
     let client = client
     let previous = diagnosticsTask

@@ -81,7 +81,9 @@ const AnthropicStatus = Schema.Struct({
   ),
 })
 
-export const registerSubscriptions = Effect.fn("Subscriptions.register")(function* (ctx: Plugin.Context) {
+export const registerSubscriptions = Effect.fn("Subscriptions.register")(function* (
+  ctx: Omit<Plugin.Context, "storage">,
+) {
   yield* ctx.rpc
     .register(Subscriptions.Definition, {
       list: () => read(),

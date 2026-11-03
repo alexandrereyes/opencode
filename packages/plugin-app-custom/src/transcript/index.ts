@@ -6,7 +6,7 @@ import { omitInlineMedia, Transcript } from "./rpc.js"
 
 const encodePage = Schema.encodeSync(Transcript.Page)
 
-export const registerTranscript = Effect.fn("Transcript.register")(function* (ctx: Plugin.Context) {
+export const registerTranscript = Effect.fn("Transcript.register")(function* (ctx: Omit<Plugin.Context, "storage">) {
   yield* ctx.rpc
     .register(Transcript.Definition, {
       list: (input, context) =>

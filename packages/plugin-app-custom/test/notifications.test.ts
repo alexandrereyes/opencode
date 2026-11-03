@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { Effect, Queue, Schema, Stream } from "effect"
+import { Effect, Queue, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
@@ -23,22 +23,9 @@ import {
   shellStarted,
   world,
 } from "./fixture/live-activity"
+import { storage } from "./fixture/storage"
 
 const host = "MacBook Pro"
-
-function storage() {
-  const values = new Map<string, Schema.Json>()
-  return {
-    values,
-    get: (key: string) => Effect.sync(() => values.get(key)),
-    update: <A>(key: string, update: (current: Schema.Json | undefined) => readonly [Schema.Json, A]) =>
-      Effect.sync(() => {
-        const [next, result] = update(values.get(key))
-        values.set(key, next)
-        return result
-      }),
-  }
-}
 
 const iphone: Notifications.RegisterInput = {
   deviceID: "iphone-17",

@@ -5,7 +5,7 @@ import { Requests } from "./rpc.js"
 
 const encodePermission = Schema.encodeSync(Permission.Request)
 
-export const registerRequests = Effect.fn("Requests.register")(function* (ctx: Plugin.Context) {
+export const registerRequests = Effect.fn("Requests.register")(function* (ctx: Omit<Plugin.Context, "storage">) {
   yield* ctx.rpc
     .register(Requests.Definition, {
       permissions: () => permissions(ctx.request),

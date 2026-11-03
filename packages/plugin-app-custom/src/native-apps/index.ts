@@ -31,7 +31,7 @@ export interface NativeAppsOptions {
 }
 
 export const registerNativeApps = Effect.fn("NativeApps.register")(function* (
-  ctx: Plugin.Context,
+  ctx: Omit<Plugin.Context, "storage">,
   options: NativeAppsOptions = {},
 ) {
   const apps = makeNativeApps(options)

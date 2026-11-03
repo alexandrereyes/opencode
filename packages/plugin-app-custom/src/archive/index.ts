@@ -10,7 +10,7 @@ interface ArchiveContext {
   readonly update: Plugin.Context["session"]["update"]
 }
 
-export const registerArchive = Effect.fn("Archive.register")(function* (ctx: Plugin.Context) {
+export const registerArchive = Effect.fn("Archive.register")(function* (ctx: Omit<Plugin.Context, "storage">) {
   yield* ctx.rpc
     .register(Archive.Definition, {
       archive: (input, context) =>

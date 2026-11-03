@@ -124,8 +124,9 @@ extension OpenCodeClient {
     struct Input: Encodable { let version = 2; let scope = "global" }
     let _: JSONValue = try await rpc("custom.voice", "end", input: Input(), timeout: 8)
   }
-  public func resetVoiceMemory() async throws {
-    struct Input: Encodable { let version = 2; let scope = "global" }
-    let _: JSONValue = try await rpc("custom.voice", "reset", input: Input(), timeout: 8)
+  /// `at`: when the device cleared its memory (epoch ms); servers before 03/11 ignore it and use their own time.
+  public func resetVoiceMemory(at: Double?) async throws {
+    struct Input: Encodable { let version = 2; let scope = "global"; let at: Double? }
+    let _: JSONValue = try await rpc("custom.voice", "reset", input: Input(at: at), timeout: 8)
   }
 }

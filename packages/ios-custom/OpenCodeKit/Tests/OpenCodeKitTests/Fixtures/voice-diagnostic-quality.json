@@ -1,0 +1,53 @@
+{
+  "events": [
+    {
+      "kind": "ended",
+      "reason": "user_end",
+      "platform": "ios",
+      "build": "0.1.0 (202611030900)",
+      "at": 1793691180000,
+      "call": "855CA9AC-0000-4000-8000-000000000000",
+      "connectedSeconds": 412.3,
+      "phase": "listening",
+      "recovering": false,
+      "events": ["transport.connected", "session.started", "turn.done"],
+      "app": { "state": "background", "locked": true },
+      "audio": {
+        "category": "PlayAndRecord",
+        "mode": "VoiceChat",
+        "inputs": ["BluetoothHFP"],
+        "outputs": ["BluetoothHFP"],
+        "otherAudio": false
+      },
+      "network": "cellular:pdp_ip0",
+      "quality": {
+        "seconds": 410,
+        "windows": 82,
+        "badWindows": 6,
+        "links": 1,
+        "lossInPct": 0.42,
+        "lossOutPct": 0.1,
+        "concealedPct": 2.35,
+        "concealmentEvents": 57,
+        "stretchedPct": 1.2,
+        "compressedPct": 0.85,
+        "jitterMs": 14.2,
+        "jitterMaxMs": 61.5,
+        "bufferMs": 92.4,
+        "rttMs": 88.1,
+        "rttMaxMs": 240,
+        "worst": {
+          "atSeconds": 215,
+          "cause": "concealed",
+          "concealedPct": 11.6,
+          "lossInPct": 3.2,
+          "lossOutPct": 0,
+          "jitterMs": 48.5
+        },
+        "routes": [{ "inputs": ["BluetoothHFP"], "outputs": ["BluetoothHFP"], "sampleRate": 16000 }],
+        "routeChanges": 0,
+        "paths": ["srflx/udp/cellular5g"]
+      }
+    }
+  ]
+}

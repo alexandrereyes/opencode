@@ -2,9 +2,10 @@ import { describe, expect } from "bun:test"
 import { KV } from "@opencode/core/kv"
 import { PluginHost } from "@opencode/core/plugin/host"
 import { LayerNode } from "@opencode/util/effect/layer-node"
-import { Effect } from "effect"
+import { Effect, Exit } from "effect"
 import { testEffect } from "../../core/test/lib/effect"
 import type { atomic } from "../src/storage"
+import { storage } from "./fixture/storage"
 
 const it = testEffect(LayerNode.compile(KV.node))
 
@@ -44,6 +45,25 @@ describe("plugin storage", () => {
         .pipe(Effect.exit)
       expect(exit._tag).toBe("Failure")
       expect(yield* storages[0].get("counter")).toBe(50)
+    }),
+  )
+
+  it.live("removes a key whose next value is undefined; null dies in the KV table and in the test fake alike", () =>
+    Effect.gen(function* () {
+      const host = PluginHost.storage(yield* KV.Service, "example.plugin")
+      const { atomic } = yield* Effect.promise(() => evaluate("remove"))
+      const shared = atomic(host)
+      yield* shared.set("window", { since: 1 })
+      expect(yield* shared.update("window", (current) => [undefined, current])).toEqual({ since: 1 })
+      expect(yield* shared.get("window")).toBeUndefined()
+      expect((yield* shared.scan({ prefix: "window" })).entries).toEqual([])
+      expect(yield* shared.update("window", (current) => [undefined, current])).toBeUndefined()
+
+      for (const target of [host, storage()]) {
+        expect(Exit.hasDies(yield* target.set("window", null).pipe(Effect.exit))).toBe(true)
+      }
+      // @ts-expect-error The plugin's own storage refuses `null` before it runs.
+      expect(Exit.hasDies(yield* shared.set("window", null).pipe(Effect.exit))).toBe(true)
     }),
   )
 })

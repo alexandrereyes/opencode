@@ -1316,11 +1316,17 @@ private actor LiveMemoryHTTP {
   /// A voice memory server that records its RPCs and answers `context` with what it holds.
   private actor ModerationMemoryServer {
     var calls: [String] = []
+    /// The `at` each reset carried.
+    var resets: [Double?] = []
     var summary = "Memória sintética antiga: palavra jambo."
     func respond(_ request: URLRequest) throws -> (Data, URLResponse) {
       let method = request.url!.lastPathComponent
       calls.append(method)
-      if method == "reset" { summary = "" }
+      if method == "reset" {
+        summary = ""
+        resets.append(try JSONDecoder().decode(JSONValue.self, from: request.httpBody ?? Data("{}".utf8))
+          .object?["input"]?.object?["at"]?.number)
+      }
       let body = switch method {
       case "info": #"{"output":{"version":2,"storage":"kv","contextFormat":"initial_items","scopes":["global"]}}"#
       case "context":
@@ -1388,6 +1394,7 @@ private actor LiveMemoryHTTP {
     // Until the session ends, the moderation is only pending: the call goes on and what it says is captured.
     XCTAssertFalse(call.controller.state.contextCleared)
     first.event?(.data(Data(#"{"type":"turn.done","turn":{"id":"after","role":"assistant","transcript":"Fala moderada."}}"#.utf8)))
+    let cleared = Date.now.timeIntervalSince1970 * 1000
     first.event?(.data(serviceClosed))
     XCTAssertTrue(call.controller.state.contextCleared)
     let rebuilt = await until(5) { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
@@ -1397,6 +1404,11 @@ private actor LiveMemoryHTTP {
     XCTAssertTrue(released, "the moderated call's lease is released")
     let calls = await call.server.calls
     XCTAssertEqual(calls.filter { $0 == "reset" }.count, 1)
+    // The reset carries when this iPhone cleared its memory, on the clock of its turns.
+    let resets = await call.server.resets
+    let at = try XCTUnwrap(resets.first ?? nil)
+    XCTAssertGreaterThanOrEqual(at, cleared)
+    XCTAssertLessThanOrEqual(at, Date.now.timeIntervalSince1970 * 1000)
     let fresh = try await call.texts(1)
     XCTAssertTrue(fresh.isEmpty, "the new call starts with an empty window")
     let offers = await call.http.requests.filter { $0.url?.path.hasSuffix("/calls") == true }
@@ -1700,6 +1712,49 @@ private actor LiveMemoryHTTP {
     await call.controller.end()
   }
 
+  /// The transport's statistics only feed the quality summary: the reports of the call's end (here `lost` and
+  /// `ended`) carry it, across a rebuilt link whose counters start again; other reports and the event trail do not.
+  func testEndReportsCarryTheCallsAudioQualityAcrossLinks() async throws {
+    let call = await resilient()
+    let first = try XCTUnwrap(call.pool.transports.first)
+    let headset = VoiceAudioRoute(inputs: ["BluetoothHFP"], outputs: ["BluetoothHFP"], sampleRate: 16_000)
+    first.event?(.quality(VoiceQualitySample(at: 0, route: headset)))
+    first.event?(.quality(Self.reading(0, received: 0, played: 0, concealed: 0)))
+    first.event?(.quality(Self.reading(5, received: 250, played: 240_000, concealed: 12_000)))
+    first.event?(.quality(Self.reading(10, received: 500, played: 480_000, concealed: 12_000)))
+    first.event?(.data(Data(#"{"type":"error","error":{"type":"server_error","code":"internal"}}"#.utf8)))
+    first.event?(.failed(.iceFailed))
+    let rebuilt = await until { call.pool.transports.count == 2 && call.controller.state.phase == .listening }
+    XCTAssertTrue(rebuilt)
+    let second = call.pool.transports[1]
+    second.event?(.quality(Self.reading(20, received: 10, played: 9_600, concealed: 0)))
+    second.event?(.quality(Self.reading(25, received: 260, played: 249_600, concealed: 0)))
+    await call.controller.end()
+    let ended = await until { await call.reports("user_end").count == 1 }
+    XCTAssertTrue(ended)
+
+    let reports = await call.outbox.pending()
+    let lost = try XCTUnwrap(reports.first { $0.reason == "ice_failed" }?.quality)
+    XCTAssertEqual(lost.windows, 2); XCTAssertEqual(lost.badWindows, 1); XCTAssertEqual(lost.links, 1)
+    XCTAssertEqual(lost.concealedPct, 2.5)
+    XCTAssertEqual(lost.worst?.cause, "concealed"); XCTAssertEqual(lost.worst?.atSeconds, 5)
+    XCTAssertEqual(lost.routes, [headset])
+    let whole = try XCTUnwrap(reports.first { $0.reason == "user_end" }?.quality)
+    XCTAssertEqual(whole.windows, 3); XCTAssertEqual(whole.links, 2); XCTAssertEqual(whole.seconds, 15)
+    XCTAssertEqual(whole.concealedPct, 1.67)
+    let tolerated = reports.filter { $0.kind == .tolerated }
+    XCTAssertFalse(tolerated.isEmpty)
+    XCTAssertTrue(tolerated.allSatisfy { $0.quality == nil })
+    XCTAssertFalse(reports.contains { $0.events.contains { $0.contains("quality") } })
+  }
+  /// One link's cumulative inbound counters at `at`: 48 kHz audio, 20 ms packets, 10 ms of jitter.
+  private static func reading(_ at: TimeInterval, received: Double, played: Double, concealed: Double) -> VoiceQualitySample {
+    var sample = VoiceQualitySample(at: at)
+    sample.packetsReceived = received; sample.packetsLost = 0; sample.totalSamplesReceived = played
+    sample.concealedSamples = concealed; sample.silentConcealedSamples = 0; sample.jitter = 0.01
+    return sample
+  }
+
   func testExplicitSilentLiveRecovery() async throws {
     #if targetEnvironment(simulator)
     guard ProcessInfo.processInfo.environment["OPENCODE_TEST_LIVE_VOICE_RECOVERY"] == "1" else {
@@ -1739,6 +1794,44 @@ private actor LiveMemoryHTTP {
     evidence.name = "voice-recovery-live"; evidence.lifetime = .keepAlways; add(evidence)
     XCTAssertEqual(creates, [201, 201])
     XCTAssertEqual(releases, [204, 204])
+    #else
+    throw XCTSkip("No physical device live probing in this suite.")
+    #endif
+  }
+
+  /// One real muted call through the controller and the real transport, about 12 s connected: confirms that libwebrtc
+  /// M147 returns the statistics the quality summary reads. Opt-in only; no speech, no delegation.
+  func testExplicitSilentLiveQuality() async throws {
+    #if targetEnvironment(simulator)
+    guard ProcessInfo.processInfo.environment["OPENCODE_TEST_LIVE_VOICE_QUALITY"] == "1" else {
+      throw XCTSkip("Explicit one-call muted simulator quality probe only; never enabled by the normal suite.")
+    }
+    let http = LiveFlakyHTTP()
+    let outbox = VoiceDiagnosticsOutbox(url: FileManager.default.temporaryDirectory.appending(path: "voice-diagnostics-\(UUID()).json"))
+    let controller = VoiceController(testing: .init(transport: { SilentLiveTransport(event: $0) },
+      master: { _ in VoiceTestMaster() }, request: { try await http.perform($0) }, diagnostics: outbox))
+    controller.start(sessions: SessionStore(configuration: .init(url: URL(string: "http://127.0.0.1:4177")!)))
+    let ready = await until(25) { controller.state.phase == .listening }
+    XCTAssertTrue(ready, controller.detail)
+    guard ready else { await controller.end(); return }
+    // The baseline at connection and two readings after it.
+    try await Task.sleep(for: .seconds(2 * VoiceQualityMeter.interval + 2))
+    await controller.end()
+    let released = await until(10) { await http.releases.count >= 1 }
+    let quality = await outbox.pending().first { $0.reason == "user_end" }?.quality
+    let data = try JSONEncoder().encode(quality)
+    print("voice-quality-live", String(decoding: data, as: UTF8.self))
+    let evidence = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+    evidence.name = "voice-quality-live"; evidence.lifetime = .keepAlways; add(evidence)
+    let creates = await http.creates, releases = await http.releases
+    XCTAssertTrue(released)
+    XCTAssertEqual(creates, [201]); XCTAssertEqual(releases, [204])
+    // A silent call receives no RTP, and libwebrtc reports no `inbound-rtp` before the first packet (03/11: no
+    // concealment, jitter or buffer here); what was sent, the server's RTCP, the pair and the route are there.
+    let measured = try XCTUnwrap(quality)
+    XCTAssertGreaterThanOrEqual(measured.windows, 2); XCTAssertEqual(measured.links, 1)
+    XCTAssertNotNil(measured.lossOutPct); XCTAssertNotNil(measured.rttMs)
+    XCTAssertFalse(measured.paths.isEmpty); XCTAssertFalse(measured.routes.isEmpty)
     #else
     throw XCTSkip("No physical device live probing in this suite.")
     #endif

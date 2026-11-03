@@ -27,6 +27,6 @@ export const open = Effect.fn("VoiceWindow.open")(function* (storage: Pick<Stora
   yield* storage.set(key, { sessionID, since: now })
 })
 
-/** Reads and clears the window in one update, so two `end`s never settle the same call twice. */
+/** Reads and removes the window in one update, so two `end`s never settle the same call twice. */
 export const take = (storage: Pick<Storage, "update">) =>
-  storage.update(key, (value) => [null, Option.getOrUndefined(decode(value))] as const)
+  storage.update(key, (value) => [undefined, Option.getOrUndefined(decode(value))] as const)

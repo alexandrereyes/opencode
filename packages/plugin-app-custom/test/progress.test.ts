@@ -27,6 +27,7 @@ import {
   userMessage,
   world,
 } from "./fixture/live-activity"
+import { storage } from "./fixture/storage"
 
 const host = "MacBook Pro"
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
@@ -383,16 +384,7 @@ test("a push that does not fit drops the rows' current item before any row or ti
 it.effect("Progresso changes ride the routine updates: at most one push per 10 seconds, priority 5", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(T)
-    const values = new Map<string, Schema.Json>()
-    const registry = makeRegistry({
-      get: (key) => Effect.sync(() => values.get(key)),
-      update: (key, update) =>
-        Effect.sync(() => {
-          const [next, result] = update(values.get(key))
-          values.set(key, next)
-          return result
-        }),
-    })
+    const registry = makeRegistry(storage())
     const pushes: Push[] = []
     const lifecycle = makeLifecycle({
       registry,

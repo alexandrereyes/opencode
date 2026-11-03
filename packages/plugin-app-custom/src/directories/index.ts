@@ -5,7 +5,7 @@ import { Plugin } from "@opencode/plugin/effect"
 import { Effect } from "effect"
 import { Directories } from "./rpc.js"
 
-export const registerDirectories = Effect.fn("Directories.register")(function* (ctx: Plugin.Context) {
+export const registerDirectories = Effect.fn("Directories.register")(function* (ctx: Omit<Plugin.Context, "storage">) {
   yield* ctx.rpc
     .register(Directories.Definition, {
       home: () => Effect.succeed({ path: os.homedir() }),

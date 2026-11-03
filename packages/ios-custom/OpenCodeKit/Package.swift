@@ -20,6 +20,7 @@ let package = Package(
         .process("Fixtures/subscriptions-pools.json"),
         .process("Fixtures/transcript-image.json"), .process("Fixtures/transcript-running.json"),
         .process("Fixtures/transcript-user.json"), .process("Fixtures/unknown-message.json"),
+        .process("Fixtures/voice-diagnostic-quality.json"),
       ]),
   ],
   swiftLanguageModes: [.v6]

@@ -20,7 +20,8 @@ import {
 import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/schema/session"
 import { Chats } from "../src/chats/rpc"
-import { Effect, Schema, Stream } from "effect"
+import { Effect, Stream } from "effect"
+import { storage } from "./fixture/storage"
 
 const owner = Session.ID.make("ses_owner")
 const directory = AbsolutePath.make("/chats/session-one")
@@ -104,23 +105,14 @@ describe("managed chats", () => {
   })
 
   test("delayed scan preserves concurrent allocation and confirmation in storage", async () => {
-    let state: Schema.Json | undefined = [allocation("confirmed")]
     let enter!: () => void
     let complete!: () => void
     const entered = new Promise<void>((resolve) => (enter = resolve))
     const scan = new Promise<void>((resolve) => (complete = resolve))
-    const storage = {
-      get: () => Effect.sync(() => state),
-      update: <A>(_key: string, update: (current: Schema.Json | undefined) => readonly [Schema.Json, A]) =>
-        Effect.sync(() => {
-          const [next, result] = update(state)
-          state = next
-          return result
-        }),
-    }
+    const shared = storage([["chats:allocations", [allocation("confirmed")]]])
     const running = Effect.runPromise(
       reconcileAllocations({
-        storage,
+        storage: shared,
         session: {
           scan: () =>
             Effect.promise(async () => {
@@ -133,7 +125,7 @@ describe("managed chats", () => {
     )
     await entered
     await Effect.runPromise(
-      storage.update("chats:allocations", (current) => [
+      shared.update("chats:allocations", () => [
         [
           { ...allocation("confirmed"), revision: 1 },
           {
@@ -147,7 +139,7 @@ describe("managed chats", () => {
     )
     complete()
     await running
-    expect(state).toEqual([
+    expect(shared.values.get("chats:allocations")).toEqual([
       { ...allocation("confirmed"), revision: 1 },
       {
         ...allocation("reserved"),

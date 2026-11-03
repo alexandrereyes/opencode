@@ -2,13 +2,14 @@ import CryptoKit
 import Foundation
 
 public enum VoiceMemoryOperation: Codable, Sendable, Equatable, Identifiable {
-  /// `reset`: `custom.voice` → `reset`, after the service moderated a call.
-  case turn(VoiceMemoryTurn), end(String), reset(String)
+  /// `reset`: `custom.voice` → `reset`, after the service moderated a call. `at` is when this device cleared its
+  /// memory (epoch ms, the clock of the turns' `at`); resets queued before 03/11 have none (`{"reset":{"_0":id}}`).
+  case turn(VoiceMemoryTurn), end(String), reset(String, at: Double? = nil)
   public var id: String {
     switch self {
     case .turn(let turn): turn.id
     case .end(let id): "end:" + id
-    case .reset(let id): "reset:" + id
+    case .reset(let id, _): "reset:" + id
     }
   }
 }
@@ -63,12 +64,12 @@ public actor VoiceMemoryBuffer {
     value.pending.append(operation)
     try save(value)
   }
-  /// Clears the conversation kept here and queues the server reset. Turns not sent yet are dropped (they are the
-  /// cleared conversation); call ends already queued stay, before the reset. Seen IDs stay, so a turn of the cleared
-  /// call captured late is still a duplicate.
-  public func reset(_ id: String) throws {
+  /// Clears the conversation kept here and queues the server reset, with `at`, when it was cleared. Turns not sent yet
+  /// are dropped (they are the cleared conversation); call ends already queued stay, before the reset. Seen IDs stay,
+  /// so a turn of the cleared call captured late is still a duplicate.
+  public func reset(_ id: String, at: Double) throws {
     var value = try snapshot()
-    let operation = VoiceMemoryOperation.reset(id)
+    let operation = VoiceMemoryOperation.reset(id, at: at)
     guard value.seenIDs.insert(operation.id).inserted else { return }
     value.pending.removeAll { if case .turn = $0 { true } else { false } }
     value.pending.append(operation)
@@ -159,8 +160,11 @@ public actor VoiceMemoryService {
         case .end:
           try await client.endVoiceMemory()
           try await buffer.acknowledge([first.id])
-        case .reset:
-          do { try await client.resetVoiceMemory() } catch ClientError.rpc("rpc.method_not_found") {
+        case .reset(_, let at):
+          // A reset queued before 03/11 has no time: the turns after it in the queue were said after the clear.
+          let later = try await buffer.snapshot().pending.dropFirst()
+            .compactMap { if case .turn(let turn) = $0 { turn.at } else { nil } }
+          do { try await client.resetVoiceMemory(at: at ?? later.min()) } catch ClientError.rpc("rpc.method_not_found") {
             // A server without `reset` keeps its memory; this device cleared its own and moves on.
           }
           try await buffer.acknowledge([first.id])

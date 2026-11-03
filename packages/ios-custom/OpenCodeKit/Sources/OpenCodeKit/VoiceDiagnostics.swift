@@ -200,12 +200,15 @@ public struct VoiceDiagnostic: Codable, Equatable, Sendable {
   /// The command a GPT Live `error` named by its `event_id`, and how many seconds before the report it was sent.
   public let failedCommand: String?
   public let failedCommandSeconds: Double?
+  /// The call's audio quality so far (`VoiceQualityMeter`), on the reports of its end: `ended`, `lost`, `failed`.
+  public let quality: VoiceQuality?
 
   public init(kind: Kind, reason: VoiceFailureReason, build: String, at: Date, call: UUID?, connectedSeconds: Double?,
     phase: String, recovering: Bool, events: VoiceEventTrail, app: App, audio: Audio?, network: String?,
     lastSent: (type: String, seconds: Double)? = nil, remoteCall: String? = nil,
-    failedCommand: (type: String, seconds: Double)? = nil) {
+    failedCommand: (type: String, seconds: Double)? = nil, quality: VoiceQuality? = nil) {
     self.kind = kind; self.reason = reason.category; self.code = reason.code; self.detail = reason.detail
+    self.quality = quality
     self.lastSent = lastSent.map { VoiceDiagnosticName.label($0.type) }.flatMap { $0.isEmpty ? nil : $0 }
     self.lastSentSeconds = self.lastSent == nil ? nil : lastSent.map { max(0, $0.seconds) }
     self.remoteCall = remoteCall.map(VoiceDiagnosticName.label).flatMap { $0.isEmpty ? nil : $0 }

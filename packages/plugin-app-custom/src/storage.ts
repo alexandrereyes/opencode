@@ -1,12 +1,19 @@
 import type { Plugin } from "@opencode/plugin/effect"
 import { Effect, Semaphore, type Schema } from "effect"
 
-/** Plugin storage with a read-modify-write `update` that is atomic for every Location instance of this plugin. */
-export type Storage = Plugin.Context["storage"] & {
-  /** Replaces `key` with the callback's next value and returns its result; a throwing callback writes nothing. */
+/**
+ * Plugin storage with a read-modify-write `update` that is atomic for every Location instance of this plugin. Values
+ * are never `null`: the host's KV column is NOT NULL and the write would die.
+ */
+export type Storage = Omit<Plugin.Context["storage"], "set"> & {
+  readonly set: (key: string, value: Exclude<Schema.Json, null>) => Effect.Effect<void>
+  /**
+   * Replaces `key` with the callback's next value, or removes it when that is `undefined`, and returns its result; a
+   * throwing callback writes nothing.
+   */
   readonly update: <A>(
     key: string,
-    update: (current: Schema.Json | undefined) => readonly [next: Schema.Json, result: A],
+    update: (current: Schema.Json | undefined) => readonly [next: Exclude<Schema.Json, null> | undefined, result: A],
   ) => Effect.Effect<A>
 }
 
@@ -34,7 +41,7 @@ export function atomic(storage: Plugin.Context["storage"]): Storage {
       lock().withPermit(
         Effect.gen(function* () {
           const [next, result] = update(yield* storage.get(key))
-          yield* storage.set(key, next)
+          yield* next === undefined ? storage.remove(key) : storage.set(key, next)
           return result
         }),
       ),

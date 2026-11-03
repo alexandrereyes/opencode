@@ -50,7 +50,7 @@ Diferenças de plataforma:
 
 O arquivo M147 fixado pelo projeto tem um defeito de empacotamento: a slice macOS inclui o binário e o
 umbrella, mas omite os headers públicos. O build do Mac executa `script/prepare-mac-webrtc.py`: recupera
-apenas os headers comuns de áudio/dados da slice iOS **do mesmo arquivo verificado**, no produto de build.
+apenas os headers comuns de áudio/dados (e, desde 03/11, o de estatísticas) da slice iOS **do mesmo arquivo verificado**, no produto de build.
 Não altera o artefato SPM, o binário nem o build do iPhone; não precisa de outra versão ou servidor.
 
 `script/test-mac-voice.py --app <OpenCodeMac.app> [--parakeet]` verifica/captura os componentes nativos
@@ -249,6 +249,13 @@ alto-falante padrão. Mudanças de rota revalidam ativação; iOS 27 usa `didBec
 e `resumptionRecommendationNotification`. Sem recomendação de retomada, o controle **Retomar
 áudio** é explícito. Media-services reset exige nova conexão. Quedas de rede seguem a seção abaixo.
 
+Desde 03/11 o transporte também **mede**, sem mudar nada na chamada: quando o ICE conecta e depois a cada 5 s
+(`VoiceQualityMeter.interval`), na fila do transporte, lê `RTCPeerConnection.statistics` e a rota de áudio
+(portas e `AVAudioSession.sampleRate`; no Mac só as estatísticas) e entrega a leitura ao controlador
+(`VoiceTransportEvent.quality`), que a soma em `VoiceQualityMeter` (Kit). Uma troca de rota também gera uma leitura
+na hora. O timer para quando o transporte fecha. O resumo vai com os relatórios de fim (seção "Qualidade do áudio",
+em Diagnóstico).
+
 ## Moderação: limpar o contexto (01/11, rev. 02/11)
 
 O GPT Live manda `error` com `type` ou `code` `content_filter` (o `VoiceProtocol.isModeration`, nunca pelo texto da
@@ -265,8 +272,8 @@ fim da sessão não conta para permitir outra limpeza. Na limpeza, o app:
 1. descarta a chamada moderada (o link muda antes de tudo, então eventos, falas e áudio dela são ignorados), fecha o
    transporte e libera a lease; o que foi dito desde o último `turn.done` não vai para a memória;
 2. limpa a memória de voz: no aparelho, `VoiceMemoryBuffer.reset` tira os turnos ainda não enviados e o contexto em
-   cache e enfileira `custom.voice` → `reset` depois do que já foi enviado; enquanto ele não chega ao servidor, a
-   memória do servidor não é lida de volta;
+   cache e enfileira `custom.voice` → `reset` depois do que já foi enviado, com a hora da limpeza (`at`, desde 03/11;
+   ver "Memória da conversa"); enquanto ele não chega ao servidor, a memória do servidor não é lida de volta;
 3. esquece os pedidos que a chamada reconstruída levaria (`VoiceContinuity`), os pedidos ainda não entregues à mestra
    e os resultados não ouvidos; atualizações da mestra sobre pedidos anteriores deixam de ser narradas até um pedido
    novo. O trabalho que a mestra já tem continua;
@@ -387,6 +394,18 @@ envia lotes de turnos antes de seu marcador `end`, sem reordená-los. Encerrar f
 a sessão (`session.close`, até 2 s), grava a fala parcial, fecha a mídia e libera a lease, aguarda as
 gravações locais e enfileira o check de compactação. Não fica com áudio aberto esperando o servidor de
 memória. Não se promete execução após force-quit; o arquivo fica para o próximo lançamento.
+
+A fila é estrita: uma operação que falha segura as seguintes até passar. De 31/10 a 03/11 um `end` que o servidor
+recusava sempre (HTTP 500, ver o contrato) segurou por dias os appends, o `reset` e os outros `end`. Desde 03/11 o
+`end` é consultivo no servidor: uma falha no check de compactação ou na janela da mestra só vira aviso no log e o
+`end` responde sucesso. O app não descarta operações da fila.
+
+O `reset` leva `at`, a hora em que o aparelho limpou a memória (ms desde a época, o mesmo relógio do `at` dos
+turnos), gravada na operação (`{"reset":{"_0":id,"at":…}}`). O servidor usa `resetAt = min(at, agora)`, então um
+`reset` que esperou na fila ainda guarda o que foi dito depois da limpeza e recusa o que foi dito antes. Um `reset`
+enfileirado antes de 03/11 está no arquivo sem hora (`{"reset":{"_0":id}}`, que continua sendo lido): ao enviá-lo, o
+app usa o menor `at` dos turnos que estão depois dele na fila, ditos depois da limpeza; sem turnos depois, vai sem
+hora e o servidor usa a dele. Servidor antigo ignora a chave e usa a própria hora, como antes.
 
 No início, contexto do servidor e pendências locais viram `session.initial_items`:
 user/`input_text`, assistant/`output_text`, resumo anterior como item `developer`/`input_text` claramente
@@ -771,6 +790,36 @@ Falar com a mestra**.
   próxima conexão do fluxo de eventos (`EventHub`). Em todo build, o os_log `VoiceStartup` registra
   `phase=failed reason=<categoria> code=…` e `phase=lost reason=…` como públicos; o texto mostrado continua só
   no arquivo DEBUG.
+- **Qualidade do áudio (03/11):** os relatórios de fim (`ended`, `lost`, `failed`) levam `quality`, o resumo da
+  chamada até ali (`VoiceQualityMeter`, Kit; os `tolerated` e `interrupted` não levam). Cada par de leituras
+  seguidas do mesmo link (5 s) é uma **janela**; uma chamada refeita começa os contadores do zero (o controlador
+  avisa o medidor, e contadores que voltam também abrem uma base nova), e `links` conta os links medidos. Só
+  números e rótulos curtos: nada de fala, ID pessoal ou endereço IP (o candidato vai como `tipo/protocolo/rede`). O
+  servidor grava quatro campos na linha `Voice diagnostics`:
+
+  | Campo no log | Lê | O que diz |
+  |---|---|---|
+  | `quality` `windows`, `seconds`, `links`, `bad` | — | Janelas medidas, segundos cobertos, links e janelas ruins |
+  | `lossIn` / `lossOut` | `inbound-rtp` `packetsLost`/`packetsReceived`; `remote-inbound-rtp` `packetsLost` sobre os `packetsSent` | Perda do que ele ouve / do que o GPT Live recebe dele (sem RTCP, a última `fractionLost`) |
+  | `concealed`, `concealments` | `concealedSamples − silentConcealedSamples` sobre `totalSamplesReceived`; `concealmentEvents` | Áudio que o NetEq inventou por pacote perdido ou atrasado (fora silêncio e ruído de conforto) |
+  | `stretched` / `compressed` | `insertedSamplesForDeceleration` / `removedSamplesForAcceleration` sobre o total | Áudio esticado para esperar pacotes / comprimido para alcançar: soa metálico ou acelerado |
+  | `jitter`, `jitterMax` | `jitter` do `inbound-rtp` em cada janela | Variação de chegada, média e pior (ms) |
+  | `buffer` | `jitterBufferDelay / jitterBufferEmittedCount` | Atraso médio do buffer de jitter (ms) |
+  | `rtt`, `rttMax` | `currentRoundTripTime` do par escolhido (ou o `roundTripTime` do RTCP) | Ida e volta da rede (ms) |
+  | `qualityWorst` | — | A pior janela: segundos desde a primeira leitura, a medida mais acima do limite (`concealed`, `loss_in`, `loss_out`, `jitter`) e seus números |
+  | `qualityAudio` | portas e `AVAudioSession.sampleRate` | Rotas vistas (até 4) com a taxa e quantas trocas (`changes=`) |
+  | `qualityPaths` | `candidateType/protocol/networkAdapterType` do candidato local | Caminho da mídia (`srflx/udp/cellular5g`, `relay/…`) |
+
+  **Janela ruim:** ocultação acima de **3 %**, perda acima de **2 %** em qualquer sentido ou jitter acima de
+  **30 ms** (`VoiceQualityMeter.limits`). **Como ler a voz metálica:** se as janelas ruins têm `lossIn`/`jitter` altos
+  e `concealed`, `stretched` ou `compressed` sobem junto, foi a rede (o NetEq ocultando e esticando/comprimindo). Se a
+  rede está limpa (perda perto de 0, `concealed` abaixo de 1 %, poucas janelas ruins) e `qualityAudio` mostra
+  `BluetoothHFP` a **8000Hz** (banda estreita) ou trocas de rota, foi o fone: a perda no rádio Bluetooth acontece
+  depois do WebRTC e não aparece nestes números. `lossOut` alto afeta o que o GPT Live entende, não o que ele ouve.
+  Limites: os até 5 s entre a última leitura e o fim não entram; uma chamada muda não recebe RTP, e o libwebrtc só
+  cria o `inbound-rtp` com o primeiro pacote, então sem fala do GPT Live não há medidas de entrada. O relógio é
+  `ProcessInfo.systemUptime`. O Watch usa outro motor (Rust/str0m) e não mede. Ler:
+  `grep 'Voice diagnostics' ~/.local/share/opencode/log/opencode.log | grep quality=`.
 
 ### Verificação — 24/10
 
@@ -948,3 +997,19 @@ no transporte, não com o rádio. O tique em background e a troca Wi-Fi→celula
 ainda precisam de um aparelho que alcance o `llm-proxy-svc`. A faixa **Sem conexão** foi conferida
 pelo fixture `-OpenCodeVoiceBarFixture offline`; o alerta de esgotamento é coberto pelo teste do
 controlador, não por captura.
+
+### Verificação da qualidade do áudio — 03/11
+
+`VoiceQualityTests` (Kit) cobre a leitura de um relatório do libwebrtc (par escolhido pelo `transport`, candidato sem
+endereço, campos ausentes), as janelas entre links, contadores que voltam, a pior janela, rotas e o contrato com o
+servidor (`Fixtures/voice-diagnostic-quality.json`, que `test/voice.test.ts` do plugin também valida).
+`testEndReportsCarryTheCallsAudioQualityAcrossLinks` (hospedado, transporte falso) confere o resumo no `lost` e no
+`ended` de uma chamada refeita, nenhum resumo nos `tolerated` e nenhuma leitura no rastro de eventos.
+
+O probe opt-in `testExplicitSilentLiveQuality` (`TEST_RUNNER_OPENCODE_TEST_LIVE_VOICE_QUALITY=1`, somente
+simulador, uma chamada muda de ~12 s, sem fala nem delegação) rodou uma vez no simulador **OpenCode GPT Live Onda 1**:
+criação `201`, liberação `204`, `windows=2 seconds=10 links=1 lossOut=0% rtt=118ms`, rota
+`out=Speaker in=MicrophoneBuiltIn 48000Hz`, caminho `prflx/udp/wifi`. Sem fala do GPT Live não chegou RTP, e o
+`inbound-rtp` (ocultação, jitter, buffer) não existia; os nomes desses campos estão no binário M147. A asserção
+de entrada foi retirada depois dessa rodada, sem outra chamada; a primeira chamada real com fala mostra as
+medidas de entrada no log.

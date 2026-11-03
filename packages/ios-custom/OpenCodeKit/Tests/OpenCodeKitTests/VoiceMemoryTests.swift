@@ -4,6 +4,8 @@ import Testing
 
 private actor MemoryHTTP {
   var calls: [String] = []
+  /// The `at` of each reset, `nil` when it had none.
+  var resets: [Double?] = []
   var failNextAppend = false
   let version: Int
   init(version: Int = 2, failNextAppend: Bool = false) { self.version = version; self.failNextAppend = failNextAppend }
@@ -25,7 +27,10 @@ private actor MemoryHTTP {
       #expect(input?["scope"]?.string == "global")
       if failNextAppend { failNextAppend = false; status = 503 }
       output = .object([:])
-    case "end", "reset": output = .object([:])
+    case "end": output = .object([:])
+    case "reset":
+      resets.append(input?["at"]?.number)
+      output = .object([:])
     default: throw ClientError.operation("Unexpected memory request")
     }
     return (try JSONEncoder().encode(JSONValue.object(["output": output])),
@@ -119,7 +124,7 @@ struct VoiceMemoryTests {
     try await buffer.append(turn("sent"))
     try await buffer.end("old-call")
     try await buffer.append(turn("unsent", role: .assistant))
-    try await buffer.reset("r1")
+    try await buffer.reset("r1", at: 1_792_760_000_500)
     var snapshot = try await buffer.snapshot()
     #expect(snapshot.pending.map(\.id) == ["end:old-call", "reset:r1"])
     #expect(snapshot.context == VoiceMemoryContext())
@@ -138,9 +143,45 @@ struct VoiceMemoryTests {
     #expect(await http.calls == ["info"], "the server's memory is not read while the reset waits")
     #expect(await service.flush())
     #expect(await http.calls == ["info", "end", "reset", "append:fresh"])
+    // When this device cleared its memory, so the server keeps what was said after it however late the reset goes.
+    #expect(await http.resets == [1_792_760_000_500])
     #expect(try await buffer.resetting() == false)
     _ = await service.prepare()
     #expect(await http.calls.last == "context")
+  }
+
+  /// The file the app wrote before 03/11 (this exact JSON) still loads; its reset, which has no time, goes with the
+  /// earliest turn queued after it, said after the clear. With no turn after it, it goes without a time.
+  @Test func resetQueuedBeforeItHadATimeGoesWithTheEarliestTurnAfterIt() async throws {
+    let root = root()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let buffer = VoiceMemoryBuffer(server: "test", root: root)
+    try FileManager.default.createDirectory(at: buffer.file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"""
+      {"pending":[{"end":{"_0":"old-call"}},{"reset":{"_0":"r1"}},{"turn":{"_0":{"text":"Depois","at":1793691500000,"role":"user","id":"fresh"}}}],"version":1,"seenIDs":["end:old-call","fresh","reset:r1"],"context":{"version":2,"turns":[{"id":"fresh","role":"user","at":1793691500000,"text":"Depois"}],"truncated":false,"scope":"global","updatedAt":0,"approxTokens":0,"summary":""}}
+      """#.utf8).write(to: buffer.file)
+    #expect(try await buffer.snapshot().pending.map(\.id) == ["end:old-call", "reset:r1", "fresh"])
+    #expect(try await buffer.snapshot().pending[1] == .reset("r1"))
+    // The earliest, not the first: a turn queued later whose clock says earlier.
+    try await buffer.end("new-call")
+    try await buffer.append(.init(id: "reply", role: .assistant, text: "Resposta", at: 1_793_691_499_000))
+    let http = MemoryHTTP()
+    #expect(await VoiceMemoryService(client: client(http), buffer: buffer).flush())
+    #expect(await http.calls == ["info", "end", "reset", "append:fresh", "end", "append:reply"])
+    #expect(await http.resets == [1_793_691_499_000])
+
+    let alone = VoiceMemoryBuffer(server: "alone", root: root)
+    try FileManager.default.createDirectory(at: alone.file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(#"{"pending":[{"reset":{"_0":"r0"}}],"version":1,"seenIDs":["reset:r0"],"context":{"version":2,"turns":[],"truncated":false,"scope":"global","updatedAt":0,"approxTokens":0,"summary":""}}"#.utf8)
+      .write(to: alone.file)
+    let empty = MemoryHTTP()
+    #expect(await VoiceMemoryService(client: client(empty), buffer: alone).flush())
+    #expect(await empty.resets == [nil])
+
+    // A reset queued now keeps its time in the file, next to the same `_0` the old format has.
+    try await alone.reset("r2", at: 1_793_700_000_000)
+    let saved = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: alone.file)).object?["pending"]?.array
+    #expect(saved == [.object(["reset": .object(["_0": .string("r2"), "at": .number(1_793_700_000_000)])])])
   }
 
   @Test func unsupportedVersionFallsBackWithoutDiscardingTheLocalBuffer() async throws {

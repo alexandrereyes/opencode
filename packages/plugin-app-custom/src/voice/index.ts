@@ -65,20 +65,18 @@ export const registerVoice = Effect.fn("Voice.register")(function* (ctx: Context
       append: (input, context) => voice.append(input).pipe(Effect.mapError((cause) => failure(context.error, cause))),
       context: (input, context) =>
         voice.context(input.scope).pipe(Effect.mapError((cause) => failure(context.error, cause))),
-      end: (input, context) =>
-        voice.schedule(input.scope).pipe(
-          Effect.tap(() => voice.settle()),
+      end: (input) =>
+        voice.end(input.scope).pipe(
           Effect.tap(() =>
             clearVoiceNote(ctx).pipe(
               Effect.catchCause((cause) => Effect.logWarning("Mestra voice note could not be cleared", { cause })),
             ),
           ),
           Effect.map((compactionScheduled) => ({ ...input, compactionScheduled })),
-          Effect.mapError((cause) => failure(context.error, cause)),
         ),
       reset: (input, context) =>
-        voice.reset(input.scope).pipe(
-          Effect.map((resetAt) => ({ ...input, resetAt })),
+        voice.reset(input.scope, input.at).pipe(
+          Effect.map((resetAt) => ({ version: input.version, scope: input.scope, resetAt })),
           Effect.mapError((cause) => failure(context.error, cause)),
         ),
       diagnostics: logDiagnostics,
@@ -124,7 +122,64 @@ export function diagnosticFields(event: Voice.Diagnostic) {
     ...(event.failedCommand && event.failedCommandSeconds !== undefined
       ? { failedCommandAgoSeconds: Math.round(event.failedCommandSeconds * 10) / 10 }
       : {}),
+    ...(event.quality ? qualityFields(event.quality) : {}),
     events: event.events.join(","),
+  }
+}
+
+/**
+ * The call's audio quality as four grep-friendly fields: `quality="windows=82 seconds=410 … rttMax=240ms"`, the worst
+ * window, the audio routes with their sample rates and the media paths.
+ */
+function qualityFields(quality: Voice.Quality) {
+  const measures = (entries: ReadonlyArray<readonly [string, number | undefined, string]>) =>
+    entries.flatMap(([name, value, unit]) => (value === undefined ? [] : [`${name}=${value}${unit}`])).join(" ")
+  return {
+    quality: measures([
+      ["windows", quality.windows, ""],
+      ["seconds", quality.seconds, ""],
+      ["links", quality.links, ""],
+      ["bad", quality.badWindows, ""],
+      ["lossIn", quality.lossInPct, "%"],
+      ["lossOut", quality.lossOutPct, "%"],
+      ["concealed", quality.concealedPct, "%"],
+      ["concealments", quality.concealmentEvents, ""],
+      ["stretched", quality.stretchedPct, "%"],
+      ["compressed", quality.compressedPct, "%"],
+      ["jitter", quality.jitterMs, "ms"],
+      ["jitterMax", quality.jitterMaxMs, "ms"],
+      ["buffer", quality.bufferMs, "ms"],
+      ["rtt", quality.rttMs, "ms"],
+      ["rttMax", quality.rttMaxMs, "ms"],
+    ]),
+    ...(quality.worst
+      ? {
+          qualityWorst: [
+            `at=${quality.worst.atSeconds}s cause=${quality.worst.cause}`,
+            measures([
+              ["concealed", quality.worst.concealedPct, "%"],
+              ["lossIn", quality.worst.lossInPct, "%"],
+              ["lossOut", quality.worst.lossOutPct, "%"],
+              ["jitter", quality.worst.jitterMs, "ms"],
+            ]),
+          ]
+            .filter(Boolean)
+            .join(" "),
+        }
+      : {}),
+    ...(quality.routes.length
+      ? {
+          qualityAudio:
+            quality.routes
+              .map(
+                (route) =>
+                  `out=${route.outputs.join("+") || "-"} in=${route.inputs.join("+") || "-"}` +
+                  (route.sampleRate === undefined ? "" : ` ${route.sampleRate}Hz`),
+              )
+              .join("; ") + (quality.routeChanges ? ` changes=${quality.routeChanges}` : ""),
+        }
+      : {}),
+    ...(quality.paths.length ? { qualityPaths: quality.paths.join(",") } : {}),
   }
 }
 
@@ -292,19 +347,51 @@ export function makeVoice(ctx: VoiceContext, scope: Scope.Scope) {
       yield* Effect.sleep(limits.latePollMs)
     }
   })
+  /** Takes the call's window and settles its late replies in the background. */
+  const settle = Effect.fn("Voice.settle")(function* () {
+    const window = yield* VoiceWindow.take(ctx.storage)
+    if (!window) return
+    const endedAt = yield* Clock.currentTimeMillis
+    yield* settleLate(window, endedAt).pipe(
+      Effect.tap((count) =>
+        count ? Effect.logInfo("Late Mestra replies written to voice memory", { count }) : Effect.void,
+      ),
+      Effect.catchCause((cause) => Effect.logWarning("Late Mestra replies could not reach voice memory", { cause })),
+      Effect.forkIn(scope),
+    )
+  })
   return {
     compact,
     schedule,
     append,
     recordLate,
+    settle,
+    /**
+     * The call's memory `end`, advisory: a compaction check and the call's late replies. A failure in either is only
+     * logged, so an `end` never holds the appends and resets the app queued behind it (from 31/10 to 03/11 a failing
+     * window `take` held them for days). Returns whether a compaction was scheduled.
+     */
+    end: Effect.fn("Voice.end")(function* (target: Voice.Scope) {
+      const compactionScheduled = yield* schedule(target).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Voice memory compaction could not be scheduled", { cause }).pipe(Effect.as(false)),
+        ),
+      )
+      yield* settle().pipe(
+        Effect.catchCause((cause) => Effect.logWarning("Voice call window could not be settled", { cause })),
+      )
+      return compactionScheduled
+    }),
     /**
      * Clears what GPT Live is given back (summary, turns and the open late-reply window) after the service moderated
      * a call. Only voice memory: the Mestra, its messages and every other session stay. Retry IDs stay too, so a
      * retried append of the cleared conversation is still a duplicate; `resetAt` keeps out whatever was spoken
-     * before it, a late reply of an earlier call and a summary computed from the old turns.
+     * before it, a late reply of an earlier call and a summary computed from the old turns. `resetAt` is when the app
+     * cleared its own memory (`at`), never later than now; without it, now.
      */
-    reset: Effect.fn("Voice.reset")(function* (target: Voice.Scope) {
+    reset: Effect.fn("Voice.reset")(function* (target: Voice.Scope, at?: number) {
       const now = yield* Clock.currentTimeMillis
+      const resetAt = at === undefined ? now : Math.min(at, now)
       yield* VoiceWindow.take(ctx.storage)
       yield* ctx.storage.update(key(target), (value) => {
         const current = decode(value ?? empty)
@@ -312,25 +399,12 @@ export function makeVoice(ctx: VoiceContext, scope: Scope.Scope) {
           ...empty,
           updatedAt: Math.max(current.updatedAt, now),
           seenTurnIDs: current.seenTurnIDs ?? current.turns.map((turn) => turn.id),
-          resetAt: now,
+          resetAt,
         }
         return [encode(record), undefined]
       })
       yield* Effect.logInfo("Voice memory cleared after moderation", { scope: target })
-      return now
-    }),
-    /** The call's memory `end`: takes its window and settles its late replies in the background. */
-    settle: Effect.fn("Voice.settle")(function* () {
-      const window = yield* VoiceWindow.take(ctx.storage)
-      if (!window) return
-      const endedAt = yield* Clock.currentTimeMillis
-      yield* settleLate(window, endedAt).pipe(
-        Effect.tap((count) =>
-          count ? Effect.logInfo("Late Mestra replies written to voice memory", { count }) : Effect.void,
-        ),
-        Effect.catchCause((cause) => Effect.logWarning("Late Mestra replies could not reach voice memory", { cause })),
-        Effect.forkIn(scope),
-      )
+      return resetAt
     }),
     context: Effect.fn("Voice.context")(function* (target: Voice.Scope) {
       const record = yield* read(target)

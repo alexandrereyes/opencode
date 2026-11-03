@@ -4,7 +4,8 @@
 Repair the build product from the *same archive's* common headers. The
 SPM artifact, its checksum, binary and iOS slices remain untouched. Only the
 audio/data API used by VoiceTransport is exposed (no UIKit or video views),
-including RTCAudioDevice, whose ObjC ADM bridge the macOS binary contains.
+including RTCAudioDevice, whose ObjC ADM bridge the macOS binary contains, and
+the statistics report its quality summary reads.
 """
 import os
 from pathlib import Path
@@ -26,7 +27,7 @@ public = [
     "RTCIceServer.h", "RTCMediaConstraints.h", "RTCMediaSource.h", "RTCMediaStream.h",
     "RTCMediaStreamTrack.h", "RTCPeerConnection.h", "RTCPeerConnectionFactory.h",
     "RTCRtpReceiver.h", "RTCRtpSender.h", "RTCRtpTransceiver.h", "RTCSSLAdapter.h",
-    "RTCSessionDescription.h",
+    "RTCSessionDescription.h", "RTCStatisticsReport.h",
 ]
 
 def copy_header(name):

@@ -17,7 +17,7 @@ import { HubError, hubSettings, makeHubClient, stateDirectory, type HubClient } 
  * Specification: `docs/resources.md`.
  */
 export const registerResources = Effect.fn("Resources.register")(function* (
-  ctx: Plugin.Context,
+  ctx: Omit<Plugin.Context, "storage">,
   hub: HubClient = makeHubClient(hubSettings()),
 ) {
   // Chrome: agent shells open `playwright-cli` browsers with a loopback CDP port that the adapter attaches to.
