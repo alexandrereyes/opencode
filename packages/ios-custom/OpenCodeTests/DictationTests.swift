@@ -295,6 +295,63 @@ import os
     XCTAssertEqual(MicrophoneVoiceCapture.displayLevel(decibels: -25), 0.5)
     XCTAssertEqual(MicrophoneVoiceCapture.displayLevel(decibels: 5), 1)
   }
+  /// Every end gives the microphone back before anything else: Descartar stops it and deletes the audio, pausing
+  /// pauses it and keeps the audio, Parar stops it with the recording on disk before transcription starts, and a
+  /// recorder that cannot open is stopped too. The real capture releases the audio session in pause() and stop().
+  func testEveryEndReleasesTheCaptureAndStopKeepsTheFileForTranscription() async throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = DictationTestSource()
+    defer { try? FileManager.default.removeItem(at: source.files.root) }
+    // The model is not installed: the transcription waits, so the stopped recording can be inspected.
+    let transcription = TranscriptionController(source: source, engine: DictationTestEngine(), monitorsNetwork: false)
+    let capture = DictationTestCapture()
+    capture.waits = false; capture.granted = true; capture.writesFixture = true
+    let file = root.appending(path: "dictation.caf")
+    let recording = VoiceRecordingComposer(file: file, capture: capture, transcription: transcription)
+    defer { recording.discard() }
+    func record() async throws {
+      recording.handle(.began); recording.handle(.ended)
+      try await wait { recording.state == .recording }
+    }
+    try await record()
+    recording.discard()
+    XCTAssertEqual(capture.calls, ["start", "stop"])
+    XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    try await record()
+    recording.pause()
+    XCTAssertEqual(capture.calls.suffix(2), ["start", "pause"])
+    XCTAssertEqual(recording.state, .paused)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "pausing keeps the audio")
+    recording.finish()
+    XCTAssertEqual(capture.calls.last, "stop")
+    try await wait { recording.job != nil }
+    XCTAssertEqual(recording.state, .pending)
+    XCTAssertEqual(recording.job?.state, .waiting)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "the recording is on disk before transcription")
+    recording.discard()
+    capture.calls = []
+    capture.failsStart = true
+    recording.handle(.began); recording.handle(.ended)
+    try await wait { recording.error != nil }
+    XCTAssertEqual(capture.calls, ["start", "stop"])
+    XCTAssertEqual(recording.state, .idle)
+  }
+  /// The shared session's activation and release are recorded in order with their outcome, and one and three
+  /// seconds after the release whether other apps' audio came back. A failed release is recorded with its code
+  /// (`AVAudioSession.ErrorCode`, for example `isBusy`) instead of disappearing in a `try?`; the simulator does not
+  /// fail it, so that case is checked on the trace itself.
+  func testSessionTraceRecordsActivationReleaseAndTheOtherAppsAudio() async throws {
+    let before = DictationAudioTrace.events.count
+    try await DictationAudioSession.activate(.playAndRecord, options: [.defaultToSpeaker]) {}
+    DictationAudioSession.deactivate()
+    let session = { Array(DictationAudioTrace.events.dropFirst(before)) }
+    try await wait { session().contains { $0.name == "after-deactivate-1s" } }
+    XCTAssertEqual(session().prefix(3).map(\.name), ["activate", "deactivate", "after-deactivate-1s"])
+    XCTAssertTrue(session().allSatisfy { $0.error == nil }, "\(session())")
+    DictationAudioTrace.record("deactivate", error: NSError(domain: NSOSStatusErrorDomain, code: AVAudioSession.ErrorCode.isBusy.rawValue))
+    XCTAssertEqual(DictationAudioTrace.events.last, .init(name: "deactivate", error: AVAudioSession.ErrorCode.isBusy.rawValue))
+  }
   func testActiveCallGateCannotOpenTheMicrophone() {
     let capture = DictationTestCapture()
     let recording = VoiceRecordingComposer(file: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString), capture: capture)
@@ -561,18 +618,23 @@ final class DictationTestSource: TranscriptionModelSource, @unchecked Sendable {
   var permission: CheckedContinuation<Bool, Never>?
   var starts = 0
   var pauses = 0
+  var failsStart = false
+  /// The capture's calls in order: what holds and gives back the audio session in the real recorder.
+  var calls: [String] = []
   func authorize() async -> Bool { waits ? await withCheckedContinuation { permission = $0 } : true }
   func start(at file: URL) async throws {
     starts += 1
+    calls.append("start")
+    if failsStart { throw TranscriptionError.integrity }
     if writesFixture {
       try FileManager.default.copyItem(at: XCTUnwrap(Bundle.main.url(forResource: "dictation-fixture", withExtension: "caf")), to: file)
     }
   }
   var elapsed: TimeInterval { recorded }
   var level: Float { 0.5 }
-  func pause() { pauses += 1 }
-  func resume() async throws {}
-  func stop() {}
+  func pause() { pauses += 1; calls.append("pause") }
+  func resume() async throws { calls.append("resume") }
+  func stop() { calls.append("stop") }
 }
 actor DictationWarmupEngine: TranscriptionEngine {
   private(set) var loads = 0

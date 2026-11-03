@@ -100,6 +100,8 @@ import AppKit
   }
   private func start() {
     guard state == .idle, willUseAudio() else { gesture = VoiceRecordingGesture(); return }
+    DictationAudioTrace.watch()
+    DictationAudioTrace.record("dictation-start", detail: DictationAudioTrace.nowPlaying())
     NotificationCenter.default.post(name: .audioCaptureWillStart, object: nil)
     Self.audioOwner?.suspend()
     Self.audioOwner = self
@@ -122,6 +124,7 @@ import AppKit
         guard !Task.isCancelled, ticket == generation else { return }
         state = .recording
         mark("recording")
+        DictationAudioTrace.record("dictation-recording")
         Haptics.play(.light)
         announce("Gravando para transcrever")
         startMeter()
@@ -150,6 +153,7 @@ import AppKit
     task?.cancel(); task = nil
     capture.pause(); elapsed = capture.elapsed; state = .paused
     mark("pause")
+    DictationAudioTrace.record("dictation-pause")
     announce("Gravação pausada")
     makePreview()
   }
@@ -217,6 +221,7 @@ import AppKit
     guard state == .recording || state == .paused else { return }
     task?.cancel(); task = nil
     clearPreview(); removeObservers(); capture.stop()
+    DictationAudioTrace.record("dictation-finish")
     state = .pending
     // discard() while the file is read (Esc, Descartar) deletes it: the failed read must not bring the panel back.
     let ticket = generation
@@ -265,6 +270,7 @@ import AppKit
   }
   private func deliver(_ edits: [String]) async {
     await receive(edits)
+    DictationAudioTrace.record("dictation-delivered")
     pendingChanged(false)
     try? FileManager.default.removeItem(at: file)
     state = .idle; gesture = VoiceRecordingGesture(); job = nil; task = nil
@@ -308,6 +314,7 @@ import AppKit
     announce("Ditado cancelado")
   }
   func discard() {
+    if state != .idle { DictationAudioTrace.record("dictation-discard") }
     generation = UUID()
     task?.cancel(); task = nil
     clearPreview(); removeObservers(); capture.stop()

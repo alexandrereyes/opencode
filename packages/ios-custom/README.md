@@ -1583,6 +1583,22 @@ uses background URLSession, resumable files, exact byte counts and SHA-256 befor
 starts only on-device in the foreground, one recording at a time, with the CPU preprocessor and Neural Engine;
 the model unloads after idle time. Download continuation is not a promise of background inference.
 
+**Música que não volta depois do ditado (Alexandre, 03/11): diagnóstico.** With YouTube Music on the iPhone speaker,
+dictating paused it and it did not come back, and its Now Playing card disappeared; WhatsApp and Abacato V2 on the
+same iPhone give it back. The recorder's session path matches Abacato's (`VoiceAudioSession`,
+`VoiceRecordingCapture`): `.playAndRecord` + `.defaultToSpeaker` with haptics allowed, the recorder on the audio
+queue, and `stop()`/`pause()` stopping it before `setActive(false, .notifyOthersOnDeactivation)`; Abacato also asks
+`setPrefersNoInterruptionsFromSystemAlerts` while recording and logs a failed release. The simulator does not
+arbitrate audio between apps (another app's playback is never interrupted there), so the cause is still unproven.
+`DictationAudioTrace` now records, in the unified log (subsystem `br.com.alexandrem.opencode`, category
+`dictation-audio`, only states, port types and codes), every activation and release with its result instead of a
+`try?`, `otherAudio`/`silenceHint` one and three seconds after each release (whether the music came back), the
+session's interruption, route and silence-hint notifications from the first dictation on, the dictation's steps
+(start, recording, pause, finish, discard, delivered) and, at the start, whether a reading holds remote command
+handlers or Now Playing info (what could make this app take Now Playing). Covered by
+`DictationPipelineTests/testEveryEndReleasesTheCaptureAndStopKeepsTheFileForTranscription` and
+`testSessionTraceRecordsActivationReleaseAndTheOtherAppsAudio`.
+
 The package is **FluidAudio 0.17.7** (`503b4bd1…`), a tagged descendant of Abacato's `c3881073…` that includes
 `.ultra` and the same `loadLocal` API. Weights remain pinned to Hugging Face
 `FluidInference/parakeet-ultra-coreml@95eaa59a39d4394f047a4dc5cce480388a60d1b6`, 18 files, never bundled.

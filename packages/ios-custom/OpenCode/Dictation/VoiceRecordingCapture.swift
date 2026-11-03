@@ -1,5 +1,8 @@
 import AVFoundation
 import Foundation
+#if os(iOS)
+import MediaPlayer
+#endif
 import OpenCodeKit
 import os
 
@@ -52,9 +55,11 @@ enum DictationAudioSession {
           try session.setCategory(category, mode: mode, options: options)
           if category == .playAndRecord { try session.setAllowHapticsAndSystemSoundsDuringRecording(true) }
           try session.setActive(true)
+          DictationAudioTrace.record("activate", detail: DictationAudioTrace.state(session))
           continuation.resume(returning: try start())
         } catch {
-          try? session.setActive(false, options: .notifyOthersOnDeactivation)
+          DictationAudioTrace.record("activate", error: error, detail: DictationAudioTrace.state(session))
+          release(session)
           continuation.resume(throwing: error)
         }
       }
@@ -70,8 +75,86 @@ enum DictationAudioSession {
     }
   }
   static func deactivate() {
-    queue.async { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+    queue.async { release(AVAudioSession.sharedInstance()) }
   }
+  /// Gives the other apps' audio back; a failure is recorded, never swallowed. Whether their audio came back shows
+  /// one and three seconds later, from the queue (`isOtherAudioPlaying`).
+  private static func release(_ session: AVAudioSession) {
+    do {
+      try session.setActive(false, options: .notifyOthersOnDeactivation)
+      DictationAudioTrace.record("deactivate", detail: DictationAudioTrace.state(session))
+    } catch {
+      DictationAudioTrace.record("deactivate", error: error, detail: DictationAudioTrace.state(session))
+    }
+    for delay in [1, 3] {
+      queue.asyncAfter(deadline: .now() + .seconds(delay)) {
+        DictationAudioTrace.record("after-deactivate-\(delay)s", detail: DictationAudioTrace.others(session))
+      }
+    }
+  }
+  #endif
+}
+
+/// What the dictation did with the shared audio session, in order, for a physical test without a debugger: the
+/// unified log (subsystem `br.com.alexandrem.opencode`, category `dictation-audio`) and the last events in memory.
+/// Only session state, routes' port types, enums and error codes: never speech, file names or account data.
+enum DictationAudioTrace {
+  struct Event: Sendable, Equatable {
+    let name: String
+    /// The `NSError` code of a failed session call (`AVAudioSession.ErrorCode`), nil when it succeeded.
+    let error: Int?
+  }
+  private static let log = Logger(subsystem: "br.com.alexandrem.opencode", category: "dictation-audio")
+  private static let recent = OSAllocatedUnfairLock(initialState: [Event]())
+  static var events: [Event] { recent.withLock { $0 } }
+  static func record(_ name: String, error: (any Error)? = nil, detail: String = "") {
+    let failure = error.map { $0 as NSError }
+    recent.withLock { events in
+      events.append(Event(name: name, error: failure?.code))
+      if events.count > 64 { events.removeFirst(events.count - 64) }
+    }
+    if let failure {
+      log.error("\(name, privacy: .public) failed \(failure.domain, privacy: .public) \(failure.code) \(detail, privacy: .public)")
+    } else {
+      log.notice("\(name, privacy: .public) \(detail, privacy: .public)")
+    }
+  }
+  #if os(iOS)
+  static func state(_ session: AVAudioSession) -> String {
+    let ports = { (ports: [AVAudioSessionPortDescription]) in ports.map(\.portType.rawValue).joined(separator: ",") }
+    return "category=\(session.category.rawValue) mode=\(session.mode.rawValue) options=\(session.categoryOptions.rawValue) "
+      + "in=\(ports(session.currentRoute.inputs)) out=\(ports(session.currentRoute.outputs)) " + others(session)
+  }
+  static func others(_ session: AVAudioSession) -> String {
+    "otherAudio=\(session.isOtherAudioPlaying) silenceHint=\(session.secondaryAudioShouldBeSilencedHint)"
+  }
+  /// Whether this app could take Now Playing from the music app when its non-mixable session activates: remote
+  /// command handlers (only a reading registers them) and Now Playing info. `isEnabled` is true by default, so it
+  /// says nothing.
+  @MainActor static func nowPlaying() -> String {
+    "remoteHandlers=\(ReadAloudPlayer.holdsRemoteCommands) info=\(MPNowPlayingInfoCenter.default().nowPlayingInfo != nil)"
+  }
+  @MainActor private static var observers: [any NSObjectProtocol] = []
+  /// From the first dictation on, the session notifications the app receives (while dictating and after, when the
+  /// other app's audio should come back), with their raw reasons.
+  @MainActor static func watch() {
+    guard observers.isEmpty else { return }
+    let center = NotificationCenter.default
+    func watch(_ name: Notification.Name, _ label: String, _ keys: [String]) -> any NSObjectProtocol {
+      center.addObserver(forName: name, object: nil, queue: nil) { note in
+        record(label, detail: keys.map { "\($0)=\(note.userInfo?[$0].map { "\($0)" } ?? "-")" }.joined(separator: " "))
+      }
+    }
+    observers = [
+      watch(AVAudioSession.interruptionNotification, "interruption",
+        [AVAudioSessionInterruptionTypeKey, AVAudioSessionInterruptionOptionKey, AVAudioSessionInterruptionReasonKey]),
+      watch(AVAudioSession.routeChangeNotification, "route", [AVAudioSessionRouteChangeReasonKey]),
+      watch(AVAudioSession.silenceSecondaryAudioHintNotification, "silence-hint", [AVAudioSessionSilenceSecondaryAudioHintTypeKey]),
+    ]
+  }
+  #else
+  @MainActor static func nowPlaying() -> String { "" }
+  @MainActor static func watch() {}
   #endif
 }
 

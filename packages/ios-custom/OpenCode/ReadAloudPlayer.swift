@@ -185,6 +185,8 @@ extension Notification.Name {
   static func stopCurrent() { current?.stop() }
   /// A reading is using the audio session (loading, playing or paused mid-reading).
   static var isActive: Bool { [.loading, .playing, .paused].contains(current?.phase) }
+  /// A reading has remote command handlers registered: the app is eligible to be the Now Playing app.
+  static var holdsRemoteCommands: Bool { current.map { !$0.commands.isEmpty } ?? false }
 
   func stop() {
     closed = true
