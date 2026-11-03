@@ -5001,6 +5001,24 @@ which sessions count and every push decision, the app owns the UI, tokens and lo
   background launch after a push-to-start, `AgentsActivityAgent.watch()`), on every connection, on each
   `activityUpdates` element and before a local start, `AgentsDuplicates.toEnd` keeps the newest live activity; the
   others, including ended cards still visible, end with `.immediate` dismissal and are reported as `ended`.
+- **Recriar Live Activity (rev. 03/11):** Você → Apple Watch → "Recriar Live Activity" replaces the agents activity
+  of the connected server with a new instance, for when the watch stops mirroring the current one (twice, both for
+  an activity started while TestFlight was updating the apps; the next instance mirrored). Only on a tap, in the
+  foreground, one at a time (the button is disabled meanwhile). `AgentsRecreation.swap` (OpenCodeKit) fixes the
+  order: request the new one with `pushType: .token` → its first token (`AgentsRecreation.first`, 30 s) → `activity`
+  for it → end the old one as `ended` (`.immediate`), which the server ignores for an activity it no longer tracks,
+  so it never rearms or pushes a start. While the swap runs, `enforceSingle` waits and `flush` reports neither the new
+  token nor the old one again (in the simulator ActivityKit re-delivered the old token right after the new activity
+  started; reported, it would point the server back at the old one, whose `ended` would then rearm it). A missing token, a null state meanwhile, leaving the foreground before the registration (the section
+  cancels on `scenePhase`) or a failed `activity` end only the new one; a failed `activity` first re-registers the
+  old one (if that fails too, the next `flush` sends it). With no activity on screen the button runs the usual local
+  start (a card swiped away stays closed); with nothing working it says so. It never touches the voice activity,
+  CallKit, sessions or the complication, and it cannot make watchOS mirror: the result says to check the Smart
+  Stack. Tests: `AgentsRecreationTests` (order, failures, cancellation before and during the registration, the
+  timeout helper), `live-activity-lifecycle.test.ts` (the server keeps the new registration after `ended(old)` and
+  never pushes a start), and `OpenCodeUITests/LiveActivityRecreateTests` on `-OpenCodeRecreateFixture` (real
+  ActivityKit and the app's driver, a closed in-memory `custom.live-activity` that records the calls, a voice
+  activity alongside).
 - **Server key:** the saved server's ID (`builtin` for the Mac); with a launch override (sandbox runs) the built-in
   entry becomes `launch-<host>-<port>`, so a sandbox never adopts the real server's activity.
 - **Environment:** the simulator is `sandbox`; on a device the app reads its `embedded.mobileprovision`:

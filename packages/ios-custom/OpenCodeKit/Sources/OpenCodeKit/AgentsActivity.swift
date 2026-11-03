@@ -557,6 +557,160 @@ public enum AgentsDuplicates {
   }
 }
 
+// MARK: Recreation
+
+/// "Recriar Live Activity" (Você → Apple Watch, rev. 2026-11-03): a new agents activity replaces the one on screen,
+/// for when the watch stopped mirroring that instance (seen twice for an activity started during an app update; the
+/// next instance mirrored). The server must never see the agents activity gone: the new one is registered first
+/// (`activity`) and only then the old one ends, reported as `ended`, which the server ignores for an activity it no
+/// longer tracks. A failure before that point ends only the new one and leaves the old one registered.
+public enum AgentsRecreation {
+  public enum Outcome: Equatable, Sendable {
+    /// The new activity replaced the old one.
+    case recreated
+    /// There was none on screen: the usual start made one.
+    case started
+    case busy, disabled, unavailable, noWork, dismissed
+    case failed(Failure)
+
+    public var succeeded: Bool { self == .recreated || self == .started }
+
+    public var message: String {
+      switch self {
+      case .recreated: "Atividade recriada. Confira o Conjunto Inteligente no relógio."
+      case .started: "Atividade criada. Confira o Conjunto Inteligente no relógio."
+      case .busy: "Já recriando a atividade."
+      case .disabled: "As Atividades ao Vivo estão desligadas para o OpenCode. Ative em Ajustes › OpenCode › Atividades ao Vivo."
+      case .unavailable: "Sem conexão com o servidor. Tente de novo quando o app estiver conectado."
+      case .noWork: "Nenhuma sessão trabalhando agora: o cartão volta sozinho quando houver trabalho."
+      case .dismissed: "O cartão foi fechado no iPhone: ele volta quando as sessões pararem e recomeçarem."
+      case .failed(.start): "O iOS não criou a nova atividade. A atual continua."
+      case .failed(.token): "O iOS não entregou o token da nova atividade a tempo. A atual continua."
+      case .failed(.register): "O servidor não confirmou a nova atividade. A atual continua."
+      case .failed(.cancelled): "Cancelado ao sair do app. A atividade atual continua."
+      }
+    }
+  }
+
+  public enum Failure: Equatable, Sendable { case start, token, register, cancelled }
+
+  /// The swap's side effects, in the order `swap` calls them.
+  public struct Steps: Sendable {
+    /// Requests the new activity and returns its ID.
+    public var start: @Sendable () async throws -> String
+    /// Its first push token, or nil when none arrived in time.
+    public var token: @Sendable (String) async -> String?
+    /// The new activity is still alive and the work it shows still goes on.
+    public var wanted: @Sendable (String) async -> Bool
+    /// `activity` for the new activity.
+    public var register: @Sendable (String, String) async throws -> Void
+    /// Tracks the new activity as registered, then ends the old one (`ended`).
+    public var commit: @Sendable (String, String) async -> Void
+    /// Ends the new activity, which the server never tracked or no longer tracks.
+    public var discard: @Sendable (String) async -> Void
+    /// `activity` for the old one again, for when the server may have applied the new registration.
+    public var restore: @Sendable () async -> Void
+
+    public init(start: @escaping @Sendable () async throws -> String, token: @escaping @Sendable (String) async -> String?,
+      wanted: @escaping @Sendable (String) async -> Bool, register: @escaping @Sendable (String, String) async throws -> Void,
+      commit: @escaping @Sendable (String, String) async -> Void, discard: @escaping @Sendable (String) async -> Void,
+      restore: @escaping @Sendable () async -> Void)
+    {
+      self.start = start
+      self.token = token
+      self.wanted = wanted
+      self.register = register
+      self.commit = commit
+      self.discard = discard
+      self.restore = restore
+    }
+  }
+
+  /// Cancellation (the app left the foreground) stops the swap until the registration starts; from then on it
+  /// finishes, so the server and the screen end up on the same single activity.
+  public static func swap(_ steps: Steps) async -> Outcome {
+    let candidate: String
+    do { candidate = try await steps.start() } catch { return .failed(.start) }
+    let token = await steps.token(candidate)
+    guard !Task.isCancelled else {
+      await steps.discard(candidate)
+      return .failed(.cancelled)
+    }
+    guard let token else {
+      await steps.discard(candidate)
+      return .failed(.token)
+    }
+    guard await steps.wanted(candidate) else {
+      await steps.discard(candidate)
+      return .noWork
+    }
+    // An unstructured task, so leaving the foreground now cannot cut the request in half.
+    let registered = await Task { try await steps.register(candidate, token) }.result
+    guard case .success = registered else {
+      // The request may have reached the server with only the answer lost: point it back at the old one first.
+      await steps.restore()
+      await steps.discard(candidate)
+      return .failed(.register)
+    }
+    await steps.commit(candidate, token)
+    return .recreated
+  }
+
+  /// The first value `produce` returns within `timeout`, or nil; also nil at once when the caller is cancelled,
+  /// even if `produce` never returns (ActivityKit's token sequences need not end on cancellation).
+  public static func first<Value: Sendable>(within timeout: Duration,
+    _ produce: @escaping @Sendable () async -> Value?) async -> Value?
+  {
+    let gate = FirstGate<Value>()
+    return await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        gate.arm(continuation, tasks: [
+          Task { gate.finish(await produce()) },
+          Task {
+            try? await Task.sleep(for: timeout)
+            gate.finish(nil)
+          },
+        ])
+      }
+    } onCancel: {
+      gate.finish(nil)
+    }
+  }
+
+  /// Resumes its continuation once, with the first value, and cancels the racing tasks.
+  private final class FirstGate<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value?, Never>?
+    private var tasks: [Task<Void, Never>] = []
+    private var result: Value??
+
+    func arm(_ continuation: CheckedContinuation<Value?, Never>, tasks: [Task<Void, Never>]) {
+      lock.lock()
+      guard let result else {
+        self.continuation = continuation
+        self.tasks = tasks
+        return lock.unlock()
+      }
+      lock.unlock()
+      tasks.forEach { $0.cancel() }
+      continuation.resume(returning: result)
+    }
+
+    func finish(_ value: Value?) {
+      lock.lock()
+      guard result == nil else { return lock.unlock() }
+      result = .some(value)
+      let continuation = self.continuation
+      let tasks = self.tasks
+      self.continuation = nil
+      self.tasks = []
+      lock.unlock()
+      tasks.forEach { $0.cancel() }
+      continuation?.resume(returning: value)
+    }
+  }
+}
+
 // MARK: Registration
 
 /// APNs environment stored with the tokens: builds signed with a development profile (installed from Xcode) talk

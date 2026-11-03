@@ -79,6 +79,23 @@ import os
     Task { await driver.apply(change.state, server: server) }
   }
 
+  /// "Recriar Live Activity" (Você → Apple Watch), with the app in front and connected (`AgentsRecreation`).
+  func recreate() async -> AgentsRecreation.Outcome {
+    guard started, !fixture else { return .unavailable }
+    return await driver.recreate()
+  }
+
+  /// The app left the foreground: a swap still waiting for its token gives up and keeps the old activity.
+  func cancelRecreation() {
+    Task { await driver.cancelRecreation() }
+  }
+
+  #if DEBUG
+  /// This process's driver, for fixtures that run it on a closed transport: a second driver would end the first
+  /// one's activities as duplicates.
+  var fixtureDriver: AgentsActivityDriver { driver }
+  #endif
+
   /// Stable per configured server. The built-in entry replaced by a launch override (sandbox runs) gets its own key
   /// so it never adopts the activity of the real server.
   static func serverKey(_ servers: ServerStore) -> String { key(servers.active, servers) }
@@ -143,6 +160,16 @@ actor AgentsActivityDriver {
   /// Servers whose activity the user swiped away: like push-to-start, no new local start until `activeTotal`
   /// returns to 0 and rises again.
   private var dismissed: Set<String> = []
+  /// The manual recreation in progress (`recreate`). While it runs, duplicates are not ended (the old activity must
+  /// outlive the registration of the new one) and the new one's token goes to the server only through the swap.
+  private var recreation: Task<AgentsRecreation.Outcome, Never>?
+  private var swapping: (candidate: String?, aborted: Bool)?
+  /// New activities a swap ended without registering: their tokens never reach the server.
+  private var discarded: Set<String> = []
+  /// Old activities while a swap replaces them: `flush` does not re-register them, which would point the server back
+  /// at the old one after the new one's registration (seen in the simulator: the old token is reported again right
+  /// after a second activity starts). A rollback lifts it and re-registers the old one itself.
+  private var retired: Set<String> = []
 
   /// `launch` reports tokens and endings until the first event-stream connection replaces it.
   func begin(_ launch: Context?) {
@@ -217,6 +244,115 @@ actor AgentsActivityDriver {
     } else { cancelEnding() }
   }
 
+  // MARK: Recreation
+
+  /// Replaces this server's agents activity with a new one (`AgentsRecreation.swap`). One at a time; the button
+  /// stays disabled meanwhile, and a second call answers `busy`.
+  func recreate(timeout: Duration = .seconds(30)) async -> AgentsRecreation.Outcome {
+    guard recreation == nil else { return .busy }
+    guard ActivityAuthorizationInfo().areActivitiesEnabled else { return .disabled }
+    guard let context, supported else { return .unavailable }
+    let task = Task { await self.replace(context, timeout: timeout) }
+    recreation = task
+    let outcome = await task.value
+    recreation = nil
+    AgentsActivityAgent.log.notice("recreate: \(String(describing: outcome), privacy: .public)")
+    return outcome
+  }
+
+  func cancelRecreation() { recreation?.cancel() }
+
+  private func replace(_ context: Context, timeout: Duration) async -> AgentsRecreation.Outcome {
+    let state: AgentsState?
+    do { state = try await context.client.liveActivitySnapshot() } catch {
+      return Task.isCancelled ? .failed(.cancelled) : .unavailable
+    }
+    guard let state, state.activeTotal > 0 || state.counts.failed > 0 else { return .noWork }
+    let old = activities(context.serverKey).map(\.id)
+    guard !old.isEmpty else {
+      // No card to replace: the usual start, which keeps a card the user swiped away closed.
+      guard !dismissed.contains(context.serverKey) else { return .dismissed }
+      await apply(state, server: context.client.configuration.url)
+      return activities(context.serverKey).isEmpty ? .failed(.start) : .started
+    }
+    swapping = (nil, false)
+    retired.formUnion(old)
+    let outcome = await AgentsRecreation.swap(.init(
+      start: { try await self.request(state, serverKey: context.serverKey) },
+      token: { id in await AgentsRecreation.first(within: timeout) { await Self.token(of: id) } },
+      wanted: { id in await self.wanted(id) },
+      register: { id, token in
+        try await context.client.liveActivityToken(deviceID: context.deviceID, activityID: id, pushToken: token)
+      },
+      commit: { id, token in await self.commit(id, token: token, replacing: old) },
+      discard: { id in await self.discard(id) },
+      restore: { await self.restore(old, context: context) }))
+    swapping = nil
+    if outcome != .recreated {
+      // Still the registered one: a token it got meanwhile goes now.
+      retired.subtract(old)
+      await flush()
+    }
+    await enforceSingle()
+    return outcome
+  }
+
+  private func request(_ state: AgentsState, serverKey: String) throws -> String {
+    let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(15 * 60),
+      relevanceScore: LiveActivityRelevance.agents)
+    // A token is the point: a local-only activity could never be registered.
+    let activity = try Activity.request(attributes: Attributes(serverKey: serverKey, theme: theme), content: content,
+      pushType: .token)
+    swapping?.candidate = activity.id
+    return activity.id
+  }
+
+  private nonisolated static func token(of id: String) async -> String? {
+    guard let activity = Activity<Attributes>.activities.first(where: { $0.id == id }) else { return nil }
+    if let token = activity.pushToken { return token.hexToken }
+    for await token in activity.pushTokenUpdates { return token.hexToken }
+    return nil
+  }
+
+  /// Still alive, and nothing ended this server's activities (a null state) while the swap waited.
+  private func wanted(_ id: String) -> Bool {
+    swapping?.aborted == false
+      && Activity<Attributes>.activities.contains { $0.id == id && $0.activityState == .active }
+  }
+
+  /// The server tracks the new activity: it takes the usual paths from now on, and the old one ends as `ended`.
+  private func commit(_ id: String, token: String, replacing old: [String]) async {
+    if let activity = Activity<Attributes>.activities.first(where: { $0.id == id }) { watch(activity) }
+    tokens[id] = token
+    reported[id] = token
+    for previous in old {
+      selfEnded.insert(previous)
+      await Self.end(previous, content: nil, policy: .immediate)
+    }
+  }
+
+  private func discard(_ id: String) async {
+    discarded.insert(id)
+    tokens[id] = nil
+    selfEnded.insert(id)
+    await Self.end(id, content: nil, policy: .immediate)
+  }
+
+  /// Re-registers the old activity the server tracked (the last one whose token this app reported), for a
+  /// registration whose answer was lost after the server applied it. If that fails too, the next flush sends it.
+  private func restore(_ old: [String], context: Context) async {
+    guard let id = old.last(where: { reported[$0] != nil }) ?? old.last,
+      let token = tokens[id] ?? Activity<Attributes>.activities.first(where: { $0.id == id })?.pushToken?.hexToken
+    else { return }
+    do {
+      try await context.client.liveActivityToken(deviceID: context.deviceID, activityID: id, pushToken: token)
+      reported[id] = token
+    } catch {
+      tokens[id] = token
+      reported[id] = nil
+    }
+  }
+
   #if DEBUG
   /// `-OpenCodeAgentsActivityFixture`: replaces every Agents activity with local, push-less fixture activities.
   func show(_ fixtures: [(attributes: AgentsActivityAttributes, state: AgentsState)]) async {
@@ -270,6 +406,8 @@ actor AgentsActivityDriver {
   /// At most one activity per server on screen, in any state: keeps the newest live one and removes the others,
   /// including ended cards still visible, with immediate dismissal (reported as `ended`).
   private func enforceSingle() async {
+    // A recreation keeps two on purpose until it commits or rolls back, then runs this again.
+    guard swapping == nil else { return }
     let all = Activity<Attributes>.activities
     let candidates = all.map { activity in
       AgentsDuplicates.Candidate(id: activity.id, serverKey: activity.attributes.serverKey,
@@ -305,6 +443,7 @@ actor AgentsActivityDriver {
   /// Same as the backend's `end`: removed at once (rev. 2026-10-27), including ended cards still on screen.
   private func end(_ key: String) async {
     ending = nil
+    swapping?.aborted = true
     for activity in Activity<Attributes>.activities where activity.attributes.serverKey == key {
       selfEnded.insert(activity.id)
       await Self.end(activity.id, content: nil, policy: .immediate)
@@ -342,6 +481,7 @@ actor AgentsActivityDriver {
   }
 
   private func token(_ token: String, for id: String) async {
+    guard !discarded.contains(id) else { return }
     tokens[id] = token
     await flush()
   }
@@ -364,7 +504,10 @@ actor AgentsActivityDriver {
         reported[id] = nil
       } catch { classify(error); return }
     }
-    for (id, token) in tokens where keys[id] == context.serverKey && reported[id] != token {
+    // A swap registers its new activity itself, and the old one must not take the registration back.
+    for (id, token) in tokens where keys[id] == context.serverKey && reported[id] != token
+      && id != swapping?.candidate && !retired.contains(id)
+    {
       do {
         try await context.client.liveActivityToken(deviceID: context.deviceID, activityID: id, pushToken: token)
         reported[id] = token

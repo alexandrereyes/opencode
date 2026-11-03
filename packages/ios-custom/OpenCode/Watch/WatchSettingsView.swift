@@ -39,6 +39,8 @@ struct WatchSettingsView: View {
       } footer: {
         Text("O relógio recebe um acesso próprio a este servidor e funciona sem o iPhone por perto, pelo Wi-Fi ou pela rede celular. A voz usa a voz escolhida em Conversa por voz.")
       }.listRowBackground(theme.color(.surface))
+      AgentsRecreateSection(recreate: { await AgentsActivityAgent.shared.recreate() },
+        cancel: { AgentsActivityAgent.shared.cancelRecreation() })
       Section("Relógios pareados") {
         if loading {
           ProgressView()
@@ -131,5 +133,60 @@ struct WatchSettingsView: View {
   private func describe(_ error: any Error) -> String {
     if AgentsSupport.unsupported(error) { return "Este servidor ainda não tem o gateway do Apple Watch." }
     return (error as? LocalizedError)?.errorDescription ?? "Não foi possível falar com o servidor."
+  }
+}
+
+/// "Recriar Live Activity" (rev. 2026-11-03): replaces this iPhone's agents card with a new instance, for when the
+/// watch stopped mirroring the current one (`AgentsRecreation`). Only on a tap, never on its own; whether the watch
+/// shows the new card is watchOS's decision.
+struct AgentsRecreateSection: View {
+  @Environment(\.appTheme) private var theme
+  @Environment(\.scenePhase) private var scenePhase
+  let recreate: () async -> AgentsRecreation.Outcome
+  let cancel: () -> Void
+  @State private var running = false
+  @State private var outcome: AgentsRecreation.Outcome?
+
+  var body: some View {
+    Section {
+      Button {
+        Task { await run() }
+      } label: {
+        HStack {
+          Text("Recriar Live Activity")
+          Spacer()
+          if running { ProgressView() }
+        }
+      }
+      .disabled(running)
+      .accessibilityIdentifier("watch-recreate-activity")
+      if let outcome {
+        Text(outcome.message).appFont(.caption).foregroundStyle(theme.color(role(outcome)))
+          .accessibilityIdentifier("watch-recreate-message")
+      }
+    } header: {
+      Text("Live Activity")
+    } footer: {
+      Text("Recria o cartão de agentes deste iPhone, que pode voltar a aparecer no Conjunto Inteligente do relógio. Quem decide mostrar o cartão no relógio é o watchOS.")
+    }
+    .listRowBackground(theme.color(.surface))
+    .onChange(of: scenePhase) { _, phase in
+      if phase != .active && running { cancel() }
+    }
+  }
+
+  private func run() async {
+    running = true
+    outcome = nil
+    let result = await recreate()
+    outcome = result
+    running = false
+    Haptics.play(result.succeeded ? .success : .warning)
+  }
+
+  private func role(_ outcome: AgentsRecreation.Outcome) -> ThemeRole {
+    if outcome.succeeded { return .success }
+    if case .failed = outcome { return .error }
+    return .textSecondary
   }
 }

@@ -202,6 +202,17 @@ device showed an ended card lingering above a new one). Ended activities never s
   on screen), the app keeps the newest, ends the others **with immediate dismissal** and reports them with `ended`.
   It enforces this whenever it gets runtime: launch, foreground, each `activityUpdates` element (including the
   background wake after a push-to-start) and before any local start.
+- **Manual recreation (iOS, rev. 2026-11-03):** "Recriar Live Activity" in Você → Apple Watch replaces the activity on
+  screen with a new instance, for a watch that stopped mirroring the current one (twice for an activity started
+  during an app update; the next instance mirrored). The app starts the new one in the foreground, waits up to
+  30 seconds for its push token, calls `activity` with it, and only then ends the old one (immediate dismissal,
+  reported as `ended`). The backend needs nothing new: `ended` for an activity other than the registered one changes
+  nothing (no rearm, no push-to-start), so the device keeps one registered activity throughout; the app never sends
+  `activity` for the old one after the new one's, which would point the backend back at it. If the token does
+  not arrive, the app leaves the foreground before the registration, or `activity` fails, the new one ends and the
+  old one stays; after a failed `activity` the app calls `activity` for the old one again first, in case the server
+  applied the new registration and only the answer was lost. The duplicate rule above waits while the swap runs.
+  Nothing starts it on its own (no timer, launch or update trigger).
 
 **Update.** The backend pushes `update` to every registered activity token:
 

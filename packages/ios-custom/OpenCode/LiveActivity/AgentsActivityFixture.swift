@@ -496,6 +496,8 @@ struct AgentsActivityFixtureRoot: View {
   var body: some View {
     if ProcessInfo.processInfo.arguments.contains("-OpenCodeActivityPriorityFixture") {
       ActivityPriorityFixtureRoot()
+    } else if ProcessInfo.processInfo.arguments.contains("-OpenCodeRecreateFixture") {
+      RecreateFixtureRoot()
     } else {
       ContentUnavailableView("Live Activity de exemplo", systemImage: "rectangle.badge.checkmark",
         description: Text("Bloqueie a tela ou volte ao início para ver a atividade Agentes."))
