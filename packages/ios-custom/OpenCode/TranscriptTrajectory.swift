@@ -22,8 +22,15 @@ enum TranscriptCounters {
   static let destroyed = Atomic<Int>(0)
   static let replaced = Atomic<Int>(0)
   static let appended = Atomic<Int>(0)
+  /// "Agentes e tarefas": body evaluations, and the projections (`work`, `subagents`) run for them and their time.
+  static let agentsBodies = Atomic<Int>(0)
+  static let agentsProjections = Atomic<Int>(0)
+  static let agentsProjectionMicros = Atomic<Int>(0)
   static var values: [String: Int] {
     [
+      "agentsBodies": agentsBodies.load(ordering: .relaxed),
+      "agentsProjections": agentsProjections.load(ordering: .relaxed),
+      "agentsProjectionMicros": agentsProjectionMicros.load(ordering: .relaxed),
       "textViewsCreated": created.load(ordering: .relaxed),
       "textViewsDestroyed": destroyed.load(ordering: .relaxed),
       "textReplacements": replaced.load(ordering: .relaxed),

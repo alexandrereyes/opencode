@@ -152,6 +152,14 @@ struct SessionsView: View {
         {
           if let session = try? await store.client.session(arguments[index + 1]), !Task.isCancelled {
             store.conversationPath.append(.init(id: session.id))
+            #if DEBUG
+            // `-OpenCodeOpenAgents`: its "Agentes e tarefas" over it, as the capsule opens it.
+            if arguments.contains("-OpenCodeOpenAgents") {
+              while store.liveConversation(session.id) == nil, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(50)) }
+              store.conversationPath.append(.init(id: session.id, agents: true))
+            }
+            if AgentsFixture.enabled { Task { await AgentsFixture.stream(store.hub) } }
+            #endif
           }
         }
         if let index = arguments.firstIndex(of: "-OpenCodeOpenResource"), arguments.indices.contains(index + 1),

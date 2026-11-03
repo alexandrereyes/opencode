@@ -41,8 +41,8 @@ struct ConversationAgentsView: View {
       .map(\.element)
   }
   /// Subagents working only in the background (their shells or subagents), from the Sessões rows.
-  private var background: [String: FamilyWork.Background] { store.background(sessions.entries) }
-  private var work: [SessionWork] { store.work(background: background) }
+  private var background: [String: FamilyWork.Background] { probe { store.background(sessions.entries) } }
+  private var work: [SessionWork] { probe { store.work(background: background) } }
   private var agents: [SessionWork] { ordered.filter { $0.kind == .agent } }
   private var scripts: [SessionWork] { ordered.filter { $0.kind == .script } }
   private func reorder(_ ids: [String]) {
@@ -57,10 +57,12 @@ struct ConversationAgentsView: View {
   }
   /// Live first, then the newest finished up to five, the rest behind "+N concluídos" (`ContextColumn.subagents`).
   private var subagents: ContextColumn.Subagents {
-    ContextColumn.subagents(
-      work: agents, rootID: store.id, members: store.children, models: store.displayModels,
-      permissions: store.family?.permissions ?? [], forms: store.family?.forms ?? [], resources: store.resources,
-      progress: progress.mapValues { ContextColumn.Progress(done: $0.done, total: $0.total) })
+    probe {
+      ContextColumn.subagents(
+        work: agents, rootID: store.id, members: store.children, models: store.displayModels,
+        permissions: store.family?.permissions ?? [], forms: store.family?.forms ?? [], resources: store.resources,
+        progress: progress.mapValues { ContextColumn.Progress(done: $0.done, total: $0.total) })
+    }
   }
   /// Changes when a live subagent takes a step, so its `agora: …` is read again.
   private var activityKey: String {
@@ -80,6 +82,9 @@ struct ConversationAgentsView: View {
     return parts.isEmpty ? "Agentes e tarefas" : parts.joined(separator: " e ") + " em execução"
   }
   var body: some View {
+    #if DEBUG
+    let _ = TranscriptCounters.agentsBodies.add(1, ordering: .relaxed)
+    #endif
     List {
       switch tab {
       case .agents: agentsTab
@@ -105,6 +110,10 @@ struct ConversationAgentsView: View {
     }
     .scrollContentBackground(.hidden).background(theme.color(.background))
     .foregroundStyle(theme.color(.textStrong))
+    #if DEBUG
+    .background(AgentsFixture.enabled ? ScrollFixtureDriver().frame(width: 0, height: 0) : nil)
+    .onAppear { if AgentsFixture.expanded { expanded = true } }
+    #endif
     .navigationTitle("Agentes e tarefas").navigationBarTitleDisplayMode(.inline)
     .toolbar(.visible, for: .navigationBar)
     .tint(theme.color(.primary))
@@ -370,7 +379,7 @@ struct ConversationAgentsView: View {
         Image(systemName: "questionmark.circle").appSymbol(.inline).foregroundStyle(theme.color(.warning))
           .accessibilityLabel(subagent.status.label)
       }
-    } else if (subagent.status == .running || subagent.status == .starting) && !reduceMotion {
+    } else if (subagent.status == .running || subagent.status == .starting) && !reduceMotion && !noShimmer {
       ShimmerText(text: text, font: AppTypography.font(.secondary, weight: .medium),
         base: theme.uiColor(.textSecondary), peak: theme.uiColor(.textStrong))
         .accessibilityLabel(text)
@@ -387,7 +396,7 @@ struct ConversationAgentsView: View {
   /// `◔ 48% · 606,9k / 1,1M · ⚡ 100% · US$ 8,58 · 4m28s · ☑ 2/4`: the tokens drop when it does not fit; the
   /// Progresso opens its whole list.
   private func metrics(_ subagent: ContextColumn.Subagent) -> some View {
-    TimelineView(.periodic(from: .now, by: subagent.work.running ? 1 : 3_600)) { context in
+    TimelineView(.periodic(from: .now, by: subagent.work.running && !noClock ? 1 : 3_600)) { context in
       let work = subagent.work
       let elapsed = work.running
         ? ConversationProjection.duration(context.date.timeIntervalSince1970 * 1000 - work.started)
@@ -519,6 +528,27 @@ struct ConversationAgentsView: View {
     .presentationBackground(theme.color(.background))
   }
 
+  #if DEBUG
+  private var noShimmer: Bool { AgentsFixture.noShimmer }
+  private var noClock: Bool { AgentsFixture.noClock }
+  /// The fixture's measure of the projections a body runs (`TranscriptCounters`), outermost call only.
+  private func probe<T>(_ body: () -> T) -> T {
+    AgentsProbe.depth += 1
+    let start = ContinuousClock.now
+    defer {
+      AgentsProbe.depth -= 1
+      if AgentsProbe.depth == 0 {
+        TranscriptCounters.agentsProjections.add(1, ordering: .relaxed)
+        TranscriptCounters.agentsProjectionMicros.add(Int(start.duration(to: .now) / .microseconds(1)), ordering: .relaxed)
+      }
+    }
+    return body()
+  }
+  #else
+  private var noShimmer: Bool { false }
+  private var noClock: Bool { false }
+  private func probe<T>(_ body: () -> T) -> T { body() }
+  #endif
   private func open(_ work: SessionWork) {
     if let child = work.sessionID {
       sessions.conversationPath.append(.init(id: child, parent: store.id))
@@ -614,3 +644,7 @@ struct ConversationContextSheet: View {
     } ?? "—"
   }
 }
+
+#if DEBUG
+@MainActor private enum AgentsProbe { static var depth = 0 }
+#endif

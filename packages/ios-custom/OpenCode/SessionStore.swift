@@ -187,6 +187,7 @@ final class SessionStore {
       ? ProcessInfo.processInfo.environment["OPENCODE_TEST_PROMPT_FIXTURE"]?.split(separator: ":").map(String.init) : nil
     let quotesUnavailable = isolated && ProcessInfo.processInfo.environment["OPENCODE_TEST_QUOTES_UNAVAILABLE"] == "1"
     let injected = suppliedClient ?? (ScrollFixtures.mode == "catalog" ? ScreenCatalogFixture.client(configuration) : nil)
+      ?? (AgentsFixture.enabled ? AgentsFixture.client(configuration) : nil)
     let base: OpenCodeClient = injected ?? failure.map { OpenCodeClient.deletionFailureFixture(configuration: configuration, sessionID: $0) }
       ?? promptFixture.flatMap { parts in
         parts.count == 3 ? OpenCodeClient.promptAdmissionFixture(configuration: configuration, sessionID: parts[0],
