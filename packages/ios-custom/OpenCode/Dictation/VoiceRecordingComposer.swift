@@ -203,9 +203,10 @@ import AppKit
     }
   }
   /// The composer left the screen, or the app went to the background (Abacato's `leftScreen` and
-  /// `enteredBackground`): a hands-free recording goes on, owned by `DictationCaptures` with the strip and the Live
-  /// Activity; a hold the finger can no longer finish becomes a paused draft with one second or more, before that it
-  /// is discarded. The preview stops.
+  /// `enteredBackground`); on the Mac, the app stopped being the active one (⌘Tab, another app's window): a hands-free
+  /// recording goes on (on the iPhone owned by `DictationCaptures`, with the strip and the Live Activity); a hold the
+  /// finger can no longer finish becomes a paused draft with one second or more, before that it is discarded. The
+  /// preview stops.
   func leftScreen() {
     if gesture.state == .holding {
       if keepsDraft { gesture.keepRecording(); pause() }
@@ -243,8 +244,9 @@ import AppKit
     ]
     #else
     observers = [
+      // Using another app is not an interruption: hands-free keeps recording into this composer's draft.
       center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-        MainActor.assumeIsolated { self?.suspend() }
+        MainActor.assumeIsolated { self?.leftScreen() }
       },
       center.addObserver(forName: .macAudioDeviceChanged, object: nil, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.suspend() }

@@ -701,8 +701,72 @@ import SwiftUI
       draft.text.string.contains("Confira as sessões") ? true : nil
     }
     guard !draft.recording.capturing else { throw Failure(description: "continuou gravando após soltar") }
+    try await outsideApp(window: window, draft: draft, option: option, shot: shot)
     try await escape(window: window, runtime: runtime, draft: draft, option: option, shot: shot)
     try await revision(window: window, runtime: runtime, draft: draft, option: option, shot: shot)
+  }
+
+  /// Hands-free outside the window (Alexandre, 03/11): leaving the app (⌘Tab, another app) and minimizing keep a
+  /// hands-free dictation recording into the same composer, back in the app too; a hold whose release the app cannot
+  /// see pauses and the key is forgotten, so the release made back in the app finishes nothing; a device change still
+  /// pauses. The app's notifications are the real ones AppKit posts; the window is really minimized.
+  private static func outsideApp(window: NSWindow, draft: ConversationDraft, option: (Bool, Bool) -> Void,
+    shot: (String) -> Void) async throws
+  {
+    let recording = draft.recording
+    func elapsing(_ step: String) async throws {
+      let before = recording.elapsed
+      try await Task.sleep(for: .seconds(1.2))
+      guard recording.state == .recording, recording.elapsed > before else {
+        throw Failure(description: "\(step): \(recording.state), \(before) → \(recording.elapsed)")
+      }
+    }
+    draft.text = NSAttributedString(string: "Antes de sair")
+    option(true, false); option(false, false)
+    try await wait("mãos livres pela tecla") { recording.state == .recording ? true : nil }
+    try await elapsing("mãos livres")
+    NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+    NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+    try await elapsing("outro app")
+    window.miniaturize(nil)
+    let minimized = (try? await wait("minimizada", timeout: 3) { window.isMiniaturized ? true : nil }) != nil
+    try await elapsing("janela minimizada")
+    if minimized {
+      window.deminiaturize(nil)
+      _ = try? await wait("restaurada", timeout: 3) { window.isMiniaturized ? nil : true }
+    }
+    NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
+    try await elapsing("de volta")
+    shot("fora-do-app")
+    // A tap stops it: the text lands in this draft, after what was typed, and nothing is sent.
+    option(true, false); option(false, false)
+    try await wait("transcrito depois de voltar", timeout: 20) {
+      draft.text.string.contains("Confira as sessões") ? true : nil
+    }
+    guard draft.text.string.hasPrefix("Antes de sair") else {
+      throw Failure(description: "texto fora do lugar: \(draft.text.string.prefix(80).debugDescription)")
+    }
+    // Held when the app goes away: one second or more pauses, and the release back here finishes nothing.
+    draft.text = NSAttributedString()
+    option(true, false)
+    try await wait("segurar antes de sair") { recording.gesture.state == .holding && recording.state == .recording ? true : nil }
+    // Past the one second that makes a hold a draft (the meter lags the capture by up to 100 ms).
+    try await wait("um segundo segurando") { recording.elapsed >= 1.2 ? true : nil }
+    NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+    try await wait("segurar pausou ao sair") { recording.state == .paused ? true : nil }
+    option(false, false)
+    try await Task.sleep(for: .milliseconds(600))
+    guard recording.state == .paused, draft.text.string.isEmpty else {
+      throw Failure(description: "o soltar fora do app mudou a gravação: \(recording.state)")
+    }
+    // A device change is still an interruption.
+    recording.resume()
+    try await wait("retomou") { recording.state == .recording ? true : nil }
+    NotificationCenter.default.post(name: .macAudioDeviceChanged, object: nil)
+    try await wait("dispositivo pausou") { recording.state == .paused ? true : nil }
+    recording.discard()
+    guard !recording.visible, draft.text.string.isEmpty else { throw Failure(description: "descartar deixou texto") }
+    print("MacAjustes dictation: mãos livres segue fora do app e minimizada; segurar pausa e esquece a tecla; dispositivo pausa")
   }
 
   /// The AI review (the fixtures' reviewer, 2.5 s): on at every recording, ⌥⌘E toggles it, also with the right

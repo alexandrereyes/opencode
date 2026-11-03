@@ -4282,6 +4282,15 @@ app, the immediate `offline`.
   retry, local pending audio and model management match iOS. The transcript lands in the composer itself, at the
   caret, which takes the focus to review and send it; there is no review sheet and it never sends automatically.
   The **right Option key** dictates too (see [Adjustment round](#adjustment-round--28-october)). Device changes and app deactivation pause recording.
+- **Dictation outside the window (Alexandre, 03/11):** a hands-free dictation keeps recording into the same
+  composer's draft when the user switches to another app (⌘Tab, a click elsewhere) or minimizes the window, and is
+  still recording on the way back; nothing is sent. `NSApplication.didResignActive` now calls the recording's
+  `leftScreen()` instead of `suspend()`: hands-free goes on, a hold (mouse or right Option) whose release the app can
+  no longer see pauses with one second or more, before that it is discarded, and `MacDictationKey` forgets the key so
+  a release made back in the app finishes nothing. A device change (`macAudioDeviceChanged`), a GPT Live call and
+  leaving the conversation (the composer's `onDisappear`) still pause it. No new bar, menu, global shortcut or Live
+  Activity; sleep and quitting the app are not covered. `script/test-mac-ajustes.sh dictation` checks it (the
+  `outsideApp` step).
 - **Dictation microphone and music:** the Mac records with `AVAudioEngine` (`OpenCodeMac/MacMicrophone.swift`), the
   input chosen in Ajustes → Voz → **Microfone** set on the input node (`kAudioOutputUnitProperty_CurrentDevice`); the
   system default input never changes. **Automático** follows the default input unless it is Bluetooth, whose

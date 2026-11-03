@@ -33,6 +33,7 @@ import OpenCodeKit
   private var target: Target?
   private var hold: Task<Void, Never>?
   private var monitor: Any?
+  private var resigned: NSObjectProtocol?
   /// The last Esc down cancelled a dictation.
   private var escaped = false
 
@@ -68,6 +69,18 @@ import OpenCodeKit
 
   private func start() {
     guard monitor == nil else { return }
+    // The local monitor never sees a release made in another app: leaving forgets the key. The recording's own
+    // observer already paused (or discarded) the hold, and keeps a hands-free dictation going.
+    resigned = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil,
+      queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          self.hold?.cancel()
+          self.gesture = DictationKeyGesture()
+          self.target = nil
+          self.escaped = false
+        }
+      }
     monitor = NSEvent.addLocalMonitorForEvents(
       matching: [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]
     ) { [weak self] event in
