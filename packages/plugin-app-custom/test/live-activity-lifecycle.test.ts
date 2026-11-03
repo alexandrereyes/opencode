@@ -6,8 +6,21 @@ import type { Push, Result } from "../src/live-activity/apns"
 import { emitMs, makeHub, sharedHub, type Member } from "../src/live-activity/index"
 import { devicesKey, limits, makeLifecycle, makeRegistry } from "../src/live-activity/lifecycle"
 import type { LiveActivity } from "../src/live-activity/rpc"
-import type { Event, Tracker } from "../src/live-activity/tracker"
-import { T, created, execution, fixture, ids, minute, question, scene, session, world } from "./fixture/live-activity"
+import { makeTracker, type Event, type Tracker } from "../src/live-activity/tracker"
+import {
+  T,
+  created,
+  execution,
+  fixture,
+  ids,
+  inboxShellNotice,
+  minute,
+  question,
+  scene,
+  session,
+  shellStarted,
+  world,
+} from "./fixture/live-activity"
 import { storage } from "./fixture/storage"
 
 const host = "MacBook Pro"
@@ -62,6 +75,28 @@ function setup(answer?: (push: Push) => Result) {
     )
   return { shared, registry, pushes: fake.pushes, lifecycle, evaluate }
 }
+
+it.effect("an admitted restart cancellation publishes zero work and lets the activity end", () =>
+  Effect.gen(function* () {
+    const tracker = makeTracker(world().ctx)
+    yield* tracker.apply(created(ids.live, T - minute), T)
+    yield* tracker.apply(shellStarted(ids.live, "sh_restart_monitor", T, "diagnostic monitor"), T)
+    const { registry, pushes, evaluate } = setup()
+    yield* registry.register(iphone, T - minute)
+    yield* registry.activity({ deviceID: iphone.deviceID, activityID: "act-restart", pushToken: "bb22" }, T - minute)
+    yield* evaluate(tracker, T)
+    expect(pushes.at(-1)?.body).toMatchObject({ aps: { event: "update", "content-state": { activeTotal: 1 } } })
+
+    yield* tracker.apply(inboxShellNotice(ids.live, "sh_restart_monitor", T + 1, "cancelled"), T + 1)
+    yield* evaluate(tracker, T + limits.coalesceMs)
+    expect(pushes.at(-1)?.body).toMatchObject({ aps: { event: "update", "content-state": { activeTotal: 0 } } })
+    yield* evaluate(tracker, T + limits.coalesceMs + limits.endMs)
+    expect(pushes.at(-1)).toMatchObject({
+      priority: 10,
+      body: { aps: { event: "end", "content-state": { activeTotal: 0 } } },
+    })
+  }),
+)
 
 it.effect("push-to-start goes out when work appears, with the push-start.json body, at most every 5 minutes", () =>
   Effect.gen(function* () {

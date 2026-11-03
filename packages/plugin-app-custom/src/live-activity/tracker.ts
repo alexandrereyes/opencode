@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode/plugin/effect"
 import type { Requests } from "../request-times.js"
 import { Session } from "@opencode/schema/session"
+import type { SessionEvent } from "@opencode/schema/session-event"
 import type { SessionMessage } from "@opencode/schema/session-message"
 import type { SessionScan } from "@opencode/schema/session-scan"
 import { DateTime, Effect } from "effect"
@@ -21,8 +22,6 @@ export const limits = {
   rows: 4,
   attention: 3,
   needs: 3,
-  /** Transcript messages a rebuild reads per session to find unfinished background shells. */
-  shellMessages: 100,
   /** Pages of `progressMessages` read to find a session's latest Progresso when it starts working again. */
   progressPages: 5,
   progressMessages: 100,
@@ -30,6 +29,7 @@ export const limits = {
 
 /** The live events the tracker folds; a structural subset of the server events a plugin receives. */
 export type Event =
+  | Pick<SessionEvent.InboxEnqueued, "type" | "created" | "data">
   | {
       readonly type: "session.created"
       readonly created: number
@@ -157,6 +157,7 @@ export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
   "session.reasoning.started",
   "session.text.started",
   "session.synthetic",
+  "session.inbox.enqueued",
   "shell.created",
   "shell.exited",
   "shell.deleted",
@@ -169,6 +170,7 @@ export const eventTypes: ReadonlySet<string> = new Set<Event["type"]>([
 
 export type TrackerContext = {
   session: Pick<Plugin.Context["session"], "get" | "scan" | "active" | "family">
+  background: Plugin.Context["job"]["background"]
   /**
    * From `custom.preferences`: "Avisar ao terminar" session IDs (`notifySessions`), `settings.autoApprove` and the
    * current Sessão mestra (`masterSessions.local`), which Sessões never lists, so its answers are never unread here.
@@ -390,10 +392,12 @@ export function makeTracker(ctx: TrackerContext) {
       entry.startedAt = yield* executionStart(entry)
       if (!entry.parentID) yield* readTodos(entry)
     }
-    // Background shells are process-local jobs with no list API for plugins: their launches and completion notices
-    // are in the transcripts. After a server restart Core has already admitted a cancellation notice for each one.
-    for (const entry of [...sessions.values()])
-      for (const [id, shell] of yield* backgroundShells(entry.id)) shells.set(id, shell)
+    // A historical launch can outlive its process, especially while restart notices still wait in the inbox.
+    // Rebuild from live jobs, the same source as Sessões, rather than inferring work from the transcript.
+    for (const job of yield* ctx.background()) {
+      if (job.type !== "shell") continue
+      shells.set(job.id, { sessionID: job.sessionID, command: job.title ?? "", startedAt: job.started })
+    }
     for (const shell of shells.values()) yield* lineage(shell.sessionID)
     const roots = new Set(
       [
@@ -415,40 +419,6 @@ export function makeTracker(ctx: TrackerContext) {
     }
     yield* refreshPending(now)
   })
-
-  /** Shells a session moved to the background whose completion notice is not in its recent transcript. */
-  const backgroundShells = (sessionID: string) =>
-    ctx.message.list({ sessionID: Session.ID.make(sessionID), limit: limits.shellMessages }).pipe(
-      Effect.map((page) => {
-        const done = new Set(
-          page.data.flatMap((message) =>
-            message.type === "synthetic" &&
-            message.metadata?.source === "shell" &&
-            typeof message.metadata.shellID === "string"
-              ? [message.metadata.shellID]
-              : [],
-          ),
-        )
-        return page.data.flatMap((message) =>
-          message.type === "assistant"
-            ? message.content.flatMap((part) => {
-                if (part.type !== "tool" || part.name !== "shell" || part.state.status !== "completed") return []
-                const shellID = part.state.metadata?.shellID
-                const command = part.state.input.command
-                if (part.state.metadata?.status !== "running" || typeof shellID !== "string" || done.has(shellID))
-                  return []
-                const shell: Shell = {
-                  sessionID,
-                  command: typeof command === "string" ? command : "",
-                  startedAt: DateTime.toEpochMillis(part.time.ran ?? part.time.created),
-                }
-                return [[shellID, shell] as const]
-              })
-            : [],
-        )
-      }),
-      Effect.orElseSucceed(() => []),
-    )
 
   const latestPrompt = (sessionID: string) =>
     ctx.message.list({ sessionID: Session.ID.make(sessionID), limit: 1, type: "user" }).pipe(
@@ -675,6 +645,16 @@ export function makeTracker(ctx: TrackerContext) {
         // A shell's completion notice; `shell.exited` normally arrived first.
         const shellID = event.data.metadata?.shellID
         if (event.data.metadata?.source === "shell" && typeof shellID === "string") shells.delete(shellID)
+        touch(entry)
+        return
+      }
+      case "session.inbox.enqueued": {
+        const item = event.data.item
+        if (item.type !== "synthetic" || item.payload.metadata?.source !== "shell") return
+        const shellID = item.payload.metadata.shellID
+        if (typeof shellID !== "string") return
+        // Admission already records that the process ended; resume:false can leave delivery parked indefinitely.
+        shells.delete(shellID)
         touch(entry)
         return
       }

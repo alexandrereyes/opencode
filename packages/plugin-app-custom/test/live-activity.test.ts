@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { Effect, Schema } from "effect"
 import { body, fit, limits as pushLimits } from "../src/live-activity/lifecycle"
 import { LiveActivity } from "../src/live-activity/rpc"
-import { clip, describe as activity, limits, makeTracker } from "../src/live-activity/tracker"
+import { clip, describe as activity, eventTypes, limits, makeTracker } from "../src/live-activity/tracker"
 import {
   T,
   T0,
@@ -18,7 +18,9 @@ import {
   tool,
   world,
   backgroundShellMessage,
+  inboxShellNotice,
   shellExited,
+  shellJob,
   shellNotice,
   shellNoticeMessage,
   shellStarted,
@@ -614,7 +616,88 @@ test("an idle session with a background shell is working until the shell ends (r
   expect(view(T + minute).counts.working).toBe(0)
 })
 
-test("rebuild finds unfinished background shells in the transcripts", async () => {
+test.each(["completed", "error", "cancelled"] as const)(
+  "an inbox %s notice clears a shell reconstructed before restart recovery admits it",
+  async (state) => {
+    const server = world()
+    server.add(
+      session(ids.live, {
+        outcome: "succeeded",
+        time: { created: T - 60 * minute, updated: T - minute, idle: T - minute },
+      }),
+    )
+    server.transcripts.set(ids.live, [
+      backgroundShellMessage("msg_monitor", "sh_monitor", T - 2 * minute, "diagnostic monitor"),
+    ])
+    server.background.push(shellJob(ids.live, "sh_monitor", T - 2 * minute, "diagnostic monitor"))
+    const tracker = makeTracker(server.ctx)
+    await run(tracker.rebuild(T))
+    expect(server.active.size).toBe(0)
+    expect(tracker.sessions.get(ids.live)?.running).toBe(false)
+    expect(tracker.derive(T, host).state.activeTotal).toBe(1)
+
+    const notice = inboxShellNotice(ids.live, "sh_monitor", T + 1, state)
+    expect(eventTypes.has(notice.type)).toBe(true)
+    server.background.splice(0)
+    // Recovery uses resume:false: the owner need not execute or deliver this inbox item to stop working.
+    await run(tracker.apply(notice, T + 1))
+    const stopped = tracker.derive(T + 1, host).state
+    expect(stopped.activeTotal).toBe(0)
+    expect(stopped.counts.working).toBe(0)
+    expect(tracker.sessions.get(ids.live)?.running).toBe(false)
+    // A duplicate admission is harmless and never revives the owner.
+    await run(tracker.apply(notice, T + 2))
+    expect(tracker.derive(T + 2, host).state.activeTotal).toBe(0)
+  },
+)
+
+test("unrelated inbox items do not clear live shells or stop the rest of the family", async () => {
+  const tracker = makeTracker(world().ctx)
+  await run(tracker.apply(created(ids.live, T - minute), T))
+  await run(tracker.apply(created("ses_child", T - minute, ids.live), T))
+  await run(tracker.apply(shellStarted(ids.live, "sh_root", T, "root command"), T))
+  await run(tracker.apply(shellStarted("ses_child", "sh_child", T, "child command"), T))
+  const notice = inboxShellNotice(ids.live, "sh_root", T + 1)
+  await run(
+    tracker.apply(
+      {
+        ...notice,
+        data: {
+          ...notice.data,
+          item: {
+            type: "user",
+            delivery: "steer",
+            payload: { text: "Hello", metadata: { source: "shell", shellID: "sh_root" } },
+          },
+        },
+      },
+      T + 1,
+    ),
+  )
+  await run(
+    tracker.apply(
+      {
+        ...notice,
+        data: {
+          ...notice.data,
+          item: {
+            type: "synthetic",
+            delivery: "steer",
+            payload: { text: "Other notice", metadata: { source: "subagent", shellID: "sh_root" } },
+          },
+        },
+      },
+      T + 2,
+    ),
+  )
+  expect(tracker.derive(T + 2, host).state.activeTotal).toBe(1)
+  await run(tracker.apply(inboxShellNotice("ses_child", "sh_child", T + 3), T + 3))
+  expect(tracker.derive(T + 3, host).state.activeTotal).toBe(1)
+  await run(tracker.apply(notice, T + 4))
+  expect(tracker.derive(T + 4, host).state.activeTotal).toBe(0)
+})
+
+test("rebuild uses live jobs and does not revive historical launches awaiting restart notices", async () => {
   const server = world()
   server.add(
     session(ids.live, {
@@ -636,9 +719,10 @@ test("rebuild finds unfinished background shells in the transcripts", async () =
     }),
   )
   server.transcripts.set(ids.nav, [
-    shellNoticeMessage("msg_nav_notice", "sh_nav", T - 6 * minute),
+    // Its cancellation may still be pending: no notice in the visible transcript and no live job.
     backgroundShellMessage("msg_nav", "sh_nav", T - 20 * minute, "bun run lint"),
   ])
+  server.background.push(shellJob(ids.live, "sh_watch", T - 10 * minute, "bun test --watch"))
   const tracker = makeTracker(server.ctx)
   await run(tracker.rebuild(T))
   const state = tracker.derive(T, host).state

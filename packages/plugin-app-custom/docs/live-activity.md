@@ -398,15 +398,15 @@ starts executing without a known list (resumed, or after a restart) and every re
 transcript instead. `experimental.todo` is asked of the session's own Location through the hub. When the list shows,
 it replaces the subagent count in `progress` for that row and the focus.
 
-**Background shells (rev. 2026-10-28).** Core's jobs are process-local and plugins have no API to list them, so the
-tracker follows the public events: `shell.created` (the shell tool tags `metadata.sessionID`; status `running`) adds
-an unfinished shell to its session's family, `shell.exited`/`shell.deleted` or the completion notice
-(`session.synthetic` with `metadata.source: "shell"` and `shellID`) remove it. Background subagents need nothing
-extra: the child session executes and rolls up. A rebuild reads the last 100 messages of every tracked session: a
-`shell` tool result with `metadata.status: "running"` and no later notice for its `shellID` is an unfinished shell
-(its start is the tool's run time; a top-level session waiting only for such work starts at its latest prompt). After
-a server restart Core admits a cancellation notice for every background shell, so none stays counted. A long-lived
-background process (a dev server) keeps its session working until it exits.
+**Background shells (rev. 2026-11-03).** The tracker follows `shell.created` (the shell tool tags
+`metadata.sessionID`; status `running`) and clears the shell on `shell.exited`/`shell.deleted`. A completion or restart
+cancellation now arrives through `session.inbox.enqueued`: a synthetic item whose payload metadata has
+`source: "shell"` and `shellID` clears that shell at admission, without waiting for delivery or executing its owner.
+The legacy direct `session.synthetic` notice remains accepted. A rebuild uses the live `ctx.job.background()` list,
+the same source as Sessões, not historical tool results: a launch marked `running` in the transcript cannot revive
+a process that already ended, even when its cancellation notice is still parked in the inbox. Background subagents
+need nothing extra: the child session executes and rolls up. A long-lived background process (a dev server) keeps
+its session working until it exits.
 
 **Unread (rev. 2026-10-28).** The rule is `custom.navigation`'s `unreadAt` as the web and iOS lists combine it: a
 nonarchived top-level session whose `time.idle` is newer than `time.viewed`, either after a success or failure newer
@@ -421,8 +421,8 @@ drives the 30-minute wake-up; idle rows are only the unread ones, ordered by the
 
 **Startup.** The aggregator subscribes first, then rebuilds from `ctx.session.active()`, a scan of top-level
 nonarchived sessions (running, or with a terminal outcome in the last 24 h: `outcome`, `time.idle`, `time.viewed`),
-and `ctx.request.pending()`. Every running session, including subagents at any depth, joins the model with its
-ancestors (top-level sessions older than the scan window are read through `get`); families that run get their direct
+`ctx.job.background()` and `ctx.request.pending()`. Every running session, including subagents at any depth, joins the
+model with its ancestors (top-level sessions older than the scan window are read through `get`); families that run get their direct
 children from `ctx.session.family` for `progress`. After a rebuild a running execution's start is approximated by its
 latest user message (or the previous idle time); a top-level session that only waits for subagents starts at its
 latest user message. The activity text stays empty until the next step event. The hub exists only while some Location is instantiated, which happens as soon as a

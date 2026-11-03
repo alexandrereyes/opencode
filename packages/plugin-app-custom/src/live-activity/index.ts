@@ -291,6 +291,7 @@ export const registerLiveActivity = Effect.fn("LiveActivity.register")(function*
   yield* hub.join({
     ctx: {
       session: ctx.session,
+      background: ctx.job.background,
       message: ctx.message,
       request: ctx.request,
       storage: ctx.storage,

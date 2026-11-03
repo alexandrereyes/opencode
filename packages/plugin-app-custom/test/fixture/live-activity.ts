@@ -1,8 +1,10 @@
 import { Effect, Schema } from "effect"
+import type { BackgroundJob } from "@opencode/plugin/effect/job"
 import { Form } from "@opencode/schema/form"
 import { Permission } from "@opencode/schema/permission"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/schema/session"
+import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { makeTracker, type Event, type TrackerContext } from "../../src/live-activity/tracker"
 
@@ -170,6 +172,7 @@ export function permission(id: string, sessionID: string, at: number, action: st
 export function world() {
   const infos = new Map<string, Session.Info>()
   const active = new Set<string>()
+  const background: BackgroundJob[] = []
   const forms: Form.Info[] = []
   const permissions: Permission.Request[] = []
   const prompts = new Map<string, number>()
@@ -180,6 +183,7 @@ export function world() {
   /** Location directories with `experimental.todo` on. */
   const todo = new Set<string>()
   const ctx: TrackerContext = {
+    background: () => Effect.sync(() => background),
     todo: (directory) => Effect.sync(() => todo.has(directory)),
     session: {
       get: ({ sessionID }) => {
@@ -239,7 +243,7 @@ export function world() {
     },
   }
   const add = (info: Session.Info) => infos.set(info.id, info)
-  return { ctx, infos, active, forms, permissions, prompts, reads, add, transcripts, watched, settings, todo }
+  return { ctx, infos, active, background, forms, permissions, prompts, reads, add, transcripts, watched, settings, todo }
 }
 
 export type Scene = "working" | "one-question" | "two-questions" | "mixed" | "failed-only" | "calm" | "progress"
@@ -346,9 +350,37 @@ export function shellExited(shellID: string, at: number): Event {
   return { type: "shell.exited", created: at, data: { id: shellID } }
 }
 
-/** The completion notice Core admits for a background shell. */
+export function shellJob(sessionID: string, shellID: string, at: number, title: string): BackgroundJob {
+  return { id: shellID, type: "shell", sessionID: Session.ID.make(sessionID), started: at, title }
+}
+
+/** A legacy direct synthetic event, still accepted alongside the current inbox events. */
 export function shellNotice(sessionID: string, shellID: string, at: number): Event {
   return { type: "session.synthetic", created: at, data: { sessionID, metadata: { source: "shell", shellID } } }
+}
+
+/** The current durable admission of a background shell's completion or restart cancellation. */
+export function inboxShellNotice(
+  sessionID: string,
+  shellID: string,
+  at: number,
+  state: "completed" | "error" | "cancelled" = "completed",
+) {
+  return Schema.decodeUnknownSync(SessionEvent.InboxEnqueued)({
+    type: SessionEvent.InboxEnqueued.type,
+    id: `evt_notice_${shellID}`,
+    created: at,
+    durable: { aggregateID: sessionID, seq: 1, version: SessionEvent.InboxEnqueued.durable.version },
+    data: {
+      sessionID,
+      inboxID: `msg_notice_${shellID}`,
+      item: {
+        type: "synthetic",
+        delivery: "steer",
+        payload: { text: `Command ${state}`, metadata: { source: "shell", shellID, state } },
+      },
+    },
+  })
 }
 
 /** A shell tool call answered with "moved to the background", as stored in the transcript. */
