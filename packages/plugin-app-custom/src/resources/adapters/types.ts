@@ -32,6 +32,8 @@ export interface Probe {
   readonly status: Entry["status"]
   /** Refreshed metadata (for example the URL Chrome now shows); merged over the stored one. */
   readonly meta?: Resources.Meta
+  /** `meta` replaces the stored metadata instead of merging, so fields that no longer hold (a stale serial) go. */
+  readonly exact?: boolean
 }
 
 export interface Image {

@@ -23,43 +23,20 @@ import type { Adapter, Entry, Image, Probe } from "./types.js"
 export const adapter: Adapter = {
   kind: "android-emulator",
   async probe(entries) {
+    const android = entries.filter((entry) => entry.meta.kind === "android-emulator")
     const running = await emulators()
-    return new Map(
-      await Promise.all(
-        entries.flatMap((entry) => {
-          if (entry.meta.kind !== "android-emulator") return []
-          const meta = entry.meta
-          const found = running.find(
-            (item) => (meta.serial && item.serial === meta.serial) || (meta.avd && item.avd === meta.avd),
-          )
-          if (found)
-            return [
-              Promise.resolve<[string, Probe]>([
-                entry.id,
-                {
-                  status: "running",
-                  meta: {
-                    ...meta,
-                    serial: found.serial,
-                    consolePort: found.consolePort,
-                    ...(found.avd ? { avd: found.avd } : {}),
-                    ...(found.grpcPort ? { grpcPort: found.grpcPort } : {}),
-                    ...(found.device ? { device: found.device } : {}),
-                  },
-                },
-              ]),
-            ]
-          return [
-            avdExists(meta.avd).then((exists): [string, Probe] => [entry.id, { status: exists ? "stopped" : "gone" }]),
-          ]
-        }),
-      ),
-    )
+    const names = [...new Set(android.flatMap((entry) => identity(entry) ?? []))]
+    const existing = await Promise.all(names.map(async (avd) => [avd, await avdExists(avd)] as const))
+    return resolve(android, running, new Set(existing.flatMap(([avd, found]) => (found ? [avd] : []))))
   },
 
   async snapshot(entry) {
-    const serial = requireSerial(entry)
-    const device = await attach(serial).catch(() => undefined)
+    const target = requireTarget(entry)
+    const serial = target.serial
+    const device = await attach(target).catch((error: unknown) => {
+      if (error instanceof AnotherEmulator) throw error
+      return undefined
+    })
     if (!device) {
       const data = await run([adb(), "-s", serial, "exec-out", "screencap", "-p"])
       return { mime: "image/png", data, ...size(data) }
@@ -74,8 +51,9 @@ export const adapter: Adapter = {
   },
 
   async stream(entry, sink, signal) {
-    const serial = requireSerial(entry)
-    const device = await attach(serial)
+    const target = requireTarget(entry)
+    const serial = target.serial
+    const device = await attach(target)
     const state = {
       latest: undefined as Frame | undefined,
       /** Last frame sent and whether it went out at the still (sharp) quality. */
@@ -166,14 +144,131 @@ export const adapter: Adapter = {
   },
 
   async input(entry, event) {
-    const serial = requireSerial(entry)
-    const device = await attach(serial)
+    const target = requireTarget(entry)
+    const serial = target.serial
+    const device = await attach(target)
     const panel = (device.panel ??= await panelSize(serial))
     await plan(event, { rotation: device.rotation, panel }).reduce(
       (chain, step) => chain.then(() => perform(serial, device, step)),
       Promise.resolve(),
     )
   },
+}
+
+/**
+ * Identity of an Android resource. The AVD is the identity; the serial (`emulator-<console port>`) is only where it
+ * runs now, and the next AVD to start takes the same port. IDs carry the AVD when one was known at registration
+ * (`android-emulator:<AVD>`), so the ID outranks `meta.avd`: entries whose `meta.avd` was rewritten by the old
+ * serial-or-AVD matching still say which emulator they are. Older IDs made from a serial (`android-emulator:emulator-5554`)
+ * carry no AVD; those entries are identified by the AVD their first probe bound them to.
+ */
+export function identity(entry: Pick<Entry, "id" | "meta">) {
+  return avdFromID(entry.id) ?? (entry.meta.kind === "android-emulator" ? entry.meta.avd : undefined)
+}
+
+/** The AVD an Android resource ID names, unless it was made from a serial or without either. */
+export function avdFromID(id: string) {
+  const native = id.startsWith("android-emulator:") ? id.slice("android-emulator:".length).replace(/~\d+$/, "") : ""
+  if (!native || native === "unknown" || /^emulator-\d+$/.test(native)) return undefined
+  return native
+}
+
+/**
+ * Restores an entry whose `meta` describes another AVD than its ID (the port-reuse corruption): `meta.avd` back to
+ * the ID's AVD, the other emulator's serial, ports and device model dropped, and `running` turned into `stopped` until
+ * a probe finds its own AVD. Owner, name, purpose and history stay. Returns `undefined` when nothing needs repairing.
+ */
+export function repair(entry: Entry): Entry | undefined {
+  const avd = avdFromID(entry.id)
+  if (entry.meta.kind !== "android-emulator" || !avd || entry.meta.avd === undefined || entry.meta.avd === avd)
+    return undefined
+  return {
+    ...entry,
+    meta: { kind: "android-emulator", avd },
+    status: entry.status === "running" ? "stopped" : entry.status,
+  }
+}
+
+/**
+ * Probe results for Android entries (pure; `probe` gathers `running` and the AVDs that exist on disk).
+ *
+ * - An entry with an AVD is running only while that AVD runs, whatever serial it now has; a serial it held before
+ *   says nothing about the AVD now on that port. Stopped entries drop their serial and ports, so neither discovery,
+ *   the agent lock nor input can reach the next AVD on that port through them.
+ * - An entry known only by serial binds to the emulator on that serial, and so learns its AVD, unless another entry
+ *   already is that AVD.
+ * - When several entries are the same AVD (left by the old matching), one represents it: the one whose ID is that
+ *   AVD, else the earliest discovered. The others stay, history intact, but are reported stopped and unbound.
+ *
+ * Every result replaces the entry's metadata (`exact`), since stale fields must go, not merge.
+ */
+export function resolve(
+  entries: readonly Entry[],
+  running: readonly RunningEmulator[],
+  existing: ReadonlySet<string>,
+): Map<string, Probe> {
+  const representative = representatives(entries)
+  return new Map(
+    entries.flatMap((entry): [string, Probe][] => {
+      if (entry.meta.kind !== "android-emulator") return []
+      const meta = entry.meta
+      const avd = identity(entry)
+      if (!avd) {
+        const found = running.find(
+          (item) =>
+            meta.serial !== undefined && item.serial === meta.serial && !(item.avd && representative.has(item.avd)),
+        )
+        if (found) return [[entry.id, { status: "running", meta: bound(meta, found), exact: true }]]
+        return [[entry.id, { status: "gone" }]]
+      }
+      const own = meta.avd === avd
+      const found = representative.get(avd) === entry.id ? running.find((item) => item.avd === avd) : undefined
+      if (found)
+        return [[entry.id, { status: "running", meta: bound({ kind: "android-emulator", avd }, found), exact: true }]]
+      return [
+        [
+          entry.id,
+          {
+            status: existing.has(avd) ? "stopped" : "gone",
+            meta: { kind: "android-emulator", avd, ...(own && meta.device ? { device: meta.device } : {}) },
+            exact: true,
+          },
+        ],
+      ]
+    }),
+  )
+}
+
+/** For each AVD, the entry that represents it: the one whose ID is that AVD, else the earliest discovered. */
+export function representatives(entries: readonly Entry[]) {
+  const groups = Map.groupBy(
+    entries.flatMap((entry) => {
+      const avd = identity(entry)
+      return avd ? [{ avd, entry }] : []
+    }),
+    (item) => item.avd,
+  )
+  return new Map(
+    [...groups].map(([avd, items]) => {
+      const chosen =
+        items.find((item) => avdFromID(item.entry.id) === avd && !/~\d+$/.test(item.entry.id)) ??
+        items.toSorted(
+          (a, b) => a.entry.discoveredAt - b.entry.discoveredAt || a.entry.id.localeCompare(b.entry.id),
+        )[0]!
+      return [avd, chosen.entry.id] as const
+    }),
+  )
+}
+
+function bound(meta: Extract<Entry["meta"], { kind: "android-emulator" }>, found: RunningEmulator) {
+  return {
+    ...meta,
+    serial: found.serial,
+    consolePort: found.consolePort,
+    ...(found.avd ? { avd: found.avd } : {}),
+    ...(found.grpcPort ? { grpcPort: found.grpcPort } : {}),
+    ...(found.device ? { device: found.device } : {}),
+  }
 }
 
 /** Frames are scaled by the emulator to fit this box, so portrait and landscape panels keep the same detail. */
@@ -204,6 +299,8 @@ type Frame = { readonly rgba: Uint8Array; readonly width: number; readonly heigh
 
 type Device = {
   connection: Connection
+  /** AVD running on this serial when the connection opened (from its `pid_<pid>.ini`). */
+  avd?: string
   rotation: number
   panel?: { readonly width: number; readonly height: number }
 }
@@ -211,16 +308,42 @@ type Device = {
 const devices = new Map<string, Promise<Device>>()
 
 /** One gRPC connection per emulator, opened on demand and reopened when the emulator restarts. */
-function attach(serial: string) {
-  const existing = devices.get(serial)
+/**
+ * One gRPC connection per emulator, opened on demand and reopened when the emulator restarts. The console port (and
+ * so the serial) is reused by whichever AVD starts next, so a connection only serves the AVD it was opened for: asking
+ * for another one fails with `AnotherEmulator` instead of capturing or touching the wrong device.
+ */
+function attach(target: { readonly serial: string; readonly avd?: string }) {
+  const existing = devices.get(target.serial)
   const fresh = () => {
-    const created = grpcEndpoint(serial).then((endpoint): Device => ({ connection: connect(endpoint), rotation: 0 }))
-    devices.set(serial, created)
-    created.catch(() => devices.delete(serial))
+    const created = grpcEndpoint(target.serial).then(
+      (endpoint): Device => ({
+        connection: connect(endpoint),
+        rotation: 0,
+        ...(endpoint.avd ? { avd: endpoint.avd } : {}),
+      }),
+    )
+    devices.set(target.serial, created)
+    created.catch(() => devices.delete(target.serial))
     return created
   }
-  if (!existing) return fresh()
-  return existing.then((device) => (device.connection.closed ? fresh() : device))
+  const device = existing ? existing.then((item) => (item.connection.closed ? fresh() : item)) : fresh()
+  return device.then((item) => {
+    checkAvd(target, item.avd)
+    return item
+  })
+}
+
+/** Refuses a device whose AVD is known and differs from the one the resource is (its port was reused). */
+export function checkAvd(target: { readonly serial: string; readonly avd?: string }, running: string | undefined) {
+  if (target.avd && running && running !== target.avd) throw new AnotherEmulator(target.serial, target.avd, running)
+}
+
+export class AnotherEmulator extends Error {
+  constructor(serial: string, expected: string, running: string) {
+    super(`${serial} now runs the AVD ${running}, not ${expected}`)
+    this.name = "AnotherEmulator"
+  }
 }
 
 export type Step =
@@ -469,9 +592,11 @@ async function panelSize(serial: string) {
   return { width: Number(match[1]), height: Number(match[2]) }
 }
 
-function requireSerial(entry: Entry) {
+/** The serial to act on and the AVD that must be running there. */
+function requireTarget(entry: Entry) {
   if (entry.meta.kind !== "android-emulator" || !entry.meta.serial) throw new Error("Emulator is not attached to adb")
-  return entry.meta.serial
+  const avd = identity(entry)
+  return { serial: entry.meta.serial, ...(avd ? { avd } : {}) }
 }
 
 /** The gRPC port and token of a running emulator, turning gRPC on through the console when it is off. */
@@ -480,11 +605,11 @@ async function grpcEndpoint(serial: string) {
   if (!Number.isInteger(consolePort)) throw new Error(`Not an emulator serial: ${serial}`)
   const find = async () => (await discovered()).find((item) => item.consolePort === consolePort && item.grpcPort)
   const existing = await find()
-  if (existing?.grpcPort) return { port: existing.grpcPort, token: existing.grpcToken }
+  if (existing?.grpcPort) return { port: existing.grpcPort, token: existing.grpcToken, avd: existing.avd }
   await text([adb(), "-s", serial, "emu", "grpc", String(consolePort + 3000)], { timeout: 10_000 })
   const started = await find()
   if (!started?.grpcPort) throw new Error("The emulator did not start its gRPC endpoint")
-  return { port: started.grpcPort, token: started.grpcToken }
+  return { port: started.grpcPort, token: started.grpcToken, avd: started.avd }
 }
 
 export type RunningEmulator = {

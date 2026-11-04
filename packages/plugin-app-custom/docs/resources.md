@@ -43,8 +43,9 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | `discoveredAt`, `lastUsedAt`, `updatedAt` | Epoch ms                                                                                                                                                                                  |
 | `activity`                                | Optional (rev. 2026-10-30): the agents' latest shell commands that named it, newest first, at most 5: `{ at, command, sessionID?, agent?, running? }`; see [Activity](#activity)          |
 
-Two registrations name the same resource when they share a UDID, an adb serial or AVD, or a Playwright session or
-CDP endpoint; the hub merges them into one entry (metadata merged, latest owner wins).
+Two registrations name the same resource when they share a UDID, a Playwright session or CDP endpoint, or, for
+Android, the same AVD (see [Android identity](#android-identity)); the hub merges them into one entry (metadata
+merged, latest owner wins).
 
 ## RPC `custom.resources`
 
@@ -226,6 +227,21 @@ hand-encoded protobuf, no dependency). Reference: the SDK's `emulator/lib/emulat
 - **Discovery.** Running emulators come from `avd/running/pid_<pid>.ini` (written only while gRPC is on; the PID is
   in the file name) and from `adb devices` (`emulator-<console port>`, AVD name from `adb emu avd name`), so an
   emulator started without gRPC is still found. `device` comes from the AVD's `hw.device.name`.
+- **Identity (rev. 2026-11-04).** <a id="android-identity"></a>The AVD is the resource; `emulator-<console port>` is
+  only where it runs now, and the next AVD to start takes the same port. `identity(entry)` is the AVD in the ID
+  (`android-emulator:<AVD>`) or, for older serial-made IDs (`android-emulator:emulator-5554`), the AVD the first probe
+  bound it to. Two AVDs never match, whatever serial they shared; a serial alone names an entry known only by serial,
+  or the entry whose AVD runs there now. `probe` reports an entry running only while its AVD runs and replaces its
+  metadata (`Probe.exact`), so a stopped AVD drops its serial and ports and neither discovery, the agent lock nor input
+  reaches the next AVD on that port through it. A serial-made ID that a new AVD would take gets a `~2` suffix instead
+  of overwriting the old entry. The gRPC connection records the AVD it was opened for, and capture or input for
+  another AVD fails (`AnotherEmulator`); a stream is stopped when its resource moves to another serial or AVD.
+  Until 2026-11-04 the hub matched by serial *or* AVD, so when AVD_A stopped and AVD_B reused its port, A's entry
+  took B's serial, AVD and model, and the app showed B twice. On load, entries whose `meta.avd` differs from their ID's
+  AVD get their own AVD back, lose the other emulator's serial, ports and model, and turn `stopped` until a probe
+  finds them (owner, name, purpose, history, lock stay). Several entries left as the same AVD (serial-made IDs) keep
+  their history, but only one represents it (the one whose ID is that AVD, else the earliest discovered); the others
+  are reported stopped. Nothing is deleted; the usual retention prunes them.
 - **gRPC endpoint.** The adapter reads `grpc.port` and `grpc.token` from the ini. When gRPC is off (the usual case:
   `-ports` disables the automatic start), it turns it on through the console, `adb -s <serial> emu grpc
 <console+3000>`, as Android Studio and serve-emu do. The endpoint listens on 127.0.0.1 and requires the bearer token;

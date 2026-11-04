@@ -3,6 +3,7 @@ import fs from "node:fs/promises"
 import type { Server, ServerWebSocket } from "bun"
 import { optional } from "@opencode/schema/schema"
 import { Option, Schema } from "effect"
+import { identity, repair } from "../adapters/android-emulator.js"
 import { namespaceOf, sameNamespace } from "../adapters/chrome.js"
 import { jpeg, size } from "../adapters/process.js"
 import type { Adapter, Entry, Image, StoredActivity, StreamSink } from "../adapters/types.js"
@@ -180,7 +181,11 @@ export function createHub(options: HubOptions) {
     const stored = await Bun.file(options.file)
       .json()
       .catch(() => [])
-    Option.getOrElse(decodeStored(stored), () => []).forEach((entry) => entries.set(entry.id, entry))
+    const loaded = Option.getOrElse(decodeStored(stored), () => [])
+    // Android entries whose metadata the old serial-or-AVD matching rewrote to another AVD get their own back.
+    const repaired = loaded.map((entry) => repair(entry) ?? entry)
+    repaired.forEach((entry) => entries.set(entry.id, entry))
+    if (repaired.some((entry, index) => entry !== loaded[index])) persist()
   }
 
   const persist = () => {
@@ -251,10 +256,10 @@ export function createHub(options: HubOptions) {
 
   const upsert = (input: Upsert) => {
     const at = now()
-    const existing = [...entries.values()].find(
-      (entry) => entry.kind === input.kind && sameResource(entry.meta, input.meta),
-    )
-    const id = existing?.id ?? idFor(input.meta)
+    const existing = registered(input.kind, input.meta)
+    const base = idFor(input.meta)
+    // A serial-made ID can already belong to an entry that is now another AVD: never overwrite it.
+    const id = existing?.id ?? (entries.has(base) ? free(base) : base)
     const entry: Entry = {
       id,
       kind: input.kind,
@@ -274,6 +279,27 @@ export function createHub(options: HubOptions) {
     changed(id)
     void probe([entry.kind])
     return view(entry)
+  }
+
+  /**
+   * The registered entry `meta` names. Android entries are their AVD (`identity`): two AVDs never match, whatever
+   * serial they share over time; a serial alone names an entry known only by serial, or the entry whose AVD runs
+   * there now. Among several candidates: an AVD match, then the entry whose ID is that AVD, then a running one, then
+   * the earliest discovered.
+   */
+  const registered = (kind: Resources.Kind, meta: Resources.Meta) => {
+    const candidates = [...entries.values()].filter((entry) => entry.kind === kind && names(entry, meta))
+    if (meta.kind !== "android-emulator") return candidates[0]
+    const rank = (entry: Entry) =>
+      (meta.avd !== undefined && identity(entry) === meta.avd ? 0 : 8) +
+      (entry.id === idFor(meta) ? 0 : 4) +
+      (entry.status === "running" ? 0 : 2)
+    return candidates.toSorted((a, b) => rank(a) - rank(b) || a.discoveredAt - b.discoveredAt)[0]
+  }
+
+  const free = (base: string) => {
+    const taken = (n: number): string => (entries.has(`${base}~${n}`) ? taken(n + 1) : `${base}~${n}`)
+    return taken(2)
   }
 
   /** Closes a shell command on every resource it named: the resource stops counting as in use for it. */
@@ -406,10 +432,14 @@ export function createHub(options: HubOptions) {
       [...result.entries()].flatMap(([id, found]) => {
         const entry = entries.get(id)
         if (!entry) return []
-        const meta = found.meta ? mergeMeta(entry.meta, found.meta) : entry.meta
+        const meta = found.meta ? (found.exact ? found.meta : mergeMeta(entry.meta, found.meta)) : entry.meta
         if (found.status === entry.status && JSON.stringify(meta) === JSON.stringify(entry.meta)) return []
         entries.set(id, { ...entry, status: found.status, meta, updatedAt: at })
-        if (found.status !== "running") lives.get(id)?.controller.abort()
+        // A stream follows the device it was opened on: stop it when the resource stops or moved to another one.
+        if (found.status !== "running" || moved(entry.meta, meta)) {
+          lives.get(id)?.controller.abort()
+          snapshots.delete(id)
+        }
         return [id]
       }),
     )
@@ -998,7 +1028,6 @@ export function idFor(meta: Resources.Meta) {
   return `chrome:${meta.session ?? meta.cdp ?? "unknown"}${namespace ? `@${namespace}` : ""}`
 }
 
-/** Whether two metadata records name the same resource (shared UDID, adb serial, AVD, session or CDP endpoint). */
 /**
  * The entry's history after `input`: the call's command added at its start (a call seen only once it ended, a
  * resource found in its output, starts and ends then), or ended when it comes back with `running: false`. The oldest
@@ -1036,10 +1065,31 @@ export function shown(command: string) {
   return line.length > limit ? `${line.slice(0, limit - 1)}…` : line
 }
 
+/** Whether `meta` names `entry`: `sameResource`, except that Android entries are their AVD (see `registered`). */
+export function names(entry: Pick<Entry, "id" | "meta" | "status">, meta: Resources.Meta) {
+  if (entry.meta.kind !== "android-emulator" || meta.kind !== "android-emulator") return sameResource(entry.meta, meta)
+  const avd = identity(entry)
+  if (avd !== undefined && meta.avd !== undefined) return avd === meta.avd
+  if (meta.serial === undefined || entry.meta.serial !== meta.serial) return false
+  return avd === undefined || entry.status === "running"
+}
+
+function moved(before: Resources.Meta, after: Resources.Meta) {
+  if (before.kind === "android-emulator" && after.kind === "android-emulator")
+    return before.serial !== after.serial || before.avd !== after.avd
+  return false
+}
+
+/**
+ * Whether two metadata records name the same resource (shared UDID, session or CDP endpoint; for Android, the same AVD
+ * when both know it, else the same serial). The hub matches registrations with `names`, which also weighs IDs.
+ */
 export function sameResource(a: Resources.Meta, b: Resources.Meta) {
   if (a.kind === "ios-simulator" && b.kind === "ios-simulator") return a.udid === b.udid
-  if (a.kind === "android-emulator" && b.kind === "android-emulator")
-    return (a.avd !== undefined && a.avd === b.avd) || (a.serial !== undefined && a.serial === b.serial)
+  if (a.kind === "android-emulator" && b.kind === "android-emulator") {
+    if (a.avd !== undefined && b.avd !== undefined) return a.avd === b.avd
+    return a.serial !== undefined && a.serial === b.serial
+  }
   if (a.kind === "chrome" && b.kind === "chrome")
     return (
       (a.session !== undefined && a.session === b.session && sameNamespace(a.workspace, b.workspace)) ||

@@ -1,3 +1,4 @@
+import { identity } from "./adapters/android-emulator.js"
 import { sameResource } from "./hub/hub.js"
 import type { Resources } from "./rpc.js"
 
@@ -136,11 +137,12 @@ export function known(list: readonly Reference[], resources: readonly Resources.
         )
         return named.length === 1 && named[0] === resource
       }
+      // An AVD names the resource that is that AVD (its ID outranks a rewritten `meta.avd`); a serial names the one
+      // running there now (stopped resources hold no serial).
       if (reference.kind === "android-emulator" && meta.kind === "android-emulator")
-        return (
-          (reference.serial !== undefined && reference.serial === meta.serial) ||
-          (reference.avd !== undefined && reference.avd === meta.avd)
-        )
+        return reference.avd !== undefined
+          ? reference.avd === identity(resource)
+          : reference.serial !== undefined && reference.serial === meta.serial
       if (reference.kind === "chrome" && meta.kind === "chrome")
         return sameResource(meta, {
           kind: "chrome",
