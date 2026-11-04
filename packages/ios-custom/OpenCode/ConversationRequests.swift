@@ -59,201 +59,46 @@ struct RequestButtonStyle: ButtonStyle {
   }
 }
 
+/// An agent's question in the conversation: the whole of it, to read, and where it is answered. The answer itself
+/// lives in the composer's place (`QuestionComposer`, one field, Responder); this card has no field of its own, and
+/// its Responder brings the answer back when the chat took the composer or another question is being answered.
 struct ConversationQuestionCard: View {
   @Environment(\.appTheme) private var theme
   let form: PendingForm
   let store: ConversationStore
-  /// The answers live in the draft, not in the view: they survive another session, the app closing, and come from
-  /// (and go to) the server's `custom.question-drafts` (`QuestionDraftSync`).
-  private var draft: QuestionDraftSync { store.questionDrafts.sync(form) }
-  private var values: [String: JSONValue] { draft.state.values }
-  private var custom: [String: String] { draft.state.custom }
-  #if os(macOS)
-  /// Each answer field takes the keyboard when its count goes up (Return from the question before).
-  @State private var focusRequests: [String: Int] = [:]
-  #else
-  @FocusState private var focus: String?
-  #endif
-  private var reply: QuestionReply { QuestionReply(form: form, values: values) }
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Label(
-        form.title == "Questions" ? "Uma pergunta para você" : form.title,
-        systemImage: "questionmark.bubble"
-      )
-      .appFont(.preview, weight: .semibold).foregroundStyle(theme.color(.info))
-      ForEach(form.fields.filter { QuestionReply.visible($0, values: reply.answer) }) { field in
-        VStack(alignment: .leading, spacing: 10) {
-          if let title = field.title { Text(title).appFont(.preview, weight: .semibold) }
-          if let description = field.description { Text(description).appFont(.preview) }
-          ForEach(field.options ?? []) { option in
-            Button {
-              // Choosing an option leaves the answer field: no keyboard without a field to type in.
-              leaveAnswerField()
-              if field.type == .multiselect {
-                let selected = values[field.key]?.array ?? []
-                draft.choose(field.key, .array(
-                  selected.contains(.string(option.value))
-                    ? selected.filter { $0 != .string(option.value) }
-                    : selected + [.string(option.value)]))
-              } else {
-                draft.choose(field.key, .string(option.value))
-              }
-            } label: {
-              HStack(spacing: 10) {
-                Image(
-                  systemName: selected(option.value, field: field)
-                    ? (field.type == .multiselect
-                      ? "checkmark.square.fill" : "largecircle.fill.circle")
-                    : (field.type == .multiselect ? "square" : "circle")
-                )
-                .foregroundStyle(
-                  theme.color(selected(option.value, field: field) ? .primary : .textSecondary))
-                VStack(alignment: .leading, spacing: 3) {
-                  Text(option.label).appFont(.preview, weight: .medium)
-                  if let description = option.description {
-                    Text(description).appFont(.caption).foregroundStyle(theme.color(.textSecondary))
-                  }
-                }
-                Spacer()
-              }.padding(11).background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
-            }.buttonStyle(.plain).accessibilityAddTraits(
-              selected(option.value, field: field) ? .isSelected : [])
+    let answering = store.answering(form)
+    let shown = store.answeringForm?.id == form.id && !answering.chatting
+    VStack(alignment: .leading, spacing: 12) {
+      Label(form.title == "Questions" ? "Pergunta do agente" : form.title, systemImage: "questionmark.bubble")
+        .appFont(.secondary, weight: .semibold).foregroundStyle(theme.color(.info))
+      ForEach(answering.fields) { field in
+        VStack(alignment: .leading, spacing: 4) {
+          if let title = field.title {
+            Text(title).appFont(.body, weight: .semibold).foregroundStyle(theme.color(.textStrong))
           }
-          // An answer field has no send button of its own: the form sends only through Enviar. Return answers there
-          // (`returned`).
-          if field.type == .string && (field.custom == true || field.options == nil) {
-            let text = Binding(
-              get: {
-                let text = values[field.key]?.string ?? ""
-                return field.options?.contains { $0.value == text } == true ? "" : text
-              }, set: { draft.type(field.key, $0) })
-            #if os(macOS)
-            // The Mac composer's answer mode: the microphone only, Shift+Return breaks the line, Esc leaves.
-            MacReplyComposer(store: store, text: text, placeholder: "Outra resposta…",
-              focusRequest: focusRequests[field.key] ?? 0, submit: { returned(field) },
-              focusChanged: { focused(field.key, $0) })
-              .padding(11).background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
-            #else
-            TextField("Outra resposta…", text: text)
-              .focused($focus, equals: field.key)
-              .submitLabel(reply.onReturn(in: form, from: field.key) == .send ? .send : .next)
-              .onSubmit { returned(field) }
-              .appFont(.preview).padding(11).background(
-                theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
-              .accessibilityIdentifier("question-answer-\(field.key)")
-            #endif
-          }
-          if field.type == .multiselect && field.custom == true {
-            ForEach(
-              (values[field.key]?.array ?? []).compactMap(\.string).filter { value in
-                !(field.options ?? []).contains { $0.value == value }
-              }, id: \.self
-            ) { value in
-              HStack {
-                Text(value).appFont(.preview)
-                Spacer()
-                Button("Remover", systemImage: "xmark") {
-                  draft.choose(field.key, .array((values[field.key]?.array ?? []).filter { $0 != .string(value) }))
-                }.labelStyle(.iconOnly)
-              }
-            }
-            HStack {
-              let text = Binding(get: { custom[field.key] ?? "" }, set: { draft.typeCustom(field.key, $0) })
-              #if os(macOS)
-              MacReplyComposer(store: store, text: text, placeholder: "Outra resposta…",
-                focusRequest: focusRequests[field.key] ?? 0, submit: { returned(field) },
-                focusChanged: { focused(field.key, $0) })
-              #else
-              TextField("Outra resposta…", text: text)
-                .focused($focus, equals: field.key)
-                .submitLabel(.next)
-                .onSubmit { returned(field) }
-                .accessibilityIdentifier("question-answer-\(field.key)")
-              #endif
-              Button("Adicionar") { addCustom(field) }.disabled(
-                (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }.appFont(.preview).padding(11).background(
-              theme.color(.surface), in: RoundedRectangle(cornerRadius: 9))
-          }
-          if field.type != .string && field.type != .multiselect {
-            Text("Este tipo de pergunta ainda não é compatível.").appFont(.caption).foregroundStyle(
-              theme.color(.warning))
-          }
+          if let description = field.description { Text(description).appFont(.body).textSelection(.enabled) }
         }
+        .fixedSize(horizontal: false, vertical: true)
       }
-      HStack(spacing: 10) {
+      HStack {
+        if shown {
+          Label("Responda no campo abaixo", systemImage: "arrow.down").appFont(.caption)
+            .foregroundStyle(theme.color(.textSecondary))
+        } else {
+          Button("Responder") {
+            store.answeringID = form.id
+            answering.chatting = false
+          }
+          .buttonStyle(QuestionButtonStyle(filled: true)).accessibilityIdentifier("question-card-answer")
+        }
         Spacer()
-        Button("Descartar") { Task { await store.dismiss(form) } }.buttonStyle(
-          RequestButtonStyle(filled: false))
-        Button("Enviar", action: send)
-          .buttonStyle(RequestButtonStyle(filled: true)).disabled(
-            reply.answer.isEmpty || !reply.valid(for: form))
       }
     }
     .foregroundStyle(theme.color(.text)).padding(16)
-    .fixedSize(horizontal: false, vertical: true)
     .background(theme.color(.surface), in: RoundedRectangle(cornerRadius: 15))
-    .overlay {
-      RoundedRectangle(cornerRadius: 15).strokeBorder(
-        theme.color(.info).opacity(0.4), lineWidth: 0.7)
-    }
-    .disabled(store.acting.contains(form.id))
-    .task(id: form.id) { await draft.load() }
-    #if os(iOS)
-    .onChange(of: focus) { _, key in draft.focused = key }
-    #endif
-  }
-  #if os(macOS)
-  private func focused(_ key: String, _ focused: Bool) {
-    if focused { draft.focused = key } else if draft.focused == key { draft.focused = nil }
-  }
-  #endif
-  private func send() {
-    guard !reply.answer.isEmpty, reply.valid(for: form), !store.acting.contains(form.id) else { return }
-    Task { await store.reply(form, answer: reply) }
-  }
-  /// Return in an answer field. A multiple choice's own answer with text adds it (Adicionar); otherwise Return sends
-  /// the form once every question shown is answered, or goes to the next unanswered one (`QuestionReply.onReturn`).
-  private func returned(_ field: PendingForm.Field) {
-    if field.type == .multiselect, !(custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-      addCustom(field)
-      return focusAnswer(field.key)
-    }
-    switch reply.onReturn(in: form, from: field.key) {
-    case .send: send()
-    case .next(let key): focusAnswer(key)
-    case .stay: focusAnswer(field.key)
-    }
-  }
-  /// The keyboard goes to that question's answer field; a question with options only leaves it.
-  private func focusAnswer(_ key: String) {
-    let typed = form.fields.first { $0.key == key }.map { field in
-      field.type == .string ? field.custom == true || field.options == nil : field.type == .multiselect && field.custom == true
-    } ?? false
-    #if os(macOS)
-    if typed { focusRequests[key, default: 0] += 1 } else { NSApp.keyWindow?.makeFirstResponder(nil) }
-    #else
-    focus = typed ? key : nil
-    #endif
-  }
-  /// The answer field with the keyboard gives it up. The Mac has no keyboard to hide and keeps its behavior.
-  private func leaveAnswerField() {
-    #if os(iOS)
-    focus = nil
-    #endif
-  }
-  private func addCustom(_ field: PendingForm.Field) {
-    let text = (custom[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !text.isEmpty else { return }
-    let selected = values[field.key]?.array ?? []
-    draft.set(field.key, value: selected.contains(.string(text)) ? values[field.key] : .array(selected + [.string(text)]),
-      custom: nil)
-  }
-  private func selected(_ option: String, field: PendingForm.Field) -> Bool {
-    field.type == .multiselect
-      ? values[field.key]?.array?.contains(.string(option)) == true
-      : values[field.key] == .string(option)
+    .overlay { RoundedRectangle(cornerRadius: 15).strokeBorder(theme.color(.info).opacity(0.4), lineWidth: 0.7) }
+    .accessibilityElement(children: .contain).accessibilityIdentifier("question-card")
   }
 }
 

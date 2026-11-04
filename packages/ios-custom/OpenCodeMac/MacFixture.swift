@@ -39,6 +39,10 @@ import OpenCodeKit
   }
 
   func client() -> OpenCodeClient {
+    // `question` starts from no answer: a run stopped before Responder leaves this device's draft of the form.
+    if MacAjustesChecks.mode == "question" {
+      QuestionDraftStore(server: Self.configuration.url.absoluteString).remove(MacFixture.rootID, "frm_mac_root")
+    }
     let server = MacFixtureServer(root: root, now: Date.now.timeIntervalSince1970 * 1000,
       pictures: MacFixturePictures.make())
     let proxy = MacFixtureProxy(now: .now)
@@ -76,6 +80,11 @@ struct MacFixtureServer: Sendable {
     let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
     let input = request.httpBody.flatMap { try? JSONDecoder().decode(RPC.self, from: $0) }?.input
     if path.hasPrefix("/api/rpc/") { return rpc(String(path.dropFirst("/api/rpc/".count)), input) }
+    // `question`: the answer is kept for the check, and the form is answered (gone from the family) from then on.
+    if MacAjustesChecks.mode == "question", path == "/api/session/\(MacFixture.rootID)/form/frm_mac_root/reply" {
+      MacAjustesChecks.questionReplies.append(request.httpBody ?? Data())
+      return ""
+    }
     switch path {
     case "/api/info": return #"{"version":"0.0.0-mac-fixture","paths":{"tmp":"/tmp"}}"#
     case "/api/project": return projects
@@ -408,10 +417,11 @@ struct MacFixtureServer: Sendable {
     return #"{"version":1,"revision":1,"data":{"projects":{"local":{"projects":[{"worktree":"\#(home)/Dev/abacato-v2","expanded":true},{"worktree":"\#(home)/Dev/opencode2","expanded":true}\#(extra)],"chatsIndex":2}},"pinnedSessions":[],"mutedSessions":[],"settings":{"autoApprove":false},"models":{"user":[{"providerID":"llm-proxy","modelID":"opus-5.5","visibility":"show"}],"variant":{},"default":{"providerID":"llm-proxy","modelID":"opus-5.5","variant":"xhigh"}}}}"#
   }
 
-  /// `-OpenCodeMacAjustes question`: the root asks two questions, one with options and its own answer, one of text.
+  /// `-OpenCodeMacAjustes question`: the root asks three questions (a single choice with its own answer, a multiple
+  /// choice with its own items, a text), until it is answered.
   private var rootQuestion: String {
-    guard MacAjustesChecks.mode == "question" else { return "" }
-    return #"{"id":"frm_mac_root","sessionID":"ses_mac_root","title":"Questions","fields":[{"key":"modulo","type":"string","title":"Qual nome usar para o módulo de capturas?","options":[{"value":"capturas","label":"capturas"},{"value":"prints","label":"prints"}],"custom":true},{"key":"pasta","type":"string","title":"Em que pasta salvar?"}],"metadata":{"kind":"question"}}"#
+    guard MacAjustesChecks.mode == "question", MacAjustesChecks.questionReplies.isEmpty else { return "" }
+    return #"{"id":"frm_mac_root","sessionID":"ses_mac_root","title":"Questions","fields":[{"key":"modulo","type":"string","title":"Qual nome usar para o módulo de capturas?","description":"O módulo guarda as capturas do Mac e do iPhone que vão para a revisão do desenho.","options":[{"value":"capturas","label":"capturas","description":"O nome que já aparece nos scripts"},{"value":"prints","label":"prints","description":"Mais curto, como a pasta do iPhone"}],"custom":true},{"key":"alvos","type":"multiselect","title":"Onde testar?","options":[{"value":"mac","label":"Mac"},{"value":"iphone","label":"iPhone"},{"value":"watch","label":"Watch"}],"custom":true},{"key":"pasta","type":"string","title":"Em que pasta salvar?"}],"metadata":{"kind":"question"}}"#
   }
 
   private var childPermission: String {

@@ -3732,6 +3732,57 @@ and right-clicking Enviar offers the other one (Enviar agora / Adicionar à fila
 **Requests in the chat.** The iPhone's permission and question cards (`ConversationRequests.swift`, shared) are
 transcript items.
 
+**An agent's question in the composer's place (Alexandre, 04/11; mocks A and B in
+`.agent-artifacts/question-mocks/2026-11-04-pergunta-do-agente/`).** A pending question form no longer has a card with
+fields beside the composer. iPhone and Mac (`OpenCode/QuestionComposer.swift`, shared):
+
+- **A, the default.** While a form waits, `QuestionComposer` takes the composer's place (and the iPhone's composer
+  footer): who asked, one question at a time with ‹ n de N ›, its options (single or multiple, a second tap unmarks)
+  in a band of their own height up to part of the conversation's (less with the iPhone's keyboard, when the
+  question keeps only its title), a multiple choice's own items, and **one answer field: the composer's own editor**
+  over a scratch draft (`ComposerEditor` with `ComposerComment(answer: true)` on the iPhone, no `+`, its action
+  `Responder`; `MacReplyComposer` with the draft passed in on the Mac), with dictation and its review, height, caret
+  and undo. The primary button is **Próxima** while another question is unanswered and **Responder** at the end,
+  the same rule as Return (`QuestionReply.onReturn`); it answers the form, never the chat. **Escrever no chat**
+  brings the chat's composer back with its draft untouched (the answer's editor is another draft) and
+  `QuestionWaitingBar` above it; its Responder, or the card's, returns. A question arriving while a message is being
+  typed waits in that bar. Answered, the composer comes back with its draft. `…` ▸ Descartar pergunta dismisses, as
+  the card's Descartar did.
+- **State.** `QuestionAnswering` (per form, kept by `ConversationStore.answerings` while the form waits): the
+  question shown, the chat's turn, the iPhone's sheet, the answer's editor (one draft for the form's questions, shared
+  by A and B) and a single choice's own text kept while an option is marked (the draft stores one value per question,
+  the option, and only it is sent; unmarking brings the text back). The answers stay in `QuestionDraftSync`, so ‹ ›,
+  A ↔ B, another session or the app closing keep each question as it was, marked and typed alike. A dictation under
+  way keeps its question until the text lands (‹ › and Próxima wait). Responder sends once, with what the visible
+  questions hold; a failure keeps everything.
+- **A dictation that ends off screen (Alexandre, 04/11).** Escrever no chat or the iPhone's sheet opening or
+  closing leave a dictation going (the iPhone's hands-free goes on with the strip; the Mac pauses one whose composer
+  leaves, its audio kept). Its text reached the answer only through the field's `onChange`, so with no field on
+  screen it stayed in the editor's draft and the field, back, put the old answer over it. `QuestionAnswering` now
+  wraps its editor's `recording.receive`: the landed text goes into the answer of the question it was made for,
+  field or not. `MacReplyComposer` removes only its own draft's directory on disappearing: a draft passed in (this
+  one) keeps a paused recording's `dictation.caf`, and `forgetAnswering` discards it with the form. Checked before
+  and after: `QuestionFormUITests` (stopped on the strip with the question hidden, the server's draft has the text;
+  reviewed across B) and `test-mac-ajustes.sh question` (a review landing with the field hidden; a recording paused
+  as it leaves, its audio kept, finished there). The `question` mode removes the fixture form's draft of this
+  device at launch: a run stopped before Responder left one, and the next run started answered.
+- **Limit.** Switching between the answer and the chat rebuilds the chat's editor: its draft is intact, its undo
+  history starts over.
+- **B, iPhone.** **Ampliar pergunta** opens `QuestionSheet` over the same state: the question whole (title and
+  text), the options, the answer field, ‹ n de N › with **Agora não** and the primary button fixed below the scroll.
+  Agora não only closes it; nothing is sent, dismissed or lost. It is offered for every question.
+- **The card** (`ConversationQuestionCard`) is read-only now: the whole question to read, "Responda no campo abaixo"
+  or a Responder that brings the answer back.
+- **Verification.** `OpenCodeTests/QuestionComposerTests` (three questions, back and forth again and again, a failed
+  Responder, one answer with each question's value); `OpenCodeUITests/QuestionFormUITests` against an isolated
+  sandbox with `-OpenCodeDictationFake` (one input area, Escrever no chat and back, single and multiple choice and an
+  own item, the third dictated and reviewed, ‹ › repeatedly, B opened, navigated and closed, Responder read back from
+  the server, the chat's draft back; large text with the keyboard; drafts across sessions, devices and relaunches),
+  on an iPhone 17 Pro (dark) and an iPhone SE (light); Mac `script/test-mac-ajustes.sh question` (the fixture's
+  three questions: one field, an own text under an option, Return on, adding and answering once, dictation undone and
+  redone in two steps, ‹ › repeatedly, Escrever no chat and back, the composer back with its draft; a narrower window)
+  in both themes.
+
 **Shared with the iPhone in this stage** (membership exceptions, no copies): `ConversationStore`,
 `ConversationActivityStore`, `ConversationUsage`, `ConversationRegistry`, `ConversationDraft`, `QuoteSync`,
 `ConversationMCPStore`, `ConversationRevert`, `ConversationReadingRequest`, `ConversationQuotes`,

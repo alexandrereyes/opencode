@@ -30,6 +30,8 @@ import SwiftUI
   static let foreground: Set<String> = ["numbers", "viewer", "dictation"]
   /// `progresso`: the fixture server answers that the root's run ended (read off the main actor by the server).
   nonisolated(unsafe) static var progressEnded = false
+  /// `question`: the bodies of the answers the fixture server received.
+  nonisolated(unsafe) static var questionReplies: [Data] = []
   nonisolated(unsafe) static var progressFamilyEnded = false
 
   /// Once per launch: a second window (one SwiftUI restores and one the capture opens) would drive the same views.
@@ -427,73 +429,204 @@ import SwiftUI
       shot: shot)
   }
 
-  // MARK: A3 — the question's own answer
+  // MARK: A3 — an agent's question in the composer's place (Alexandre, 04/11)
 
+  /// The fixture's root asks three questions. One answer field (the composer's own editor) in the composer's place,
+  /// the chat's composer gone with its draft kept; a single choice's own text kept under a marked option; Return
+  /// goes to the next unanswered question, adds a multiple choice's own item and answers at the end; the third is
+  /// dictated (right Option, the fixtures' reviewer) and undone and redone in two steps; ‹ › keep every question as
+  /// it was; Escrever no chat and back; the answer goes once, and the chat's composer comes back with its draft.
+  /// The buttons' own actions are `QuestionAnswering`'s, called as they call them (a background copy has no
+  /// accessibility tree to press them); keys, clicks and dictation go through the app's event path.
   private static func question(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
     let conversation = try require(runtime.store?.liveConversation(MacFixture.rootID), "conversa")
-    // The card is the transcript's last item: bring the end into view whatever reading place was restored.
-    let transcript = try await wait("transcrição") {
-      runtime.memory(MacFixture.rootID).active.flatMap { $0.revealed ? $0 : nil }
+    let chat = runtime.input(conversation).draft
+    chat.text = NSAttributedString(string: "Rascunho do chat")
+    let answering = try await wait("pergunta no lugar do composer") {
+      conversation.answeringForm.map(conversation.answering)
     }
-    transcript.scrollToLatest(animated: false)
-    // The two questions' answer fields, top to bottom.
-    let fields = try await wait("campos das perguntas") {
-      let fields = views(window).compactMap { $0 as? ComposerTextNSView }.filter {
-        $0.accessibilityIdentifier() == "question-reply" && $0.window != nil && $0.visibleRect.height > 4
-      }.sorted { $0.convert($0.bounds, to: nil).minY > $1.convert($1.bounds, to: nil).minY }
-      return fields.count == 2 ? fields : nil
+    func editors() -> [ComposerTextNSView] {
+      views(window).compactMap { $0 as? ComposerTextNSView }.filter { $0.window != nil && $0.visibleRect.height > 4 }
     }
-    let field = fields[0]
-    // A real click (down and up) on the field focuses it.
-    click(field, in: window)
+    func answerField(_ step: String) async throws -> ComposerTextNSView {
+      try await wait(step) {
+        let shown = editors()
+        return shown.count == 1 && shown[0].accessibilityIdentifier() == "question-reply" ? shown[0] : nil
+      }
+    }
+    func field(_ key: String) throws -> PendingForm.Field {
+      try require(answering.form.fields.first { $0.key == key }, "pergunta \(key)")
+    }
+    func option(_ key: String, _ value: String) throws -> PendingForm.Field.Option {
+      try require(field(key).options?.first { $0.value == value }, "opção \(value)")
+    }
+    func returnKey() { window.sendEvent(key("\r", code: 36, window: window)) }
+    var input = try await answerField("um só campo, o da resposta")
+    shot("pergunta-1")
+    // A narrower window: the same field and options, whole.
+    let wide = window.contentLayoutRect.size
+    window.setContentSize(CGSize(width: 1000, height: wide.height))
+    try await Task.sleep(for: .milliseconds(700))
+    shot("pergunta-1-estreita")
+    window.setContentSize(wide)
+    try await Task.sleep(for: .milliseconds(500))
+    // 1: its own text, then an option marked: the option answers, the text stays in the field.
+    click(input, in: window)
+    try await wait("foco no campo da resposta") { window.firstResponder === input ? true : nil }
+    input.insertText("relatorios", replacementRange: input.selectedRange())
+    try await wait("o texto respondeu") { answering.sync.state.values["modulo"] == .string("relatorios") ? true : nil }
+    answering.choose(try option("modulo", "prints"), in: try field("modulo"))
     try await Task.sleep(for: .milliseconds(300))
-    guard window.firstResponder === field else { throw Failure(description: "clique não focou o campo") }
-    field.insertText("Capturas do Mac", replacementRange: field.selectedRange())
-    // Shift+Return breaks the line.
-    window.sendEvent(key("\r", code: 36, flags: .shift, window: window))
-    field.insertText("segunda linha", replacementRange: field.selectedRange())
-    guard field.string == "Capturas do Mac\nsegunda linha" else {
-      throw Failure(description: "Shift+Return: \(field.string.debugDescription)")
+    guard answering.sync.state.values["modulo"] == .string("prints"), input.string == "relatorios" else {
+      throw Failure(description: "opção marcada: \(String(describing: answering.sync.state.values["modulo"])) · \(input.string)")
     }
-    // With text the field keeps only its microphone: the form sends through Enviar.
-    try await Task.sleep(for: .milliseconds(300))
-    guard accessible("composer-send", in: window) == nil else { throw Failure(description: "o campo mostrou ↑") }
-    shot("digitado")
-    // Return with a question unanswered goes to it, without sending.
-    let before = conversation.submitted
-    window.sendEvent(key("\r", code: 36, window: window))
-    try await wait("Return foi à próxima pergunta") { window.firstResponder === fields[1] ? true : nil }
-    guard conversation.submitted == before else { throw Failure(description: "Return enviou com pergunta sem resposta") }
-    // The second answer is dictated (right Option, tap and tap) and lands revised by the fixtures' reviewer.
-    let draft = try require(fields[1].input?.representedDraft, "rascunho da segunda resposta")
+    // Return: the next unanswered question; the field follows it.
+    let sent = conversation.submitted
+    returnKey()
+    try await wait("Return foi à segunda pergunta") { answering.field?.key == "alvos" && input.string.isEmpty ? true : nil }
+    // 2: two options and an item of its own (Return adds it, then goes on).
+    answering.choose(try option("alvos", "mac"), in: try field("alvos"))
+    answering.choose(try option("alvos", "iphone"), in: try field("alvos"))
+    input.insertText("Vision", replacementRange: input.selectedRange())
+    try await wait("o item próprio no campo") { answering.text(try! field("alvos")) == "Vision" ? true : nil }
+    returnKey()
+    try await wait("Return adicionou o item") {
+      answering.sync.state.values["alvos"] == .array([.string("mac"), .string("iphone"), .string("Vision")]) ? true : nil
+    }
+    shot("pergunta-2-multipla")
+    returnKey()
+    try await wait("Return foi à terceira pergunta") { answering.field?.key == "pasta" ? true : nil }
+    guard conversation.submitted == sent else { throw Failure(description: "Return respondeu antes da hora") }
+    // 3: dictated in the answer's composer, then its two undo steps (raw, nothing) and back.
     func tapOption() {
       for down in [true, false] {
         let flags = down ? NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | 0x40) : []
-        if let event = NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
+        NSApp.sendEvent(NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
           timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-          characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 61) {
-          NSApp.postEvent(event, atStart: false)
-        }
+          characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 61)!)
       }
     }
     tapOption()
-    try await wait("ditado na resposta") { draft.recording.capturing ? true : nil }
+    try await wait("ditado na resposta") { answering.editor.recording.capturing ? true : nil }
     try await Task.sleep(for: .seconds(1.2))
+    answering.move(-1)
+    guard answering.field?.key == "pasta" else { throw Failure(description: "trocou de pergunta durante o ditado") }
     shot("ditando")
     tapOption()
-    try await wait("ditado revisado na resposta", timeout: 20) {
-      fields[1].string == DictationFixtures.text ? true : nil
+    try await wait("ditado revisado na resposta", timeout: 20) { input.string == DictationFixtures.text ? true : nil }
+    try await wait("o ditado na pergunta") { answering.text(try! field("pasta")) == DictationFixtures.text ? true : nil }
+    func chain(_ action: String) throws {
+      guard input.tryToPerform(Selector(action), with: nil) else { throw Failure(description: "\(action) não chegou") }
     }
-    guard accessible("composer-send", in: window) == nil else { throw Failure(description: "o campo ditado mostrou ↑") }
-    // Everything answered: Return is Enviar.
-    window.sendEvent(key("\r", code: 36, window: window))
-    try await wait("Return enviou") { conversation.submitted > before ? true : nil }
-    // Esc leaves the field.
-    click(field, in: window)
-    try await Task.sleep(for: .milliseconds(200))
-    window.sendEvent(key("\u{1b}", code: 53, window: window))
-    guard window.firstResponder !== field else { throw Failure(description: "Esc não saiu do campo") }
-    shot("enviado")
+    try chain("undo:")
+    try await wait("desfazer voltou ao texto cru") { input.string == DictationFixtures.raw ? true : nil }
+    try chain("undo:")
+    try await wait("desfazer tirou o ditado") { input.string.isEmpty ? true : nil }
+    try chain("redo:")
+    try chain("redo:")
+    try await wait("refazer voltou ao revisado") { input.string == DictationFixtures.text ? true : nil }
+    shot("pergunta-3-ditada")
+    // ‹ › again and again: each question exactly as it was.
+    for round in 1...2 {
+      answering.move(-1)
+      answering.move(-1)
+      try await wait("volta \(round) à primeira") { answering.field?.key == "modulo" && input.string == "relatorios" ? true : nil }
+      guard answering.selected(try option("modulo", "prints"), in: try field("modulo")) else {
+        throw Failure(description: "a primeira perdeu a opção")
+      }
+      answering.move(1)
+      try await wait("volta \(round) à segunda") { answering.field?.key == "alvos" && input.string.isEmpty ? true : nil }
+      guard answering.added(try field("alvos")) == ["Vision"],
+        answering.selected(try option("alvos", "mac"), in: try field("alvos")),
+        answering.selected(try option("alvos", "iphone"), in: try field("alvos")),
+        !answering.selected(try option("alvos", "watch"), in: try field("alvos")) else {
+        throw Failure(description: "a segunda perdeu as opções")
+      }
+      answering.move(1)
+      try await wait("volta \(round) à terceira") { input.string == DictationFixtures.text ? true : nil }
+    }
+    // A dictation that ends with the field off screen (Escrever no chat) lands in its own question, in the form's
+    // answer while hidden and in the field once back: (1) the review under way when the field leaves; (2) a
+    // recording the Mac pauses as its composer leaves, its audio kept, finished there by the recorder.
+    let pasta = try field("pasta")
+    var expected = answering.text(pasta)
+    for (phase, recording) in [("revisão", false), ("gravação", true)] {
+      click(input, in: window)
+      try await wait("foco no campo (\(phase))") { window.firstResponder === input ? true : nil }
+      // The dictation lands at the caret: at the end, after what the question already holds.
+      input.setSelectedRange(NSRange(location: (input.string as NSString).length, length: 0))
+      tapOption()
+      try await wait("gravou (\(phase))") { answering.editor.recording.capturing ? true : nil }
+      try await Task.sleep(for: .seconds(1.2))
+      if !recording {
+        tapOption()
+        try await wait("revisando (\(phase))", timeout: 15) { answering.editor.recording.revision.reviewing != nil ? true : nil }
+      }
+      answering.chatting = true
+      try await wait("o campo saiu (\(phase))") {
+        editors().contains { $0.accessibilityIdentifier() == "question-reply" } ? nil : true
+      }
+      if recording {
+        try await wait("pausou ao sair") { answering.editor.recording.state == .paused ? true : nil }
+        try await Task.sleep(for: .milliseconds(500))
+        guard FileManager.default.fileExists(atPath: answering.editor.recording.file.path) else {
+          throw Failure(description: "o áudio da gravação pausada foi apagado ao sair")
+        }
+        answering.editor.recording.finish()
+      }
+      expected += " " + DictationFixtures.text
+      try await wait("o ditado na pergunta com o campo fora (\(phase))", timeout: 25) {
+        answering.text(pasta) == expected ? true : nil
+      }
+      guard answering.field?.key == "pasta", chat.text.string == "Rascunho do chat" else {
+        throw Failure(description: "fora do lugar (\(phase)): \(answering.field?.key ?? "-") · \(chat.text.string)")
+      }
+      answering.chatting = false
+      input = try await answerField("o campo de volta (\(phase))")
+      try await Task.sleep(for: .milliseconds(800))
+      guard input.string == expected, answering.text(pasta) == expected else {
+        throw Failure(description: "de volta (\(phase)): campo \(input.string.debugDescription) · resposta \(answering.text(pasta).debugDescription)")
+      }
+    }
+    print("MacAjustes question: ditado terminado com o campo fora (revisão e gravação pausada) caiu na própria pergunta; o áudio ficou")
+    // Escrever no chat: the chat's composer with its draft; back, the answer as it was.
+    answering.chatting = true
+    let composer = try await wait("o composer do chat") {
+      editors().first { $0.accessibilityIdentifier() == "conversation-composer" }
+    }
+    guard composer.string == "Rascunho do chat", editors().count == 1 else {
+      throw Failure(description: "composer do chat: \(composer.string.debugDescription)")
+    }
+    try await Task.sleep(for: .milliseconds(400))
+    shot("escrever-no-chat")
+    answering.chatting = false
+    input = try await answerField("a resposta de volta")
+    try await wait("a terceira como estava") { input.string == expected ? true : nil }
+    // Return answers once every question is: once, with each question's own answer.
+    click(input, in: window)
+    try await wait("foco para responder") { window.firstResponder === input ? true : nil }
+    returnKey()
+    returnKey()
+    try await wait("respondeu", timeout: 10) { !MacAjustesChecks.questionReplies.isEmpty ? true : nil }
+    try await Task.sleep(for: .milliseconds(500))
+    guard MacAjustesChecks.questionReplies.count == 1,
+      let reply = try? JSONDecoder().decode(JSONValue.self, from: MacAjustesChecks.questionReplies[0]) else {
+      throw Failure(description: "respostas: \(MacAjustesChecks.questionReplies.count)")
+    }
+    let answer = JSONValue.object(["answer": .object([
+      "modulo": .string("prints"), "alvos": .array([.string("mac"), .string("iphone"), .string("Vision")]),
+      "pasta": .string(expected)])])
+    guard reply == answer else { throw Failure(description: "resposta: \(reply)") }
+    // Answered: the chat's composer comes back with its draft.
+    let back = try await wait("o composer do chat de volta", timeout: 15) {
+      editors().first { $0.accessibilityIdentifier() == "conversation-composer" }
+    }
+    guard back.string == "Rascunho do chat", conversation.answeringForm == nil else {
+      throw Failure(description: "depois de responder: \(back.string.debugDescription)")
+    }
+    try await Task.sleep(for: .milliseconds(400))
+    shot("respondida")
+    print("MacAjustes question: um só campo no lugar do composer; texto próprio sob a opção; Return segue, adiciona e responde uma vez; ditado com desfazer em dois passos; ‹ › mantêm cada resposta; Escrever no chat e de volta; o composer volta com o rascunho")
   }
 
   // MARK: A10 — a pending quote opens editing

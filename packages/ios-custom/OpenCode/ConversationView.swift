@@ -359,14 +359,34 @@ struct ConversationView: View {
           }
           ConversationTray(store: conversation, draft: sessions.drafts.draft(conversation.id))
             .padding(.bottom, 8)
-          ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id), footer: false)
-            .anchorPreference(key: MCPComposerAnchorKey.self, value: .bounds) { $0 }
-            .disabled(!conversation.ready)
-          if !sessions.drafts.draft(conversation.id).expanded {
-            ComposerFooter(store: conversation, draft: sessions.drafts.draft(conversation.id),
-              usage: conversation.sessionUsage) { detailsOpen = true }
+          // An agent's question takes the composer's place; Escrever no chat brings it back, the question waiting.
+          if let question = conversation.answeringForm, !conversation.answering(question).chatting {
+            QuestionComposer(store: conversation, answering: conversation.answering(question),
+              chat: sessions.drafts.draft(conversation.id), room: size?.height ?? 700)
+              .padding(.bottom, 8)
           } else {
-            Color.clear.frame(height: 40).accessibilityHidden(true)
+            if let question = conversation.answeringForm {
+              QuestionWaitingBar(answering: conversation.answering(question)).padding(.bottom, 8)
+            }
+            ConversationComposer(store: conversation, draft: sessions.drafts.draft(conversation.id), footer: false)
+              .anchorPreference(key: MCPComposerAnchorKey.self, value: .bounds) { $0 }
+              .disabled(!conversation.ready)
+            if !sessions.drafts.draft(conversation.id).expanded {
+              ComposerFooter(store: conversation, draft: sessions.drafts.draft(conversation.id),
+                usage: conversation.sessionUsage) { detailsOpen = true }
+            } else {
+              Color.clear.frame(height: 40).accessibilityHidden(true)
+            }
+          }
+        }
+        .onChange(of: conversation.questions.map(\.id), initial: true) { _, ids in
+          conversation.forgetAnswering(keeping: ids)
+          // A question arriving while a message is being written waits beside it rather than taking its field.
+          let chat = sessions.drafts.draft(conversation.id)
+          if let question = conversation.answeringForm, conversation.answerings[question.id] == nil, chat.focused,
+            chat.hasText
+          {
+            conversation.answering(question).chatting = true
           }
         }
         .padding(.horizontal, AppLayout.composerMargin).padding(.top, 8).padding(.bottom, 0).background(

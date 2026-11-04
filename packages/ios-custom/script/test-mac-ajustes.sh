@@ -48,7 +48,8 @@ for mode in $modes; do
     # Pergunta paralela's dictation records with the fake microphone; the fixtures' reviewer answers in 0.8 s.
     composer) extra=(-OpenCodeMacFakeDictation -OpenCodeDictationReview 800) ;;
     # The answers record with the fake microphone and the fixtures' reviewer.
-    question) extra=(-OpenCodeMacFakeDictation) ;;
+    # The fixtures' reviewer answers in 2.5 s, so the question's field can leave while it reviews.
+    question) extra=(-OpenCodeMacFakeDictation -OpenCodeDictationReview 2500) ;;
     archived) extra=(-OpenCodeMacSearchFixture) ;;
     width) extra=(-OpenCodeMacCaptureSize 2400x1300) ;;
     jump) extra=(-OpenCodeMacCaptureSize 1500x700) ;;

@@ -43,6 +43,10 @@ import UniformTypeIdentifiers
   /// The question forms' unsent answers, shared with the server's `custom.question-drafts` and this server's other
   /// conversations.
   @ObservationIgnored let questionDrafts: QuestionDrafts
+  /// The agents' questions being answered in the composer's place (`QuestionComposer`), by form.
+  @ObservationIgnored var answerings: [String: QuestionAnswering] = [:]
+  /// The question the composer answers when several wait (a card's Responder); otherwise the first.
+  var answeringID: String?
   /// This session's descendants at any depth (`custom.session-family/page`): a subagent lists its own.
   private(set) var children: [Session] = []
   /// A subagent's ancestors, the top-level session first (one read each, when its parent changes): the header's

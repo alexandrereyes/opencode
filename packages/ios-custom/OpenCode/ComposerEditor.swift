@@ -12,6 +12,8 @@ struct ComposerComment {
   /// Bytes of the message draft's other attachments, which share the draft's 25 MiB limit.
   let reservedBytes: Int
   let commit: () -> Void
+  /// An agent's question's own answer (`QuestionComposer`): text only, no attachments; its action answers the form.
+  var answer = false
 }
 
 struct ComposerEditor: View {
@@ -44,7 +46,7 @@ struct ComposerEditor: View {
   }
   /// Where this composer's dictation lands, for the strip and the Live Activity when it is off screen.
   private var dictationPlace: DictationPlace {
-    if comment != nil { return DictationPlace(title: "Comentário", route: nil) }
+    if let comment { return DictationPlace(title: comment.answer ? "Resposta" : "Comentário", route: nil) }
     if store.isNewSession { return DictationPlace(title: "Nova sessão", route: .newSession) }
     let title = store.session?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
     return DictationPlace(title: title?.isEmpty == false ? title! : "Conversa", route: .conversation(store.id))
@@ -158,10 +160,12 @@ struct ComposerEditor: View {
         }
         ComposerTextView(
           draft: draft, theme: theme, expanded: expanded, owner: editorID,
-          label: comment == nil ? "Mensagem" : "Comentário",
-          identifier: comment == nil ? "conversation-composer" : "comment-composer",
+          label: comment == nil ? "Mensagem" : comment?.answer == true ? "Resposta" : "Comentário",
+          identifier: comment == nil ? "conversation-composer" : comment?.answer == true ? "question-answer" : "comment-composer",
           submit: submit, canSubmit: canSubmit, firstSuggestion: firstSuggestion,
           importImages: { providers in
+            // An answer is text only: a pasted image does not become an attachment.
+            guard comment?.answer != true else { return }
             Task { await store.importImages(providers, draft: draft, reservedBytes: comment?.reservedBytes ?? 0) }
           },
           saveSnippet: canEditSnippets ? { openSnippetEditor(.init(content: $0)) } : nil
@@ -365,7 +369,7 @@ struct ComposerEditor: View {
         DictationCompactMicrophone(recording: draft.recording, hasContent: hasContent, available: available)
         DictationAction(recording: draft.recording, hasContent: hasContent, canSubmit: canSubmit,
           sending: draft.sending, available: available,
-          submit: submit, submission: comment == nil ? .message : .comment)
+          submit: submit, submission: comment == nil ? .message : comment?.answer == true ? .answer : .comment)
           .contextMenu {
             if comment == nil && hasContent && store.executing {
               Button(store.preferences?.data.settings.followUpBehavior == .queue ? "Enviar agora" : "Adicionar à fila") {
@@ -379,34 +383,37 @@ struct ComposerEditor: View {
   }
   private var controlRow: some View {
     HStack(spacing: 8) {
-      Menu {
-        if comment == nil && !expanded {
-          Button(
-            "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right", action: expand
-          )
-        }
-        Button("Câmera", systemImage: "camera") {
-          draft.focused = false
-          Task {
-            let access = await ComposerCamera.request()
-            if access == .ready { camera = true } else { cameraProblem = access }
-          }
-        }
-        Button("Fotos", systemImage: "photo.on.rectangle") {
-          draft.focused = false
-          photos = true
-        }
-        Button("Arquivos", systemImage: "folder") {
-          draft.focused = false
-          files = true
-        }
-      } label: {
-        Image(systemName: "plus").appSymbol(.action).frame(width: 31, height: 36)
-          .overlay { Circle().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
-      }.menuOrder(.fixed).accessibilityLabel("Adicionar")
+      if comment?.answer != true { addMenu }
       if comment == nil { selectors } else { Spacer(minLength: 2) }
     }.frame(minHeight: 36).foregroundStyle(theme.color(.textSecondary)).buttonStyle(.plain).disabled(
       draft.sending || draft.importing)
+  }
+  private var addMenu: some View {
+    Menu {
+      if comment == nil && !expanded {
+        Button(
+          "Expandir compositor", systemImage: "arrow.up.left.and.arrow.down.right", action: expand
+        )
+      }
+      Button("Câmera", systemImage: "camera") {
+        draft.focused = false
+        Task {
+          let access = await ComposerCamera.request()
+          if access == .ready { camera = true } else { cameraProblem = access }
+        }
+      }
+      Button("Fotos", systemImage: "photo.on.rectangle") {
+        draft.focused = false
+        photos = true
+      }
+      Button("Arquivos", systemImage: "folder") {
+        draft.focused = false
+        files = true
+      }
+    } label: {
+      Image(systemName: "plus").appSymbol(.action).frame(width: 31, height: 36)
+        .overlay { Circle().strokeBorder(theme.color(.controlBorder), lineWidth: 1 / displayScale) }
+    }.menuOrder(.fixed).accessibilityLabel("Adicionar")
   }
   @ViewBuilder private var selectors: some View {
     ComposerModelChip(label: store.modelLabel(store.selectedModel(draft))) {

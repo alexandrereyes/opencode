@@ -1,103 +1,30 @@
 import XCTest
 
-/// The question form against the isolated sandbox: each test creates a session and a pending form through the API
-/// (no model is called), answers it in the app and reads the answer back from the server. The answer fields have no
-/// send button of their own; Return sends once every question is answered, otherwise goes to the next one.
+/// An agent's question in the composer's place (A) and its iPhone sheet (B), against the isolated sandbox: each test
+/// creates a session and a pending form through the API (no model is called), answers it in the app and reads the
+/// answer back from the server. One answer field, the composer's own editor (dictation by the fake microphone and the
+/// fixtures' reviewer, `-OpenCodeDictationFake`), follows the question shown; ‹ › keep each question as it was
+/// answered; Responder answers the form; Escrever no chat brings the chat's composer back with its draft.
 @MainActor final class QuestionFormUITests: XCTestCase {
   private let app = XCUIApplication()
   private let environment = ProcessInfo.processInfo.environment
   override func setUp() { continueAfterFailure = false }
   override func tearDown() async throws { app.terminate() }
 
-  func testSeveralQuestionsReturnGoesToTheNextOneThenSends() async throws {
-    let (session, form) = try await create([
-      ["key": "voz", "type": "string", "title": "Voz do Abacato", "description": "Qual voz o Abacato usa?",
-       "options": [["value": "marin", "label": "marin"], ["value": "cedar", "label": "cedar"]], "custom": true],
-      ["key": "seguir", "type": "string", "title": "Seguir com o desenho",
-       "options": [["value": "sim", "label": "Sim, seguir"], ["value": "apps", "label": "Prefiro mudar os apps"]]],
-      ["key": "nota", "type": "string", "title": "Algo mais?"],
-    ])
-    try open(session)
-    let voz = app.textFields["question-answer-voz"]
-    XCTAssertTrue(voz.waitForExistence(timeout: 30), app.debugDescription)
-    voz.tap()
-    voz.typeText("viola")
-    // Only the form's Enviar sends; the field has no ↑ of its own.
-    XCTAssertTrue(app.buttons["Enviar"].exists)
-    XCTAssertFalse(app.buttons["composer-send"].exists)
-    XCTAssertFalse(app.buttons["Enviar mensagem"].exists)
-    capture("pergunta-campo-sem-enviar")
-    // "seguir" has options only: Return leaves the field for it, without sending.
-    voz.typeText("\n")
-    XCTAssertTrue(waitFocus(voz, false))
-    let status = try await state(session, form)
-    XCTAssertEqual(status.status, "pending")
-    app.buttons["Sim, seguir"].tap()
-    let nota = app.textFields["question-answer-nota"]
-    nota.tap()
-    nota.typeText("ok")
-    capture("pergunta-respondida")
-    nota.typeText("\n")
-    let answered = try await waitAnswered(session, form)
-    XCTAssertEqual(answered, ["voz": .string("viola"), "seguir": .string("sim"), "nota": .string("ok")])
-  }
-
-  func testReturnFromAnEarlierQuestionGoesToTheNextTypedAnswer() async throws {
-    let (session, form) = try await create([
-      ["key": "nome", "type": "string", "title": "Nome do módulo"],
-      ["key": "pasta", "type": "string", "title": "Em que pasta salvar?"],
-    ])
-    try open(session)
-    let nome = app.textFields["question-answer-nome"]
-    let pasta = app.textFields["question-answer-pasta"]
-    XCTAssertTrue(nome.waitForExistence(timeout: 30), app.debugDescription)
-    nome.tap()
-    nome.typeText("capturas\n")
-    XCTAssertTrue(waitFocus(pasta, true))
-    pasta.typeText("Capturas/2026\n")
-    let answered = try await waitAnswered(session, form)
-    XCTAssertEqual(answered, ["nome": .string("capturas"), "pasta": .string("Capturas/2026")])
-  }
-
-  func testOneMultipleChoiceReturnAddsTheOwnAnswerThenSends() async throws {
-    let (session, form) = try await create([
-      ["key": "itens", "type": "multiselect", "title": "O que testar?",
-       "options": [["value": "mac", "label": "Mac"], ["value": "iphone", "label": "iPhone"]], "custom": true],
-    ])
-    try open(session)
-    let itens = app.textFields["question-answer-itens"]
-    XCTAssertTrue(itens.waitForExistence(timeout: 30), app.debugDescription)
-    app.buttons["Mac"].tap()
-    itens.tap()
-    itens.typeText("watch\n")
-    XCTAssertTrue(app.staticTexts["watch"].waitForExistence(timeout: 5))
-    let status = try await state(session, form)
-    XCTAssertEqual(status.status, "pending")
-    capture("pergunta-multipla")
-    // Empty, with everything answered: Return is Enviar.
-    itens.typeText("\n")
-    let answered = try await waitAnswered(session, form)
-    XCTAssertEqual(answered, ["itens": Value.array(["mac", "watch"])])
-  }
-
-  // MARK: Keyboard
-
-  /// A long question first, so the second question's field starts below the visible conversation.
-  private func keyboardForm(second: [String: Any]) async throws -> (String, String) {
-    let long = "No Acompanhar, o texto que a pessoa pede ao agente fica guardado no registro da avaliação pela vida da "
-      + "conta, além dos registros técnicos de 30 dias. O que vale?"
-    return try await create([
-      ["key": "prazo", "type": "string", "title": "D033 Pedido de ajuste", "description": long,
-       "options": [
-         ["value": "prazo", "label": "Texto com prazo (Recomendado)", "description": "O registro fica sem o texto livre; o texto sai em 30 dias, como os registros técnicos"],
-         ["value": "sempre", "label": "Guardar sempre", "description": "O texto fica no registro enquanto a conta existir, junto da avaliação"],
-         ["value": "nunca", "label": "Não guardar", "description": "Nem o registro nem os logs técnicos guardam o texto livre da pessoa"],
-       ], "custom": true],
-      second,
-    ])
-  }
+  private var composer: XCUIElement { app.descendants(matching: .any)["question-composer"].firstMatch }
+  private var answer: XCUIElement { app.textViews["question-answer"].firstMatch }
+  private var step: XCUIElement { app.staticTexts["question-step"].firstMatch }
+  private func button(_ identifier: String) -> XCUIElement { app.buttons[identifier].firstMatch }
   private func option(_ label: String) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
+  }
+  private func waitValue(_ element: XCUIElement, contains text: String, timeout: TimeInterval = 10) -> Bool {
+    let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", text), object: element)
+    return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+  }
+  private func waitLabel(_ element: XCUIElement, _ text: String) -> Bool {
+    let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", text), object: element)
+    return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
   }
   private func waitKeyboard(_ shown: Bool) -> Bool {
     let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == %@", NSNumber(value: shown)),
@@ -105,82 +32,243 @@ import XCTest
     return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
   }
 
-  /// Tapping an option (or empty space in the card) leaves the answer field; tapping the field brings it back.
-  func testTappingAnOptionOrTheCardHidesTheKeyboard() async throws {
-    let (session, form) = try await keyboardForm(second: ["key": "nota", "type": "string", "title": "Algo mais?"])
-    try open(session)
-    let prazo = app.textFields["question-answer-prazo"]
-    XCTAssertTrue(prazo.waitForExistence(timeout: 30), app.debugDescription)
-    prazo.tap()
-    prazo.typeText("outra")
-    XCTAssertTrue(waitKeyboard(true))
-    option("Guardar sempre").tap()
-    XCTAssertTrue(waitKeyboard(false), "Tocar numa opção esconde o teclado")
-    capture("teclado-opcao")
-    // The option's own answer field focuses again.
-    prazo.tap()
-    XCTAssertTrue(waitKeyboard(true))
-    XCTAssertTrue(waitFocus(prazo, true))
-    // Empty space in the card: its title.
-    app.staticTexts["D033 Pedido de ajuste"].tap()
-    XCTAssertTrue(waitKeyboard(false), "Tocar fora dos campos esconde o teclado")
-    // Answers and Enviar still work.
-    option("Texto com prazo").tap()
-    let nota = app.textFields["question-answer-nota"]
-    nota.tap()
-    nota.typeText("ok")
-    app.staticTexts["Algo mais?"].tap()
-    XCTAssertTrue(waitKeyboard(false))
-    app.buttons["Enviar"].tap()
+  private let revised = "Confira as sessões em andamento e prepare um resumo das alterações. Não envie esta mensagem antes da minha revisão."
+  private func threeQuestions() async throws -> (String, String) {
+    try await create([
+      ["key": "tema", "type": "string", "title": "Qual tema usar nas capturas?",
+       "description": "As capturas vão para a revisão do desenho; escolha o tema principal ou escreva outro.",
+       "options": [["value": "claro", "label": "Claro", "description": "Fundo claro, como o app abre de dia"],
+                   ["value": "escuro", "label": "Escuro", "description": "Fundo escuro, o tema que mais aparece nos prints"]],
+       "custom": true],
+      ["key": "alvos", "type": "multiselect", "title": "Onde testar?",
+       "options": [["value": "mac", "label": "Mac"], ["value": "iphone", "label": "iPhone"], ["value": "watch", "label": "Watch"]],
+       "custom": true],
+      ["key": "nota", "type": "string", "title": "Algo mais para a revisão?"],
+    ])
+  }
+  /// Each question as it was left: the step, the single choice, the multiple choice and its own item, the text.
+  private func checkAnswers(dictated: Bool, file: StaticString = #filePath, line: UInt = #line) {
+    button("question-previous").tap()
+    button("question-previous").tap()
+    XCTAssertTrue(waitLabel(step, "1 de 3"), step.label, file: file, line: line)
+    XCTAssertTrue(option("Escuro").isSelected, file: file, line: line)
+    XCTAssertFalse(option("Claro").isSelected, file: file, line: line)
+    button("question-next").tap()
+    XCTAssertTrue(waitLabel(step, "2 de 3"), step.label, file: file, line: line)
+    XCTAssertTrue(option("Mac").isSelected && option("iPhone").isSelected, file: file, line: line)
+    XCTAssertFalse(option("Watch").isSelected, file: file, line: line)
+    XCTAssertTrue(app.staticTexts["Vision"].exists, file: file, line: line)
+    button("question-next").tap()
+    XCTAssertTrue(waitLabel(step, "3 de 3"), step.label, file: file, line: line)
+    if dictated { XCTAssertEqual(answer.value as? String, revised, file: file, line: line) }
+  }
+
+  /// The main case (A): one input area, the chat's draft kept, three kinds of question answered, the last one
+  /// dictated with its review; ‹ › again and again; the sheet (B) and back; Responder; the chat's draft again.
+  func testTheQuestionTakesTheComposerAndKeepsEveryAnswer() async throws {
+    let (session, form) = try await threeQuestions()
+    try open(session, dictation: true)
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
+    XCTAssertFalse(app.textViews["conversation-composer"].exists, "one input area: the chat's composer gives way")
+    capture("a-pergunta-1")
+    // Escrever no chat, a draft, and back: the draft waits.
+    button("question-write-chat").tap()
+    let chat = app.textViews["conversation-composer"]
+    XCTAssertTrue(chat.waitForExistence(timeout: 10))
+    XCTAssertTrue(button("question-resume").exists)
+    chat.tap()
+    chat.typeText("Rascunho do chat")
+    capture("a-escrever-no-chat")
+    button("question-resume").tap()
+    XCTAssertTrue(composer.waitForExistence(timeout: 10))
+    XCTAssertTrue(app.descendants(matching: .any)["question-chat-kept"].exists)
+    XCTAssertTrue(waitKeyboard(false) || !app.keyboards.firstMatch.exists)
+
+    // 1: a single choice. Próxima goes on, Responder is not offered yet.
+    XCTAssertTrue(waitLabel(step, "1 de 3"), step.label)
+    option("Escuro").tap()
+    XCTAssertTrue(option("Escuro").isSelected)
+    XCTAssertEqual(button("question-primary").label, "Próxima")
+    button("question-primary").tap()
+    // 2: two options and an item of its own, added by the answer composer's action.
+    XCTAssertTrue(waitLabel(step, "2 de 3"), step.label)
+    option("Mac").tap()
+    option("iPhone").tap()
+    answer.tap()
+    answer.typeText("Vision")
+    button("question-answer-done").tap()
+    XCTAssertTrue(app.staticTexts["Vision"].waitForExistence(timeout: 5))
+    capture("a-pergunta-2-multipla")
+    button("question-primary").tap()
+    // 3: dictated in the answer composer (the fake microphone, then the fixtures' reviewer).
+    XCTAssertTrue(waitLabel(step, "3 de 3"), step.label)
+    let microphone = button("dictation-microphone")
+    XCTAssertTrue(microphone.waitForExistence(timeout: 10), app.debugDescription)
+    microphone.tap()
+    XCTAssertTrue(button("dictation-stop").waitForExistence(timeout: 10), app.debugDescription)
+    try await Task.sleep(for: .seconds(1.5))
+    XCTAssertFalse(button("question-previous").isEnabled, "the dictation lands in its own question")
+    capture("a-ditando")
+    button("dictation-stop").tap()
+    XCTAssertTrue(waitValue(answer, contains: "Confira as sessões", timeout: 30), String(describing: answer.value))
+    XCTAssertEqual(answer.value as? String, revised)
+    capture("a-pergunta-3-ditada")
+    let before = try await state(session, form)
+    XCTAssertEqual(before.status, "pending", "nothing answered before Responder")
+
+    // ‹ › again and again: each question exactly as it was.
+    checkAnswers(dictated: true)
+    checkAnswers(dictated: true)
+
+    // B: the same answer in its own sheet; Agora não only closes it.
+    button("question-expand").tap()
+    let sheet = app.descendants(matching: .any)["question-sheet"].firstMatch
+    XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+    XCTAssertTrue(waitLabel(step, "3 de 3"), step.label)
+    XCTAssertEqual(answer.value as? String, revised)
+    capture("b-ampliada-3")
+    button("question-previous").tap()
+    XCTAssertTrue(waitLabel(step, "2 de 3"), step.label)
+    XCTAssertTrue(option("Mac").isSelected && option("iPhone").isSelected && !option("Watch").isSelected)
+    capture("b-ampliada-2")
+    button("question-sheet-close").tap()
+    XCTAssertTrue(waitLabel(step, "2 de 3"), step.label)
+    XCTAssertTrue(option("Mac").isSelected && option("iPhone").isSelected)
+    let closed = try await state(session, form)
+    XCTAssertEqual(closed.status, "pending", "closing the sheet answers nothing")
+    button("question-next").tap()
+    XCTAssertEqual(answer.value as? String, revised)
+    checkAnswers(dictated: true)
+
+    // Responder: the form's answer, each question's own; then the chat's composer with its draft.
+    XCTAssertEqual(button("question-primary").label, "Responder")
+    button("question-primary").tap()
     let answered = try await waitAnswered(session, form)
-    XCTAssertEqual(answered, ["prazo": .string("prazo"), "nota": .string("ok")])
+    XCTAssertEqual(answered, ["tema": .string("escuro"), "alvos": .array(["mac", "iphone", "Vision"]), "nota": .string(revised)])
+    XCTAssertTrue(chat.waitForExistence(timeout: 20), app.debugDescription)
+    XCTAssertTrue(waitValue(chat, contains: "Rascunho do chat"), String(describing: chat.value))
+    XCTAssertFalse(composer.exists)
+    capture("a-respondida-chat-de-volta")
   }
 
-  /// Return toward a question with options only leaves the field and hides the keyboard.
-  func testReturnToAnOptionsOnlyQuestionHidesTheKeyboard() async throws {
-    let (session, _) = try await keyboardForm(second: ["key": "seguir", "type": "string", "title": "Seguir com o desenho",
-      "options": [["value": "sim", "label": "Sim, seguir"], ["value": "nao", "label": "Não seguir"]]])
-    try open(session)
-    let prazo = app.textFields["question-answer-prazo"]
-    XCTAssertTrue(prazo.waitForExistence(timeout: 30), app.debugDescription)
-    prazo.tap()
-    prazo.typeText("outra\n")
-    XCTAssertTrue(waitKeyboard(false), "Return para uma pergunta só de opções esconde o teclado")
-    XCTAssertTrue(waitFocus(prazo, false))
+  /// To the third question, the first two answered (Escuro; Mac).
+  private func toTheThird() {
+    option("Escuro").tap()
+    button("question-primary").tap()
+    XCTAssertTrue(waitLabel(step, "2 de 3"), step.label)
+    option("Mac").tap()
+    button("question-primary").tap()
+    XCTAssertTrue(waitLabel(step, "3 de 3"), step.label)
   }
 
-  /// Return toward a question with its own answer focuses that field where it can be seen.
-  func testReturnToAQuestionWithItsOwnAnswerShowsThatField() async throws {
-    let (session, _) = try await keyboardForm(second: ["key": "voz", "type": "string", "title": "Voz do Abacato",
-      "options": [["value": "marin", "label": "marin"], ["value": "cedar", "label": "cedar"]], "custom": true])
-    try open(session)
-    let prazo = app.textFields["question-answer-prazo"]
-    XCTAssertTrue(prazo.waitForExistence(timeout: 30), app.debugDescription)
-    prazo.tap()
-    prazo.typeText("outra\n")
-    let voz = app.textFields["question-answer-voz"]
-    XCTAssertTrue(waitFocus(voz, true))
-    let visible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: voz)
-    XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 5), .completed, "O campo em foco aparece na tela")
-    capture("teclado-proxima-resposta")
+  /// A dictation that ends with its question off screen (Escrever no chat, stopped on the dictation strip) lands in
+  /// its own question: in the form's answer while hidden (the server's draft has it), then in the field once back.
+  func testADictationFinishedWithTheQuestionHiddenLandsInItsQuestion() async throws {
+    let (session, form) = try await threeQuestions()
+    try open(session, dictation: true, review: "3000")
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
+    button("question-write-chat").tap()
+    let chat = app.textViews["conversation-composer"]
+    XCTAssertTrue(chat.waitForExistence(timeout: 10))
+    chat.tap()
+    chat.typeText("Rascunho do chat")
+    button("question-resume").tap()
+    XCTAssertTrue(composer.waitForExistence(timeout: 10))
+    toTheThird()
+    button("dictation-microphone").tap()
+    XCTAssertTrue(button("dictation-stop").waitForExistence(timeout: 10), app.debugDescription)
+    try await Task.sleep(for: .seconds(1.5))
+    // The chat while it records; the strip stops it.
+    button("question-write-chat").tap()
+    XCTAssertTrue(chat.waitForExistence(timeout: 10))
+    let stop = button("dictation-strip-stop")
+    XCTAssertTrue(stop.waitForExistence(timeout: 10), app.debugDescription)
+    capture("oculta-gravando")
+    stop.tap()
+    let saved = try await waitDraft(session, form) { [revised] in $0?["nota"]?["text"] == .string(revised) }
+    XCTAssertTrue(saved, "the dictated answer reached the form while its field was hidden")
+    XCTAssertTrue(waitValue(chat, contains: "Rascunho do chat"), String(describing: chat.value))
+    capture("oculta-pronta")
+    // Back: the third question shows it, and stays so.
+    button("question-resume").tap()
+    XCTAssertTrue(waitLabel(step, "3 de 3"), step.label)
+    XCTAssertTrue(waitValue(answer, contains: "Confira", timeout: 10), String(describing: answer.value))
+    try await Task.sleep(for: .seconds(1))
+    XCTAssertEqual(answer.value as? String, revised)
+    capture("oculta-de-volta")
+    button("question-previous").tap()
+    XCTAssertTrue(option("Mac").isSelected && !option("iPhone").isSelected)
+    button("question-previous").tap()
+    XCTAssertTrue(option("Escuro").isSelected)
+    button("question-next").tap()
+    button("question-next").tap()
+    XCTAssertEqual(answer.value as? String, revised)
+    button("question-primary").tap()
+    let answered = try await waitAnswered(session, form)
+    XCTAssertEqual(answered, ["tema": .string("escuro"), "alvos": .array(["mac"]), "nota": .string(revised)])
+    XCTAssertTrue(chat.waitForExistence(timeout: 20))
+    XCTAssertTrue(waitValue(chat, contains: "Rascunho do chat"), String(describing: chat.value))
   }
 
-  /// Dragging the conversation hides the keyboard of a question's field; the composer's keeps working.
-  func testDraggingTheConversationHidesTheKeyboard() async throws {
-    let (session, _) = try await keyboardForm(second: ["key": "nota", "type": "string", "title": "Algo mais?"])
-    try open(session)
-    let prazo = app.textFields["question-answer-prazo"]
-    XCTAssertTrue(prazo.waitForExistence(timeout: 30), app.debugDescription)
-    prazo.tap()
+  /// A dictation still under review when the sheet (B) opens and closes again lands in the same question.
+  func testADictationReviewedAcrossTheSheetLandsInItsQuestion() async throws {
+    let (session, form) = try await threeQuestions()
+    try open(session, dictation: true, review: "3000")
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
+    toTheThird()
+    button("dictation-microphone").tap()
+    XCTAssertTrue(button("dictation-stop").waitForExistence(timeout: 10), app.debugDescription)
+    try await Task.sleep(for: .seconds(1.5))
+    button("dictation-stop").tap()
+    button("question-expand").tap()
+    XCTAssertTrue(app.descendants(matching: .any)["question-sheet"].firstMatch.waitForExistence(timeout: 10))
+    capture("b-durante-a-revisao")
+    button("question-sheet-close").tap()
+    XCTAssertTrue(waitValue(answer, contains: "Confira", timeout: 20), String(describing: answer.value))
+    try await Task.sleep(for: .seconds(1))
+    XCTAssertEqual(answer.value as? String, revised)
+    XCTAssertTrue(waitLabel(step, "3 de 3"), step.label)
+    let saved = try await waitDraft(session, form) { [revised] in $0?["nota"]?["text"] == .string(revised) }
+    XCTAssertTrue(saved)
+  }
+
+  /// A long question with long options, in large text: the options scroll in their own band, whole; the answer field
+  /// with the keyboard keeps Responder in reach.
+  func testALongQuestionInLargeTextStaysReadableWithTheKeyboard() async throws {
+    let long = "No Acompanhar, o texto que a pessoa pede ao agente fica guardado no registro da avaliação pela vida da "
+      + "conta, além dos registros técnicos de 30 dias. O que vale?"
+    let (session, form) = try await create([
+      ["key": "prazo", "type": "string", "title": "D033 Pedido de ajuste", "description": long,
+       "options": [
+         ["value": "prazo", "label": "Texto com prazo (Recomendado)", "description": "O registro fica sem o texto livre; o texto sai em 30 dias, como os registros técnicos"],
+         ["value": "sempre", "label": "Guardar sempre", "description": "O texto fica no registro enquanto a conta existir, junto da avaliação"],
+         ["value": "nunca", "label": "Não guardar", "description": "Nem o registro nem os logs técnicos guardam o texto livre da pessoa"],
+       ], "custom": true],
+    ])
+    try open(session, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"])
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
+    capture("letra-grande")
+    // The last option is reached by scrolling the options' band, never cut.
+    let last = option("Não guardar")
+    for _ in 0..<4 where !last.isHittable { composer.swipeUp() }
+    XCTAssertTrue(last.isHittable)
+    last.tap()
+    XCTAssertTrue(last.isSelected)
+    answer.tap()
     XCTAssertTrue(waitKeyboard(true))
-    app.collectionViews["conversation-transcript"].swipeUp()
-    XCTAssertTrue(waitKeyboard(false), "Arrastar a conversa esconde o teclado")
-    capture("teclado-arrastar")
-    let composer = app.textViews["conversation-composer"]
-    composer.tap()
-    XCTAssertTrue(waitKeyboard(true))
-    composer.typeText("Rascunho")
-    XCTAssertTrue((composer.value as? String ?? "").contains("Rascunho"))
+    answer.typeText("Guardar só o resumo")
+    XCTAssertTrue(answer.isHittable && button("question-primary").isHittable, "with the keyboard, field and Responder stay in reach")
+    capture("letra-grande-teclado")
+    // The sheet shows the question whole.
+    button("question-expand").tap()
+    let sheet = app.descendants(matching: .any)["question-sheet"].firstMatch
+    XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+    XCTAssertTrue(sheet.staticTexts.matching(NSPredicate(format: "label == %@", long)).firstMatch.exists,
+      "the sheet shows the question whole")
+    capture("letra-grande-ampliada")
+    button("question-primary").tap()
+    let answered = try await waitAnswered(session, form)
+    XCTAssertEqual(answered, ["prazo": .string("Guardar só o resumo")])
   }
 
   // MARK: Drafts (`custom.question-drafts`)
@@ -221,12 +309,12 @@ import XCTest
     // Another session waiting for an answer too, so the list shows it among the newest ones.
     let other = try await create([["key": "x", "type": "string", "title": "Outra pergunta"]])
     try open(session)
-    let nota = app.textFields["question-answer-nota"]
-    XCTAssertTrue(nota.waitForExistence(timeout: 30), app.debugDescription)
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
     app.buttons["cedar"].tap()
-    nota.tap()
-    nota.typeText("rascunho")
-    app.staticTexts["Algo mais?"].tap()
+    button("question-primary").tap()
+    XCTAssertTrue(waitLabel(step, "2 de 2"), step.label)
+    answer.tap()
+    answer.typeText("rascunho")
     let saved = try await waitDraft(session, form) {
       $0?["voz"]?["selected"] == .array(["cedar"]) && $0?["nota"]?["text"] == .string("rascunho")
     }
@@ -241,16 +329,19 @@ import XCTest
     let row = app.buttons["session-row-\(session)"]
     XCTAssertTrue(row.waitForExistence(timeout: 20), app.debugDescription)
     row.tap()
-    XCTAssertTrue(nota.waitForExistence(timeout: 30), app.debugDescription)
-    XCTAssertEqual(nota.value as? String, "rascunho")
-    XCTAssertTrue(selected("cedar"))
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
+    // Back on the question it was on.
+    XCTAssertTrue(waitLabel(step, "2 de 2"), step.label)
+    XCTAssertTrue(waitValue(answer, contains: "rascunho"), String(describing: answer.value))
+    button("question-previous").tap()
     capture("rascunho-voltou")
     // Closed and reopened.
     app.terminate()
     try open(session)
-    XCTAssertTrue(nota.waitForExistence(timeout: 30), app.debugDescription)
-    XCTAssertEqual(nota.value as? String, "rascunho")
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
     XCTAssertTrue(selected("cedar"))
+    button("question-next").tap()
+    XCTAssertTrue(waitValue(answer, contains: "rascunho"), String(describing: answer.value))
   }
 
   /// What another device saved shows here, when the form opens and while it is on screen.
@@ -260,16 +351,13 @@ import XCTest
       "sessionID": session, "requestID": form, "client": "mac",
       "fields": ["voz": ["selected": [], "text": "viola", "added": []]]]])
     try open(session)
-    let voz = app.textFields["question-answer-voz"]
-    XCTAssertTrue(voz.waitForExistence(timeout: 30), app.debugDescription)
-    let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'viola'"), object: voz)
-    XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 10), .completed, String(describing: voz.value))
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
+    XCTAssertTrue(waitValue(answer, contains: "viola"), String(describing: answer.value))
     let _: JSONObject = try await request("POST", "/api/rpc/custom.question-drafts/save", ["input": [
       "sessionID": session, "requestID": form, "client": "mac",
       "fields": ["nota": ["selected": [], "text": "do Mac", "added": []]]]])
-    let nota = app.textFields["question-answer-nota"]
-    let live = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == 'do Mac'"), object: nota)
-    XCTAssertEqual(XCTWaiter.wait(for: [live], timeout: 10), .completed, String(describing: nota.value))
+    button("question-next").tap()
+    XCTAssertTrue(waitValue(answer, contains: "do Mac"), String(describing: answer.value))
     capture("rascunho-outro-aparelho")
   }
 
@@ -277,15 +365,14 @@ import XCTest
   func testAnsweringClearsTheDraft() async throws {
     let (session, form) = try await draftForm()
     try open(session)
-    let nota = app.textFields["question-answer-nota"]
-    XCTAssertTrue(nota.waitForExistence(timeout: 30), app.debugDescription)
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
     app.buttons["marin"].tap()
-    nota.tap()
-    nota.typeText("ok")
-    app.staticTexts["Algo mais?"].tap()
+    button("question-primary").tap()
+    answer.tap()
+    answer.typeText("ok")
     let saved = try await waitDraft(session, form) { $0?["nota"]?["text"] == .string("ok") }
     XCTAssertTrue(saved)
-    app.buttons["Enviar"].tap()
+    button("question-primary").tap()
     let answered = try await waitAnswered(session, form)
     XCTAssertEqual(answered, ["voz": .string("marin"), "nota": .string("ok")])
     let cleared = try await waitDraft(session, form) { $0 == nil }
@@ -294,23 +381,18 @@ import XCTest
 
   // MARK: Helpers
 
-  private func open(_ session: String) throws {
+  private func open(_ session: String, dictation: Bool = false, review: String = "800", extra: [String] = []) throws {
     app.launchArguments = ["-OpenCodeServerURL", TestSandbox.url, "-OpenCodeOpenSession", session,
       "-OpenCodeTheme", environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark"]
+      + (dictation ? ["-OpenCodeDictationFake", "-OpenCodeDictationReview", review] : []) + extra
     app.launchEnvironment["OPENCODE_SERVER_PASSWORD"] = environment["OPENCODE_TEST_PASSWORD"]
     app.launch()
     try app.requireSandbox()
   }
 
-  private func waitFocus(_ element: XCUIElement, _ focused: Bool) -> Bool {
-    let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hasKeyboardFocus == %@", NSNumber(value: focused)),
-      object: element)
-    return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
-  }
-
   private func capture(_ name: String) {
     let attachment = XCTAttachment(screenshot: app.screenshot())
-    attachment.name = name
+    attachment.name = name + "-" + (environment["OPENCODE_TEST_THEME"] ?? "openchamber-dark")
     attachment.lifetime = .keepAlways
     add(attachment)
   }

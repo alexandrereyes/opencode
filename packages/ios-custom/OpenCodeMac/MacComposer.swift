@@ -648,7 +648,10 @@ struct MacReplyComposer: View {
   var dictationTurns: (@MainActor () -> [DictationReview.Turn])? = nil
   /// The field took or left the caret (a question's draft keeps another device's change out of it meanwhile).
   var focusChanged: ((Bool) -> Void)? = nil
-  @State private var draft = Self.scratch()
+  /// A draft its host keeps (an agent's question's answer, shared by its questions); otherwise one of its own.
+  var editor: ConversationDraft? = nil
+  @State private var own = Self.scratch()
+  private var draft: ConversationDraft { editor ?? own }
 
   var body: some View {
     MacComposer(store: store, draft: draft,
@@ -667,7 +670,12 @@ struct MacReplyComposer: View {
         receive(text)
         if focusOnAppear { draft.focused = true }
       }
-      .onDisappear { try? FileManager.default.removeItem(at: draft.persistence.directory) }
+      .onDisappear {
+        // Only its own draft's files go with it. A host's draft (an agent's question's answer) outlives this field,
+        // a recording it paused included; the host discards it (`ConversationStore.forgetAnswering`).
+        guard editor == nil else { return }
+        try? FileManager.default.removeItem(at: draft.persistence.directory)
+      }
       .onChange(of: draft.contentRevision) {
         let value = draft.document.text
         if value != text { text = value }
@@ -677,7 +685,7 @@ struct MacReplyComposer: View {
       .onChange(of: draft.focused) { _, focused in focusChanged?(focused) }
   }
 
-  private static func scratch() -> ConversationDraft {
+  static func scratch() -> ConversationDraft {
     let draft = ConversationDraft.scratch()
     #if DEBUG
     MacSyntheticKey.fakeDictation(draft)

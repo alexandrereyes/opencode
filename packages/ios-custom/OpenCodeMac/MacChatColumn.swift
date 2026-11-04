@@ -102,6 +102,7 @@ struct MacConversationView: View {
   @State private var dropping = false
   @State private var playerHeight: CGFloat = 0
   @State private var chatWidth: CGFloat = 800
+  @State private var chatHeight: CGFloat = 800
 
   private var input: MacConversationInput { runtime.input(conversation) }
   private var draft: ConversationDraft { input.draft }
@@ -329,7 +330,10 @@ struct MacConversationView: View {
         jumpButton.padding(.trailing, (margin - MacJumpButton.side) / 2).padding(.bottom, 12)
       }
     }
-    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chatWidth = $0 }
+    .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+      chatWidth = size.width
+      chatHeight = size.height
+    }
     .overlay(alignment: .top) {
       if memory.state.resumeOffered {
         Button("Continuar de onde parou") { transcript?.resume() }
@@ -374,12 +378,30 @@ struct MacConversationView: View {
         ConversationProgressPill(progress: progress)
       }
       ConversationTray(store: conversation, draft: draft, started: .some(input.executionStarted.value))
-      // Without a margin wide enough beside the column, ↓ sits on the composer card's top right corner.
-      MacComposer(store: conversation, draft: draft,
-        corner: memory.state.jumpToLatest && jumpMargin == nil
-          // Mostly above the card's edge, clear of the first line of text.
-          ? AnyView(jumpButton.padding(.trailing, 12).offset(y: 8 - MacJumpButton.side)) : nil)
-        .disabled(!conversation.ready || conversation.notice != nil)
+      // An agent's question takes the composer's place; Escrever no chat brings it back, the question waiting.
+      if let question = conversation.answeringForm, !conversation.answering(question).chatting {
+        QuestionComposer(store: conversation, answering: conversation.answering(question), chat: draft,
+          room: chatHeight)
+      } else {
+        if let question = conversation.answeringForm {
+          QuestionWaitingBar(answering: conversation.answering(question))
+        }
+        // Without a margin wide enough beside the column, ↓ sits on the composer card's top right corner.
+        MacComposer(store: conversation, draft: draft,
+          corner: memory.state.jumpToLatest && jumpMargin == nil
+            // Mostly above the card's edge, clear of the first line of text.
+            ? AnyView(jumpButton.padding(.trailing, 12).offset(y: 8 - MacJumpButton.side)) : nil)
+          .disabled(!conversation.ready || conversation.notice != nil)
+      }
+    }
+    .onChange(of: conversation.questions.map(\.id), initial: true) { _, ids in
+      conversation.forgetAnswering(keeping: ids)
+      // A question arriving while a message is being written waits beside it rather than taking its field.
+      if let question = conversation.answeringForm, conversation.answerings[question.id] == nil, draft.focused,
+        draft.hasText
+      {
+        conversation.answering(question).chatting = true
+      }
     }
     .frame(maxWidth: MacTranscriptContext.column)
     .padding(.horizontal, MacTranscriptContext.minimumInset).padding(.bottom, 10).padding(.top, 6)

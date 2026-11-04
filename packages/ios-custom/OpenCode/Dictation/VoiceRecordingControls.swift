@@ -165,8 +165,9 @@ struct DictationAction: View {
   let available: Bool
   let submit: () -> Void
   var submission = Submission.message
-  /// A quote comment's action commits it to the message draft rather than sending.
-  enum Submission { case message, comment }
+  /// A quote comment's action commits it to the message draft rather than sending; an agent's question's answer
+  /// answers (or goes to its next question).
+  enum Submission { case message, comment, answer }
   /// With content a hold belongs to the compact microphone beside this action (DictationCompactMicrophone).
   private var holding: Bool { recording.gesture.state == .holding && !hasContent }
   private var besideHold: Bool { recording.gesture.state == .holding && hasContent }
@@ -181,9 +182,9 @@ struct DictationAction: View {
         .frame(width: 44, height: 44)
         .disabled(locked ? recording.state == .authorizing : !canSubmit)
         .opacity(!available && !hasContent && !locked ? 0.45 : 1)
-        .accessibilityLabel(locked ? "Parar e transcrever" : hasContent ? submission == .message ? "Enviar mensagem" : "Concluir comentário" : "Gravar para transcrever")
+        .accessibilityLabel(locked ? "Parar e transcrever" : hasContent ? submission == .message ? "Enviar mensagem" : submission == .answer ? "Responder" : "Concluir comentário" : "Gravar para transcrever")
         .accessibilityHint(!available && !hasContent && !locked ? "O microfone está indisponível no momento." : "")
-        .accessibilityIdentifier(locked ? "dictation-stop" : hasContent ? submission == .message ? "composer-send" : "comment-done" : "dictation-microphone-disabled")
+        .accessibilityIdentifier(locked ? "dictation-stop" : hasContent ? submission == .message ? "composer-send" : submission == .answer ? "question-answer-done" : "comment-done" : "dictation-microphone-disabled")
       } else {
         face.opacity(available ? 1 : 0.45).accessibilityHidden(true)
       }
