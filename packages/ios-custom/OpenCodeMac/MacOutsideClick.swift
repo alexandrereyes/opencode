@@ -4,15 +4,18 @@ import SwiftUI
 /// A click outside a sheet (on the dimmed window behind it, or anywhere else on that window) closes the sheet like
 /// Esc: the click becomes an Esc key equivalent for the topmost sheet, so its Cancelar/Fechar button runs with the
 /// same effect, including any confirmation that button asks for. Alerts and confirmation dialogs are sheets too and
-/// close as their Cancelar would. Each click closes only the topmost sheet.
+/// close as their Cancelar would. Each click closes only the topmost sheet. Sheets in `keptOpen` (Pergunta paralela)
+/// close only by their own X or Esc.
 @MainActor enum MacOutsideClick {
   private static var monitor: Any?
+  static let keptOpen = NSHashTable<NSWindow>.weakObjects()
 
   static func start() {
     guard monitor == nil else { return }
     monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
       guard let window = event.window, var sheet = window.attachedSheet else { return event }
       while let next = sheet.attachedSheet { sheet = next }
+      if keptOpen.contains(sheet) { return event }
       // Modelo e esforço over Nova sessão closes first, by its own monitor.
       if sheet.childWindows?.contains(where: { $0.isVisible && $0.identifier?.rawValue == "mac-model-palette" }) == true {
         return event

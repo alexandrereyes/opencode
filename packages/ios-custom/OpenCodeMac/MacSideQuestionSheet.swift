@@ -4,19 +4,34 @@ import SwiftUI
 
 /// Pergunta paralela (the selection menu, `…`, Sessão ▸ Pergunta paralela… ⌥⌘B, `/btw`): the iPhone's
 /// `SideQuestionSheet` on the Mac. The shared `SideQuestionState` asks `POST /generate` with the session's context
-/// and model, keeps up to five earlier answers as context and saves nothing to the conversation; closing (Fechar,
-/// Esc or a click outside) discards the thread. A selected passage arrives as the question's blockquote.
+/// and model, keeps up to five earlier answers as context and saves nothing to the conversation; closing (X or Esc;
+/// a click outside does not close it) discards the thread. A selected passage arrives as the question's blockquote.
+/// The sheet takes about 70% of the window it covers.
 struct MacSideQuestionSheet: View {
   @Environment(\.appTheme) private var theme
   @Environment(\.dismiss) private var dismiss
   let store: ConversationStore
   let launch: SideQuestionLaunch
+  /// The window the sheet covers, whose size it follows.
+  let owner: NSWindow?
   @State private var state: SideQuestionState
+  @State private var size: CGSize
 
-  init(store: ConversationStore, launch: SideQuestionLaunch) {
+  init(store: ConversationStore, launch: SideQuestionLaunch, owner: NSWindow?) {
     self.store = store
     self.launch = launch
+    self.owner = owner
     _state = State(initialValue: SideQuestionState(text: launch.text))
+    _size = State(initialValue: Self.size(in: owner))
+  }
+
+  /// About 70% of the owner's content (Alexandre, 04/11), 560 × 440 at least, never past the owner.
+  static func size(in owner: NSWindow?) -> CGSize {
+    guard let content = owner?.contentLayoutRect.size, content.width > 0, content.height > 0 else {
+      return CGSize(width: 680, height: 600)
+    }
+    return CGSize(width: min(content.width, max(560, (content.width * 0.7).rounded())),
+      height: min(content.height, max(440, (content.height * 0.7).rounded())))
   }
 
   var body: some View {
@@ -73,8 +88,12 @@ struct MacSideQuestionSheet: View {
         composer.padding([.horizontal, .bottom], 16).background(theme.color(.background))
       }
     }
-    .frame(width: 680, height: 600)
+    .frame(width: size.width, height: size.height)
     .background(theme.color(.background))
+    .background(KeptOpen())
+    .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResizeNotification, object: owner)) { _ in
+      size = Self.size(in: owner)
+    }
     .toastOverlay(state.toast)
     .task { if launch.submit { state.ask(store: store) } }
     .onDisappear { state.stop(restore: false) }
@@ -118,6 +137,18 @@ struct MacSideQuestionSheet: View {
   private func submit() {
     guard canSubmit else { return }
     state.ask(store: store)
+  }
+
+  /// Marks the sheet's window so a click outside leaves it open (`MacOutsideClick`).
+  private struct KeptOpen: NSViewRepresentable {
+    final class Mark: NSView {
+      override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let window { MacOutsideClick.keptOpen.add(window) }
+      }
+    }
+    func makeNSView(context: Context) -> Mark { Mark() }
+    func updateNSView(_ view: Mark, context: Context) {}
   }
 
   private func copy(_ answer: String) {

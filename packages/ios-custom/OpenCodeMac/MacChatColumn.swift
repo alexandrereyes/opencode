@@ -191,7 +191,9 @@ struct MacConversationView: View {
         .macCancelable()
       }
     }
-    .sheet(item: $runtime.sideQuestion) { launch in MacSideQuestionSheet(store: conversation, launch: launch) }
+    .sheet(item: $runtime.sideQuestion) { launch in
+      MacSideQuestionSheet(store: conversation, launch: launch, owner: runtime.window)
+    }
     .onChange(of: conversation.sideQuestion?.id, initial: true) { _, _ in
       // `/btw` sets the conversation, which every window showing it shares: the window it was typed in asks.
       guard let launch = conversation.sideQuestion, runtime.window?.isKeyWindow != false else { return }

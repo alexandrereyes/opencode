@@ -140,6 +140,74 @@ import SwiftUI
     try await sideQuestion(window: window, runtime: runtime, shot: shot)
   }
 
+  /// Pergunta paralela's sheet (Alexandre, 04/11): about 70% of the window it covers, 560 × 440 at least and never
+  /// past it, following that window's resizing; a click outside leaves it open with its draft, and only Esc in its
+  /// field or its X closes it.
+  private static func sideQuestionSheet(window: NSWindow, runtime: MacWindowRuntime,
+    open: (String) async throws -> (NSWindow, ComposerTextNSView), shot: (String) -> Void) async throws
+  {
+    let original = window.contentLayoutRect.size
+    defer { window.setContentSize(original) }
+    func expected() -> CGSize {
+      let content = window.contentLayoutRect.size
+      return CGSize(width: min(content.width, max(560, (content.width * 0.7).rounded())),
+        height: min(content.height, max(440, (content.height * 0.7).rounded())))
+    }
+    func measure(_ sheet: NSWindow, _ step: String) async throws {
+      let size = try await wait("tamanho da folha \(step)") {
+        abs(sheet.frame.width - expected().width) < 1.5 && abs(sheet.frame.height - expected().height) < 1.5
+          ? sheet.frame.size : nil
+      }
+      print("MacAjustes composer pergunta paralela \(step): janela \(window.contentLayoutRect.size) · folha \(size)")
+    }
+    func event(_ type: NSEvent.EventType, at point: CGPoint, in target: NSWindow) -> NSEvent {
+      NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: target.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!
+    }
+    // Three window sizes, the last near the window's minimum height (620): 70%, then the 440 floor.
+    for (index, content) in [CGSize(width: 1600, height: 1000), CGSize(width: 1200, height: 760),
+      CGSize(width: 900, height: 620)].enumerated() {
+      window.setContentSize(content)
+      try await Task.sleep(for: .milliseconds(400))
+      let (sheet, field) = try await open("Trecho para o tamanho da folha")
+      try await measure(sheet, "tamanho \(index + 1)")
+      if index == 0 { shot("pergunta-paralela-70") }
+      // The field still holds the quote and the caret at this size.
+      guard field.window?.firstResponder === field, field.visibleRect.height >= 59 else {
+        throw Failure(description: "pergunta paralela tamanho \(index + 1): campo \(field.visibleRect)")
+      }
+      runtime.sideQuestion = nil
+      try await wait("folha fechou no tamanho \(index + 1)") { window.attachedSheet == nil ? true : nil }
+    }
+    // Resizing the window with the sheet open: the sheet follows.
+    window.setContentSize(CGSize(width: 1600, height: 1000))
+    try await Task.sleep(for: .milliseconds(400))
+    var (sheet, field) = try await open("Trecho que fica")
+    window.setContentSize(CGSize(width: 1200, height: 760))
+    try await measure(sheet, "redimensionada")
+    // A click outside, on the window behind it, through the app's event path (where `MacOutsideClick` watches).
+    field.insertText("Minha pergunta", replacementRange: field.selectedRange())
+    let outside = CGPoint(x: 20, y: 20)
+    NSApp.sendEvent(event(.leftMouseDown, at: outside, in: window))
+    NSApp.sendEvent(event(.leftMouseUp, at: outside, in: window))
+    try await Task.sleep(for: .milliseconds(700))
+    guard window.attachedSheet === sheet, field.string == "> Trecho que fica\n\nMinha pergunta" else {
+      throw Failure(description: "o clique fora fechou a pergunta paralela ou mudou o texto: \(field.string.debugDescription)")
+    }
+    // Esc in the field closes it (the window's own key path to its first responder).
+    guard sheet.firstResponder === field else { throw Failure(description: "o campo perdeu o foco com o clique fora") }
+    sheet.sendEvent(key("\u{1b}", code: 53, window: sheet))
+    try await wait("Esc fechou a pergunta paralela") { window.attachedSheet == nil && runtime.sideQuestion == nil ? true : nil }
+    // The X closes it: a click on it, top right of the header.
+    (sheet, field) = try await open("Trecho para o X")
+    let content = try require(sheet.contentView, "conteúdo da folha")
+    let x = content.convert(CGPoint(x: content.bounds.width - 24 - 14, y: content.isFlipped ? 18 + 14 : content.bounds.height - 18 - 14), to: nil)
+    sheet.sendEvent(event(.leftMouseDown, at: x, in: sheet))
+    sheet.sendEvent(event(.leftMouseUp, at: x, in: sheet))
+    try await wait("o X fechou a pergunta paralela") { window.attachedSheet == nil && runtime.sideQuestion == nil ? true : nil }
+    print("MacAjustes composer: pergunta paralela em 70% da janela, fica aberta com clique fora, fecha com Esc e com o X")
+  }
+
   /// Pergunta paralela over a selected passage (Alexandre, 04/11): the passage arrives as the question's blockquote
   /// (`SideQuestionRequest.quote`), and the field grows to it like the conversation's composer, up to the same
   /// maximum, with the caret visible where the question goes; typing and erasing lines grows and shrinks it.
@@ -212,8 +280,17 @@ import SwiftUI
     try check(field, lines: 5, quoteShown: true, "trecho de três linhas")
     shot("pergunta-paralela-tres-linhas")
     try await close(sheet)
-    (sheet, field) = try await open(String(repeating: "Um trecho comprido que quebra a linha do campo. ", count: 3))
-    try check(field, lines: 4, quoteShown: true, "trecho que quebra")
+    (sheet, field) = try await open(String(repeating: "Um trecho comprido que quebra a linha do campo. ", count: 8))
+    // As many lines as the field's own layout wraps it to (the sheet follows the window's width), two at least.
+    var fragments = 0
+    if let manager = field.layoutManager {
+      manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { _, _, _, _, _ in
+        fragments += 1
+      }
+      if manager.extraLineFragmentTextContainer != nil { fragments += 1 }
+    }
+    guard fragments >= 4 else { throw Failure(description: "pergunta paralela: o trecho não quebrou (\(fragments) linhas)") }
+    try check(field, lines: fragments, quoteShown: true, "trecho que quebra")
     try await close(sheet)
     // A long passage: the field stops at the composer's maximum and scrolls to the caret; the passage's start is
     // above, a scroll away.
@@ -222,6 +299,7 @@ import SwiftUI
     shot("pergunta-paralela-trecho-longo")
     try await close(sheet)
     print("MacAjustes composer: pergunta paralela com trecho cresce como o campo da conversa, com o cursor visível")
+    try await sideQuestionSheet(window: window, runtime: runtime, open: open, shot: shot)
   }
 
   // MARK: A3 — the question's own answer

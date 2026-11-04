@@ -4750,8 +4750,8 @@ failures now print whether the app and the window were in front. The base build
   (`SideQuestionSheet.swift`, now shared; its iPhone view stays in `#if os(iOS)`), so the request, history, Parar,
   retry and toast are the iPhone's. A selection prefills the field with its blockquote, shown as a `QuotedPassage` in
   the sent bubble; answers use the chat's Markdown (`MacMarkdownText`) with Copiar resposta. The field is
-  `MacReplyField` (Return asks, Shift+Return breaks the line, Esc closes); Fechar, Esc and a click outside discard
-  the thread. Like the iPhone, `POST /generate` answers at once (no stream) and nothing reaches the conversation.
+  `MacReplyField` (Return asks, Shift+Return breaks the line, Esc closes); the X and Esc discard the thread (a click
+  outside no longer closes it, below). Like the iPhone, `POST /generate` answers at once (no stream) and nothing reaches the conversation.
 - **Fixture:** `/generate` returns a local Markdown answer; `-OpenCodeMacSideQuestion <question>` opens the sheet
   about a sample passage for the capture pipeline.
 - **A selected passage's field (Alexandre, 04/11):** the field stayed one line tall with the blockquote in it, the
@@ -4763,6 +4763,14 @@ failures now print whether the app and the window were in front. The base build
   start a scroll away. The passage stays the question's Markdown blockquote, sent as before.
   `test-mac-ajustes.sh composer` checks short, three-line, wrapping and long passages, typing and erasing a line, the
   caret inside the field's visible rectangle and the text the question sends.
+- **Size and closing (Alexandre, 04/11):** the sheet takes about 70% of the width and height of the window it covers
+  (`runtime.window`'s `contentLayoutRect`, never the key window, which may be the sheet itself), 560 × 440 at least
+  and never past that window, and follows its resizing. A click outside no longer closes it: the sheet's window is in
+  `MacOutsideClick.keptOpen`, which the other sheets' click-outside-is-Esc rule skips; only the X and Esc (the
+  field's, after a dictation's own Esc, or the header's cancel shortcut) close it, cancelling the question under way
+  as before. `test-mac-ajustes.sh composer` checks three window sizes (70% and the 440 floor), a resize with the
+  sheet open, a click outside (through the app's event path, where removing the exception makes it fail), Esc in
+  the field and a click on the X.
 
 ### Main-thread cost with sessions streaming — 29 October
 
