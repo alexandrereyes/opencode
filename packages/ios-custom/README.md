@@ -4771,6 +4771,13 @@ failures now print whether the app and the window were in front. The base build
   as before. `test-mac-ajustes.sh composer` checks three window sizes (70% and the 440 floor), a resize with the
   sheet open, a click outside (through the app's event path, where removing the exception makes it fail), Esc in
   the field and a click on the X.
+- **Dictation in it, checked in the background:** `test-mac-ajustes.sh composer` now runs with the fake microphone
+  and the fixtures' reviewer (`-OpenCodeMacFakeDictation -OpenCodeDictationReview 800`) and dictates into the sheet
+  without the app in front: the right Option key and Esc go through `NSApp.sendEvent`, where `MacDictationKey`'s
+  local monitor sees them, and undo and redo up the responder chain to the window's `undo:`. The raw text, then its
+  revision, land after the quote and the question as two undo steps, the field growing and shrinking with them and
+  the caret in view; after the X and another conversation, the window has no step of that editor and the next
+  sheet's field starts empty; Esc during a dictation cancels it and keeps the sheet, the next Esc closes it.
 
 ### Main-thread cost with sessions streaming — 29 October
 

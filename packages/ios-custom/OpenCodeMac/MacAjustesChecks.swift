@@ -140,6 +140,126 @@ import SwiftUI
     try await sideQuestion(window: window, runtime: runtime, shot: shot)
   }
 
+  /// Dictation in Pergunta paralela over a passage, in this background copy (`-OpenCodeMacFakeDictation`, the
+  /// fixtures' reviewer): the right Option key and Esc go through `NSApp.sendEvent`, where `MacDictationKey`'s local
+  /// monitor sees them as it sees the keyboard's; undo and redo go up the responder chain from the field to the
+  /// window's `undo:`, as the Edit menu's do. The raw text, then its revision, land after the quote as two undo steps,
+  /// the field growing to them with the caret in view; Esc during a dictation cancels it and keeps the sheet, the next
+  /// Esc closes it; once the sheet is closed (X) and another conversation shown, no undo step reaches its editor.
+  private static func sideQuestionDictation(window: NSWindow, runtime: MacWindowRuntime,
+    open: (String) async throws -> (NSWindow, ComposerTextNSView),
+    check: (ComposerTextNSView, Int, Bool, String) throws -> Void, laidOut: (ComposerTextNSView) -> Int,
+    shot: (String) -> Void) async throws
+  {
+    func option(_ down: Bool, _ target: NSWindow) {
+      // The right Option key alone (NX_DEVICERALTKEYMASK with the Option flag), as the hardware sends it.
+      let flags = down ? NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | 0x40) : []
+      NSApp.sendEvent(NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags,
+        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: target.windowNumber, context: nil,
+        characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 61)!)
+    }
+    func tap(_ target: NSWindow) { option(true, target); option(false, target) }
+    func chain(_ action: String, _ field: NSTextView) throws {
+      guard field.window?.firstResponder === field, field.tryToPerform(Selector(action), with: nil) else {
+        throw Failure(description: "pergunta paralela: \(action) não chegou à janela pela cadeia de respostas")
+      }
+    }
+    // A question already written after the quote: the dictation lands after it and wraps the line, so the field grows
+    // when the text arrives and shrinks when it is undone.
+    let quote = "> Trecho para ditar\n\n" + "Antes de responder, considere o trecho citado acima e o que ele muda na decisão:"
+    // 1. Raw, then revised, after the quote; two undo steps in this field.
+    var (sheet, field) = try await open("Trecho para ditar")
+    let draft = try require(field.input?.representedDraft, "rascunho da pergunta paralela")
+    draft.text = NSAttributedString(string: quote)
+    draft.selection = NSRange(location: (quote as NSString).length, length: 0)
+    try await wait("pergunta escrita") { field.string == quote && field.selectedRange().location == (quote as NSString).length ? true : nil }
+    try await Task.sleep(for: .milliseconds(400))
+    try check(field, 3, true, "pergunta antes do ditado")
+    tap(sheet)
+    try await wait("a tecla gravou na pergunta paralela") { draft.recording.capturing ? true : nil }
+    guard draft.recording.revision.enabled else { throw Failure(description: "pergunta paralela: revisão desligada") }
+    try await Task.sleep(for: .seconds(1.2))
+    tap(sheet)
+    try await wait("ajustando texto na pergunta paralela", timeout: 15) {
+      draft.recording.revision.reviewing != nil ? true : nil
+    }
+    try await wait("revisado na pergunta paralela", timeout: 15) {
+      field.string == quote + " " + DictationFixtures.text ? true : nil
+    }
+    try await Task.sleep(for: .milliseconds(600))
+    let revisedLines = laidOut(field)
+    guard revisedLines > 3 else { throw Failure(description: "pergunta paralela: o ditado não quebrou a linha (\(revisedLines))") }
+    try check(field, revisedLines, true, "ditado revisado")
+    shot("pergunta-paralela-ditado")
+    try chain("undo:", field)
+    try await wait("desfazer voltou ao texto cru") { field.string == quote + " " + DictationFixtures.raw ? true : nil }
+    try await Task.sleep(for: .milliseconds(400))
+    try check(field, laidOut(field), true, "texto cru")
+    try chain("undo:", field)
+    try await wait("desfazer tirou o ditado") { field.string == quote ? true : nil }
+    try await Task.sleep(for: .milliseconds(400))
+    try check(field, 3, true, "sem o ditado")
+    try chain("redo:", field)
+    try chain("redo:", field)
+    try await wait("refazer voltou ao revisado") { field.string == quote + " " + DictationFixtures.text ? true : nil }
+    try await Task.sleep(for: .milliseconds(400))
+    try check(field, revisedLines, true, "refeito")
+    guard draft.document.text == quote + " " + DictationFixtures.text else {
+      throw Failure(description: "pergunta paralela: a pergunta seria \(draft.document.text.debugDescription)")
+    }
+    // 2. The X, another conversation and back, then undo up the window's chain: nothing of that editor runs.
+    weak var closed = field.input
+    let content = try require(sheet.contentView, "conteúdo da folha")
+    let x = content.convert(CGPoint(x: content.bounds.width - 24 - 14,
+      y: content.isFlipped ? 18 + 14 : content.bounds.height - 18 - 14), to: nil)
+    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+      sheet.sendEvent(NSEvent.mouseEvent(with: type, location: x, modifierFlags: [],
+        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: sheet.windowNumber, context: nil, eventNumber: 0,
+        clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0)!)
+    }
+    try await wait("o X fechou a pergunta paralela ditada") { window.attachedSheet == nil ? true : nil }
+    runtime.selection = MacSelection(sessionID: "ses_mac_docs")
+    try await Task.sleep(for: .milliseconds(800))
+    runtime.selection = MacSelection(sessionID: MacFixture.rootID)
+    let main = try await wait("editor da conversa de volta") {
+      MacSyntheticKey.composer(in: window.contentView).flatMap { $0.window === window ? $0 : nil }
+    }
+    window.makeFirstResponder(main)
+    let stale = window.undoManager?.canUndo == true
+    let ran = main.tryToPerform(Selector(("undo:")), with: nil)
+    try await Task.sleep(for: .milliseconds(400))
+    print("MacAjustes composer pergunta paralela ditada fechada: editor dela vivo \(closed != nil) · desfazer na janela \(stale) · undo: \(ran)")
+    guard !stale else { throw Failure(description: "pergunta paralela: a janela guardou passos do editor da folha") }
+    // The next sheet's field starts with no step of the last one.
+    (sheet, field) = try await open("Trecho seguinte")
+    guard field.undoManager?.canUndo != true else {
+      throw Failure(description: "pergunta paralela: a folha nova herdou passos da anterior")
+    }
+    // 3. Esc during a dictation cancels it and keeps the sheet; the next Esc closes it.
+    let next = try require(field.input?.representedDraft, "rascunho da pergunta paralela seguinte")
+    tap(sheet)
+    try await wait("gravou para o Esc") { next.recording.capturing ? true : nil }
+    try await Task.sleep(for: .seconds(1.2))
+    let esc = { key("\u{1b}", code: 53, window: sheet) }
+    NSApp.sendEvent(esc())
+    try await wait("Esc cancelou o ditado") { next.recording.visible ? nil : true }
+    try await Task.sleep(for: .milliseconds(600))
+    guard window.attachedSheet === sheet, field.string == "> Trecho seguinte\n\n" else {
+      throw Failure(description: "pergunta paralela: o Esc do ditado fechou a folha ou mudou o texto: \(field.string.debugDescription)")
+    }
+    NSApp.sendEvent(esc())
+    try await Task.sleep(for: .milliseconds(700))
+    var path = "NSApp.sendEvent"
+    if window.attachedSheet != nil {
+      // A key event the app's event path hands to the key window only; inactive, this copy has none.
+      guard !NSApp.isActive else { throw Failure(description: "pergunta paralela: o Esc sem ditado não fechou a folha") }
+      path = "sheet.sendEvent (app inativo: o NSApp não entrega tecla sem janela principal)"
+      sheet.sendEvent(esc())
+    }
+    try await wait("o Esc fechou a pergunta paralela") { window.attachedSheet == nil && runtime.sideQuestion == nil ? true : nil }
+    print("MacAjustes composer: pergunta paralela ditada em dois passos (cru e revisado) depois do trecho, desfazer e refazer pela cadeia de respostas; Esc no ditado cancela e mantém a folha; Esc depois fecha por \(path)")
+  }
+
   /// Pergunta paralela's sheet (Alexandre, 04/11): about 70% of the window it covers, 560 × 440 at least and never
   /// past it, following that window's resizing; a click outside leaves it open with its draft, and only Esc in its
   /// field or its X closes it.
@@ -250,6 +370,15 @@ import SwiftUI
         throw Failure(description: "pergunta paralela \(step): início do trecho \(first) fora de \(shown)")
       }
     }
+    /// The lines the field's own layout makes of its text, the empty one after a final line break included.
+    func laidOut(_ field: ComposerTextNSView) -> Int {
+      guard let manager = field.layoutManager else { return 0 }
+      var lines = 0
+      manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { _, _, _, _, _ in
+        lines += 1
+      }
+      return lines + (manager.extraLineFragmentTextContainer != nil ? 1 : 0)
+    }
     func close(_ sheet: NSWindow) async throws {
       runtime.sideQuestion = nil
       try await wait("pergunta paralela fechou") { window.attachedSheet !== sheet ? true : nil }
@@ -282,13 +411,7 @@ import SwiftUI
     try await close(sheet)
     (sheet, field) = try await open(String(repeating: "Um trecho comprido que quebra a linha do campo. ", count: 8))
     // As many lines as the field's own layout wraps it to (the sheet follows the window's width), two at least.
-    var fragments = 0
-    if let manager = field.layoutManager {
-      manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { _, _, _, _, _ in
-        fragments += 1
-      }
-      if manager.extraLineFragmentTextContainer != nil { fragments += 1 }
-    }
+    let fragments = laidOut(field)
     guard fragments >= 4 else { throw Failure(description: "pergunta paralela: o trecho não quebrou (\(fragments) linhas)") }
     try check(field, lines: fragments, quoteShown: true, "trecho que quebra")
     try await close(sheet)
@@ -300,6 +423,8 @@ import SwiftUI
     try await close(sheet)
     print("MacAjustes composer: pergunta paralela com trecho cresce como o campo da conversa, com o cursor visível")
     try await sideQuestionSheet(window: window, runtime: runtime, open: open, shot: shot)
+    try await sideQuestionDictation(window: window, runtime: runtime, open: open, check: check, laidOut: laidOut,
+      shot: shot)
   }
 
   // MARK: A3 — the question's own answer

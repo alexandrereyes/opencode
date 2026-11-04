@@ -45,6 +45,8 @@ for mode in $modes; do
   extra=()
   case $mode in
     quote) extra=(-OpenCodeMacDetailCase quotes) ;;
+    # Pergunta paralela's dictation records with the fake microphone; the fixtures' reviewer answers in 0.8 s.
+    composer) extra=(-OpenCodeMacFakeDictation -OpenCodeDictationReview 800) ;;
     # The answers record with the fake microphone and the fixtures' reviewer.
     question) extra=(-OpenCodeMacFakeDictation) ;;
     archived) extra=(-OpenCodeMacSearchFixture) ;;
