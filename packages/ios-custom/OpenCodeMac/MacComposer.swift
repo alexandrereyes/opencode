@@ -527,6 +527,12 @@ struct MacComposerEditor: NSViewRepresentable {
       view.restyle()
       text.undoManager?.removeAllActions()
       context.coordinator.cited = MacAttachments.cited(in: view.textStorage)
+      // A text given rather than typed (a draft reopened, Pergunta paralela's passage) shows its caret, once the field
+      // has its height: past the field's maximum, the text scrolls to it.
+      DispatchQueue.main.async { [weak view] in
+        guard let view else { return }
+        view.textView.scrollRangeToVisible(view.textView.selectedRange())
+      }
     } else if restyle {
       view.restyle()
     }

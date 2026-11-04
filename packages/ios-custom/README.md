@@ -4754,6 +4754,15 @@ failures now print whether the app and the window were in front. The base build
   the thread. Like the iPhone, `POST /generate` answers at once (no stream) and nothing reaches the conversation.
 - **Fixture:** `/generate` returns a local Markdown answer; `-OpenCodeMacSideQuestion <question>` opens the sheet
   about a sample passage for the capture pipeline.
+- **A selected passage's field (Alexandre, 04/11):** the field stayed one line tall with the blockquote in it, the
+  caret two lines below, out of sight. Its height came from `ComposerInputView.contentHeight` at the field's width:
+  laying out a text taller than the field shows the scroller, which narrowed the container mid-measure, and that
+  height (one line, the old wrap's) was kept. A height measured while the wrap changed is now measured again, so the
+  field grows like the conversation's (up to `maximumLines`), and a text given to the editor (the passage, a draft
+  reopened) scrolls to its caret once laid out: a long passage stops at the maximum with the caret on screen and its
+  start a scroll away. The passage stays the question's Markdown blockquote, sent as before.
+  `test-mac-ajustes.sh composer` checks short, three-line, wrapping and long passages, typing and erasing a line, the
+  caret inside the field's visible rectangle and the text the question sends.
 
 ### Main-thread cost with sessions streaming — 29 October
 

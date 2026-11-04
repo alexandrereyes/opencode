@@ -175,7 +175,11 @@ final class ComposerInputView: NSScrollView {
   /// so their heights are kept until the text changes.
   func contentHeight(width: CGFloat) -> CGFloat {
     if let height = heights[width] { return height }
-    let height = textView.textHeight(width: width, lineHeight: lineHeight)
+    let wrap = textView.textContainer?.size.width
+    let first = textView.textHeight(width: width, lineHeight: lineHeight)
+    // Laying out a text taller than the field shows the scroller, which narrows the container while it is measured
+    // (Pergunta paralela's passage, given at one line): that height is the old wrap's, so it is measured again.
+    let height = textView.textContainer?.size.width == wrap ? first : textView.textHeight(width: width, lineHeight: lineHeight)
     if heights.count > 16 { heights.removeAll() }
     heights[width] = height
     return height

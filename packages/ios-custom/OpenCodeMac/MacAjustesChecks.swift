@@ -137,6 +137,91 @@ import SwiftUI
     try await set(NSAttributedString(string: (1...12).map { "Linha \($0) de um texto longo" }.joined(separator: "\n")))
     try check(lines: 12, "rolagem")
     try await set(NSAttributedString())
+    try await sideQuestion(window: window, runtime: runtime, shot: shot)
+  }
+
+  /// Pergunta paralela over a selected passage (Alexandre, 04/11): the passage arrives as the question's blockquote
+  /// (`SideQuestionRequest.quote`), and the field grows to it like the conversation's composer, up to the same
+  /// maximum, with the caret visible where the question goes; typing and erasing lines grows and shrinks it.
+  private static func sideQuestion(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void) async throws {
+    func open(_ quote: String) async throws -> (NSWindow, ComposerTextNSView) {
+      runtime.askSideQuestion(quote: quote)
+      let sheet = try await wait("folha da pergunta paralela") { window.attachedSheet }
+      let field = try await wait("campo da pergunta paralela com o foco") {
+        MacSyntheticKey.composer(in: sheet.contentView).flatMap { sheet.firstResponder === $0 ? $0 : nil }
+      }
+      try await Task.sleep(for: .milliseconds(900))
+      return (sheet, field)
+    }
+    /// The caret's rectangle in the text view: on the extra line after a final line break, else at its glyph.
+    func caret(_ field: ComposerTextNSView) -> CGRect {
+      guard let manager = field.layoutManager, let container = field.textContainer else { return .null }
+      let location = field.selectedRange().location
+      let origin = field.textContainerOrigin
+      if location == field.textStorage?.length, manager.extraLineFragmentTextContainer === container {
+        return manager.extraLineFragmentRect.offsetBy(dx: origin.x, dy: origin.y)
+      }
+      let glyph = manager.glyphIndexForCharacter(at: max(0, location - (location == field.textStorage?.length ? 1 : 0)))
+      return manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).offsetBy(dx: origin.x, dy: origin.y)
+    }
+    func check(_ field: ComposerTextNSView, lines expected: Int, quoteShown: Bool, _ step: String) throws {
+      let input = try require(field.input, "editor da pergunta paralela")
+      let line = input.lineHeight
+      let height = min(CGFloat(expected), ComposerInputView.maximumLines) * line
+      let shown = field.visibleRect
+      let mark = caret(field)
+      let first = field.layoutManager.map { $0.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil) } ?? .null
+      print("MacAjustes composer pergunta paralela \(step): altura \(input.frame.height) (esperada \(height)) · topo \(input.contentView.bounds.minY) · cursor \(mark) em \(shown)")
+      guard abs(input.frame.height - height) < 0.5 else {
+        throw Failure(description: "pergunta paralela \(step): altura \(input.frame.height), esperada \(height)")
+      }
+      guard field.window?.firstResponder === field, shown.contains(mark.insetBy(dx: 0, dy: 0.5)) else {
+        throw Failure(description: "pergunta paralela \(step): cursor \(mark) fora de \(shown)")
+      }
+      guard !quoteShown || shown.contains(first.insetBy(dx: 0, dy: 0.5)) else {
+        throw Failure(description: "pergunta paralela \(step): início do trecho \(first) fora de \(shown)")
+      }
+    }
+    func close(_ sheet: NSWindow) async throws {
+      runtime.sideQuestion = nil
+      try await wait("pergunta paralela fechou") { window.attachedSheet !== sheet ? true : nil }
+      try await Task.sleep(for: .milliseconds(400))
+    }
+    // A short passage: the quote, the blank line and the caret, with no scrolling.
+    var (sheet, field) = try await open("Pedido. É o candidato mais forte, e a leitura já entrega quase tudo:")
+    try check(field, lines: 3, quoteShown: true, "trecho curto")
+    shot("pergunta-paralela-trecho-curto")
+    field.insertText("Por que este?", replacementRange: field.selectedRange())
+    try await Task.sleep(for: .milliseconds(600))
+    try check(field, lines: 3, quoteShown: true, "pergunta digitada")
+    field.insertText("\nE o segundo?", replacementRange: field.selectedRange())
+    try await Task.sleep(for: .milliseconds(600))
+    try check(field, lines: 4, quoteShown: true, "linha a mais")
+    field.setSelectedRange(NSRange(location: field.string.count - 13, length: 13))
+    field.deleteBackward(nil)
+    try await Task.sleep(for: .milliseconds(600))
+    try check(field, lines: 3, quoteShown: true, "linha apagada")
+    // What the question sends (the service's `question`): the quote, then what was typed.
+    let draft = try require(field.input?.representedDraft, "rascunho da pergunta paralela")
+    guard draft.document.text == "> Pedido. É o candidato mais forte, e a leitura já entrega quase tudo:\n\nPor que este?" else {
+      throw Failure(description: "pergunta paralela: texto \(draft.document.text.debugDescription)")
+    }
+    try await close(sheet)
+    // Three lines of passage, and one long line that wraps to two.
+    (sheet, field) = try await open("Primeira linha do trecho\nSegunda linha do trecho\nTerceira linha do trecho")
+    try check(field, lines: 5, quoteShown: true, "trecho de três linhas")
+    shot("pergunta-paralela-tres-linhas")
+    try await close(sheet)
+    (sheet, field) = try await open(String(repeating: "Um trecho comprido que quebra a linha do campo. ", count: 3))
+    try check(field, lines: 4, quoteShown: true, "trecho que quebra")
+    try await close(sheet)
+    // A long passage: the field stops at the composer's maximum and scrolls to the caret; the passage's start is
+    // above, a scroll away.
+    (sheet, field) = try await open((1...14).map { "Linha \($0) de um trecho longo" }.joined(separator: "\n"))
+    try check(field, lines: 16, quoteShown: false, "trecho longo")
+    shot("pergunta-paralela-trecho-longo")
+    try await close(sheet)
+    print("MacAjustes composer: pergunta paralela com trecho cresce como o campo da conversa, com o cursor visível")
   }
 
   // MARK: A3 — the question's own answer
