@@ -125,6 +125,17 @@ final class ComposerInputView: NSScrollView {
   }
   required init?(coder: NSCoder) { nil }
 
+  /// Leaving its window (another conversation builds its own editor), the editor takes its steps off the window's
+  /// undo stack, which ⌘Z reads: `UndoManager` does not retain a step's target, so ⌘Z ran a token's or a
+  /// dictation's step on this freed view (crash of 04/11); typing, aimed at the text storage, would edit a hidden one.
+  override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if newWindow !== window, let manager = textView.undoManager {
+      manager.removeAllActions(withTarget: self)
+      manager.removeAllActions(withTarget: textStorage)
+    }
+    super.viewWillMove(toWindow: newWindow)
+  }
+
   /// Heights of the text at the widths SwiftUI asked about, until the text or its attributes change.
   private var heights: [CGFloat: CGFloat] = [:]
   @objc private func textEdited() { heights.removeAll() }

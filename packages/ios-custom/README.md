@@ -4305,6 +4305,14 @@ app, the immediate `offline`.
   leaving the conversation (the composer's `onDisappear`) still pause it. No new bar, menu, global shortcut or Live
   Activity; sleep and quitting the app are not covered. `script/test-mac-ajustes.sh dictation` checks it (the
   `outsideApp` step).
+- **⌘Z after leaving a conversation (crash of 04/11, incident F8F2E2CD):** the composer's editor keeps its undo
+  steps on the window's `UndoManager`, which the Edit menu's `-[NSWindow undo:]` reads, and each conversation builds
+  its own editor (`.id` in `MacChatColumn`). A token's or a dictation's step (`registerUndo(withTarget:)`) does not
+  retain its target, and the new editor's `removeAllActions()` runs before it is in the window: ⌘Z then ran a step on
+  the freed `ComposerInputView` (SIGTRAP in `swift_getObjectType`). Leaving its window, the editor now removes its own
+  steps (target itself, and its text storage for AppKit's typing); the steps of the editor on screen and the sheets'
+  own stacks are untouched. `test-mac-ajustes.sh dictation` (`undoAfterLeaving`) crashed the same way before (with
+  `MallocScribble=1`) and checks ⌘Z, ⇧⌘Z and typing undo after.
 - **Dictation microphone and music:** the Mac records with `AVAudioEngine` (`OpenCodeMac/MacMicrophone.swift`), the
   input chosen in Ajustes → Voz → **Microfone** set on the input node (`kAudioOutputUnitProperty_CurrentDevice`); the
   system default input never changes. **Automático** follows the default input unless it is Bluetooth, whose

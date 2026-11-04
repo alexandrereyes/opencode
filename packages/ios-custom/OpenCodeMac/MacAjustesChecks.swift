@@ -650,6 +650,7 @@ import SwiftUI
     let conversation = try require(runtime.store?.liveConversation(MacFixture.rootID), "conversa")
     let draft = runtime.input(conversation).draft
     _ = try await wait("editor") { draft.input?.window != nil ? true : nil }
+    try await undoAfterLeaving(window: window, runtime: runtime, draft: draft)
     NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
     func option(_ down: Bool, left: Bool = false) {
       // NX_DEVICERALTKEYMASK (0x40) or NX_DEVICELALTKEYMASK (0x20) with the Option flag, like the hardware sends.
@@ -704,6 +705,111 @@ import SwiftUI
     try await outsideApp(window: window, draft: draft, option: option, shot: shot)
     try await escape(window: window, runtime: runtime, draft: draft, option: option, shot: shot)
     try await revision(window: window, runtime: runtime, draft: draft, option: option, shot: shot)
+  }
+
+  /// ⌘Z after leaving a conversation (crash of 04/11, incident F8F2E2CD): each conversation builds its own editor
+  /// (`.id` in `MacChatColumn`), and a token or a dictation is an undo step on the window's stack, aimed at that
+  /// editor. Once it is gone, none of its steps may be left for ⌘Z to run on the next one, nor a comment sheet's
+  /// once it closes (its stack is the sheet's own); in the editor on screen, ⌘Z and ⇧⌘Z still undo and redo the
+  /// dictation and typing.
+  private static func undoAfterLeaving(window: NSWindow, runtime: MacWindowRuntime, draft: ConversationDraft)
+    async throws
+  {
+    func editor(_ step: String, other: Bool) async throws -> ComposerTextNSView {
+      try await wait(step) {
+        MacSyntheticKey.composer(in: window.contentView).flatMap { field in
+          (field.input?.representedDraft === draft) != other && field.window === window ? field : nil
+        }
+      }
+    }
+    // ⌘Z is the menu's key equivalent while this copy is in front (the crash's path); once another app takes the
+    // focus (the copy runs beside Alexandre's work), and for ⇧⌘Z, the action goes through the responder chain, which
+    // ends at the same `-[NSWindow undo:]` and `redo:`.
+    var paths: Set<String> = []
+    func menu(_ action: String) -> Bool {
+      if action == "undo:", NSApp.isActive, window.isKeyWindow,
+        NSApp.mainMenu?.performKeyEquivalent(with: key("z", code: 6, flags: .command, window: window)) == true {
+        paths.insert("menu")
+        return true
+      }
+      guard window.firstResponder?.tryToPerform(Selector(action), with: nil) == true else { return false }
+      paths.insert("cadeia de respostas")
+      return true
+    }
+    // The other conversation was opened before, its draft loaded: its editor then gets no late revision, whose
+    // `removeAllActions()` would hide the steps left by chance, depending on when the draft read its file.
+    runtime.selection = MacSelection(sessionID: "ses_mac_docs")
+    await (try await editor("outra conversa antes", other: true)).input?.representedDraft?.load()
+    runtime.selection = MacSelection(sessionID: MacFixture.rootID)
+    let kept = "Ditado que fica"
+    draft.text = NSAttributedString(string: "Antes")
+    draft.selection = NSRange(location: 5, length: 0)
+    draft.focused = true
+    weak var left = try await editor("editor da conversa", other: false).input
+    try await wait("foco no editor da conversa") { window.firstResponder === left?.textView ? true : nil }
+    // Steps as the app makes them: a dictation lands in its own group. (`insertText` here comes from no event: its
+    // typing group would stay open, as no event ends it, and take the dictation in.)
+    await draft.insertTranscription(["Primeiro"])
+    await draft.insertTranscription([kept])
+    let saved = draft.text.string
+    guard saved == "Antes Primeiro " + kept, left?.textView.undoManager?.canUndo == true else {
+      throw Failure(description: "o ditado não entrou como passo de desfazer: \(draft.text.string.debugDescription)")
+    }
+    runtime.selection = MacSelection(sessionID: "ses_mac_docs")
+    let field = try await editor("editor da outra conversa", other: true)
+    let other = try require(field.input?.representedDraft, "rascunho da outra conversa")
+    other.focused = true
+    try await wait("foco na outra conversa") { window.firstResponder === field ? true : nil }
+    try await wait("o editor da conversa anterior saiu da memória", timeout: 10) { left == nil ? true : nil }
+    let shown = field.string
+    let stale = field.undoManager?.canUndo == true
+    print("MacAjustes dictation: outra conversa · desfazer disponível \(stale) · ⌘Z \(menu("undo:"))")
+    try await Task.sleep(for: .milliseconds(300))
+    guard !stale, field.string == shown else {
+      throw Failure(description: "⌘Z na outra conversa tinha passos do editor anterior (\(stale)): \(field.string.debugDescription)")
+    }
+    // Back: the dictation stayed, and ⌘Z and ⇧⌘Z work on the new editor's own steps.
+    runtime.selection = MacSelection(sessionID: MacFixture.rootID)
+    let back = try await editor("editor de volta", other: false)
+    draft.focused = true
+    try await wait("foco de volta") { window.firstResponder === back ? true : nil }
+    guard back.string == saved else { throw Failure(description: "o ditado sumiu: \(back.string.debugDescription)") }
+    draft.text = NSAttributedString(string: "Antes " + kept)
+    draft.selection = NSRange(location: draft.text.length, length: 0)
+    try await wait("texto de volta") { back.string == "Antes " + kept ? true : nil }
+    await draft.insertTranscription(["De novo"])
+    guard menu("undo:") else { throw Failure(description: "o menu não tratou ⌘Z") }
+    try await wait("⌘Z desfez o ditado novo") { draft.text.string == "Antes " + kept ? true : nil }
+    guard menu("redo:") else { throw Failure(description: "o menu não tratou ⇧⌘Z") }
+    try await wait("⇧⌘Z refez o ditado novo") { draft.text.string == "Antes " + kept + " De novo" ? true : nil }
+    // Typing is still undone by ⌘Z, the dictation step under it intact.
+    back.insertText("!", replacementRange: back.selectedRange())
+    try await wait("digitou") { draft.text.string.hasSuffix("De novo!") ? true : nil }
+    back.breakUndoCoalescing()
+    guard menu("undo:") else { throw Failure(description: "o menu não tratou ⌘Z da digitação") }
+    try await wait("⌘Z desfez a digitação") { draft.text.string == "Antes " + kept + " De novo" ? true : nil }
+    // A comment's sheet: a dictation there, then it closes.
+    draft.text = NSAttributedString()
+    await draft.persist()
+    try await wait("pilha limpa com o rascunho trocado") { window.undoManager?.canUndo == false ? true : nil }
+    draft.commenting = ChatQuote(messageID: "msg_check", partID: "prt_check", text: "Trecho citado")
+    let sheet = try await wait("folha do comentário") { window.attachedSheet }
+    let sheetField = try await wait("campo do comentário") {
+      MacSyntheticKey.composer(in: sheet.contentView).flatMap { $0.input?.representedDraft != nil ? $0 : nil }
+    }
+    let comment = try require(sheetField.input?.representedDraft, "rascunho do comentário")
+    await comment.insertTranscription(["ditado na folha"])
+    guard sheetField.string.contains("ditado na folha"), sheetField.undoManager?.canUndo == true else {
+      throw Failure(description: "o ditado da folha não virou passo de desfazer: \(sheetField.string.debugDescription)")
+    }
+    let shared = sheetField.undoManager === window.undoManager
+    draft.commenting = nil
+    try await wait("a folha fechou") { window.attachedSheet == nil ? true : nil }
+    try await Task.sleep(for: .seconds(1))
+    let sheetStale = window.undoManager?.canUndo == true
+    print("MacAjustes dictation: folha fechada · pilha \(shared ? "da janela" : "própria da folha") · desfazer na janela \(sheetStale) · ⌘Z \(menu("undo:"))")
+    guard !sheetStale else { throw Failure(description: "⌘Z depois da folha tinha passos do editor dela") }
+    print("MacAjustes dictation: ⌘Z depois de trocar de conversa e de fechar a folha só desfaz o editor na tela; desfazer e refazer por \(paths.sorted().joined(separator: " e "))")
   }
 
   /// Hands-free outside the window (Alexandre, 03/11): leaving the app (⌘Tab, another app) and minimizing keep a
