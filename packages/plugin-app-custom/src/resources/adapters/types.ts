@@ -87,6 +87,11 @@ export interface Adapter {
   snapshot(entry: Entry): Promise<Image>
   stream?(entry: Entry, sink: StreamSink, signal: AbortSignal): Promise<void>
   input?(entry: Entry, event: Input): Promise<void>
+  /**
+   * Completes a registration's metadata from the device before the hub matches it (Android: the AVD that runs on a
+   * bare serial now). Failures leave the metadata as it was.
+   */
+  identify?(meta: Resources.Meta): Promise<Resources.Meta>
   recover?(): Promise<void>
   /** Alexandre's control ended (returned or expired): undo viewer-only behavior, such as Chrome's sharp stills. */
   released?(entry: Entry): Promise<void>

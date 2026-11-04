@@ -234,14 +234,24 @@ hand-encoded protobuf, no dependency). Reference: the SDK's `emulator/lib/emulat
   or the entry whose AVD runs there now. `probe` reports an entry running only while its AVD runs and replaces its
   metadata (`Probe.exact`), so a stopped AVD drops its serial and ports and neither discovery, the agent lock nor input
   reaches the next AVD on that port through it. A serial-made ID that a new AVD would take gets a `~2` suffix instead
-  of overwriting the old entry. The gRPC connection records the AVD it was opened for, and capture or input for
-  another AVD fails (`AnotherEmulator`); a stream is stopped when its resource moves to another serial or AVD.
+  of overwriting the old entry.
+- **Who holds a serial now.** Registry status can be seconds old, so neither registration nor control trusts it for a
+  bare serial. Registrations go through `Adapter.identify`: the hub asks the emulator on that port which AVD it is
+  (its alive `pid_<pid>.ini`, else the read-only console query `adb -s <serial> emu avd name`) before matching, and a
+  bare serial it cannot identify gets an entry of its own instead of an AVD's history (discovery's `known` no longer
+  maps a bare serial to an AVD's resource; `bareSerials` sends it to the hub). Before every capture, input event and
+  rotation poll, the adapter proves the same way that the serial runs the resource's AVD, and only then turns gRPC on,
+  opens or reuses a connection, or runs any other adb command; a cached connection is reused only for the AVD just
+  proven. A different AVD fails with `AnotherEmulator`, an occupant that cannot be told with `UnconfirmedEmulator`
+  (fail closed, matching the probe, which reports stopped when adb cannot name the AVD), and nothing is sent. A
+  resource known only by serial (first discovery, before a probe binds it) acts on whatever emulator answers there.
+  A stream is stopped when its resource moves to another serial or AVD, or a poll finds another AVD on its serial.
   Until 2026-11-04 the hub matched by serial *or* AVD, so when AVD_A stopped and AVD_B reused its port, A's entry
   took B's serial, AVD and model, and the app showed B twice. On load, entries whose `meta.avd` differs from their ID's
   AVD get their own AVD back, lose the other emulator's serial, ports and model, and turn `stopped` until a probe
   finds them (owner, name, purpose, history, lock stay). Several entries left as the same AVD (serial-made IDs) keep
   their history, but only one represents it (the one whose ID is that AVD, else the earliest discovered); the others
-  are reported stopped. Nothing is deleted; the usual retention prunes them.
+  are reported stopped. Nothing is deleted; the usual retention prunes them, counted from the repair.
 - **gRPC endpoint.** The adapter reads `grpc.port` and `grpc.token` from the ini. When gRPC is off (the usual case:
   `-ports` disables the automatic start), it turns it on through the console, `adb -s <serial> emu grpc
 <console+3000>`, as Android Studio and serve-emu do. The endpoint listens on 127.0.0.1 and requires the bearer token;

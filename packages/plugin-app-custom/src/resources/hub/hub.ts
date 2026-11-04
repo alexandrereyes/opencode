@@ -183,7 +183,7 @@ export function createHub(options: HubOptions) {
       .catch(() => [])
     const loaded = Option.getOrElse(decodeStored(stored), () => [])
     // Android entries whose metadata the old serial-or-AVD matching rewrote to another AVD get their own back.
-    const repaired = loaded.map((entry) => repair(entry) ?? entry)
+    const repaired = loaded.map((entry) => repair(entry, now()) ?? entry)
     repaired.forEach((entry) => entries.set(entry.id, entry))
     if (repaired.some((entry, index) => entry !== loaded[index])) persist()
   }
@@ -283,9 +283,9 @@ export function createHub(options: HubOptions) {
 
   /**
    * The registered entry `meta` names. Android entries are their AVD (`identity`): two AVDs never match, whatever
-   * serial they share over time; a serial alone names an entry known only by serial, or the entry whose AVD runs
-   * there now. Among several candidates: an AVD match, then the entry whose ID is that AVD, then a running one, then
-   * the earliest discovered.
+   * serial they share over time, and a bare serial (one `register` could not identify) names only an entry that is
+   * itself known only by serial, never an AVD's entry, whose status may be seconds old. Among several candidates: an
+   * AVD match, then the entry whose ID is that AVD, then a running one, then the earliest discovered.
    */
   const registered = (kind: Resources.Kind, meta: Resources.Meta) => {
     const candidates = [...entries.values()].filter((entry) => entry.kind === kind && names(entry, meta))
@@ -300,6 +300,16 @@ export function createHub(options: HubOptions) {
   const free = (base: string) => {
     const taken = (n: number): string => (entries.has(`${base}~${n}`) ? taken(n + 1) : `${base}~${n}`)
     return taken(2)
+  }
+
+  /**
+   * `upsert` after the adapter has completed the metadata from the device (`identify`): registrations from the plugin
+   * name a bare Android serial, and only the emulator running there now says which AVD that is.
+   */
+  const register = async (input: Upsert) => {
+    const adapter = options.adapters[input.kind]
+    const meta = adapter.identify ? await adapter.identify(input.meta).catch(() => input.meta) : input.meta
+    return upsert({ ...input, meta })
   }
 
   /** Closes a shell command on every resource it named: the resource stops counting as in use for it. */
@@ -813,7 +823,7 @@ export function createHub(options: HubOptions) {
       })
     if (!id && request.method === "PUT") {
       const input = decodeUpsert(await request.json().catch(() => undefined))
-      return Option.isSome(input) ? Response.json(upsert(input.value)) : status(400)
+      return Option.isSome(input) ? Response.json(await register(input.value)) : status(400)
     }
     const decoded = decodeURIComponent(id ?? "")
     const entry = entries.get(decoded)
@@ -1016,7 +1026,23 @@ export function createHub(options: HubOptions) {
     waiters.forEach((wake) => wake())
   }
 
-  return { fetch, websocket, start, close, upsert, end, control, ticket, probe, expire, claim, view, entries, locks }
+  return {
+    fetch,
+    websocket,
+    start,
+    close,
+    upsert,
+    register,
+    end,
+    control,
+    ticket,
+    probe,
+    expire,
+    claim,
+    view,
+    entries,
+    locks,
+  }
 }
 
 export function idFor(meta: Resources.Meta) {
@@ -1070,8 +1096,7 @@ export function names(entry: Pick<Entry, "id" | "meta" | "status">, meta: Resour
   if (entry.meta.kind !== "android-emulator" || meta.kind !== "android-emulator") return sameResource(entry.meta, meta)
   const avd = identity(entry)
   if (avd !== undefined && meta.avd !== undefined) return avd === meta.avd
-  if (meta.serial === undefined || entry.meta.serial !== meta.serial) return false
-  return avd === undefined || entry.status === "running"
+  return avd === undefined && meta.serial !== undefined && entry.meta.serial === meta.serial
 }
 
 function moved(before: Resources.Meta, after: Resources.Meta) {

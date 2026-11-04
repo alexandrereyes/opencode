@@ -5,7 +5,7 @@ import path from "node:path"
 import type { Adapter, Entry } from "../src/resources/adapters/types"
 import { parseRunning } from "../src/resources/adapters/android-emulator"
 import { parse } from "../src/resources/adapters/ios-simulator"
-import { known, parseSimulators, references, resolveSimulators } from "../src/resources/discovery"
+import { bareSerials, known, parseSimulators, references, resolveSimulators } from "../src/resources/discovery"
 import { createHub, idFor, label, sameResource, shown, type Lock } from "../src/resources/hub/hub"
 import { links } from "../src/resources/index"
 import { sign, verify } from "../src/resources/hub/ticket"
@@ -568,7 +568,12 @@ describe("activity", () => {
     expect(known(references(`xcrun simctl io ${udid.toLowerCase()} screenshot a.png`), all)).toEqual([phone])
     // A name counts when one live simulator has it (the stopped twin is ignored).
     expect(known(references(`xcrun simctl launch "OpenCode Teste" com.app`), all)).toEqual([phone])
-    expect(known(references("adb -s emulator-5554 shell input tap 1 1"), all)).toEqual([pixel])
+    // A bare serial is no longer matched to an AVD's resource here: it goes to the hub as a serial, which asks the
+    // emulator on that port which AVD it is now.
+    expect(known(references("adb -s emulator-5554 shell input tap 1 1"), all)).toEqual([])
+    expect(bareSerials(references("adb -s emulator-5554 shell input tap 1 1"), all)).toEqual([
+      { kind: "android-emulator", serial: "emulator-5554" },
+    ])
     expect(known(references("emulator -avd Pixel_9 -no-window"), all)).toEqual([pixel])
     expect(known(references("playwright-cli -s=login click e3", "", "/tmp/projeto"), all)).toEqual([browser])
     expect(known(references("playwright-cli -s=other click e3", "", "/tmp/projeto"), all)).toEqual([])

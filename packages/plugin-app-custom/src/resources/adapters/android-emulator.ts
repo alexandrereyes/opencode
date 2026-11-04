@@ -20,139 +20,227 @@ import type { Adapter, Entry, Image, Probe } from "./types.js"
  *   (`adb emu grpc <port>`), as Android Studio and Expo's serve-emu do; it listens on loopback and needs the
  *   console's bearer token, read from the emulator's `avd/running/pid_<pid>.ini`.
  */
-export const adapter: Adapter = {
-  kind: "android-emulator",
-  async probe(entries) {
-    const android = entries.filter((entry) => entry.meta.kind === "android-emulator")
-    const running = await emulators()
-    const names = [...new Set(android.flatMap((entry) => identity(entry) ?? []))]
-    const existing = await Promise.all(names.map(async (avd) => [avd, await avdExists(avd)] as const))
-    return resolve(android, running, new Set(existing.flatMap(([avd, found]) => (found ? [avd] : []))))
-  },
+export const adapter = createAdapter({
+  run,
+  text,
+  connect,
+  discovered: () => discovered(),
+  emulators: () => emulators(),
+  avdExists: (avd) => avdExists(avd),
+})
 
-  async snapshot(entry) {
-    const target = requireTarget(entry)
-    const serial = target.serial
-    const device = await attach(target).catch((error: unknown) => {
-      if (error instanceof AnotherEmulator) throw error
-      return undefined
+/**
+ * What the adapter does to the outside world: commands (always `adb` here), gRPC connections, and the emulators and
+ * AVDs it reads from disk. Tests pass fakes to `createAdapter`; production uses the real ones (`adapter`).
+ */
+export interface AndroidSystem {
+  run(command: readonly string[], options?: { readonly timeout?: number }): Promise<Uint8Array<ArrayBuffer>>
+  text(command: readonly string[], options?: { readonly timeout?: number }): Promise<string>
+  connect(endpoint: { readonly port: number; readonly token?: string }): Connection
+  /** Emulators that wrote `avd/running/pid_<pid>.ini` and are alive: file reads only, no process. */
+  discovered(): Promise<RunningEmulator[]>
+  /** Every running emulator, with its device model (`discovered` plus `adb devices`). */
+  emulators(): Promise<RunningEmulator[]>
+  avdExists(avd: string): Promise<boolean>
+}
+
+export function createAdapter(io: AndroidSystem) {
+  const devices = new Map<string, Promise<Device>>()
+
+  /**
+   * Proves which AVD runs on the target's serial now, before anything is sent there: a console port (and so a serial)
+   * goes to whichever AVD starts next, and neither the registry nor a cached connection says who holds it today. The
+   * proof comes from the running emulators' ini files (no process) or, without one, the read-only console query
+   * `adb emu avd name`. A resource that is an AVD acts only on that AVD and fails closed when the occupant cannot be
+   * told; one known only by serial (just discovered, not probed yet) acts on whatever emulator answers there.
+   */
+  const verify = async (target: Target) => {
+    const now = await occupant(io, target.serial)
+    if (!now) throw new UnconfirmedEmulator(target.serial, target.avd)
+    checkAvd(target, now)
+    return now
+  }
+
+  /**
+   * One gRPC connection per emulator, opened on demand, only after `verify`, and reused only while it still serves
+   * the AVD that holds the serial now; gRPC is turned on (`adb emu grpc`) only on a verified emulator.
+   */
+  const attach = async (target: Target) => {
+    const avd = await verify(target)
+    const cached = await devices.get(target.serial)?.catch(() => undefined)
+    if (cached && !cached.connection.closed && cached.avd === avd) return cached
+    cached?.connection.close()
+    const created = grpcEndpoint(io, target.serial).then((endpoint): Device => {
+      // The port changed hands between the proof and the endpoint lookup.
+      checkAvd({ serial: target.serial, avd }, endpoint.avd)
+      return { connection: io.connect(endpoint), rotation: 0, avd }
     })
-    if (!device) {
-      const data = await run([adb(), "-s", serial, "exec-out", "screencap", "-p"])
-      return { mime: "image/png", data, ...size(data) }
-    }
-    const [message, rotation] = await Promise.all([
-      device.connection.unary("getScreenshot", imageFormat(0)),
-      displayRotation(serial).catch(() => device.rotation),
-    ])
-    device.rotation = rotation
-    const frame = parseImage(message)
-    return encode(frame, rotation, 85)
-  },
+    devices.set(target.serial, created)
+    created.catch(() => devices.delete(target.serial))
+    return created
+  }
 
-  async stream(entry, sink, signal) {
-    const target = requireTarget(entry)
-    const serial = target.serial
-    const device = await attach(target)
-    const state = {
-      latest: undefined as Frame | undefined,
-      /** Last frame sent and whether it went out at the still (sharp) quality. */
-      shown: undefined as { readonly frame: Frame; readonly sharp: boolean } | undefined,
-      busy: false,
-      size: "",
-      orientation: -1,
-      sentAt: 0,
-      timer: undefined as ReturnType<typeof setTimeout> | undefined,
-    }
-    const later = (ms: number, run: () => void) => {
-      clearTimeout(state.timer)
-      state.timer = setTimeout(run, ms)
-    }
-    const publish = async (frame: Frame, sharp: boolean) => {
-      const profile = profiles[sink.profile?.() ?? "standard"]
-      const rotation = device.rotation
-      const image = await encode(frame, rotation, sharp ? profile.still : profile.motion, profile.side).catch(
-        () => undefined,
-      )
-      if (!image || signal.aborted) return
-      const size = `${image.width}x${image.height}`
-      if (size !== state.size) {
-        state.size = size
-        sink.hello({ format: "jpeg", width: image.width, height: image.height })
-      }
-      if (rotation !== state.orientation) {
-        state.orientation = rotation
-        // Frames already arrive upright, so this is information only; `rotation` would make viewers turn them again.
-        sink.meta({ orientation: orientations[rotation] ?? "portrait" })
-      }
-      state.shown = { frame, sharp }
-      state.sentAt = performance.now()
-      sink.frame(image.data, { capturedAt: frame.capturedAt })
-    }
-    const pump = async (): Promise<void> => {
-      if (state.busy || !state.latest || signal.aborted) return
-      const profile = profiles[sink.profile?.() ?? "standard"]
-      const wait = state.sentAt + profile.intervalMs - performance.now()
-      if (wait > 0) return later(wait, () => void pump())
-      state.busy = true
-      // Encode only when some viewer can take the frame; meanwhile newer frames replace this one.
-      if (sink.ready && !sink.ready()) await sink.whenReady?.(signal)
-      const frame = state.latest
-      state.latest = undefined
-      if (frame) await publish(frame, false)
-      state.busy = false
-      if (state.latest) return pump()
-      // The screen settled: send the same picture once more at the sharp quality.
-      later(settleMs, () => {
-        const shown = state.shown
-        if (state.busy || state.latest || !shown || shown.sharp || signal.aborted) return
-        state.busy = true
-        void publish(shown.frame, true).finally(() => {
-          state.busy = false
-          void pump()
-        })
+  const adapter: Adapter = {
+    kind: "android-emulator",
+    async probe(entries) {
+      const android = entries.filter((entry) => entry.meta.kind === "android-emulator")
+      const running = await io.emulators()
+      const names = [...new Set(android.flatMap((entry) => identity(entry) ?? []))]
+      const existing = await Promise.all(names.map(async (avd) => [avd, await io.avdExists(avd)] as const))
+      return resolve(android, running, new Set(existing.flatMap(([avd, found]) => (found ? [avd] : []))))
+    },
+
+    /** A serial alone gets the AVD that runs there now, so the hub never files it under whoever ran there before. */
+    async identify(meta) {
+      if (meta.kind !== "android-emulator" || meta.avd !== undefined || meta.serial === undefined) return meta
+      const avd = await occupant(io, meta.serial)
+      return avd ? { ...meta, avd } : meta
+    },
+
+    async snapshot(entry) {
+      const target = requireTarget(entry)
+      const serial = target.serial
+      const device = await attach(target).catch((error: unknown) => {
+        if (error instanceof EmulatorIdentityError) throw error
+        return undefined
       })
-    }
-    const watch = setInterval(() => {
-      void displayRotation(serial)
-        .then((rotation) => {
-          if (rotation === device.rotation) return
-          device.rotation = rotation
-          // A rotation alone does not change the panel, so the emulator sends no frame: redraw the last one.
-          state.latest ??= state.shown?.frame
-          void pump()
-        })
-        .catch(() => {})
-    }, rotationPollMs)
-    device.rotation = await displayRotation(serial).catch(() => device.rotation)
-    await device.connection
-      .stream(
-        "streamScreenshot",
-        imageFormat(streamBox),
-        (message) => {
-          const frame = parseImage(message)
-          if (frame.width === 0 || frame.height === 0) return
-          state.latest = frame
-          void pump()
-        },
-        signal,
-      )
-      .finally(() => {
-        clearInterval(watch)
+      // Without gRPC, a PNG through adb from the emulator `attach` has just verified.
+      if (!device) {
+        const data = await io.run([adb(), "-s", serial, "exec-out", "screencap", "-p"])
+        return { mime: "image/png", data, ...size(data) }
+      }
+      const [message, rotation] = await Promise.all([
+        device.connection.unary("getScreenshot", imageFormat(0)),
+        displayRotation(io, serial).catch(() => device.rotation),
+      ])
+      device.rotation = rotation
+      const frame = parseImage(message)
+      return encode(frame, rotation, 85)
+    },
+
+    async stream(entry, sink, signal) {
+      const target = requireTarget(entry)
+      const serial = target.serial
+      const device = await attach(target)
+      const state = {
+        latest: undefined as Frame | undefined,
+        /** Last frame sent and whether it went out at the still (sharp) quality. */
+        shown: undefined as { readonly frame: Frame; readonly sharp: boolean } | undefined,
+        busy: false,
+        size: "",
+        orientation: -1,
+        sentAt: 0,
+        timer: undefined as ReturnType<typeof setTimeout> | undefined,
+      }
+      const later = (ms: number, run: () => void) => {
         clearTimeout(state.timer)
-      })
-  },
+        state.timer = setTimeout(run, ms)
+      }
+      const publish = async (frame: Frame, sharp: boolean) => {
+        const profile = profiles[sink.profile?.() ?? "standard"]
+        const rotation = device.rotation
+        const image = await encode(frame, rotation, sharp ? profile.still : profile.motion, profile.side).catch(
+          () => undefined,
+        )
+        if (!image || signal.aborted) return
+        const size = `${image.width}x${image.height}`
+        if (size !== state.size) {
+          state.size = size
+          sink.hello({ format: "jpeg", width: image.width, height: image.height })
+        }
+        if (rotation !== state.orientation) {
+          state.orientation = rotation
+          // Frames already arrive upright, so this is information only; `rotation` would make viewers turn them again.
+          sink.meta({ orientation: orientations[rotation] ?? "portrait" })
+        }
+        state.shown = { frame, sharp }
+        state.sentAt = performance.now()
+        sink.frame(image.data, { capturedAt: frame.capturedAt })
+      }
+      const pump = async (): Promise<void> => {
+        if (state.busy || !state.latest || signal.aborted) return
+        const profile = profiles[sink.profile?.() ?? "standard"]
+        const wait = state.sentAt + profile.intervalMs - performance.now()
+        if (wait > 0) return later(wait, () => void pump())
+        state.busy = true
+        // Encode only when some viewer can take the frame; meanwhile newer frames replace this one.
+        if (sink.ready && !sink.ready()) await sink.whenReady?.(signal)
+        const frame = state.latest
+        state.latest = undefined
+        if (frame) await publish(frame, false)
+        state.busy = false
+        if (state.latest) return pump()
+        // The screen settled: send the same picture once more at the sharp quality.
+        later(settleMs, () => {
+          const shown = state.shown
+          if (state.busy || state.latest || !shown || shown.sharp || signal.aborted) return
+          state.busy = true
+          void publish(shown.frame, true).finally(() => {
+            state.busy = false
+            void pump()
+          })
+        })
+      }
+      const watch = setInterval(() => {
+        // Each poll first checks the serial still runs this AVD; if not, the stream ends instead of polling the next one.
+        void verify(target)
+          .then(() => displayRotation(io, serial))
+          .then((rotation) => {
+            if (rotation === device.rotation) return
+            device.rotation = rotation
+            // A rotation alone does not change the panel, so the emulator sends no frame: redraw the last one.
+            state.latest ??= state.shown?.frame
+            void pump()
+          })
+          .catch((error: unknown) => {
+            if (error instanceof EmulatorIdentityError) device.connection.close()
+          })
+      }, rotationPollMs)
+      device.rotation = await displayRotation(io, serial).catch(() => device.rotation)
+      await device.connection
+        .stream(
+          "streamScreenshot",
+          imageFormat(streamBox),
+          (message) => {
+            const frame = parseImage(message)
+            if (frame.width === 0 || frame.height === 0) return
+            state.latest = frame
+            void pump()
+          },
+          signal,
+        )
+        .finally(() => {
+          clearInterval(watch)
+          clearTimeout(state.timer)
+        })
+    },
 
-  async input(entry, event) {
-    const target = requireTarget(entry)
-    const serial = target.serial
-    const device = await attach(target)
-    const panel = (device.panel ??= await panelSize(serial))
-    await plan(event, { rotation: device.rotation, panel }).reduce(
-      (chain, step) => chain.then(() => perform(serial, device, step)),
-      Promise.resolve(),
-    )
-  },
+    async input(entry, event) {
+      const target = requireTarget(entry)
+      const serial = target.serial
+      const device = await attach(target)
+      const panel = (device.panel ??= await panelSize(io, serial))
+      await plan(event, { rotation: device.rotation, panel }).reduce(
+        (chain, step) => chain.then(() => perform(io, serial, device, step)),
+        Promise.resolve(),
+      )
+    },
+  }
+  return adapter
+}
+
+type Target = { readonly serial: string; readonly avd?: string }
+
+/** The AVD running on `serial` now: its ini file if it has one (no process), else the console; `undefined` if unknown. */
+async function occupant(io: AndroidSystem, serial: string) {
+  const consolePort = Number(/^emulator-(\d+)$/.exec(serial)?.[1] ?? Number.NaN)
+  if (!Number.isInteger(consolePort)) return undefined
+  const file = (await io.discovered().catch(() => [])).find((item) => item.consolePort === consolePort)
+  if (file?.avd) return file.avd
+  return io
+    .text([adb(), "-s", serial, "emu", "avd", "name"], { timeout: 5_000 })
+    .then((output) => output.split("\n")[0]?.trim() || undefined)
+    .catch(() => undefined)
 }
 
 /**
@@ -178,7 +266,7 @@ export function avdFromID(id: string) {
  * the ID's AVD, the other emulator's serial, ports and device model dropped, and `running` turned into `stopped` until
  * a probe finds its own AVD. Owner, name, purpose and history stay. Returns `undefined` when nothing needs repairing.
  */
-export function repair(entry: Entry): Entry | undefined {
+export function repair(entry: Entry, at: number): Entry | undefined {
   const avd = avdFromID(entry.id)
   if (entry.meta.kind !== "android-emulator" || !avd || entry.meta.avd === undefined || entry.meta.avd === avd)
     return undefined
@@ -186,6 +274,8 @@ export function repair(entry: Entry): Entry | undefined {
     ...entry,
     meta: { kind: "android-emulator", avd },
     status: entry.status === "running" ? "stopped" : entry.status,
+    // Changed now: retention of stopped and gone entries counts from the repair, not from the corruption.
+    updatedAt: Math.max(entry.updatedAt, at),
   }
 }
 
@@ -299,50 +389,33 @@ type Frame = { readonly rgba: Uint8Array; readonly width: number; readonly heigh
 
 type Device = {
   connection: Connection
-  /** AVD running on this serial when the connection opened (from its `pid_<pid>.ini`). */
-  avd?: string
+  /** The AVD verified on this serial when the connection opened. */
+  avd: string
   rotation: number
   panel?: { readonly width: number; readonly height: number }
 }
 
-const devices = new Map<string, Promise<Device>>()
-
-/** One gRPC connection per emulator, opened on demand and reopened when the emulator restarts. */
-/**
- * One gRPC connection per emulator, opened on demand and reopened when the emulator restarts. The console port (and
- * so the serial) is reused by whichever AVD starts next, so a connection only serves the AVD it was opened for: asking
- * for another one fails with `AnotherEmulator` instead of capturing or touching the wrong device.
- */
-function attach(target: { readonly serial: string; readonly avd?: string }) {
-  const existing = devices.get(target.serial)
-  const fresh = () => {
-    const created = grpcEndpoint(target.serial).then(
-      (endpoint): Device => ({
-        connection: connect(endpoint),
-        rotation: 0,
-        ...(endpoint.avd ? { avd: endpoint.avd } : {}),
-      }),
-    )
-    devices.set(target.serial, created)
-    created.catch(() => devices.delete(target.serial))
-    return created
-  }
-  const device = existing ? existing.then((item) => (item.connection.closed ? fresh() : item)) : fresh()
-  return device.then((item) => {
-    checkAvd(target, item.avd)
-    return item
-  })
-}
-
 /** Refuses a device whose AVD is known and differs from the one the resource is (its port was reused). */
-export function checkAvd(target: { readonly serial: string; readonly avd?: string }, running: string | undefined) {
+export function checkAvd(target: Target, running: string | undefined) {
   if (target.avd && running && running !== target.avd) throw new AnotherEmulator(target.serial, target.avd, running)
 }
 
-export class AnotherEmulator extends Error {
+/** The serial does not (provably) run the resource's AVD: nothing was sent to it. */
+export class EmulatorIdentityError extends Error {}
+
+export class AnotherEmulator extends EmulatorIdentityError {
   constructor(serial: string, expected: string, running: string) {
     super(`${serial} now runs the AVD ${running}, not ${expected}`)
     this.name = "AnotherEmulator"
+  }
+}
+
+export class UnconfirmedEmulator extends EmulatorIdentityError {
+  constructor(serial: string, expected: string | undefined) {
+    super(
+      expected ? `Could not confirm that ${serial} still runs the AVD ${expected}` : `No emulator answers on ${serial}`,
+    )
+    this.name = "UnconfirmedEmulator"
   }
 }
 
@@ -460,7 +533,7 @@ const modifierKeys = {
   meta: "KEYCODE_META_LEFT",
 } as const
 
-async function perform(serial: string, device: Device, step: Step) {
+async function perform(io: AndroidSystem, serial: string, device: Device, step: Step) {
   if (step.type === "touch") {
     const touches = step.touches.map((touch) =>
       pb.bytes(
@@ -478,11 +551,11 @@ async function perform(serial: string, device: Device, step: Step) {
     return
   }
   if (step.type === "shell") {
-    await run([adb(), "-s", serial, "shell", step.command])
+    await io.run([adb(), "-s", serial, "shell", step.command])
     return
   }
   if (step.type === "rotate") {
-    await run([
+    await io.run([
       adb(),
       "-s",
       serial,
@@ -499,7 +572,7 @@ async function perform(serial: string, device: Device, step: Step) {
   )
   await device.connection
     .unary("setClipboard", pb.string(1, step.text))
-    .then(() => run([adb(), "-s", serial, "shell", "input keyevent KEYCODE_PASTE"]))
+    .then(() => io.run([adb(), "-s", serial, "shell", "input keyevent KEYCODE_PASTE"]))
     // The paste is asynchronous in the app; give it a moment before putting the old clipboard back.
     .then(() => Bun.sleep(pasteSettleMs))
     .finally(() =>
@@ -576,8 +649,8 @@ export function bmp(rgba: Uint8Array, width: number, height: number) {
 }
 
 /** Current display rotation as a quarter-turn count (Android `Surface.ROTATION_*`). */
-async function displayRotation(serial: string) {
-  const output = await text(
+async function displayRotation(io: AndroidSystem, serial: string) {
+  const output = await io.text(
     [adb(), "-s", serial, "shell", "dumpsys display 2>/dev/null | grep -m1 -o 'mCurrentOrientation=[0-3]'"],
     { timeout: 5_000 },
   )
@@ -585,28 +658,28 @@ async function displayRotation(serial: string) {
 }
 
 /** The touch panel's pixel size: the physical display size, which an `wm size` override does not change. */
-async function panelSize(serial: string) {
-  const output = await text([adb(), "-s", serial, "shell", "wm size"], { timeout: 5_000 })
+async function panelSize(io: AndroidSystem, serial: string) {
+  const output = await io.text([adb(), "-s", serial, "shell", "wm size"], { timeout: 5_000 })
   const match = /Physical size:\s*(\d+)x(\d+)/.exec(output)
   if (!match) throw new Error("Could not read the emulator display size")
   return { width: Number(match[1]), height: Number(match[2]) }
 }
 
 /** The serial to act on and the AVD that must be running there. */
-function requireTarget(entry: Entry) {
+function requireTarget(entry: Entry): Target {
   if (entry.meta.kind !== "android-emulator" || !entry.meta.serial) throw new Error("Emulator is not attached to adb")
   const avd = identity(entry)
   return { serial: entry.meta.serial, ...(avd ? { avd } : {}) }
 }
 
 /** The gRPC port and token of a running emulator, turning gRPC on through the console when it is off. */
-async function grpcEndpoint(serial: string) {
+async function grpcEndpoint(io: AndroidSystem, serial: string) {
   const consolePort = Number(/^emulator-(\d+)$/.exec(serial)?.[1] ?? Number.NaN)
   if (!Number.isInteger(consolePort)) throw new Error(`Not an emulator serial: ${serial}`)
-  const find = async () => (await discovered()).find((item) => item.consolePort === consolePort && item.grpcPort)
+  const find = async () => (await io.discovered()).find((item) => item.consolePort === consolePort && item.grpcPort)
   const existing = await find()
   if (existing?.grpcPort) return { port: existing.grpcPort, token: existing.grpcToken, avd: existing.avd }
-  await text([adb(), "-s", serial, "emu", "grpc", String(consolePort + 3000)], { timeout: 10_000 })
+  await io.text([adb(), "-s", serial, "emu", "grpc", String(consolePort + 3000)], { timeout: 10_000 })
   const started = await find()
   if (!started?.grpcPort) throw new Error("The emulator did not start its gRPC endpoint")
   return { port: started.grpcPort, token: started.grpcToken, avd: started.avd }

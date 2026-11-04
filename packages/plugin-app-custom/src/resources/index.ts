@@ -5,7 +5,7 @@ import { optional } from "@opencode/schema/schema"
 import { Effect, Option, Schedule, Schema } from "effect"
 import path from "node:path"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
-import { known, parseSimulators, references, resolveSimulators, touchesResources } from "./discovery.js"
+import { bareSerials, known, parseSimulators, references, resolveSimulators, touchesResources } from "./discovery.js"
 import { blocking, refusal, returned } from "./lock.js"
 import { Resources } from "./rpc.js"
 import { HubError, hubSettings, makeHubClient, stateDirectory, type HubClient } from "./supervisor.js"
@@ -115,7 +115,10 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       const owner = yield* family(event.sessionID)
       const found = references(command, "", shellWorkdir(event.input) ?? (owner.directory || undefined))
       const registered = yield* call(() => hub.list(false)).pipe(
-        Effect.map((result) => known(found, result.resources)),
+        Effect.map((result) => [
+          ...known(found, result.resources).map((resource) => ({ kind: resource.kind, meta: resource.meta })),
+          ...bareSerials(found, result.resources).map((meta) => ({ kind: meta.kind, meta })),
+        ]),
         Effect.orElseSucceed(() => []),
       )
       yield* Effect.forEach(
@@ -197,9 +200,11 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           call(async () => {
             const target = (await hub.list()).resources.find((resource) => names(resource.meta).includes(input.ref))
             if (!target) throw new HubError("not_found", "")
+            // A serial is resolved by the hub against the emulator there now (it may be another AVD's by now).
+            const bare = target.meta.kind === "android-emulator" && target.meta.serial === input.ref
             return hub.upsert({
               kind: target.kind,
-              meta: target.meta,
+              meta: bare ? { kind: "android-emulator", serial: input.ref } : target.meta,
               ...(input.name ? { name: input.name } : {}),
               ...(input.purpose ? { purpose: input.purpose } : {}),
             })

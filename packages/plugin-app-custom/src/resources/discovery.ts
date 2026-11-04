@@ -137,12 +137,12 @@ export function known(list: readonly Reference[], resources: readonly Resources.
         )
         return named.length === 1 && named[0] === resource
       }
-      // An AVD names the resource that is that AVD (its ID outranks a rewritten `meta.avd`); a serial names the one
-      // running there now (stopped resources hold no serial).
+      // An AVD names the resource that is that AVD (its ID outranks a rewritten `meta.avd`). A bare serial names only a
+      // resource known by serial alone: whose AVD holds it now is the emulator's to say (`bareSerials`).
       if (reference.kind === "android-emulator" && meta.kind === "android-emulator")
         return reference.avd !== undefined
           ? reference.avd === identity(resource)
-          : reference.serial !== undefined && reference.serial === meta.serial
+          : reference.serial !== undefined && reference.serial === meta.serial && identity(resource) === undefined
       if (reference.kind === "chrome" && meta.kind === "chrome")
         return sameResource(meta, {
           kind: "chrome",
@@ -153,6 +153,30 @@ export function known(list: readonly Reference[], resources: readonly Resources.
       return false
     }),
   )
+}
+
+/**
+ * Bare Android serials a command names that a registered AVD resource held at its last probe. They go to the hub as
+ * serials, and the hub asks the emulator on that port which AVD it is (`Adapter.identify`), since the AVD that held it
+ * a few seconds ago may have stopped and another taken the port.
+ */
+export function bareSerials(list: readonly Reference[], resources: readonly Resources.Resource[]): Resources.Meta[] {
+  const serials = list.flatMap((reference) =>
+    reference.kind === "android-emulator" && reference.avd === undefined && reference.serial !== undefined
+      ? [reference.serial]
+      : [],
+  )
+  return [...new Set(serials)]
+    .filter((serial) =>
+      resources.some(
+        (resource) =>
+          resource.state !== "gone" &&
+          resource.meta.kind === "android-emulator" &&
+          resource.meta.serial === serial &&
+          identity(resource) !== undefined,
+      ),
+    )
+    .map((serial) => ({ kind: "android-emulator", serial }))
 }
 
 export type Simulator = { readonly udid: string; readonly name: string; readonly booted: boolean }
