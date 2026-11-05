@@ -462,14 +462,33 @@ import SwiftUI
     }
     func returnKey() { window.sendEvent(key("\r", code: 36, window: window)) }
     var input = try await answerField("um só campo, o da resposta")
+    // The button names the question Return goes to.
+    guard answering.primary == .next("Onde testar?") else { throw Failure(description: "botão: \(answering.primary)") }
     shot("pergunta-1")
-    // A narrower window: the same field and options, whole.
+    // A text longer than the composer's lines opens whole there (Mostrar tudo; the button's own action): the answer
+    // field stays on screen, in a narrower window too, and nothing of the answer changes.
+    func reachable(_ step: String) throws {
+      let frame = input.convert(input.bounds, to: nil)
+      guard input.window === window, input.visibleRect.height > 4, frame.minY >= 0,
+        frame.maxY <= window.contentLayoutRect.maxY else {
+        throw Failure(description: "\(step): campo da resposta fora da janela \(frame)")
+      }
+    }
+    answering.opened.insert("modulo")
+    try await Task.sleep(for: .milliseconds(700))
+    try reachable("texto aberto")
+    shot("pergunta-1-aberta")
     let wide = window.contentLayoutRect.size
     window.setContentSize(CGSize(width: 1000, height: wide.height))
     try await Task.sleep(for: .milliseconds(700))
+    try reachable("texto aberto, janela estreita")
+    shot("pergunta-1-aberta-estreita")
+    answering.opened.remove("modulo")
+    try await Task.sleep(for: .milliseconds(500))
     shot("pergunta-1-estreita")
     window.setContentSize(wide)
     try await Task.sleep(for: .milliseconds(500))
+    guard answering.sync.state.values.isEmpty else { throw Failure(description: "abrir o texto mudou a resposta") }
     // 1: its own text, then an option marked: the option answers, the text stays in the field.
     click(input, in: window)
     try await wait("foco no campo da resposta") { window.firstResponder === input ? true : nil }
@@ -489,10 +508,14 @@ import SwiftUI
     answering.choose(try option("alvos", "iphone"), in: try field("alvos"))
     input.insertText("Vision", replacementRange: input.selectedRange())
     try await wait("o item próprio no campo") { answering.text(try! field("alvos")) == "Vision" ? true : nil }
+    guard answering.primary == .add else { throw Failure(description: "com o item digitado: \(answering.primary)") }
     returnKey()
     try await wait("Return adicionou o item") {
       answering.sync.state.values["alvos"] == .array([.string("mac"), .string("iphone"), .string("Vision")]) ? true : nil
     }
+    // The field empties on the next update: Return again only then, as a person would.
+    try await wait("o campo esvaziou depois de adicionar") { input.string.isEmpty ? true : nil }
+    guard answering.primary == .next("Em que pasta salvar?") else { throw Failure(description: "depois de adicionar: \(answering.primary)") }
     shot("pergunta-2-multipla")
     returnKey()
     try await wait("Return foi à terceira pergunta") { answering.field?.key == "pasta" ? true : nil }
@@ -525,6 +548,7 @@ import SwiftUI
     try chain("redo:")
     try chain("redo:")
     try await wait("refazer voltou ao revisado") { input.string == DictationFixtures.text ? true : nil }
+    fflush(stdout)
     shot("pergunta-3-ditada")
     // ‹ › again and again: each question exactly as it was.
     for round in 1...2 {

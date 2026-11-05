@@ -88,7 +88,7 @@ import XCTest
     XCTAssertTrue(waitLabel(step, "1 de 3"), step.label)
     option("Escuro").tap()
     XCTAssertTrue(option("Escuro").isSelected)
-    XCTAssertEqual(button("question-primary").label, "Próxima")
+    XCTAssertEqual(button("question-primary").label, "Próxima pergunta: Onde testar?")
     button("question-primary").tap()
     // 2: two options and an item of its own, added by the answer composer's action.
     XCTAssertTrue(waitLabel(step, "2 de 3"), step.label)
@@ -230,6 +230,64 @@ import XCTest
     XCTAssertTrue(waitLabel(step, "3 de 3"), step.label)
     let saved = try await waitDraft(session, form) { [revised] in $0?["nota"]?["text"] == .string(revised) }
     XCTAssertTrue(saved)
+  }
+
+  /// A question longer than the composer's lines (Alexandre, 05/11): it says so, opens whole there and closes again,
+  /// the answer field and the button within reach, in large text; the button names the next question; with the
+  /// keyboard up Mostrar tudo opens the sheet; the open text and the answers stay across ‹ ›.
+  func testALongQuestionOpensWholeInPlaceAndTheButtonNamesTheNextOne() async throws {
+    let context = "O branch main está 131 commits à frente do remoto, com o merge da integração de ontem no topo. "
+      + "O push só publica os commits no repositório; não faz deploy nem atualiza o servidor, que segue na versão "
+      + "anterior até a próxima ativação. Os testes do merge passaram no fim da tarde. Posso enviar agora?"
+    let (session, form) = try await create([
+      ["key": "push", "type": "string", "title": "Push da main", "description": context, "custom": true,
+       "options": [["value": "sim", "label": "Pode enviar", "description": "Envio os 131 commits agora"],
+                   ["value": "depois", "label": "Depois", "description": "Deixo o push para quando você pedir"]]],
+      ["key": "videos", "type": "string", "title": "Vídeos",
+       "description": "Os dois vídeos de 3 min 19 s estão na pasta temporária.",
+       "options": [["value": "copiar", "label": "Copiar para a Mesa"], ["value": "regravar", "label": "Regravar"],
+                   ["value": "manter", "label": "Deixar onde estão"]]],
+    ])
+    try open(session, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"])
+    XCTAssertTrue(composer.waitForExistence(timeout: 30), app.debugDescription)
+    let whole = composer.staticTexts.matching(NSPredicate(format: "label == %@", context)).firstMatch
+    let more = button("question-prompt-more")
+    XCTAssertTrue(more.waitForExistence(timeout: 10), "the cut text says so")
+    XCTAssertEqual(button("question-primary").label, "Próxima pergunta: Vídeos")
+    capture("contexto-fechado")
+    more.tap()
+    XCTAssertTrue(button("question-prompt-less").waitForExistence(timeout: 5))
+    XCTAssertTrue(app.descendants(matching: .any)["question-prompt-open"].exists)
+    XCTAssertTrue(whole.exists)
+    XCTAssertTrue(answer.isHittable && button("question-primary").isHittable, "the field and the button stay in reach")
+    capture("contexto-aberto")
+    option("Pode enviar").tap()
+    // To the second and back: the text is still open, the option still marked.
+    button("question-primary").tap()
+    XCTAssertTrue(waitLabel(step, "2 de 2"), step.label)
+    XCTAssertEqual(button("question-primary").label, "Responder")
+    XCTAssertFalse(button("question-primary").isEnabled, "the last question unanswered: Responder waits")
+    button("question-previous").tap()
+    XCTAssertTrue(waitLabel(step, "1 de 2"), step.label)
+    XCTAssertTrue(button("question-prompt-less").exists)
+    XCTAssertTrue(option("Pode enviar").isSelected)
+    button("question-prompt-less").tap()
+    XCTAssertTrue(more.waitForExistence(timeout: 5))
+    // With the keyboard up only the title stays; Mostrar tudo opens the sheet with all of it.
+    answer.tap()
+    XCTAssertTrue(waitKeyboard(true))
+    capture("contexto-teclado")
+    more.tap()
+    let sheet = app.descendants(matching: .any)["question-sheet"].firstMatch
+    XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+    XCTAssertTrue(sheet.staticTexts.matching(NSPredicate(format: "label == %@", context)).firstMatch.exists)
+    button("question-sheet-close").tap()
+    button("question-primary").tap()
+    XCTAssertTrue(waitLabel(step, "2 de 2"), step.label)
+    option("Deixar onde estão").tap()
+    button("question-primary").tap()
+    let answered = try await waitAnswered(session, form)
+    XCTAssertEqual(answered, ["push": .string("sim"), "videos": .string("manter")])
   }
 
   /// A long question with long options, in large text: the options scroll in their own band, whole; the answer field

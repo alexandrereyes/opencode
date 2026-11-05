@@ -3768,6 +3768,21 @@ fields beside the composer. iPhone and Mac (`OpenCode/QuestionComposer.swift`, s
   device at launch: a run stopped before Responder left one, and the next run started answered.
 - **Limit.** Switching between the answer and the chat rebuilds the chat's editor: its draft is intact, its undo
   history starts over.
+- **The whole question and where Próxima goes (Alexandre, 05/11).** In the composer's place a question's text keeps
+  three lines (two with the iPhone's keyboard) and says when they cut it: **Mostrar tudo** opens it whole there, in
+  a scrolling band of its own beside a narrower options band, so the answer field and the buttons stay in the window
+  (Mac normal and narrow, iPhone in large text); **Mostrar menos** closes it (`QuestionAnswering.opened`, how it
+  reads, not its answer). With the iPhone's keyboard up only the title stays and Mostrar tudo opens the sheet. The
+  primary button says what it does (`QuestionAnswering.primary`): **Próxima: {title}** of the question Return goes to
+  (`QuestionReturn.next`, which skips answered ones; "Próxima pergunta" without a title; a long title is cut, its
+  accessibility label whole; on its own row in large text), **Adicionar** while a multiple choice's item is typed,
+  **Responder** at the end. The card numbers its questions and marks the one being answered.
+- **A question switch loads the editor (05/11).** ‹ ›, Próxima and Return put the new question's text in the
+  answer's editor at once (`QuestionAnswering.show`): the fields copy the editor into the answer on their next update,
+  and when an edit and a switch fell in the same update that copy wrote the last question's text into the new one (a
+  marked option came unmarked). Now that copy finds the new question's own text and changes nothing.
+  `QuestionComposerTests.testALateCopyAfterSwitchingChangesNoOtherQuestion`; the Mac `question` check's ‹ › rounds
+  run right after an undo and redo, where it happened.
 - **B, iPhone.** **Ampliar pergunta** opens `QuestionSheet` over the same state: the question whole (title and
   text), the options, the answer field, ‹ n de N › with **Agora não** and the primary button fixed below the scroll.
   Agora não only closes it; nothing is sent, dismissed or lost. It is offered for every question.

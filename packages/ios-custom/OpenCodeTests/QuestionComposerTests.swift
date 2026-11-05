@@ -146,6 +146,70 @@ private actor QuestionServer {
     XCTAssertEqual(dismissed, 0)
   }
 
+  /// The primary button says what it does: the question Return goes to, by title (skipping one already answered),
+  /// Próxima pergunta without a title, Adicionar while a multiple choice's item is typed, Responder at the end;
+  /// opening a question's whole text changes no answer.
+  func testThePrimaryNamesWhereItGoes() async throws {
+    let server = QuestionServer()
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4393")!)) {
+      await server.response($0)
+    }
+    let store = ConversationStore(id: "ses_question", client: client, hub: EventHub(client: client))
+    let answering = QuestionAnswering(form: try form(), store: store)
+    let (tema, alvos, nota) = (answering.fields[0], answering.fields[1], answering.fields[2])
+    XCTAssertEqual(answering.primary, .next("Onde testar?"))
+    answering.choose(try XCTUnwrap(tema.options?[0]), in: tema)
+    answering.opened.insert("tema")
+    answering.opened.remove("tema")
+    XCTAssertEqual(answering.sync.state.values["tema"], .string("claro"))
+    answering.advance()
+    XCTAssertEqual(answering.field?.key, "alvos")
+    answering.type("Vision", in: alvos)
+    XCTAssertEqual(answering.primary, .add, "Return adds the typed item before going on")
+    answering.advance()
+    XCTAssertEqual(answering.field?.key, "alvos")
+    XCTAssertEqual(answering.primary, .next("Algo mais?"))
+    // Back at the first, the second answered: Return goes to the third, and the button says so.
+    answering.move(-1)
+    XCTAssertEqual(answering.primary, .next("Algo mais?"))
+    answering.move(2)
+    XCTAssertEqual(answering.field?.key, "nota")
+    XCTAssertEqual(answering.primary, .respond)
+    answering.type("ok", in: nota)
+    XCTAssertEqual(answering.primary, .respond)
+    XCTAssertEqual(answering.next, .send)
+
+    let untitled = try JSONDecoder().decode(PendingForm.self, from: Data("""
+      {"id":"frm_\(UUID().uuidString)","sessionID":"ses_question","title":"Questions","metadata":{"kind":"question"},
+       "fields":[{"key":"a","type":"string","title":"Primeira"},{"key":"b","type":"string"}]}
+      """.utf8))
+    XCTAssertEqual(QuestionAnswering(form: untitled, store: store).primary, .next(nil))
+  }
+
+  /// Switching questions puts the new one's text in the answer's editor at once, so the field's late copy of the
+  /// editor (its `onChange`, on the next update) writes nothing of the last question into this one.
+  func testALateCopyAfterSwitchingChangesNoOtherQuestion() async throws {
+    let server = QuestionServer()
+    let client = OpenCodeClient(configuration: .init(url: URL(string: "http://127.0.0.1:4394")!)) {
+      await server.response($0)
+    }
+    let store = ConversationStore(id: "ses_question", client: client, hub: EventHub(client: client))
+    let answering = QuestionAnswering(form: try form(), store: store)
+    let (tema, _, nota) = (answering.fields[0], answering.fields[1], answering.fields[2])
+    answering.type("Sépia", in: tema)
+    answering.choose(try XCTUnwrap(tema.options?[1]), in: tema)
+    answering.move(2)
+    XCTAssertEqual(answering.field?.key, "nota")
+    answering.type("Texto da terceira", in: nota)
+    answering.move(-2)
+    XCTAssertEqual(answering.text(nota), "Texto da terceira")
+    XCTAssertEqual(answering.editor.document.text, "Sépia", "the editor holds the first question's text at once")
+    // The field's late copy, now bound to the first question.
+    answering.type(answering.editor.document.text, in: tema)
+    XCTAssertEqual(answering.sync.state.values["tema"], .string("escuro"), "the option stays marked")
+    XCTAssertEqual(answering.text(tema), "Sépia")
+  }
+
   /// Emptying a single choice's own text keeps a marked option; typing replaces it.
   func testTypingReplacesAMarkedOptionAndEmptyingKeepsIt() async throws {
     let server = QuestionServer()

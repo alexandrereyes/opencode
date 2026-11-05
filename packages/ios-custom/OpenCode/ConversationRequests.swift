@@ -72,8 +72,15 @@ struct ConversationQuestionCard: View {
     VStack(alignment: .leading, spacing: 12) {
       Label(form.title == "Questions" ? "Pergunta do agente" : form.title, systemImage: "questionmark.bubble")
         .appFont(.secondary, weight: .semibold).foregroundStyle(theme.color(.info))
-      ForEach(answering.fields) { field in
+      ForEach(Array(answering.fields.enumerated()), id: \.element.id) { index, field in
         VStack(alignment: .leading, spacing: 4) {
+          // Which of the form's questions this is, and the one being answered below.
+          if answering.fields.count > 1 {
+            Text("\(index + 1) de \(answering.fields.count)"
+              + (shown && answering.field?.key == field.key ? " · respondendo agora" : ""))
+              .appFont(.caption, weight: .medium)
+              .foregroundStyle(theme.color(shown && answering.field?.key == field.key ? .info : .textSecondary))
+          }
           if let title = field.title {
             Text(title).appFont(.body, weight: .semibold).foregroundStyle(theme.color(.textStrong))
           }

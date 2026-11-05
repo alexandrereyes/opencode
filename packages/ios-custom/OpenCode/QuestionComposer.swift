@@ -60,12 +60,39 @@ import SwiftUI
     guard let field else { return .stay }
     return reply.onReturn(in: form, from: field.key)
   }
+  /// Questions whose whole text is open in the composer's place (Mostrar tudo): how they read, not their answers.
+  var opened: Set<String> = []
+
+  /// The primary button (and Return), by what it really does, as `advance` does it: add a multiple choice's typed
+  /// item, go to the question Return goes to (named by its title, when it has one), or answer.
+  enum Primary: Equatable { case add, next(String?), respond }
+  var primary: Primary {
+    guard let field else { return .respond }
+    if field.type == .multiselect, !(sync.state.custom[field.key] ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+      return .add
+    }
+    guard case .next(let key) = next else { return .respond }
+    let title = form.fields.first { $0.key == key }?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+    return .next(title?.isEmpty == false ? title : nil)
+  }
 
   /// ‹ and ›: the other questions keep their answers, marked and typed alike.
   func move(_ offset: Int) {
     let target = position + offset
     guard !dictating, fields.indices.contains(target) else { return }
-    current = fields[target].key
+    show(fields[target].key)
+  }
+
+  /// Another question in the answer field: the editor takes its text at once. The fields copy the editor into the
+  /// answer on their next update, which may come after this switch: by then the editor already holds this question's
+  /// text, and that copy changes nothing (it wrote the last question's text into this one).
+  private func show(_ key: String) {
+    current = key
+    guard let field else { return }
+    let text = field.takesText ? text(field) : ""
+    guard editor.document.text != text else { return }
+    editor.text = NSAttributedString(string: text)
+    editor.selection = NSRange(location: (text as NSString).length, length: 0)
   }
 
   func selected(_ option: PendingForm.Field.Option, in field: PendingForm.Field) -> Bool {
@@ -139,7 +166,7 @@ import SwiftUI
     case .send: send()
     case .next(let key):
       guard !dictating else { return }
-      current = key
+      show(key)
       focusRequest += 1
     case .stay: break
     }
@@ -236,7 +263,8 @@ struct QuestionComposer: View {
           .foregroundStyle(theme.color(.textSecondary)).accessibilityIdentifier("question-chat-kept")
       }
       if let field = answering.field {
-        QuestionPrompt(field: field, sheet: false, typing: typing)
+        QuestionPrompt(field: field, sheet: false, typing: typing, answering: answering,
+          room: room * (typing ? 0.14 : Self.share * 0.6))
         // The options take their own height up to a part of the conversation's (less with the keyboard), then
         // scroll in their band: the conversation above keeps its room. A definite height: beside the transcript, a
         // flexible scroll view would be squeezed.
@@ -245,7 +273,8 @@ struct QuestionComposer: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { optionsHeight = $0 }
         }
         .scrollBounceBehavior(.basedOnSize).scrollIndicators(.visible)
-        .frame(height: min(optionsHeight, room * (typing ? 0.14 : Self.share)))
+        .frame(height: min(optionsHeight,
+          room * (typing ? 0.14 : answering.opened.contains(field.key) ? Self.share * 0.6 : Self.share)))
         #if os(iOS)
         if field.takesText && !answering.expanded { QuestionAnswerField(store: store, answering: answering, field: field) }
         #else
@@ -337,11 +366,22 @@ private struct QuestionHeader: View {
 
 /// The question's title and its text: a few lines in the composer's place (the transcript's card and the iPhone's
 /// sheet show it all), all of it in the sheet.
+///
+/// In the composer's place the text keeps a few lines, and says so when it does not fit them: Mostrar tudo opens it
+/// whole there, scrolling in a band of its own (the options, the answer field and the buttons stay), Mostrar menos
+/// closes it. With the iPhone's keyboard up only the title stays, and Mostrar tudo opens the sheet.
 private struct QuestionPrompt: View {
   @Environment(\.appTheme) private var theme
   let field: PendingForm.Field
   let sheet: Bool
   var typing = false
+  var answering: QuestionAnswering? = nil
+  /// The open text's band, at most.
+  var room: CGFloat = 0
+  @State private var shown: CGFloat = 0
+  @State private var whole: CGFloat = 0
+  @State private var openHeight: CGFloat = 0
+  private var open: Bool { answering?.opened.contains(field.key) == true }
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       if let title = field.title {
@@ -349,12 +389,57 @@ private struct QuestionPrompt: View {
           .lineLimit(typing ? 2 : nil)
           .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
       }
-      if let description = field.description, !typing || field.title == nil {
-        Text(description).appFont(.body).foregroundStyle(theme.color(.text))
-          .lineLimit(sheet ? nil : typing ? 2 : 3).fixedSize(horizontal: false, vertical: true)
-          .textSelection(.enabled)
+      if let description = field.description {
+        if sheet {
+          text(description)
+        } else if typing && field.title != nil {
+          more(description, hidden: true)
+        } else if open {
+          ScrollView {
+            text(description)
+              .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { openHeight = $0 }
+          }
+          .scrollBounceBehavior(.basedOnSize).scrollIndicators(.visible)
+          .frame(height: min(openHeight, max(room, 80)))
+          .accessibilityIdentifier("question-prompt-open")
+          more(description, hidden: false)
+        } else {
+          text(description).lineLimit(typing ? 2 : 3)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
+            // The whole text at this width, unseen, tells whether those lines cut it.
+            .background(alignment: .topLeading) {
+              text(description).hidden().accessibilityHidden(true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
+            }
+          if whole > shown + 1 { more(description, hidden: true) }
+        }
       }
     }
+  }
+  private func text(_ description: String) -> some View {
+    Text(description).appFont(.body).foregroundStyle(theme.color(.text))
+      .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+  }
+  /// Mostrar tudo / Mostrar menos: what it opens or closes is the question's text, nothing of its answer.
+  private func more(_ description: String, hidden: Bool) -> some View {
+    Button(hidden ? "Mostrar tudo" : "Mostrar menos", systemImage: hidden ? "chevron.down" : "chevron.up") {
+      guard let answering else { return }
+      #if os(iOS)
+      if typing {
+        answering.editor.focused = false
+        answering.expanded = true
+        return
+      }
+      #endif
+      if hidden { answering.opened.insert(field.key) } else { answering.opened.remove(field.key) }
+    }
+    .appFont(.secondary, weight: .medium).foregroundStyle(theme.color(.info)).buttonStyle(.plain)
+    .frame(minHeight: 32)
+    #if os(iOS)
+    .frame(minHeight: 44)
+    #endif
+    .accessibilityLabel(hidden ? "Mostrar a pergunta inteira" : "Mostrar menos da pergunta")
+    .accessibilityIdentifier(hidden ? "question-prompt-more" : "question-prompt-less")
   }
 }
 
@@ -478,10 +563,21 @@ private struct QuestionAnswerField: View {
 /// the steps sit above Agora não and the button.
 private struct QuestionFooter: View {
   @Environment(\.appTheme) private var theme
+  @Environment(\.dynamicTypeSize) private var typeSize
   let answering: QuestionAnswering
   var close: (() -> Void)? = nil
   var body: some View {
-    if let close {
+    if close == nil, typeSize.isAccessibilitySize {
+      // Large text: the button on a row of its own, so the next question's name fits.
+      VStack(spacing: 6) {
+        HStack(spacing: 6) {
+          steps
+          Spacer(minLength: 0)
+        }
+        primary.frame(maxWidth: .infinity)
+      }
+      .buttonStyle(.plain).foregroundStyle(theme.color(.textSecondary))
+    } else if let close {
       VStack(spacing: 6) {
         HStack(spacing: 6) {
           steps
@@ -516,15 +612,31 @@ private struct QuestionFooter: View {
         .accessibilityIdentifier("question-next")
     }
   }
+  /// Named by where it goes: Próxima: the title of the question Return goes to (it may skip answered ones), Próxima
+  /// pergunta without a title, Adicionar while a multiple choice's item is typed, Responder at the end. A long title
+  /// is cut on one line; its accessibility label says it all.
   private var primary: some View {
-    let next = answering.next
+    let primary = answering.primary
+    let (label, spoken): (String, String) = switch primary {
+    case .add: ("Adicionar", "Adicionar à lista")
+    case .next(let title?): ("Próxima: " + title, "Próxima pergunta: " + title)
+    case .next(nil): ("Próxima pergunta", "Próxima pergunta")
+    case .respond: ("Responder", "Responder")
+    }
     return Button { answering.advance() } label: {
-      Text(next == .send || next == .stay ? "Responder" : "Próxima").lineLimit(1).fixedSize()
-        .frame(maxWidth: close == nil ? nil : .infinity)
+      Group {
+        if case .next = primary {
+          Text(label).lineLimit(1).truncationMode(.tail)
+        } else {
+          Text(label).lineLimit(1).fixedSize()
+        }
+      }
+      .frame(maxWidth: close == nil && !typeSize.isAccessibilitySize ? nil : .infinity)
     }
     .buttonStyle(QuestionButtonStyle(filled: true))
-    .disabled(next == .stay || answering.dictating || answering.sending)
+    .disabled((primary == .respond && answering.next == .stay) || answering.dictating || answering.sending)
     .keyboardShortcut(.defaultAction)
+    .accessibilityLabel(spoken)
     .accessibilityIdentifier("question-primary")
   }
 }
