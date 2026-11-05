@@ -14,6 +14,7 @@ import { Chats } from "../../plugin-app-custom/src/chats/rpc"
 import { agentID, registerMaster } from "../../plugin-app-custom/src/master"
 import { Master } from "../../plugin-app-custom/src/master/rpc"
 import { registerPreferences } from "../../plugin-app-custom/src/preferences"
+import { timed } from "../../plugin-app-custom/src/request-times"
 import { atomic } from "../../plugin-app-custom/src/storage"
 
 const providerID = Provider.ID.make("llm-proxy")
@@ -38,8 +39,10 @@ testEffect(PluginTestLayer).live(
           confirm: (input) => Effect.sync(() => void claims.push(`confirm:${input.sessionID}`)).pipe(Effect.as({})),
         })
         .pipe(Effect.orDie)
-      yield* registerPreferences({ ...ctx, storage: atomic(ctx.storage) })
-      yield* registerMaster(ctx)
+      // The custom plugin's context, composed as its entry point does.
+      const custom = { ...ctx, storage: atomic(ctx.storage), request: timed(ctx.request) }
+      yield* registerPreferences(custom)
+      yield* registerMaster(custom)
       yield* ctx.provider.transform((editor) =>
         editor.add({
           info: { ...Provider.Info.empty(providerID), activation: "enabled" },

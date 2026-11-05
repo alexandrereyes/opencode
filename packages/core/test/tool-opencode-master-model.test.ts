@@ -10,6 +10,8 @@ import { Rpc } from "@opencode/core/rpc"
 import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
 import { agentID, preferredModel, registerMaster } from "../../plugin-app-custom/src/master"
+import { timed } from "../../plugin-app-custom/src/request-times"
+import { atomic } from "../../plugin-app-custom/src/storage"
 
 const providerID = Provider.ID.make("llm-proxy")
 const catalog = (id: string, variants: string[]) => ({
@@ -27,7 +29,8 @@ testEffect(PluginTestLayer).live(
       const hooks = yield* PluginHooks.Service
       const ctx = yield* PluginHost.make(plugins)
       const info = rpc.call("custom.master", "info", {})
-      yield* registerMaster(ctx)
+      // The custom plugin's context, composed as its entry point does.
+      yield* registerMaster({ ...ctx, storage: atomic(ctx.storage), request: timed(ctx.request) })
       expect(yield* info).toEqual({ version: 1, agent: agentID })
 
       // Configured providers are contributed by plugins that run after the custom package.
