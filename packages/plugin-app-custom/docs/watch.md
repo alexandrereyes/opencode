@@ -73,6 +73,14 @@ JSON bodies, camelCase, times in **epoch milliseconds**, optional fields omitted
 | DELETE | `/watch/v1/voice/calls/:callID`                    | —                                                                 | `{ ok: true }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | POST   | `/watch/v1/diagnostics`                            | `{ events: object[] ≤ 50 }`                                       | `{ ok: true }` — logged with the device ID, secrets redacted                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
+**Dashboard lists (rev. 2026-11-05).** `/state` is an authenticated HTTP read, not an ActivityKit push: it returns
+every relevant root session, pending request and attention item in `sessions`, `attention` and `needs`, in the same
+priority order, without a four-row or twenty-row cap. The existing watch app already decodes and scrolls these
+arrays, so this needs a server/plugin update, not a new watch build. The Live Activity snapshot and APNs payload
+remain compact (4 session rows, at most 3 attention/needs rows, and the existing 4096-byte fitting). Complication
+drawing, push keys, rate limits and refresh intervals are unchanged. Reading the dashboard also keeps the full lists
+in its shared offline cache.
+
 ```ts
 WatchRequest =
   | { kind: "question", requestID, sessionID, title, project, since,

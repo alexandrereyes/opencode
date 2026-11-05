@@ -167,6 +167,7 @@ export function makeHub(options: HubOptions) {
    * The state with the host name and each attention session's oldest pending request, for other surfaces of the
    * same hub (the watch gateway). The request IDs never enter the Live Activity state or pushes. Unlike `snapshot`,
    * `state` stays while only unread answers wait (rev. 2026-10-29), so the watch counts what Sessões counts.
+   * Its lists are complete: the watch's scrolling dashboard is not constrained by an APNs payload (rev. 2026-11-05).
    */
   const view = Effect.gen(function* () {
     const running = yield* current
@@ -174,7 +175,7 @@ export function makeHub(options: HubOptions) {
     const now = yield* Clock.currentTimeMillis
     const derived = running.tracker.derive(now, ready.host)
     return {
-      state: visible(derived.state, now, true),
+      state: visible({ ...derived.state, ...derived.dashboard }, now, "watch"),
       live: visible(derived.state, now),
       host: ready.host,
       requests: derived.requests,
@@ -250,12 +251,13 @@ export function makeHub(options: HubOptions) {
 export type Hub = ReturnType<typeof makeHub>
 
 /**
- * `null` while nothing is working, waiting or failed (nor, with `unread`, any answer unread); otherwise the state
- * trimmed to fit an update push. Unread answers never keep a Live Activity alive.
+ * `null` while nothing is working, waiting or failed (nor any answer unread on the watch). Activity states are
+ * trimmed to fit an update push; the watch keeps the full HTTP lists. Unread answers never keep an activity alive.
  */
-function visible(state: LiveActivity.AgentsState, now: number, unread = false) {
-  if (state.activeTotal === 0 && state.counts.failed === 0 && !(unread && (state.counts.unread ?? 0) > 0)) return null
-  return fit({ event: "update", state, now })
+function visible(state: LiveActivity.AgentsState, now: number, surface: "activity" | "watch" = "activity") {
+  if (state.activeTotal === 0 && state.counts.failed === 0 && !(surface === "watch" && (state.counts.unread ?? 0) > 0))
+    return null
+  return surface === "watch" ? state : fit({ event: "update", state, now })
 }
 
 /** macOS ComputerName (e.g. "MacBook Pro"), falling back to the host name. */

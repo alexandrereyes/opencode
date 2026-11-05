@@ -51,6 +51,11 @@ a theme change applies to the next activity.
 
 ## ContentState (`AgentsState`, dynamic)
 
+The row limits below apply to the Live Activity snapshot and pushes. The watch's `/watch/v1/state` uses the same
+schema and priority order with complete `sessions`, `attention` and `needs` arrays, without APNs payload fitting
+(rev. 2026-11-05); see [watch.md](watch.md#gateway-http-api-watchv1). This does not enlarge activity pushes or change
+the complication's drawing or push budget.
+
 ```ts
 AgentsState {
   v: 1

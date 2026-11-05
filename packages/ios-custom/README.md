@@ -5375,6 +5375,11 @@ watch's own Wi-Fi or cellular. The contract with the backend is
   still open Responder; failures and answers show their kind and time) and then a collapsed `Trabalhando N` that
   expands to the working sessions. The gateway now answers a state while only unread answers wait, so the watch counts
   what Sessões counts. The thin inner work arc of the mock was left out.
+- **Complete dashboard lists (05/11):** the watch's `/watch/v1/state` returns all relevant session, request and
+  attention rows, not the Live Activity's compact four-session snapshot. The existing `dashboardRows` and watchOS
+  `List` already decode and scroll more than twenty rows; no new watch build is required, only the server/plugin
+  update. Live Activity payload fitting, complications and their refresh/push budgets stay unchanged. Regression
+  checks cover 25 working sessions and more than 3 pending questions, including each request's Responder ID.
 - **Sync within the WidgetKit budget (rev. 29/10).** WidgetKit counts every complication reload outside the app in
   front (push, timeline or background request) against one daily budget, 40 to 70 for a widget looked at often; the
   server's 150 pushes a day plus a 15-minute timeline exhausted it, so only opening the app updated the complication.

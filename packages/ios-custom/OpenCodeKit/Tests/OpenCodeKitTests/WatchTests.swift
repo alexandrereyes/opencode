@@ -135,6 +135,39 @@ private let stateJSON = """
     #expect(state.dashboardRows().map(\.id) == ["attention-question-s2", "need-permission-s3", "working"])
   }
 
+  @Test func dashboardKeepsAllTwentyFiveWorkingSessions() throws {
+    var state = try self.state
+    state.counts = .init(working: 25, question: 0, permission: 0, failed: 0, idle: 0, unread: 0)
+    state.activeTotal = 25
+    state.attention = []
+    state.needs = []
+    state.sessions = (0..<25).map { index in
+      .init(sessionID: "s\(index)", title: "Sessão \(index)", project: "OpenCode", directory: "/repo",
+        status: .working, progress: nil)
+    }
+    let decoded = try JSONDecoder().decode(AgentsState.self, from: JSONEncoder().encode(state))
+    #expect(decoded.dashboardRows().map(\.id) == ["working"])
+    #expect(decoded.dashboardRows(working: true).map(\.id) == ["working"] + (0..<25).map { "session-s\($0)" })
+  }
+
+  @Test func dashboardKeepsRequestsBeyondTheCompactActivityLimit() throws {
+    var state = try self.state
+    state.counts = .init(working: 0, question: 6, permission: 0, failed: 0, idle: 0, unread: 0)
+    state.activeTotal = 6
+    state.attentionTotal = 6
+    state.attention = (0..<6).map { index in
+      .init(sessionID: "q\(index)", title: "Pergunta \(index)", project: "OpenCode", directory: "/repo",
+        kind: .question, since: Double(index), text: "Continuar?", requestID: "request-\(index)")
+    }
+    state.needs = state.attention.map { item in
+      .init(sessionID: item.sessionID, title: item.title, project: item.project, directory: item.directory,
+        kind: .question, since: item.since)
+    }
+    #expect(state.dashboardRows().map(\.id) == (0..<6).map { "attention-question-q\($0)" })
+    guard case .attention(let last) = state.dashboardRows().last else { Issue.record("missing last request"); return }
+    #expect(last.requestID == "request-5")
+  }
+
   @Test func unreadAndFailedNeedsKeepTheirTime() throws {
     var state = try self.state
     state.counts = .init(working: 2, question: 1, permission: 0, failed: 1, idle: 0, unread: 2)

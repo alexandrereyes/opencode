@@ -163,6 +163,45 @@ it.effect(
   { timeout: 20_000 },
 )
 
+it.effect("/state keeps more than twenty sessions and every pending request on the dashboard", () =>
+  Effect.gen(function* () {
+    const f = yield* setup()
+    const sessions: LiveActivity.Row[] = Array.from({ length: 30 }, (_, index) => ({
+      sessionID: `ses_watch_${index}`,
+      title: `Sessão ${index}: acompanhar os testes e a publicação sem perder o andamento`,
+      project: "OpenCode",
+      directory: "/repo/opencode",
+      status: index < 5 ? "question" : "working",
+    }))
+    const attention = sessions.slice(0, 5).map(
+      (row, index): LiveActivity.Attention => ({
+        sessionID: row.sessionID,
+        title: row.title,
+        project: row.project,
+        directory: row.directory,
+        kind: "question",
+        since: T - 60_000 + index,
+      }),
+    )
+    f.state.value = {
+      ...agents(30, 5, 0),
+      sessions,
+      attention,
+      needs: attention,
+    }
+    attention.forEach((item, index) => f.state.requests.set(item.sessionID, `frm_watch_${index}`))
+
+    const response = yield* f.json("GET", "/state")
+    expect(response.state.sessions).toHaveLength(30)
+    expect(response.state.sessions.filter((row: LiveActivity.Row) => row.status === "working")).toHaveLength(25)
+    expect(
+      response.state.attention.map((item: LiveActivity.Attention & { requestID: string }) => item.requestID),
+    ).toEqual(["frm_watch_0", "frm_watch_1", "frm_watch_2", "frm_watch_3", "frm_watch_4"])
+    expect(response.state.needs).toHaveLength(5)
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeGreaterThan(4096)
+  }),
+)
+
 it.effect("questions and permissions map from pending requests; replies use the native APIs", () =>
   Effect.gen(function* () {
     const { server, json, call } = yield* setup()

@@ -268,6 +268,8 @@ export type Pending = {
 
 export type Derived = {
   readonly state: LiveActivity.AgentsState
+  /** Full lists for the watch's scrolling dashboard; only the Live Activity uses the compact lists in `state`. */
+  readonly dashboard: Pick<LiveActivity.AgentsState, "attention" | "sessions" | "needs">
   /** Every attention item, failed session and unread answer, untruncated: the urgency keys of activity updates. */
   readonly marks: ReadonlyMap<string, Mark>
   /** When the state changes by itself next (an idle or failed row expiring). */
@@ -843,14 +845,12 @@ export function makeTracker(ctx: TrackerContext) {
       ...of("permission").toSorted(bySince),
       ...of("failed").toSorted(byEnded),
       ...unread,
-    ]
-      .slice(0, limits.needs)
-      .map((row): LiveActivity.Need => {
-        if (row.status === "question" || row.status === "permission")
-          return { ...row.ref, kind: row.status, since: row.oldest?.since ?? now }
-        if (row.status === "failed") return { ...row.ref, kind: "failed", since: row.entry.ended?.at ?? now }
-        return { ...row.ref, kind: "unread", since: unreadAt(row.entry) }
-      })
+    ].map((row): LiveActivity.Need => {
+      if (row.status === "question" || row.status === "permission")
+        return { ...row.ref, kind: row.status, since: row.oldest?.since ?? now }
+      if (row.status === "failed") return { ...row.ref, kind: "failed", since: row.entry.ended?.at ?? now }
+      return { ...row.ref, kind: "unread", since: unreadAt(row.entry) }
+    })
     const counts = {
       working: working.length,
       question: of("question").length,
@@ -891,6 +891,18 @@ export function makeTracker(ctx: TrackerContext) {
           ? [row.entry.ended.at + limits.failedMs]
           : [],
     )
+    const attention = waiting.map(
+      (row): LiveActivity.Attention => ({
+        ...row.ref,
+        kind: row.status === "question" ? "question" : "permission",
+        since: row.oldest?.since ?? now,
+        ...(row.oldest?.text ? { text: clip(row.oldest.text, limits.text) } : {}),
+      }),
+    )
+    const sessionRows = ordered.map((row): LiveActivity.Row => {
+      const rowProgress = row.status === "working" ? progress(row) : undefined
+      return { ...row.ref, status: row.status, ...(rowProgress ? { progress: rowProgress } : {}) }
+    })
     return {
       state: {
         v: 1,
@@ -908,19 +920,12 @@ export function makeTracker(ctx: TrackerContext) {
               },
             }
           : {}),
-        attention: waiting.slice(0, limits.attention).map((row) => ({
-          ...row.ref,
-          kind: row.status === "question" ? ("question" as const) : ("permission" as const),
-          since: row.oldest?.since ?? now,
-          ...(row.oldest?.text ? { text: clip(row.oldest.text, limits.text) } : {}),
-        })),
+        attention: attention.slice(0, limits.attention),
         attentionTotal: counts.question + counts.permission,
-        sessions: ordered.slice(0, limits.rows).map((row) => {
-          const rowProgress = row.status === "working" ? progress(row) : undefined
-          return { ...row.ref, status: row.status, ...(rowProgress ? { progress: rowProgress } : {}) }
-        }),
-        needs,
+        sessions: sessionRows.slice(0, limits.rows),
+        needs: needs.slice(0, limits.needs),
       },
+      dashboard: { attention, sessions: sessionRows, needs },
       marks,
       ...(expiries.length > 0 ? { wakeAt: Math.min(...expiries) } : {}),
       requests: new Map(waiting.flatMap((row) => (row.oldest ? [[row.entry.id, row.oldest.id] as const] : []))),

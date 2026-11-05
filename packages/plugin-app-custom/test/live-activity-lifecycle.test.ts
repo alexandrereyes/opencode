@@ -533,6 +533,40 @@ it.effect("a starting hub rebuilds running sessions and pending requests before 
   }),
 )
 
+it.effect("the watch keeps every session and request while the Live Activity stays compact", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(T)
+    const server = world()
+    const ids = Array.from({ length: 30 }, (_, index) => `ses_watch_${index.toString().padStart(2, "0")}`)
+    ids.forEach((id, index) => {
+      server.add(session(id, { title: `Sessão ${index}: acompanhar os testes e a publicação sem perder o andamento` }))
+      server.active.add(id)
+    })
+    ids.slice(0, 5).forEach((id, index) => {
+      server.forms.push(question(`frm_watch_${index}`, id, T - minute + index, `Continuar a tarefa ${index}?`))
+    })
+    const hub = makeHub({ host: Effect.succeed(host), apns: Effect.succeed(undefined) })
+    yield* hub.join(member(server, storage(), yield* Queue.unbounded<Event>()).value)
+
+    const watch = (yield* hub.view).state
+    expect(watch?.counts).toMatchObject({ working: 25, question: 5 })
+    expect(watch?.sessions).toHaveLength(30)
+    expect(new Set(watch?.sessions.map((row) => row.sessionID))).toEqual(new Set(ids))
+    expect(watch?.sessions.filter((row) => row.status === "working")).toHaveLength(25)
+    expect(watch?.attention).toHaveLength(5)
+    expect(watch?.needs).toHaveLength(5)
+    expect((yield* hub.view).requests.size).toBe(5)
+    // HTTP dashboard data is not constrained by the APNs body budget.
+    expect(Buffer.byteLength(JSON.stringify(watch))).toBeGreaterThan(limits.bodyBytes)
+
+    const activity = (yield* hub.handlers.snapshot()).state
+    expect(activity?.counts).toEqual(watch?.counts)
+    expect(activity?.sessions).toHaveLength(4)
+    expect(activity?.attention.length).toBeLessThanOrEqual(3)
+    expect(activity?.needs?.length).toBeLessThanOrEqual(3)
+  }),
+)
+
 test("every evaluation of the plugin module, one per Location, shares one process-wide hub", async () => {
   // The plugin loader clears the module cache for each Location; a query string evaluates the module again here.
   const specifier = "../src/live-activity/index.ts"
