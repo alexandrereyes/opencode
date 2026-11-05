@@ -136,10 +136,12 @@ struct MacSessionColumn: View {
         bulkDelete = nil
         archiveSelection(rows)
       }
+      // Return confirms what the alert asks, here Excluir (Arquivar is the alternative); Esc is Cancelar.
       Button(SessionBulkCopy.deleteTitle(rows.count), role: .destructive) {
         bulkDelete = nil
         Task { runtime.sessionSelection.complete(await store.deleteMany(rows.map(\.session))) }
       }
+      .keyboardShortcut(.defaultAction)
     } message: { rows in
       Text(SessionBulkCopy.deleteMessage(
         count: rows.count, running: rows.filter { !$0.memberIDs.isDisjoint(with: store.active) }.count,
@@ -154,6 +156,7 @@ struct MacSessionColumn: View {
         bulkArchive = nil
         archiveSelection(rows)
       }
+      .keyboardShortcut(.defaultAction)
       Button("Cancelar", role: .cancel) { bulkArchive = nil }
     } message: { _ in
       Text("As sessões sairão de Recentes e ficarão na lista de arquivadas. Não há opção de desarquivar nesta versão.")

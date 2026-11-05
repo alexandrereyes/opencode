@@ -3475,6 +3475,18 @@ Contexto and the chat shared with the iPhone. Briefing, mocks and the parity ima
 - **Settings**: see [Ajustes](#ajustes). `-OpenCodeServerURL`/`OPENCODE_SERVER_URL` and
   `-OpenCodeServerPassword`/`OPENCODE_SERVER_PASSWORD` override the server for a launch, as on the iPhone.
 
+### Return in the session confirmations — 5 November
+
+On the Mac, **Return** confirms the session confirmations and **Esc** cancels them (Alexandre, 05/11): Excluir sessão
+(`SessionDeleteConfirmation`, shared, so also in Arquivadas; `#if os(macOS)`, the iPhone unchanged), Arquivar sessão
+(`MacWindow`) and the selection's Arquivar and Excluir (`MacSessionColumn`, where Arquivar stays the alternative).
+A destructive button is never a dialog's default on its own, so Return did nothing; its main button now carries
+`.keyboardShortcut(.defaultAction)` (the alert's own key equivalent; Cancelar keeps Esc by its role). Nothing else
+changed: the same dialogs, texts and warnings, no new confirmation, no shortcut outside them. `test-mac-ajustes.sh
+archived` opens each one (the fixture records the archive and delete calls), checks Return and Esc as its buttons'
+key equivalents, then Esc (nothing runs) and Return (it runs once), the chat's draft untouched; without the shortcut
+it fails at the first one (Return on `""`).
+
 ### Approved Mac choices — 28 October
 
 The approved palette C, project rail C and subagent banner A + tree C are implemented independently of the

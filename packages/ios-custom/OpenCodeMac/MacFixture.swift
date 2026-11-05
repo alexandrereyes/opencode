@@ -79,6 +79,17 @@ struct MacFixtureServer: Sendable {
     let path = url.path
     let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
     let input = request.httpBody.flatMap { try? JSONDecoder().decode(RPC.self, from: $0) }?.input
+    // `archived`: the confirmations' archive and delete are kept for the check and answered here, the fixture's own.
+    if MacAjustesChecks.mode == "archived" {
+      if request.httpMethod == "DELETE", path.hasPrefix("/api/session/") {
+        MacAjustesChecks.sessionActions.append("excluir " + path.dropFirst("/api/session/".count))
+        return ""
+      }
+      if path == "/api/rpc/custom.archive/archive" {
+        MacAjustesChecks.sessionActions.append("arquivar " + (input?["sessionID"]?.string ?? ""))
+        return #"{"output":{}}"#
+      }
+    }
     if path.hasPrefix("/api/rpc/") { return rpc(String(path.dropFirst("/api/rpc/".count)), input) }
     // `question`: the answer is kept for the check, and the form is answered (gone from the family) from then on.
     if MacAjustesChecks.mode == "question", path == "/api/session/\(MacFixture.rootID)/form/frm_mac_root/reply" {

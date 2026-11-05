@@ -90,10 +90,12 @@ struct MacWindow: View {
       isPresented: Binding(get: { runtime.archiveRequest != nil }, set: { if !$0 { runtime.archiveRequest = nil } })
     ) {
       if let row = runtime.archiveRequest {
+        // Return archives, Esc cancels.
         Button("Arquivar", role: .destructive) {
           Task { await store.archive(row) }
           runtime.archiveRequest = nil
         }
+        .keyboardShortcut(.defaultAction)
       }
       Button("Cancelar", role: .cancel) { runtime.archiveRequest = nil }
     } message: {

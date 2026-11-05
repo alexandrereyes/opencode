@@ -14,6 +14,10 @@ private struct SessionDeleteConfirmation: ViewModifier {
         candidate = nil
         Task { await store.delete(session) }
       }
+      #if os(macOS)
+      // Return confirms what the alert asks (a destructive button is never the default on its own); Esc is Cancelar.
+      .keyboardShortcut(.defaultAction)
+      #endif
     } message: { session in
       Text(SessionDeletionPlan.confirmation(session.displayTitle))
     }

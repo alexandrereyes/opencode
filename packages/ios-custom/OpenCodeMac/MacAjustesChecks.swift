@@ -30,6 +30,8 @@ import SwiftUI
   static let foreground: Set<String> = ["numbers", "viewer", "dictation"]
   /// `progresso`: the fixture server answers that the root's run ended (read off the main actor by the server).
   nonisolated(unsafe) static var progressEnded = false
+  /// `archived`: the archives and deletions the fixture server received, in order.
+  nonisolated(unsafe) static var sessionActions: [String] = []
   /// `question`: the bodies of the answers the fixture server received.
   nonisolated(unsafe) static var questionReplies: [Data] = []
   nonisolated(unsafe) static var progressFamilyEnded = false
@@ -54,7 +56,9 @@ import SwiftUI
       case "quote": try await quote(window: window, runtime: runtime, shot: shot)
       case "image": try await image(window: window, shot: shot)
       case "viewer": try await viewer(window: window, theme: theme, folder: folder)
-      case "archived": try await archived(window: window, shot: shot)
+      case "archived":
+        try await archived(window: window, shot: shot)
+        try await sessionConfirmations(window: window, runtime: runtime, shot: shot)
       case "numbers": try await numbers(window: window, runtime: runtime)
       case "width": try await width(window: window, runtime: runtime, shot: shot)
       case "dictation": try await dictation(window: window, runtime: runtime, shot: shot)
@@ -972,6 +976,88 @@ import SwiftUI
     _ = sheet.performKeyEquivalent(with: find)
     try await wait("⌘F focou") { sheet.firstResponder is NSTextView ? true : nil }
     print("MacAjustes archived: \(all) arquivada(s), 1 com PROTOTIPO, 0 sem resultado, ⌘F foca")
+  }
+
+  // MARK: Session confirmations: Return confirms, Esc cancels (Alexandre, 05/11)
+
+  /// Excluir sessão, Arquivar sessão, and the selection's Arquivar and Excluir: Return is the main button's key
+  /// equivalent and confirms once, Esc is Cancelar's and changes nothing, and neither reaches the composer. The keys
+  /// go to the alert's own window (`performKeyEquivalent`, as AppKit hands it a key equivalent), this background copy
+  /// having no key window; the fixture records what the server would have received.
+  private static func sessionConfirmations(window: NSWindow, runtime: MacWindowRuntime, shot: (String) -> Void)
+    async throws
+  {
+    if let sheet = window.attachedSheet {
+      _ = sheet.performKeyEquivalent(with: key("\u{1b}", code: 53, window: sheet))
+      try await wait("Arquivadas fechou") { window.attachedSheet == nil ? true : nil }
+    }
+    let store = try require(runtime.store, "sessões")
+    let conversation = try require(store.liveConversation(MacFixture.rootID), "conversa")
+    let chat = runtime.input(conversation).draft
+    chat.text = NSAttributedString(string: "Rascunho do chat")
+    let submitted = conversation.submitted
+    // Six other sessions, a different one (or two) for each confirmation.
+    let ids = store.filtered.map(\.id).filter { $0 != MacFixture.rootID }
+    guard ids.count >= 6 else { throw Failure(description: "poucas sessões: \(ids.count)") }
+    func row(_ id: String) throws -> SessionRow { try require(store.rows.first { $0.id == id }, "linha \(id)") }
+    func select(_ pair: ArraySlice<String>) {
+      runtime.sessionSelection.clear()
+      runtime.sessionSelection.start(pair.first!)
+      runtime.sessionSelection.toggle(pair.last!)
+    }
+    let cases: [(String, String, [String], () throws -> Void)] = [
+      ("arquivar-sessao", "Arquivar", ["arquivar " + ids[0]], { runtime.archiveRequest = try row(ids[0]) }),
+      ("excluir-sessao", "Excluir sessão", ["excluir " + ids[1]], { runtime.deleteRequest = try row(ids[1]).session }),
+      ("arquivar-selecionadas", "Arquivar", ["arquivar " + ids[2], "arquivar " + ids[3]], {
+        select(ids[2...3])
+        runtime.bulkRequest = .archive
+      }),
+      ("excluir-selecionadas", SessionBulkCopy.deleteTitle(2), ["excluir " + ids[4], "excluir " + ids[5]], {
+        select(ids[4...5])
+        runtime.bulkRequest = .delete
+      }),
+    ]
+    for (name, principal, expected, open) in cases {
+      MacAjustesChecks.sessionActions = []
+      // Opening runs nothing; Esc is Cancelar.
+      try open()
+      var sheet = try await wait("\(name) aberta") { window.attachedSheet }
+      try await Task.sleep(for: .milliseconds(400))
+      let buttons = views(sheet).compactMap { $0 as? NSButton }
+      guard let main = buttons.first(where: { $0.title == principal }),
+        let cancel = buttons.first(where: { $0.title == "Cancelar" }) else {
+        throw Failure(description: "\(name): botões \(buttons.map(\.title))")
+      }
+      print("MacAjustes archived: \(name) · \(principal) \(main.keyEquivalent.debugDescription) · Cancelar \(cancel.keyEquivalent.debugDescription)")
+      guard main.keyEquivalent == "\r", cancel.keyEquivalent == "\u{1b}" else {
+        throw Failure(description: "\(name): Return em \(main.keyEquivalent.debugDescription), Esc em \(cancel.keyEquivalent.debugDescription)")
+      }
+      shot("confirmacao-" + name)
+      guard MacAjustesChecks.sessionActions.isEmpty else { throw Failure(description: "\(name): abrir executou") }
+      _ = sheet.performKeyEquivalent(with: key("\u{1b}", code: 53, window: sheet))
+      try await wait("\(name): Esc fechou") { window.attachedSheet == nil ? true : nil }
+      try await Task.sleep(for: .milliseconds(600))
+      guard MacAjustesChecks.sessionActions.isEmpty else {
+        throw Failure(description: "\(name): Esc executou \(MacAjustesChecks.sessionActions)")
+      }
+      // Return confirms, once.
+      try open()
+      sheet = try await wait("\(name) aberta de novo") { window.attachedSheet }
+      try await Task.sleep(for: .milliseconds(400))
+      _ = sheet.performKeyEquivalent(with: key("\r", code: 36, window: sheet))
+      try await wait("\(name): Return fechou") { window.attachedSheet == nil ? true : nil }
+      try await wait("\(name): Return confirmou") {
+        MacAjustesChecks.sessionActions.sorted() == expected.sorted() ? true : nil
+      }
+      try await Task.sleep(for: .milliseconds(600))
+      guard MacAjustesChecks.sessionActions.sorted() == expected.sorted() else {
+        throw Failure(description: "\(name): \(MacAjustesChecks.sessionActions)")
+      }
+    }
+    guard chat.text.string == "Rascunho do chat", conversation.submitted == submitted else {
+      throw Failure(description: "o Return chegou ao composer: \(chat.text.string.debugDescription)")
+    }
+    print("MacAjustes archived: Return confirma e Esc cancela Arquivar sessão, Excluir sessão, Arquivar e Excluir selecionadas, uma vez, sem chegar ao composer")
   }
 
   // MARK: A18 — ⌘1…⌘9
