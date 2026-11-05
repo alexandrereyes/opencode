@@ -154,6 +154,30 @@ Other customizations:
   #54191 and awaits activation in `shell.create`.
 - Compatibility skill watcher reconciliation in `packages/core/src/config/plugin/compatibility.ts` and
   `core/test/config/skill.test.ts`. Exit: its entry in `docs/upstream-overrides.md`.
+- A wake with nothing to promote starts no execution (2026-11-05, our own fix, no upstream PR or issue; related but
+  not the same: #52378, #59565). Files: `packages/core/src/session/run-coordinator.ts` (optional `idle` check before a
+  non-forced start: such a wake skips `started`, the drain and `settled`; wakes meanwhile ring its doorbell as usual;
+  `run` never asks) and `packages/core/src/session/execution.ts` (the check: `SessionInbox.nextPromotable`, the same
+  entry test as `SessionRunner.drain` in `runner/llm.ts`). **Why:** a doorbell rung while an execution runs (for example a
+  repeated notice admission, a scheduler re-wake) outlives that execution when it fails, since `settle` starts a
+  successor for it; the work it announced was already taken, so the successor's drain returns `Complete` at once and
+  publishes `Execution.Succeeded`, which overwrites `idle_outcome = failed`. On 2026-11-05 a root whose provider was
+  unreachable (`getaddrinfo ENOTFOUND`) recorded `idle failed` and, 2 ms later with no message between, `idle succeeded`,
+  so the apps showed an answer instead of the error; a subagent showed the same +4 ms pair on 2026-11-04. An idle wake
+  with nothing pending also published a `started`/`succeeded` pair. Work admitted during the failing execution still
+  runs in a successor, explicit resumes (`run`, restart recovery) always run, and a successful execution still drains
+  its doorbell inside the same busy period. Tests in `core/test/session-execution.test.ts`: "a wake whose work the
+  failing execution already took leaves the failure as its last terminal" and "an idle wake with nothing to promote
+  starts no execution; an explicit resume still runs" fail on `78a5228bf0` (terminals `started, failed, started,
+  succeeded`; an empty `started, succeeded`) and pass with the fix; "work admitted while an execution fails still runs
+  in a successor" passes on both. Two `core/test/session-move.test.ts` cases held an execution open with an empty wake;
+  they now use an explicit resume. **Exit:** at each upstream integration, compare upstream's `run-coordinator.ts`
+  (`start`/`settle`), `execution.ts` and `runner/llm.ts` (empty-drain `Complete`) with this change, and run the three
+  tests above against upstream's code; drop the patch only when upstream proves the same behavior (no terminal after a
+  redundant wake, failure kept), not because the merge is clean. Between `79349e840` and upstream `dev` `893e8dc43f`
+  (2026-11-05) `run-coordinator.ts` did not change; `execution.ts` and `runner/llm.ts` changed only in #60974 (trace)
+  and #61421 (perf). #61880 (retries for `ENOTFOUND`/`EAI_AGAIN` for up to an hour) changes the retry policy, not this
+  terminal, and is not applied.
 - Tests only: custom tests that drive plugin code through Core's fixtures stay in Core, because they need Core's test
   preload and HOME isolation: `core/test/tool-opencode-master-{ensure,ensure-bundle,model}.test.ts`,
   `core/test/tool-opencode-session-read.test.ts`, `core/test/plugin/app-mentions.test.ts`; host tests
@@ -242,6 +266,11 @@ packages/server/test/shell.test.ts
 # Compatibility skill watcher
 packages/core/src/config/plugin/compatibility.ts
 packages/core/test/config/skill.test.ts
+# A wake with nothing to promote starts no execution
+packages/core/src/session/run-coordinator.ts
+packages/core/src/session/execution.ts
+packages/core/test/session-execution.test.ts
+packages/core/test/session-move.test.ts
 # Tests only
 packages/core/test/tool-opencode-master-ensure.test.ts
 packages/core/test/tool-opencode-master-ensure-bundle.test.ts

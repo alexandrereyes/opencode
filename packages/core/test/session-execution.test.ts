@@ -373,7 +373,127 @@ describe("SessionExecution lifecycle", () => {
       expect((yield* claims(database))[sessionID]).toBe(true)
     }),
   )
+
+  it.effect("a wake whose work the failing execution already took leaves the failure as its last terminal", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      const sessionID = Session.ID.make("ses_failed_then_redundant_wake")
+      yield* seedSessions(database, [sessionID])
+      yield* seedInbox(database, sessionID, ["steer"])
+      const terminals = yield* recordTerminals(bus)
+      const running = yield* Deferred.make<void>()
+      const unreachable = yield* Deferred.make<void>()
+      const drained: string[] = []
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+      const context = yield* buildExecution(scope, ({ sessionID: id }) =>
+        Effect.gen(function* () {
+          drained.push(id)
+          if (drained.length > 1) return
+          // The step takes the notice that woke it, then the provider stays unreachable through its retries.
+          yield* SessionInbox.promote(database.db, bus, id, "input")
+          yield* Deferred.succeed(running, undefined)
+          yield* Deferred.await(unreachable)
+          return yield* transportFailure
+        }),
+      )
+      const execution = Context.get(context, SessionExecution.Service)
+      yield* execution.wake(sessionID)
+      yield* Deferred.await(running)
+      // A doorbell with nothing new behind it, such as a repeated admission or a scheduler's re-wake.
+      yield* execution.wake(sessionID)
+      yield* Deferred.succeed(unreachable, undefined)
+      yield* execution.awaitIdle(sessionID)
+
+      expect(drained).toEqual([sessionID])
+      expect(terminals).toEqual(["started", "failed"])
+      expect(yield* claims(database)).toEqual({ [sessionID]: false })
+    }),
+  )
+
+  it.effect("work admitted while an execution fails still runs in a successor", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      const sessionID = Session.ID.make("ses_failed_then_new_work")
+      yield* seedSessions(database, [sessionID])
+      yield* seedInbox(database, sessionID, ["steer"])
+      const terminals = yield* recordTerminals(bus)
+      const running = yield* Deferred.make<void>()
+      const unreachable = yield* Deferred.make<void>()
+      const drained: string[] = []
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+      const context = yield* buildExecution(scope, ({ sessionID: id }) =>
+        Effect.gen(function* () {
+          drained.push(id)
+          yield* SessionInbox.promote(database.db, bus, id, "input")
+          if (drained.length > 1) return
+          yield* Deferred.succeed(running, undefined)
+          yield* Deferred.await(unreachable)
+          return yield* transportFailure
+        }),
+      )
+      const execution = Context.get(context, SessionExecution.Service)
+      yield* execution.wake(sessionID)
+      yield* Deferred.await(running)
+      // A new prompt arrives during the failing step and stays durable until the successor promotes it.
+      yield* seedInbox(database, sessionID, ["queue"])
+      yield* execution.wake(sessionID)
+      yield* Deferred.succeed(unreachable, undefined)
+      yield* execution.awaitIdle(sessionID)
+
+      expect(drained).toEqual([sessionID, sessionID])
+      expect(terminals).toEqual(["started", "failed", "started", "succeeded"])
+      expect(yield* SessionInbox.list(database.db, sessionID)).toEqual([])
+    }),
+  )
+
+  it.effect("an idle wake with nothing to promote starts no execution; an explicit resume still runs", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      const sessionID = Session.ID.make("ses_idle_redundant_wake")
+      yield* seedSessions(database, [sessionID])
+      const terminals = yield* recordTerminals(bus)
+      const drained: string[] = []
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+      const context = yield* buildExecution(scope, ({ sessionID: id }) => Effect.sync(() => void drained.push(id)))
+      const execution = Context.get(context, SessionExecution.Service)
+
+      yield* execution.wake(sessionID)
+      yield* execution.awaitIdle(sessionID)
+      expect(drained).toEqual([])
+      expect(terminals).toEqual([])
+      expect(yield* execution.isActive(sessionID)).toBe(false)
+
+      yield* execution.resume(sessionID)
+      expect(drained).toEqual([sessionID])
+      expect(terminals).toEqual(["started", "succeeded"])
+    }),
+  )
 })
+
+const transportFailure = Effect.fail(
+  new AIError({
+    reason: new TransportError({ message: "getaddrinfo ENOTFOUND", transport: "http", operation: "request" }),
+  }),
+)
+
+/** The lifecycle events of every Session, in publication order. */
+function recordTerminals(bus: Bus.Service["Service"]) {
+  return Effect.gen(function* () {
+    const events: string[] = []
+    const record = (name: string) => () => Effect.sync(() => void events.push(name))
+    yield* bus.project(SessionEvent.Execution.Started, record("started"))
+    yield* bus.project(SessionEvent.Execution.Succeeded, record("succeeded"))
+    yield* bus.project(SessionEvent.Execution.Failed, record("failed"))
+    yield* bus.project(SessionEvent.Execution.Interrupted, record("interrupted"))
+    return events
+  })
+}
 
 describe("SessionRestart background recovery", () => {
   it.effect("keeps shell owners idle until a user prompt delivers recovered notices exactly once", () =>

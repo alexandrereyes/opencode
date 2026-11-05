@@ -57,6 +57,13 @@ export const make = <Key, E, Reason = never>(options: {
   /** Runs once when a process-local busy period begins, before its first drain. */
   readonly started?: (key: Key) => Effect.Effect<void>
   /**
+   * Whether a wake has nothing to drain in its scope. Such a wake, including a doorbell that
+   * survives a failed execution after it took that work, ends without a busy period: no
+   * `started`, drain or `settled`. Wakes arriving meanwhile ring its doorbell as usual. `run`
+   * never asks.
+   */
+  readonly idle?: (key: Key, scope: Promotable) => Effect.Effect<boolean>
+  /**
    * Runs in the execution fiber for every exit, including interruption, after the final
    * drain and before the execution settles (waiters resolve after it completes).
    */
@@ -89,14 +96,23 @@ export const make = <Key, E, Reason = never>(options: {
       // The leading yield lets `owner` be assigned before the drain can settle, and keeps
       // failing self-waking executions from growing the stack across successor starts.
       // Drains start one tick after wake; callers observe progress through events or run.
+      const busy = Effect.uninterruptible(options.started?.(key) ?? Effect.void).pipe(
+        Effect.andThen(loop(key, execution, force)),
+        Effect.onExit((exit) =>
+          Effect.sync(() => {
+            execution.owner = undefined
+          }).pipe(Effect.andThen(options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void)),
+        ),
+      )
       execution.owner = fork(
         Effect.yieldNow.pipe(
-          Effect.andThen(Effect.uninterruptible(options.started?.(key) ?? Effect.void)),
-          Effect.andThen(loop(key, execution, force)),
-          Effect.onExit((exit) =>
-            Effect.sync(() => {
-              execution.owner = undefined
-            }).pipe(Effect.andThen(options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void)),
+          Effect.andThen(force || !options.idle ? Effect.succeed(false) : options.idle(key, scope)),
+          Effect.flatMap((idle) =>
+            idle
+              ? Effect.sync(() => {
+                  execution.owner = undefined
+                })
+              : busy,
           ),
           Effect.onExit((exit) => Effect.sync(() => settle(key, execution, exit))),
           Effect.exit,

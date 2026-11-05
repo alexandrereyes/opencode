@@ -371,7 +371,8 @@ describe("Session.move", () => {
         .pipe(Effect.forkScoped)
       const release = yield* Queue.take(fixture.probes)
 
-      yield* fixture.execution.wake(created.id)
+      // A wake with nothing to promote starts no execution; an explicit resume always does.
+      yield* fixture.execution.resume(created.id).pipe(Effect.ignore, Effect.forkScoped({ startImmediately: true }))
       // The real coordinator now owns execution; its separate instance acquisition stays suspended.
       yield* Queue.take(fixture.probes)
       expect(yield* fixture.execution.isActive(created.id)).toBe(true)
@@ -523,8 +524,9 @@ describe("Session.move", () => {
           yield* Effect.promise(() => mkdir(source))
           const created = yield* session.create({ location: Location.Ref.make({ directory: source }) })
 
-          // Hold real execution open so the move cannot be consumed before admission is checked.
-          yield* execution.wake(created.id)
+          // Hold real execution open so the move cannot be consumed before admission is checked. A wake with nothing to
+          // promote starts no execution; an explicit resume always does.
+          yield* execution.resume(created.id).pipe(Effect.ignore, Effect.forkScoped({ startImmediately: true }))
           expect(yield* execution.isActive(created.id)).toBe(true)
           yield* Effect.promise(() => rm(source, { recursive: true }))
 

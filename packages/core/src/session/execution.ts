@@ -112,6 +112,19 @@ export const layer = Layer.effect(
           sessionID,
           bus.publish(SessionEvent.Execution.Started, { sessionID }, claimOnCommit(sessionID)),
         ),
+      // A wake with nothing to promote, the same check the runner's drain starts with, would only record a
+      // success: after a failure (its doorbell outlives the execution that took the work) it replaced it.
+      idle: (sessionID, promotable) =>
+        SessionInbox.nextPromotable(db, sessionID, "input").pipe(
+          Effect.map(
+            (next) =>
+              next === undefined ||
+              (promotable === "steer" &&
+                next.delivery === "queue" &&
+                next.type !== "compaction" &&
+                next.type !== "move"),
+          ),
+        ),
       drain: (sessionID, force, promotable) => drain(sessionID, force, undefined, promotable),
       // One terminal observation per busy period, covering every coalesced drain.
       settled: (sessionID, exit, reason) =>
