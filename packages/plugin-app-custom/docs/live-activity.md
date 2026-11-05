@@ -120,12 +120,14 @@ does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agor
   executes. It stops counting when the task ends; the completion notice then wakes the session as a new execution.
   Without any known turn of the top-level session, `startedAt` falls back to the earliest start among executing
   descendants and unfinished tasks. With only tasks pending, `activity` describes the newest one (`Rodando <command>`).
-- **Status precedence per session:** question > permission > working > failed > idle (rev. 2026-10-29: working
-  outranked by failed before; now a failure whose family still works, such as a background shell, is working, like
-  its Sessões row).
+- **Status precedence per session:** question > permission > failed > working > idle (rev. 2026-11-05: a session
+  whose own last run failed is stopped with an error, never working, even while its subagents or background shells
+  still run; they keep their own state in its Agentes, and its Progresso hides. Between 2026-10-29 and then, that
+  family counted as working, which kept a session whose provider was down looking busy).
 - **Failed:** the session's latest execution ended with `session.execution.failed` (a user interruption is not a
-  failure). It stays failed until a new execution starts, the session is viewed (`session.viewed`), archived or
-  deleted, or 24 hours pass.
+  failure). It shows as failed until a new execution starts, the session is viewed (`session.viewed`), archived or
+  deleted, or 24 hours pass; a failure no longer shown (viewed or expired) still never counts as working, and an
+  unviewed one past 24 hours is unread. Only a new execution of the session clears it.
 - **Idle:** neither the session nor any descendant is executing or has an unfinished background task (rev.
   2026-10-28), and its latest execution succeeded within the last 30 minutes.
 - **Unread (rev. 2026-10-28):** a top-level session that is not working, has no pending request and is not failed,

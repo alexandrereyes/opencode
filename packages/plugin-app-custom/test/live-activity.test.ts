@@ -841,7 +841,7 @@ test("rebuild keeps unread sessions of any age and drops read ones", async () =>
   expect([...tracker.sessions.keys()]).toEqual([ids.live, ids.oauth])
 })
 
-test("needs list what Sessões lists in Precisa de você: working outranks a failure, the Sessão mestra is never unread (rev. 2026-10-29)", async () => {
+test("needs list what Sessões lists in Precisa de você: a failure outranks its family's work, the Sessão mestra is never unread (rev. 2026-11-05)", async () => {
   const server = world()
   const tracker = makeTracker(server.ctx)
   await run(
@@ -860,7 +860,7 @@ test("needs list what Sessões lists in Precisa de você: working outranks a fai
         yield* tracker.apply(execution("started", id, end - 10 * minute), T)
         yield* tracker.apply(execution(outcome, id, end), T)
       }
-      // A failure whose background shell still runs stays working, like its Sessões row.
+      // A failure whose background shell still runs stopped with an error, like its Sessões row; the shell goes on.
       yield* tracker.apply(created(ids.deploy, T - 30 * minute), T)
       yield* tracker.apply(execution("started", ids.deploy, T - 20 * minute), T)
       yield* tracker.apply(shellStarted(ids.deploy, "sh_dev", T - 15 * minute, "bun run dev"), T)
@@ -870,13 +870,40 @@ test("needs list what Sessões lists in Precisa de você: working outranks a fai
     }),
   )
   const state = tracker.derive(T, host).state
-  expect(state.counts).toEqual({ working: 1, question: 1, permission: 0, failed: 1, idle: 2, unread: 1 })
+  expect(state.counts).toEqual({ working: 0, question: 1, permission: 0, failed: 2, idle: 2, unread: 1 })
+  expect(state.activeTotal).toBe(1)
   expect(state.needs?.map((need) => [need.sessionID, need.kind, need.since])).toEqual([
     [ids.cache, "question", T - 4 * minute],
+    [ids.deploy, "failed", T - 2 * minute],
     [ids.oauth, "failed", T - 6 * minute],
-    [ids.nav, "unread", T - 3 * minute],
   ])
-  expect(state.sessions.find((row) => row.sessionID === ids.deploy)?.status).toBe("working")
+  const deploy = state.sessions.find((row) => row.sessionID === ids.deploy)
+  expect(deploy?.status).toBe("failed")
+  expect(deploy?.progress).toBeUndefined()
   expect(state.sessions.some((row) => row.sessionID === ids.live)).toBe(false)
   expect(Schema.decodeUnknownSync(LiveActivity.AgentsState)(state)).toEqual(state)
+})
+
+test("a failure read while its helpers still run leaves the activity without working; running again works", async () => {
+  const server = world()
+  const tracker = makeTracker(server.ctx)
+  const child = "ses_tester_android"
+  const failedAt = T - 2 * minute
+  await run(
+    Effect.gen(function* () {
+      yield* tracker.apply(created(ids.deploy, T - 30 * minute), T)
+      yield* tracker.apply(execution("started", ids.deploy, T - 20 * minute), T)
+      yield* tracker.apply(created(child, T - 19 * minute, ids.deploy), T)
+      yield* tracker.apply(execution("started", child, T - 18 * minute), T)
+      yield* tracker.apply(shellStarted(child, "sh_avd", T - 17 * minute, "emulator -avd Teste"), T)
+      yield* tracker.apply(execution("succeeded", child, T - 16 * minute), T)
+      yield* tracker.apply(execution("failed", ids.deploy, failedAt), T)
+      yield* tracker.apply({ type: "session.viewed", created: T, data: { sessionID: ids.deploy, idle: failedAt } }, T)
+    }),
+  )
+  const read = tracker.derive(T, host).state
+  expect(read.sessions.some((row) => row.sessionID === ids.deploy)).toBe(false)
+  expect(read.counts).toMatchObject({ working: 0, failed: 0 })
+  await run(tracker.apply(execution("started", ids.deploy, T + 1), T + 1))
+  expect(tracker.derive(T + 1, host).state.sessions.find((row) => row.sessionID === ids.deploy)?.status).toBe("working")
 })

@@ -677,13 +677,21 @@ export function makeTracker(ctx: TrackerContext) {
     (entry.completionAt ?? 0) > (entry.viewedAt ?? 0) ? (entry.completionAt ?? 0) : (entry.idleAt ?? 0)
 
   /**
+   * Its own last run failed and it has not run again: stopped with an error (iOS `SessionList`), whatever its
+   * subagents or background shells still do, read or not. Only a new execution of the session clears it.
+   */
+  const failedStop = (entry: Entry) => !entry.running && entry.ended?.outcome === "failed"
+
+  /**
    * The session or a descendant at any depth executes, or a background shell of one of them still runs: the working
-   * family of Sessões and of the rows below (`family` in `derive`), taken below `entry`.
+   * family of Sessões and of the rows below (`family` in `derive`), taken below `entry`; never after its own failed
+   * run (`failedStop`).
    */
   const working = (entry: Entry) =>
-    entry.running ||
-    [...sessions.values()].some((other) => other.running && !other.archived && within(other.id, entry.id)) ||
-    [...shells.values()].some((shell) => within(shell.sessionID, entry.id))
+    !failedStop(entry) &&
+    (entry.running ||
+      [...sessions.values()].some((other) => other.running && !other.archived && within(other.id, entry.id)) ||
+      [...shells.values()].some((shell) => within(shell.sessionID, entry.id)))
   const within = (id: string, ancestor: string) => {
     const visit = (current: Entry | undefined, depth: number): boolean =>
       current !== undefined &&
@@ -770,10 +778,21 @@ export function makeTracker(ctx: TrackerContext) {
           .filter((request) => request.kind === kind)
           .toSorted((a, b) => a.since - b.since || a.id.localeCompare(b.id))[0]
         const rollup = family(entry)
-        // Like the Sessões row (rev. 2026-10-29): a working family outranks its failure.
+        // Like the Sessões row: requests first, then its own failed run, which the work its family still does (a
+        // subagent or a background shell) never hides; that failure leaves the activity once read or expired.
         const status: LiveActivity.RowStatus | undefined =
           kind ??
-          (rollup.running ? "working" : failed(entry) ? "failed" : idle(entry) || unseen(entry) ? "idle" : undefined)
+          (failedStop(entry)
+            ? failed(entry)
+              ? "failed"
+              : unseen(entry)
+                ? "idle"
+                : undefined
+            : rollup.running
+              ? "working"
+              : idle(entry) || unseen(entry)
+                ? "idle"
+                : undefined)
         if (!status) return []
         // Sessões never lists the current Sessão mestra, so its answers do not count as unread.
         const unread = status === "idle" && unseen(entry) && entry.id !== settings.master
