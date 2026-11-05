@@ -166,9 +166,14 @@ struct MacChatTitle: View {
     let conversation = shownID.flatMap { store.liveConversation($0) }
     let title = master && runtime.selection.childID == nil ? "Sessão mestra"
       : conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode"
-    let running = conversation?.working ?? (row?.state == .running || shownID.map(store.active.contains) == true)
+    // Its last run failed and it has not run again, whatever its family still does (Sessões' `.failed` row).
+    let failed = conversation?.failedStop
+      ?? (runtime.selection.childID == nil && row?.state == .failed)
+    let running = !failed
+      && (conversation?.working ?? (row?.state == .running || shownID.map(store.active.contains) == true))
     // No model of the family executes but its shells or subagents below still work (Sessões' "em segundo plano").
     let background = !running && conversation?.workingInBackground(store.entries) == true
+    let status = failed ? "parada com erro" : running ? "trabalhando…" : background ? "em segundo plano" : ""
     let subtitle = subtitle(row)
     HStack(spacing: 9) {
       MacChatAvatar(
@@ -178,8 +183,7 @@ struct MacChatTitle: View {
         icon: row.flatMap { $0.chat ? nil : ProjectIcon.of($0.project) })
       ConversationTitle(
         title: master ? "Sessão mestra" : title, subtitle: subtitle,
-        status: running ? "trabalhando…" : background ? "em segundo plano" : "",
-        waiting: row?.state == .permission || row?.state == .question)
+        status: status, alert: failed || row?.state == .permission || row?.state == .question)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(width: width, alignment: .leading)
@@ -187,7 +191,7 @@ struct MacChatTitle: View {
     .background(MacSearchAnchor(role: .title))
     .fixedSize()
     .accessibilityElement(children: .combine)
-    .accessibilityLabel([title, subtitle, running ? "trabalhando" : background ? "em segundo plano" : nil]
+    .accessibilityLabel([title, subtitle, status.isEmpty ? nil : status.replacingOccurrences(of: "…", with: "")]
       .compactMap { $0 }.joined(separator: ", "))
     .accessibilityAddTraits(.isHeader)
   }

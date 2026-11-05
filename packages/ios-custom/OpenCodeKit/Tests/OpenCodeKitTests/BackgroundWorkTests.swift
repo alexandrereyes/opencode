@@ -81,15 +81,18 @@ private func subagents(
   #expect(work.first { $0.id == "c0" }?.state.label == "Em segundo plano")
 }
 
-@Test func requestsOutrankAndShellsOutlastAFailureInTheBackground() throws {
+@Test func requestsOutrankAFailureAndAFailureOutranksShellsInTheBackground() throws {
   let (members, entries) = try family(failedC0: true)
   let background = FamilyWork.background(members.map(\.id), entries: entries, active: [])
   let permission = try decode(
     PermissionRequest.self, #"{"id":"per","sessionID":"g1","action":"shell","resources":["git push"]}"#)
   let list = subagents(members, background: background, permissions: [permission])
-  // A grandchild's permission keeps its branch first, as asking; a failed child whose shells run works.
-  #expect(list.shown.prefix(2).map(\.id) == ["c1", "c0"])
-  #expect(list.shown.prefix(2).map(\.status) == [.permission, .background])
+  // A grandchild's permission keeps its branch first, as asking; a failed child stopped with an error even while its
+  // own shells still run, and those stay its own (`aSubagentsShellsStayOutOfItsParentsScripts`).
+  #expect(list.shown.first?.id == "c1")
+  #expect(list.shown.first?.status == .permission)
+  #expect((list.shown + list.hidden).first { $0.id == "c0" }?.status == .failed)
+  #expect(!list.shown.contains { $0.id == "c0" && $0.status.ongoing })
   let question = try decode(
     PendingForm.self, #"{"id":"que","sessionID":"c0","title":"Pergunta","fields":[],"metadata":{"kind":"question"}}"#)
   #expect(subagents(members, background: background, forms: [question]).shown.first { $0.id == "c0" }?.status == .question)

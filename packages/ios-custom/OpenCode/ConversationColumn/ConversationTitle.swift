@@ -47,7 +47,7 @@ struct ConversationAvatar: View {
 }
 
 /// The title and its status line, like WhatsApp's "digitando…": `<branch> · trabalhando…`, with the status in
-/// `success`, or `error` while the conversation waits for the user.
+/// `success`, or `error` while the conversation waits for the user or stopped with an error.
 struct ConversationTitle: View {
   @Environment(\.appTheme) private var theme
   let title: String
@@ -55,7 +55,8 @@ struct ConversationTitle: View {
   var switches = false
   let subtitle: String
   let status: String
-  let waiting: Bool
+  /// It waits for the user or stopped with an error: the status in `error`.
+  let alert: Bool
   /// A subagent's `SUBAGENTE · ASTRAMAX`, above the title in small accent capitals.
   var kicker: String? = nil
 
@@ -78,7 +79,7 @@ struct ConversationTitle: View {
       }
       if !subtitle.isEmpty || !status.isEmpty {
         Text(
-          "\(Text(subtitle))\(Text(status.isEmpty ? "" : (subtitle.isEmpty ? "" : " · ") + status).foregroundColor(theme.color(waiting ? .error : .success)))"
+          "\(Text(subtitle))\(Text(status.isEmpty ? "" : (subtitle.isEmpty ? "" : " · ") + status).foregroundColor(theme.color(alert ? .error : .success)))"
         )
         .appFont(.caption).lineLimit(1).foregroundStyle(theme.color(.textSecondary))
         .accessibilityIdentifier("conversation-header-subtitle")

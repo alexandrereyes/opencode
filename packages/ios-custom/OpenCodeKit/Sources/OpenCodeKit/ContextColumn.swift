@@ -188,7 +188,8 @@ public enum ContextColumn {
       let permission = permissions.first { owns($0.sessionID) }
       let status: Status =
         permission != nil ? .permission
-        : forms.contains(where: { owns($0.sessionID) }) && (work.live || work.state == .background) ? .question
+        : forms.contains(where: { owns($0.sessionID) })
+          && (work.live || work.state == .background || work.state == .failed) ? .question
         : status(work.state)
       let session = child.flatMap { sessions[$0] }
       let context = session?.context

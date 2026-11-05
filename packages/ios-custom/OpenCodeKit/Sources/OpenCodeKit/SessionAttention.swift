@@ -4,7 +4,8 @@ import Foundation
 /// the server for the Live Activity and the watch (`counts` and `needs` of `custom.live-activity`). A root session
 /// counts once, by its row state: a pending permission, a pending question, an unseen failure, or an answer not yet
 /// read (`SessionState.unread`). A working family, a background shell included, never counts: `.running` outranks
-/// failures and unread answers, and an unread failure counts only as a failure.
+/// unread answers, and an unread failure counts only as a failure. A failed run outranks the work its family still
+/// does, so the row stays `.failed` after it is viewed; it counts only while unseen.
 public enum SessionAttention {
   /// Why a root needs you, in the order of "Precisa de você".
   public enum Reason: Int, Sendable, Hashable, CaseIterable {
@@ -15,7 +16,7 @@ public enum SessionAttention {
     switch row.state {
     case .permission: .permission
     case .question: .question
-    case .failed: .failed
+    case .failed: row.unread ? .failed : nil
     case .unread: .replied
     case .running, .stopped: nil
     }
@@ -70,7 +71,9 @@ public struct SessionAttentionHold: Sendable, Equatable {
   /// The row's own reason, else the one it had when opened while it stays idle and unchanged.
   public func reason(_ row: SessionRow) -> SessionAttention.Reason? {
     if let reason = SessionAttention.reason(row) { return reason }
-    guard let entry = entries[row.id], row.state == .stopped, row.session.time.idle == entry.idle else { return nil }
+    guard let entry = entries[row.id], row.state == .stopped || row.state == .failed,
+      row.session.time.idle == entry.idle
+    else { return nil }
     return entry.reason
   }
 }

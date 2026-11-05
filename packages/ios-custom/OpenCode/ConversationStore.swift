@@ -281,6 +281,9 @@ import UniformTypeIdentifiers
   var waiting: Bool { family?.permissions.isEmpty == false || family?.forms.isEmpty == false }
   var working: Bool { active.contains(id) || family?.active.isEmpty == false }
   var executing: Bool { active.contains(id) }
+  /// Its last run failed and it has not run again: "parada com erro", like its Sessões row, even while subagents or
+  /// background shells it started still work (they stay in Agentes and keep their own state there).
+  var failedStop: Bool { session?.outcome == .failed && !executing }
   /// `experimental.todo` for this session's Location, read when the conversation opens and again whenever it starts
   /// executing (not on every refresh, which runs after almost every event of a working session).
   private(set) var progressEnabled = false
@@ -291,7 +294,7 @@ import UniformTypeIdentifiers
   /// below it still runs, by Sessões' rule (`FamilyWork`) plus this conversation's own agents and shells. The
   /// Sessões row's list is the fallback for a loaded tail that does not reach the latest call.
   func progress(in sessions: SessionStore) -> SessionProgress? {
-    guard progressEnabled, runningCount > 0
+    guard progressEnabled, !failedStop, runningCount > 0
       || FamilyWork.working(id, entries: sessions.entries, active: active, descendants: family?.active ?? [])
     else { return nil }
     let visible = SessionRevert.visible(messages, boundary: reversion.boundary(session))
@@ -339,9 +342,10 @@ import UniformTypeIdentifiers
   func background(_ entries: [NavigationEntry]) -> [String: FamilyWork.Background] {
     FamilyWork.background(children.filter { $0.parentID == id }.map(\.id), entries: entries, active: active)
   }
-  /// Only what it started still works, in the background: no model of the family executes (`working`).
+  /// Only what it started still works, in the background: no model of the family executes (`working`) and its own
+  /// last run did not fail (`failedStop`).
   func workingInBackground(_ entries: [NavigationEntry]) -> Bool {
-    !working && FamilyWork.working(id, entries: entries, active: active)
+    !working && !failedStop && FamilyWork.working(id, entries: entries, active: active)
   }
   var runningCount: Int { work.filter(\.running).count }
   var runningAgents: Int { work.filter { $0.kind == .agent && $0.running }.count }

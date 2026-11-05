@@ -104,9 +104,11 @@ extension ConversationProjection {
       let tool = linked.first
       // A continued child is started again by its latest call; a background call completes at once.
       let latest = linked.last.flatMap { $0.time?.ran ?? $0.time?.created }
-      // Work left running below outranks how the model's turn ended, like a working row in Sessões.
+      // Work left running below outranks how the model's turn ended, like a working row in Sessões, except a failed
+      // run: the child stopped with an error, and its own shells and subagents stay listed in its details.
       let state: SessionWork.State = active.contains(child.id) ? .running
-        : background.contains(child.id) ? .background : finishedState(child.outcome, tool: linked.last?.status)
+        : background.contains(child.id) && child.outcome != .failed
+        ? .background : finishedState(child.outcome, tool: linked.last?.status)
       let ended = child.time.idle ?? child.time.updated
       return SessionWork(
         id: child.id, kind: .agent, sessionID: child.id, shellID: nil, toolID: tool?.id,

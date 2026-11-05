@@ -16,7 +16,8 @@ public struct SessionRow: Sendable, Identifiable {
   public let notify: Bool
   public let activeChildren: Int
   public let requestCount: Int
-  /// The family executes or a background shell of it still runs, even when a request outranks `.running`.
+  /// The family executes or a background shell of it still runs, even when a request outranks `.running`; never
+  /// while the session is stopped by its failed run.
   public let working: Bool
   /// Set when only background shells keep the family working: a member's newest command (empty without one).
   public let background: String?
@@ -172,12 +173,14 @@ public enum SessionList {
       let executing = members.contains { active.contains($0.session.id) }
       // A background shell outlives its turn without any Session state; the server counts it per Session.
       let shells = members.filter { ($0.backgroundCount ?? 0) > 0 }
-      let running = FamilyWork.working(members, active: active)
+      // Its last run failed and it has not run again: stopped with an error, whatever its subagents or background
+      // shells still do (they stay in its Agentes) and whether or not it was viewed. Only a new run of the session
+      // clears it; viewing only drops it from "Precisa de você" (`SessionAttention`).
+      let failed = session.outcome == .failed && !active.contains(session.id)
+      let running = !failed && FamilyWork.working(members, active: active)
       let idle =
         session.outcome == .succeeded || session.outcome == .failed ? session.time.idle : nil
       let unread = max(entry.unreadAt ?? 0, idle ?? 0) > (session.time.viewed ?? 0)
-      // Opening the session (viewed) or running it again clears the failure; an interruption is not one.
-      let failed = session.outcome == .failed && (session.time.idle ?? 0) > (session.time.viewed ?? 0)
       return SessionRow(
         entry: entry, project: projects.first { $0.id == session.projectID },
         memberIDs: Set(members.map { $0.session.id }),
@@ -191,7 +194,7 @@ public enum SessionList {
           $0.session.parentID != nil && active.contains($0.session.id)
         }.count,
         requestCount: permissions + questions, working: running,
-        background: executing ? nil : shells.first.map { $0.backgroundTitle ?? "" },
+        background: executing || failed ? nil : shells.first.map { $0.backgroundTitle ?? "" },
         rank: ranks[session.id] ?? session.time.updated,
         chat: chatRoot.map { session.location.directory.hasPrefix($0 + "/") } ?? false,
         // While the family works (rev. 2026-11-02; the web only while the session itself executes), so a list stays

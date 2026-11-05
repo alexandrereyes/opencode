@@ -18,7 +18,8 @@ private func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Double {
 
 private func entry(
   _ id: String, message: Double, outcome: String? = nil, idle: Double? = nil, viewed: Double? = nil,
-  permission: Bool = false, question: Bool = false, directory: String = "/repo", archived: Double? = nil
+  permission: Bool = false, question: Bool = false, directory: String = "/repo", archived: Double? = nil,
+  parent: String? = nil, background: Int? = nil
 ) throws -> NavigationEntry {
   var time: [String: JSONValue] = ["created": .number(message), "updated": .number(message)]
   if let archived { time["archived"] = .number(archived) }
@@ -29,7 +30,9 @@ private func entry(
     "location": .object(["directory": .string(directory)]), "time": .object(time),
   ]
   if let outcome { session["outcome"] = .string(outcome) }
+  if let parent { session["parentID"] = .string(parent) }
   var row: [String: JSONValue] = ["session": .object(session), "messageAt": .number(message)]
+  if let background { row["backgroundCount"] = .number(Double(background)) }
   if permission { row["permissionAt"] = .number(message) }
   if question { row["questionAt"] = .number(message) }
   return try JSONDecoder().decode(NavigationEntry.self, from: JSONEncoder().encode(row))
@@ -43,7 +46,7 @@ private func rows(
     autoApprove: false, ranks: [:], chatRoot: chatRoot)
 }
 
-@Test func failureIsUnseenFailedOutcomeAndRanksBelowRunning() throws {
+@Test func aFailureStopsTheSessionUntilItRunsAgainAndNeedsYouOnlyUnseen() throws {
   let failed = try entry("ses_failed", message: at(27, 9), outcome: "failed", idle: at(27, 9), viewed: at(27, 8))
   let seen = try entry("ses_seen", message: at(27, 9), outcome: "failed", idle: at(27, 9), viewed: at(27, 9, 1))
   let interrupted = try entry("ses_stop", message: at(27, 9), outcome: "interrupted", idle: at(27, 9))
@@ -54,7 +57,10 @@ private func rows(
     uniqueKeysWithValues: rows([failed, seen, interrupted, rerun, asking], active: ["ses_rerun"])
       .map { ($0.id, $0.state) })
   #expect(states["ses_failed"] == .failed)
-  #expect(states["ses_seen"] == .stopped)
+  // Viewing a failure does not resolve it: still stopped with an error, no longer in "Precisa de você".
+  #expect(states["ses_seen"] == .failed)
+  let seenRow = try #require(rows([seen]).first)
+  #expect(!seenRow.needsYou && !seenRow.unread && SessionAttention.reason(seenRow) == nil)
   #expect(states["ses_stop"] == .stopped)
   #expect(states["ses_rerun"] == .running)
   #expect(states["ses_ask"] == .question)
@@ -285,4 +291,61 @@ private func rows(
   // Closing every conversation lets everything go.
   hold.update(open: [], rows: switched)
   #expect(hold == SessionAttentionHold())
+}
+
+/// @abacato on 4 November 2026: its run failed (provider unreachable) while two testers kept an emulator and a fake
+/// live service running.
+@Test func helpersStillRunningNeverMakeAFailedSessionLookWorking() throws {
+  let failure = at(27, 9)
+  let family = { (viewed: Double?) in
+    [
+      try entry("ses_root", message: failure, outcome: "failed", idle: failure, viewed: viewed),
+      try entry("ses_android", message: at(27, 8), outcome: "succeeded", idle: at(27, 8), parent: "ses_root",
+        background: 1),
+      try entry("ses_core", message: at(27, 8), outcome: "succeeded", idle: at(27, 8), parent: "ses_root",
+        background: 1),
+    ]
+  }
+  let plan = SessionProgress(items: [.init(content: "Testar no Android", status: .inProgress)])
+  let list = { (entries: [NavigationEntry], active: Set<String>) in
+    SessionList.rows(
+      entries: entries, projects: [], active: active, pins: [], notify: [], autoApprove: false, ranks: [:],
+      chatRoot: nil, progress: ["ses_root": plan])
+  }
+  let unseen = try #require(list(try family(nil), []).first)
+  #expect(unseen.state == .failed && !unseen.working && unseen.background == nil && unseen.progress == nil)
+  #expect(SessionAttention.reason(unseen) == .failed && !SessionFilter.running.includes(unseen))
+  let sections = SessionSections.group([unseen], now: now, calendar: calendar)
+  #expect(sections.map(\.kind) == [.attention])
+  // Viewed: still stopped with an error and out of Trabalhando, without counting.
+  let seen = try #require(list(try family(at(27, 9, 1)), []).first)
+  #expect(seen.state == .failed && !seen.working && seen.progress == nil && SessionAttention.count([seen]) == 0)
+  #expect(!SessionSections.group([seen], now: now, calendar: calendar).contains { $0.kind == .running })
+  // A subagent that still executes stays in Agentes (`activeChildren`) without making the root work.
+  let child = try #require(list(try family(nil), ["ses_android"]).first)
+  #expect(child.state == .failed && !child.working && child.activeChildren == 1)
+  // Running it again works again, its helpers and Progresso included.
+  let resumed = try #require(list(try family(at(27, 9, 1)), ["ses_root"]).first)
+  #expect(resumed.state == .running && resumed.working && resumed.progress == plan)
+  // A helper's question outranks the failure.
+  var asking = try family(at(27, 9, 1))
+  asking[1] = try entry("ses_android", message: at(27, 9, 2), outcome: "succeeded", idle: at(27, 8),
+    question: true, parent: "ses_root", background: 1)
+  #expect(list(asking, []).first?.state == .question)
+  // An earlier success whose helpers run is working in the background, as before.
+  var succeeded = try family(nil)
+  succeeded[0] = try entry("ses_root", message: failure, outcome: "succeeded", idle: failure, viewed: failure)
+  let background = try #require(list(succeeded, []).first)
+  #expect(background.state == .running && background.working && background.background == "")
+  #expect(background.progress == plan)
+}
+
+@Test func aFailureOpenedFromPrecisaDeVoceKeepsItsPlaceWhileOpen() throws {
+  let unseen = try entry("ses_failed", message: at(27, 9), outcome: "failed", idle: at(27, 9))
+  var hold = SessionAttentionHold()
+  hold.update(open: ["ses_failed"], rows: rows([unseen]))
+  let viewed = rows([try entry("ses_failed", message: at(27, 9), outcome: "failed", idle: at(27, 9),
+    viewed: at(27, 9))])
+  let row = try #require(viewed.first)
+  #expect(row.state == .failed && hold.reason(row) == .failed && SessionAttention.count(viewed) == 0)
 }

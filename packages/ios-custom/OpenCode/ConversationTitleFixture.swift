@@ -19,7 +19,7 @@ struct ConversationTitleFixtureRoot: View {
         avatar: ConversationAvatar(context: 0.38, master: false,
           colors: theme.avatar(SessionList.avatarColor(nil, fallback: "project_scroll_0")),
           monogram: SessionList.monogram("opencode2")),
-        title: ConversationTitle(title: "App Mac", subtitle: "opencode2-mac-app-mocks", status: "trabalhando…", waiting: false),
+        title: ConversationTitle(title: "App Mac", subtitle: "opencode2-mac-app-mocks", status: "trabalhando…", alert: false),
         newSession: {}
       ) {
         Menu {

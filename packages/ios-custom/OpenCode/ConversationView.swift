@@ -87,7 +87,8 @@ struct ConversationView: View {
     return conversation.located?.branch ?? (showLocation ? conversation.branch : "")
   }
   private var headerStatus: String {
-    conversation.waiting ? "aguardando você" : conversation.working ? "trabalhando…"
+    conversation.waiting ? "aguardando você" : conversation.failedStop ? "parada com erro"
+      : conversation.working ? "trabalhando…"
       : conversation.workingInBackground(sessions.entries) ? "em segundo plano" : ""
   }
   var body: some View {
@@ -441,7 +442,7 @@ struct ConversationView: View {
       }
       let title = ConversationTitle(
         title: master ? "Sessão mestra" : conversation.session?.displayTitle ?? "Conversa", switches: switches,
-        subtitle: subagent?.subtitle ?? headerSubtitle, status: headerStatus, waiting: conversation.waiting,
+        subtitle: subagent?.subtitle ?? headerSubtitle, status: headerStatus, alert: conversation.waiting || conversation.failedStop,
         kicker: subagent?.kicker)
       if subagent != nil {
         // A subagent's badge, title and parent open its path; a long press has the … menu's actions that make sense
