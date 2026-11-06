@@ -160,16 +160,16 @@ test("shells of a subagent whose turn ended are detached; an executing subagent'
           pending: () => Effect.succeed([]),
           background: () =>
             Effect.succeed([
-              { id: "sh_root", type: "shell", sessionID: "ses_root", title: "bun run dev", started: 5 },
-              { id: "sh_old", type: "shell", sessionID: "ses_android", title: "adb logcat", started: 10 },
+              { id: "sh_root", type: "shell", sessionID: rows[0].session.id, title: "bun run dev", started: 5 },
+              { id: "sh_old", type: "shell", sessionID: rows[1].session.id, title: "adb logcat", started: 10 },
               {
                 id: "sh_emu",
                 type: "shell",
-                sessionID: "ses_android",
+                sessionID: rows[1].session.id,
                 title: "android-emulator -avd Pixel",
                 started: 15,
               },
-              { id: "sh_sim", type: "shell", sessionID: "ses_ios", title: "xcodebuild test", started: 20 },
+              { id: "sh_sim", type: "shell", sessionID: rows[2].session.id, title: "xcodebuild test", started: 20 },
             ]),
           active: () => {
             reads++
