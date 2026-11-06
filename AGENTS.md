@@ -1,9 +1,9 @@
 - After changing the public Protocol or Server `HttpApi`, run `bun run generate` from `packages/client`. Do not edit generated client files directly.
 - Keep runtime dependencies directed from Schema to Core and Protocol, then from Core and Protocol to Server. Client runtime code may depend on Schema and Protocol but never Core or Server; `sdk` composes Client, Core, and Server.
-- Shared backend and API implementation changes belong in `packages/core`, `packages/cli`, `packages/server`, `packages/protocol`, `packages/schema`, and related generated client surfaces when required. Custom plugin policy belongs in `packages/plugin-app-custom`; custom client product work belongs in the native apps (`packages/ios-custom`), following the rules below.
+- Shared backend and API implementation changes belong in `packages/core`, `packages/cli`, `packages/server`, `packages/protocol`, `packages/schema`, and related generated client surfaces when required. Custom plugin policy belongs in `packages/plugin-app-custom`. Custom client product work belongs in the native iOS and Mac apps, which live in their own repository, MyAgents (`~/Dev/MyAgents`, `github.com/alexandrereyes/MyAgents`).
 - This repository does not use Changesets. Do not add `.changeset` files; follow the existing release workflow instead.
 - The default upstream branch is `dev`. In this fork, `origin/dev` is a stale copy; use `upstream/dev` for the upstream branch.
-- For upstream-compatible work, default new branches and worktrees to `upstream/dev` and target pull requests to `dev`. For custom backend, plugin, or native app work, branch from `custom`, or `origin/custom` when the local ref is unavailable, and target `custom`. Use another base or target branch when the requester explicitly instructs it.
+- For upstream-compatible work, default new branches and worktrees to `upstream/dev` and target pull requests to `dev`. For custom backend or plugin work, branch from `custom`, or `origin/custom` when the local ref is unavailable, and target `custom`. Use another base or target branch when the requester explicitly instructs it.
 - Local `main` and `dev` refs may not exist; use `upstream/dev` for diffs against upstream.
 
 ## Custom Branch Protection
@@ -33,12 +33,12 @@ Follow this order while preserving existing behavior, data, and runtime guarante
 - Preserve upstream implementation bodies. Do not copy whole upstream modules or move their bodies merely to hide the diff.
 - Document remaining integration points, measure overlap against a fixed upstream base, and verify behavioral parity with meaningful tests.
 - Keep unrelated upstream fixes outside the customization scope.
-- List every changed or added upstream-owned file (anything outside `packages/plugin-app-custom`, `packages/ios-custom`, `docs/`, `.agents/` and `packages/cli/{script,test}/custom-*`) in "Customizations in upstream code" of `docs/upstream-integrations.md`, with its reason and exit condition. Run `bun run custom:upstream-check` before integrating into `custom`; it fails on any changed upstream-owned file missing from that section's path list.
+- List every changed or added upstream-owned file (anything outside `packages/plugin-app-custom`, `docs/`, `.agents/` and `packages/cli/{script,test}/custom-*`) in "Customizations in upstream code" of `docs/upstream-integrations.md`, with its reason and exit condition. Run `bun run custom:upstream-check` before integrating into `custom`; it fails on any changed upstream-owned file missing from that section's path list.
 
 ## Web UI
 
 - The custom server embeds and serves upstream's web app, `packages/app`, unchanged. Keep the upstream-owned `packages/app`, `packages/ui`, `packages/session-ui`, `packages/gui-plugins`, and `packages/stories` trees identical to the upstream revision integrated as the branch's current baseline; never make custom edits there.
-- Custom client features live in the native iOS and Mac apps (`packages/ios-custom`), backed by `packages/plugin-app-custom`. Do not add a custom web UI package.
+- Custom client features live in the native iOS and Mac apps of the MyAgents repository (`~/Dev/MyAgents`), backed by `packages/plugin-app-custom`. Do not add a custom web UI package or bring the apps back into this repository.
 - The former custom web app (`packages/app-custom`, `packages/ui-custom`, `packages/session-ui-custom`) remains in Git history at the tag `web-custom-final`; native app documentation that cites those paths refers to that tag.
 
 ## Live TUI Testing

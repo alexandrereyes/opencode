@@ -26,7 +26,7 @@ Transformar o pedido em uma feature do fork pessoal, validar e publicar seguindo
 | Instalação custom | `~/.local/share/opencode-custom-v2` (`releases/`, `current`, `prepared`, `previous`) |
 | Operação da instalação | `bun run custom:{prepare,update,activate,status,rollback,prune}` no checkout de atualização |
 | Backend de produção | `http://127.0.0.1:4178`, job `local.opencode.custom-manual` |
-| Apps principais | iOS e Mac nativos (`packages/ios-custom`), em `http://opencode2-mac.alexandrem.com.br` |
+| Apps principais | iOS e Mac nativos do repositório MyAgents (`~/Dev/MyAgents`, `github.com/alexandrereyes/MyAgents`), em `http://opencode2-mac.alexandrem.com.br` |
 | Web (só para emergência) | `http://127.0.0.1:4096` e `https://mac.alexandrem.com.br`: proxy autenticado para 4178 (job `com.alexandrem.opencode2-ui`), que serve o app web **padrão do upstream** (`packages/app`) |
 | TUI | `opencode2`, launcher estável que usa o release `current` com `--server http://127.0.0.1:4178` |
 | Dev efêmero, sob demanda | `http://127.0.0.1:4177` — nunca serviço permanente |
@@ -37,7 +37,7 @@ Esses caminhos são pontos de partida, não garantias de estado. Confira Git, ma
 ## 1. Entender o pedido e o estado atual
 
 1. Carregue a skill `opencode` e consulte a documentação **V2** pertinente em `https://opencode.ai/v2/docs/`.
-2. Leia `AGENTS.md` da raiz e dos pacotes envolvidos. Para os apps iOS e Mac, leia `packages/ios-custom/README.md`; para código Effect, `effect`; para execução/debug do servidor, `opencode-dev`.
+2. Leia `AGENTS.md` da raiz e dos pacotes envolvidos. Os apps iOS e Mac ficam no repositório MyAgents (`~/Dev/MyAgents`): mudanças neles são feitas lá, seguindo o `AGENTS.md` e o `README.md` de lá. Para código Effect, `effect`; para execução/debug do servidor, `opencode-dev`.
 3. Inspecione `git status` e `git remote -v` no checkout existente. Preserve alterações e arquivos não rastreados de outras tarefas.
 4. Leia a versão atual de `docs/custom-macos.md` no fork. Confirme os comandos `custom:*` por código (`packages/cli/script/custom-release.ts`) e documentação antes de executá-los.
 5. Diferencie **apps iOS/Mac**, app web, desktop e TUI. Não há mais app web custom: o web servido é o `packages/app` do upstream, sem alterações, e features de interface custom vão para os apps nativos. Para menções de apps Mac, consulte o MCP realmente configurado, seus métodos e retornos atuais; não presuma o antigo `codex-computer-use` ou formato de `list_apps`.
@@ -55,11 +55,11 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 ## 3. Implementar
 
 - Prefira pontos de extensão existentes quando reduzirem o trabalho de manutenção. Alterações diretas no backend são permitidas quando necessárias.
-- Preserve a estrutura do monorepo. Backend: `packages/core`, `server`, `protocol`, `schema`; plugin custom: `packages/plugin-app-custom`; apps iOS e Mac: `packages/ios-custom`; cliente: `packages/client`. `packages/app`, `ui`, `session-ui`, `gui-plugins` e `stories` permanecem idênticos à baseline upstream. O antigo web custom (`app-custom`, `ui-custom`, `session-ui-custom`) só existe na tag `web-custom-final`.
+- Preserve a estrutura do monorepo. Backend: `packages/core`, `server`, `protocol`, `schema`; plugin custom: `packages/plugin-app-custom`; cliente: `packages/client`. Os apps iOS e Mac não voltam para este repositório. `packages/app`, `ui`, `session-ui`, `gui-plugins` e `stories` permanecem idênticos à baseline upstream. O antigo web custom (`app-custom`, `ui-custom`, `session-ui-custom`) só existe na tag `web-custom-final`.
 - Mudou Protocol ou Server HttpApi público? Execute `bun run generate` em `packages/client`; nunca edite arquivos gerados manualmente.
 - Faça mudanças focadas, sem refatorações extensas não necessárias à feature.
 - Mudanças no fluxo de release (`packages/cli/script/custom-*.ts`, launchers, config gerada) ficam no fork e são documentadas em `docs/custom-macos.md`.
-- Toda alteração ou adição em arquivo do upstream (qualquer caminho fora de `packages/plugin-app-custom`, `packages/ios-custom`, `docs/`, `.agents/` e `packages/cli/{script,test}/custom-*`) entra em "Customizations in upstream code" de `docs/upstream-integrations.md`, com o motivo e a condição de saída, e o caminho exato vai para a lista de "Changed upstream files". `bun run custom:upstream-check` compara essa lista com o diff contra a baseline upstream integrada e falha em qualquer arquivo não documentado.
+- Toda alteração ou adição em arquivo do upstream (qualquer caminho fora de `packages/plugin-app-custom`, `docs/`, `.agents/` e `packages/cli/{script,test}/custom-*`) entra em "Customizations in upstream code" de `docs/upstream-integrations.md`, com o motivo e a condição de saída, e o caminho exato vai para a lista de "Changed upstream files". `bun run custom:upstream-check` compara essa lista com o diff contra a baseline upstream integrada e falha em qualquer arquivo não documentado.
 - Credenciais, tokens, banco, logs, backups e releases ficam fora do Git. Não exiba segredos ao consultar configuração. Use arquivos locais privados ou referências a variáveis.
 - Ao aplicar um PR/commit upstream antecipadamente ou adaptá-lo, registre a entrada em `docs/upstream-overrides.md` na mesma mudança, seguindo o template do arquivo: link, SHA da revisão upstream revisada, mudança local e diferenças, testes, status, condição para reconciliar/remover e instalação (`none` salvo ação operacional explícita). Mudança de UI upstream não entra antecipada em `packages/app`, `ui` ou `session-ui`: ela chega com a próxima integração upstream. Apenas acompanhar um PR aberto, sem incorporá-lo, não gera entrada. O registro começou sem auditoria retroativa: ao identificar um caso antigo, registre-o também.
 
@@ -67,9 +67,7 @@ Todas as features pessoais partem de **`origin/custom`**, não de `beta`, `dev`,
 
 1. Use o Bun exigido pelo `packageManager` atual. A instalação custom tem runtime privado; não substitua o Bun global para satisfazer o projeto.
 2. Rode `bun typecheck` a partir dos pacotes afetados e testes relevantes nos diretórios de pacote, nunca testes na raiz.
-3. Para os apps iOS e Mac, siga a validação descrita em `packages/ios-custom/README.md`. Para conferir o web padrão servido pelo backend, use `playwright-cli`. Distinga claramente fixture de integração real.
-   - Checagens do Mac: `packages/ios-custom/script/test-mac-ajustes.sh` recebe os modos do que foi alterado e, sem argumentos, só os lista e sai com erro. Use `--all` (a bateria inteira, uma abertura do app por modo) **somente quando Alexandre pedir explicitamente**; nos outros casos, rode apenas os modos afetados, numa execução só.
-   - Apps de teste (DEBUG no Simulador, cópias de teste do Mac) só se conectam a um sandbox de loopback passado com `-OpenCodeServerURL`, nunca ao servidor real ou a um salvo (`TestInstall`). Não contorne isso; passe sempre o sandbox isolado.
+3. Para conferir o web padrão servido pelo backend, use `playwright-cli`. Para validar uma mudança do backend nos apps iOS e Mac, siga a validação do `README.md` do MyAgents, contra um sandbox isolado (`packages/cli/script/custom-sandbox.ts`). Distinga claramente fixture de integração real.
 4. Para validação isolada em 4177, use o entrypoint de desenvolvimento `packages/cli/script/custom-server.ts` com um `OPENCODE_CUSTOM_HOME` exclusivo do teste (veja "Isolated source development" em `docs/custom-macos.md`) e encerre o processo ao terminar. Nunca teste em 4096 ou 4178. Não pare nem reinicie o serviço que hospeda a conversa.
 5. Para o fluxo de release, use `--dry-run`, um `OPENCODE_CUSTOM_HOME` isolado e `packages/cli/script/custom-smoke.ts`; cubra lock, falhas de preparação/ativação e retomada. Não use a instalação ou sessões reais como alvo de testes destrutivos.
 6. Execute `git diff --check` e revise o diff. Não contorne hooks de publicação. Falhas preexistentes exigem evidência na base, não mera suposição.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * End to end of the watch complication's WidgetKit pushes against an owned sandbox started with
- * `OPENCODE_APNS_ORIGIN` pointing at `packages/ios-custom/script/fake-apns.ts`. It pairs a test watch, registers a
+ * `OPENCODE_APNS_ORIGIN` pointing at MyAgents `script/fake-apns.ts`. It pairs a test watch, registers a
  * fake widget token, plays a fixed sequence of real Luna 6 / low runs, questions, permissions and a failure, then
  * `--churn-minutes` of routine work (a short answer every 15 s while a long run goes on), and counts the `widgets`
  * pushes the plugin hands to APNs. Like a real complication, it reads `/watch/v1/state` (as the

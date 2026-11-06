@@ -1,7 +1,7 @@
 # Mac Calendar, Reminders and Contacts (`custom.mac`)
 
 Any agent reads Alexandre's Calendar, Reminders and Contacts through one tool, `mac_query` (namespace `mac`, code
-mode). The MyAgents app on the Mac (`packages/ios-custom`, target `OpenCodeMac`) reads them on demand with EventKit
+mode). The MyAgents app on the Mac (MyAgents repository, target `OpenCodeMac`) reads them on demand with EventKit
 and Contacts.framework, under its own macOS grants; the server holds none and stores nothing besides presence. The
 flow is the iPhone's (`docs/device.md`) with its own RPC, so an always-online Mac never answers `iphone_query`.
 
@@ -45,11 +45,11 @@ Security, with Full Access for Calendars and Reminders), `restricted`, `invalid`
 
 - `OpenCodeKit/MacData.swift`: request/attach types, the dispatcher (a source switched off answers at once; a
   collector is cut at the deadline), date parsing and `MacDataPreferences` (every source on by default).
-- `OpenCodeMac/MacDataAgent.swift`: presence heartbeat, request handling, detach on quit.
-- `OpenCodeMac/MacDataCollectors.swift`: the EventKit and Contacts reads, off the main actor; asks for a permission
+- `Apps/Mac/MacDataAgent.swift`: presence heartbeat, request handling, detach on quit.
+- `Apps/Mac/MacDataCollectors.swift`: the EventKit and Contacts reads, off the main actor; asks for a permission
   the first time a source is read or switched on.
-- `OpenCodeMac/MacDataSettings.swift`: Ajustes → Dados do Mac, one switch per source with its permission, "Pedir
+- `Apps/Mac/MacDataSettings.swift`: Ajustes → Dados do Mac, one switch per source with its permission, "Pedir
   permissão" and a link to the System Settings pane when denied.
-- The usage descriptions are in `OpenCodeMac/Info.plist`; the hardened runtime also requires the
+- The usage descriptions are in `Apps/Mac/Info.plist`; the hardened runtime also requires the
   `com.apple.security.personal-information.calendars` and `.addressbook` entitlements. The app is signed with the
   Apple Development team, so its grants survive rebuilds.

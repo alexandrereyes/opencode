@@ -196,8 +196,8 @@ Every upstream-owned file that differs from the integrated baseline, one exact p
 `bun run custom:upstream-check` (`packages/cli/script/custom-upstream-check.ts`) compares this list with the files that
 `HEAD`, the uncommitted changes and the untracked files change against `git merge-base HEAD upstream/dev` (or
 `--base <sha>`). It fails on a changed file missing here and on an entry that no longer differs. Upstream-owned means
-everything outside the custom areas, none of which exists upstream: `packages/plugin-app-custom/`,
-`packages/ios-custom/`, `docs/`, `.agents/`, and the `packages/cli/script/custom-` and `packages/cli/test/custom-`
+everything outside the custom areas, none of which exists upstream: `packages/plugin-app-custom/`, `docs/`,
+`.agents/`, and the `packages/cli/script/custom-` and `packages/cli/test/custom-`
 prefixes. A new entry also needs its reason and exit condition above; the `#` lines name the group.
 
 ```text

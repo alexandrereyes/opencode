@@ -30,4 +30,4 @@ created: the call is a stateless generation inside the plugin.
   at once and ignores the late reply. Esc (and the trash button) cancels everything, inserting nothing.
 - When the reply arrives the app inserts the raw text and replaces it with the revision as two undo steps: the first
   undo brings back the raw text, the second removes it.
-- Details and tests: "AI review of the dictation" in `packages/ios-custom/README.md`.
+- Details and tests: "AI review of the dictation" in the MyAgents `README.md`.

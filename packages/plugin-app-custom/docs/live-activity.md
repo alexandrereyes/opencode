@@ -4,7 +4,7 @@ One iOS Live Activity (Lock Screen + Dynamic Island) per connected server that s
 on that server. It only informs: there are **no buttons and no Live Activity intents**. Tapping opens the app.
 
 This document is the contract between the backend (`packages/plugin-app-custom/src/live-activity`) and the iOS app
-(`packages/ios-custom`). Both sides implement exactly what is written here. The example payloads in
+(MyAgents repository, `~/Dev/MyAgents`). Both sides implement exactly what is written here. The example payloads in
 [`live-activity/`](live-activity/) are normative fixtures: the backend tests must produce them (modulo IDs and times)
 and the iOS tests must decode and render them.
 

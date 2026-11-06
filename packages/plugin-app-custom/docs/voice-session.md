@@ -121,10 +121,10 @@ authenticated normal plugin transport, for example
   `loss_out`, `jitter`, and its numbers), up to 4 `routes` (`inputs`, `outputs`, `sampleRate`) with `routeChanges`, and
   up to 4 `paths` (`type/protocol/network` of the local candidate, never an address). Measures are finite and
   non-negative; a report breaking that is refused with its whole batch, so the app builds them only from rounded,
-  clamped values, and the fixture both sides test (`packages/ios-custom/OpenCodeKit/Tests/OpenCodeKitTests/Fixtures/
-  voice-diagnostic-quality.json`) keeps them in step. The log line gets `quality="windows=… seconds=… links=… bad=…
+  clamped values, and the fixture both sides test (MyAgents `OpenCodeKit/Tests/OpenCodeKitTests/Fixtures/voice-diagnostic-quality.json`,
+  copied to `test/fixture/` here) keeps them in step. The log line gets `quality="windows=… seconds=… links=… bad=…
   lossIn=…% … rttMax=…ms"`, `qualityWorst`, `qualityAudio` (`out=… in=… 16000Hz; … changes=N`) and `qualityPaths`; how
-  to read them and the limits of a bad window are in `packages/ios-custom/docs/voice.md` ("Qualidade do áudio").
+  to read them and the limits of a bad window are in the MyAgents `docs/voice.md` ("Qualidade do áudio").
   The app sanitizes `detail` with `VoiceDiagnosticText` and the
   server again with `sanitize` (`src/voice/sanitize.ts`), by the same rules: no control characters, quoted spans over
   32 characters (which could echo speech) as `"…"`. No speech or transcript fits the schema. `Diagnostic` is a struct

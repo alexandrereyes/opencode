@@ -4,7 +4,7 @@ import { sanitize } from "../voice/sanitize.js"
 // GPT Live's wire as the gateway reaches it: the Codex route (`OpenAI-Alpha: quicksilver=v2`), not OpenAI's public Live
 // API. Its paths and headers, the creation's body, and the sideband's events, commands and field names live here, so
 // moving to the official API changes this file while `voice.ts` keeps the orchestration. The iPhone's `VoiceProtocol`
-// (OpenCodeKit) is the same wire; `packages/ios-custom/docs/voice.md` ("Rota do Codex e API oficial") maps each name.
+// (OpenCodeKit) is the same wire; the MyAgents `docs/voice.md` ("Rota do Codex e API oficial") maps each name.
 
 export const model = "gpt-live-1-codex"
 /** The Codex alpha headers, on the creation and on the sideband. */

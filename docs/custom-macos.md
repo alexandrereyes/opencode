@@ -154,7 +154,7 @@ server context points to the server identity's grants.
 
 The server holds no Calendar, Reminders or Contacts grant. The `mac_query` tool
 (`packages/plugin-app-custom/src/mac-data`), available to every agent, asks the OpenCode app on the Mac
-(`packages/ios-custom`, target `OpenCodeMac`), which reads them under its own grants and answers through the
+(MyAgents repository, `~/Dev/MyAgents`, target `OpenCodeMac`), which reads them under its own grants and answers through the
 `custom.mac` RPC, the same way the iPhone answers `iphone_query` (see
 `packages/plugin-app-custom/docs/mac-data.md`). The app must be open; otherwise the tool fails at once with
 `offline`.
@@ -621,7 +621,7 @@ release config generator as production, but is not a production release.
 
 ## Web app
 
-The custom clients are the native iOS and Mac apps (`packages/ios-custom`). The release embeds
+The custom clients are the native iOS and Mac apps of the MyAgents repository (`~/Dev/MyAgents`). The release embeds
 upstream's web app (`packages/app`) unchanged, so the browser at `http://127.0.0.1:4096` and
 `https://mac.alexandrem.com.br` shows the standard OpenCode web UI against the custom backend. It is
 kept for occasional browser access and has none of the custom client features (archive, snippets,
@@ -722,11 +722,11 @@ would need a separate integration. No proxy-side account-affinity or retry polic
 
 ## Native app themes
 
-The iOS and Mac themes are generated from the theme JSON files in `packages/ios-custom/script/theme/themes`,
+The iOS and Mac themes are generated, in the MyAgents repository, from the theme JSON files in `script/theme/themes`,
 including **OpenChamber** (warm ink neutrals, orange accent, Vitesse-style syntax, teal links, green inline
-code and a tinted user-message bubble). Run `bun packages/ios-custom/script/generate-themes.ts` (on Linux or the
+code and a tinted user-message bubble). Run `bun script/generate-themes.ts` there (on Linux or the
 Mac: it reads the theme files in sorted order, so `registry.json` is byte-identical on both); the resolver
-in `packages/ios-custom/script/theme` came from the former custom web UI. Two optional pairs of theme
+in its `script/theme` came from the former custom web UI. Two optional pairs of theme
 variables apply to every theme that defines them: `v2-user-message-background`/`v2-user-message-text` (user
 bubble) and `v2-inline-code-background`/`v2-inline-code-text` (Markdown inline code and paths, which otherwise
 follow `syntax-string`).

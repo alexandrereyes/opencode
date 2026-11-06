@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * End to end against an owned sandbox started with `OPENCODE_APNS_ORIGIN` pointing at
- * `packages/ios-custom/script/fake-apns.ts`: real Luna 6 / low runs, a fake device token, and the alerts the plugin
+ * MyAgents `script/fake-apns.ts`: real Luna 6 / low runs, a fake device token, and the alerts the plugin
  * hands to APNs read back from the fake's log. Nothing reaches Apple or a device.
  *
  *   bun script/e2e-session-notifications.ts --url http://127.0.0.1:4186 --home <sandbox home> --apns-log <jsonl>

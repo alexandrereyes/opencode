@@ -8,7 +8,6 @@ import path from "node:path"
  */
 export const customAreas = [
   "packages/plugin-app-custom/",
-  "packages/ios-custom/",
   "docs/",
   ".agents/",
   "packages/cli/script/custom-",

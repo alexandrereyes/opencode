@@ -1,7 +1,7 @@
 # iPhone data on demand (`custom.device`)
 
 Any agent reads live data from Alexandre's iPhone through two direct tools, `iphone_status` and `iphone_query`.
-The iOS app (`packages/ios-custom`) collects the data on demand; nothing is synchronized in the background and
+The iOS app (MyAgents repository, `~/Dev/MyAgents`) collects the data on demand; nothing is synchronized in the background and
 nothing is stored on the server besides presence. The tool descriptions carry when to use them and what each status
 means, so no agent prompt needs extra instructions; only the Mestra keeps one line in its prompt (see below). Agents
 whose own rules deny every tool outside an allowlist still do not see them: `explore` (built-in read-only subagent)

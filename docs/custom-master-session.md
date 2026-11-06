@@ -16,7 +16,7 @@ still own creation, durable prompt admission, queue/steer delivery, interruption
 The native iOS product owns the accessory-only entry, normal composer and first-send creation in managed chats, current
 master exclusion from list/attention/global alert shortcuts, marker on target user messages, archive/reset and old-server
 capability notice. The optional undo action is omitted because native unarchive does not exist. No web or upstream UI
-tree is changed. See `packages/plugin-app-custom/docs/master-session.md` and `packages/ios-custom/README.md` for contracts,
+tree is changed. See `packages/plugin-app-custom/docs/master-session.md` and the MyAgents `README.md` (`~/Dev/MyAgents`) for contracts,
 limitations and isolated sandbox/simulator commands.
 
 ## Remaining reusable integration points

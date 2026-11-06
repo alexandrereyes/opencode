@@ -3,7 +3,7 @@
 A native watchOS app for Alexandre's Apple Watch Ultra 3 that works **without the iPhone nearby**: a complication,
 a dashboard of agent sessions, answering pending requests, and a realtime voice conversation (GPT Live) with the
 Sessão mestra. This document is the contract between the backend (`packages/plugin-app-custom/src/watch`) and the
-watch/iOS side (`packages/ios-custom`). Both implement exactly what is written here; neither changes it alone.
+watch/iOS side (MyAgents repository, `~/Dev/MyAgents`). Both implement exactly what is written here; neither changes it alone.
 
 Approved references in `.agent-artifacts/watch/` (not versioned): complication `opcao-1-anel-estados.png`, screens
 `app-1-painel.png` (dashboard), `app-2-voz-mestra.png` (voice), `app-3-responder-pergunta.png` (answer).
@@ -110,12 +110,12 @@ VoiceEvent = { seq: number, at: number } & (
 
 **Signaling (backend).** `POST /voice/calls` reserves the llm-proxy lease (`/_gpt-live/sessions/{uuid}`), creates
 the call with `POST /backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas` and the iPhone's headers
-(see `packages/ios-custom/docs/voice.md`, "Contrato privado do llm-proxy"), returns the answer SDP, and attaches the
+(see the MyAgents `docs/voice.md`, "Contrato privado do llm-proxy"), returns the answer SDP, and attaches the
 sideband (`/v1/live` through the llm-proxy). The watch offer is audio-only Opus with no data channel and no local
 candidates; the answer must be ICE-lite with UDP candidates, otherwise `502 {code:"unsupported_answer"}`. The
 route's names (paths, headers, the creation's body, sideband events and commands) live in `src/watch/protocol.ts`;
 the table "Rota do Codex e API oficial" in
-[`packages/ios-custom/docs/voice.md`](../../ios-custom/docs/voice.md#rota-do-codex-e-api-oficial) maps each to OpenAI's
+[MyAgents `docs/voice.md`](https://github.com/alexandrereyes/MyAgents/blob/main/docs/voice.md#rota-do-codex-e-api-oficial) maps each to OpenAI's
 official Live API, on both platforms, for a later move.
 
 - **Session config is built by the backend**, equivalent to the iPhone's (`OpenCodeKit/Voice.swift`): model,
@@ -247,9 +247,9 @@ All copy pt-BR, theme colors from `openchamber-dark` (no theme picker on the wat
   key cannot create App Groups; switch to an App Group only if one is created in the portal).
 - Widget extension `br.com.alexandrem.opencode.watchkitapp.widgets` for the complications.
 - WebRTC engine: vendor `apps/shared/OpenClawWatchRTC` (+ the spike's transport/audio Swift with its fixes) under
-  `packages/ios-custom/Vendor/OpenClawWatchRTC/` with the MIT notices of OpenClaw and str0m. Build the static
+  MyAgents `Vendor/OpenClawWatchRTC/` with the MIT notices of OpenClaw and str0m. Build the static
   library with a **private pinned toolchain** in `~/.local/share/opencode-ios/rust` (setup script in
-  `packages/ios-custom/script/`), never a global Rust install; the Xcode build phase reuses a fingerprinted cache.
+  MyAgents `script/`), never a global Rust install; the Xcode build phase reuses a fingerprinted cache.
 - Shared Swift that has no UI goes to `OpenCodeKit` when it compiles for watchOS; otherwise to a watch-only folder.
 
 ## Out of scope for v1

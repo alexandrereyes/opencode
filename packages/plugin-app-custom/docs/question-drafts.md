@@ -39,5 +39,5 @@ without events: drafts nobody touched for 14 days are dropped on the next save o
 ## Clients
 
 The iOS and Mac apps (`OpenCodeKit/QuestionDrafts.swift`, `QuestionDraftSync`): see "Question drafts" in
-`packages/ios-custom/README.md`. A client without this RPC (an older server answers `rpc.unavailable`) keeps the draft
+the MyAgents `README.md`. A client without this RPC (an older server answers `rpc.unavailable`) keeps the draft
 on its own device only.

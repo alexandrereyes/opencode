@@ -835,10 +835,9 @@ test("voice diagnostics carry categories and names only and log one line each", 
 })
 
 test("a call's audio quality from the app's own fixture is accepted and logged; unknown keys never reject a report", async () => {
-  // Written by OpenCodeKit's `VoiceQualityTests`, which round-trips it through `VoiceDiagnostic`.
-  const fixture = await Bun.file(
-    `${import.meta.dir}/../../ios-custom/OpenCodeKit/Tests/OpenCodeKitTests/Fixtures/voice-diagnostic-quality.json`,
-  ).json()
+  // A copy of the apps' fixture (MyAgents repository, `OpenCodeKit/Tests/OpenCodeKitTests/Fixtures/`), which
+  // OpenCodeKit's `VoiceQualityTests` round-trips through `VoiceDiagnostic`; keep both identical.
+  const fixture = await Bun.file(`${import.meta.dir}/fixture/voice-diagnostic-quality.json`).json()
   const input = Voice.Definition.methods.diagnostics.input["~standard"]
   const accepted = await input.validate(fixture)
   if (!("value" in accepted)) throw new Error(JSON.stringify(accepted.issues))

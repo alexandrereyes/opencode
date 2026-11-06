@@ -29,7 +29,7 @@ packages/core/src/ignored-in-another-section.ts
 test("custom areas are exactly the fork's own prefixes; everything else is upstream-owned", () => {
   for (const file of [
     "packages/plugin-app-custom/src/sessions/index.ts",
-    "packages/ios-custom/OpenCodeKit/Sources/OpenCodeKit/Voice.swift",
+    "packages/plugin-app-custom/docs/live-activity/push-start.json",
     "docs/upstream-integrations.md",
     ".agents/skills/opencode-custom/SKILL.md",
     "packages/cli/script/custom-upstream-check.ts",
@@ -44,6 +44,7 @@ test("custom areas are exactly the fork's own prefixes; everything else is upstr
     "packages/cli/test/debug-paths.test.ts",
     "packages/app/docs/notes.md",
     "packages/plugin-app/src/index.ts",
+    "packages/ios-custom/README.md",
     "services/www/src/docs/content/build/plugins/server.mdx",
   ])
     expect(isCustom(file)).toBe(false)
@@ -89,7 +90,7 @@ test("comparison reports undocumented upstream files, stale and duplicated entri
     stale: ["packages/core/src/reverted.ts", "docs/custom-master-session.md"],
     duplicated: ["AGENTS.md"],
   })
-  expect(compare(["packages/ios-custom/README.md"], [])).toEqual({
+  expect(compare(["packages/plugin-app-custom/README.md"], [])).toEqual({
     upstream: [],
     undocumented: [],
     stale: [],

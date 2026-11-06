@@ -1,6 +1,6 @@
 # Session notifications
 
-Contract between the plugin and the iOS app (`packages/ios-custom`) for the APNs alerts the server sends to every
+Contract between the plugin and the iOS app (MyAgents repository) for the APNs alerts the server sends to every
 registered iPhone. There are no switches besides the per-session bell (rev. 2026-10-29):
 
 | What | Alerts | Rule |

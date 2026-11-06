@@ -184,7 +184,7 @@ Plugin KV (`ctx.storage`, SQLite `kv`, namespaced by plugin): `quotes:session:<s
 
 **Web (`packages/app-custom`, removed; tag `web-custom-final`): done.** `src/composer/quote-sync.ts` bound every Session composer to its server: `info` probe (again on reconnect, focus and visibility), one-time import of the IndexedDB drafts, `list` mirrored into the composer, `rpc.custom.quotes.updated` read from the app's shared event stream, comment saves debounced by 400 ms and flushed on Done, trash and page hide, images uploaded before the save, `clear` with `reason: "sent"` only after admission. Without `custom.quotes` the composer keeps its IndexedDB drafts. History browsing and editing a queued prompt show their quotes as a local preview that is never published. Quotes restored from a sent message (revert, an undone queued prompt) are saved under new IDs when the server reports `already_sent`; a stale edit of a quote sent elsewhere is dropped.
 
-**iOS (`packages/ios-custom`)**
+**iOS (MyAgents repository)**
 
 - Probe `info`; in server mode, `ConversationDraft.quotes` mirrors `list` (keep a local cache for offline display if wanted, but the server wins), refresh on the event, reconnect and foreground.
 - `QuoteCommentEditor` Done → `upload` new attachments, then `save`; trash → `remove`; keep the ephemeral editor local.

@@ -22,8 +22,8 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | Plugin     | `src/resources/index.ts`, `lock.ts`, `supervisor.ts`                | `custom.resources` RPC, control lock in `execute.before`, relays hub events, starts the hub   |
 | Hub        | `src/resources/hub/`                                                | Separate Bun process: registry, locks, tickets, probes, shared streams, input                 |
 | Adapters   | `src/resources/adapters/<kind>.ts`                                  | One per kind: liveness, snapshot, stream, input                                               |
-| iOS mirror | `ios-custom/OpenCodeKit/Sources/OpenCodeKit/SessionResources.swift` | Codable contract, RPC calls, hub URLs                                                         |
-| iOS viewer | `ios-custom/OpenCode/SessionResources/`                             | Shared shell (`ResourceViewer.swift`, model, touch surface, keyboard) and one folder per kind |
+| iOS mirror | MyAgents `OpenCodeKit/Sources/OpenCodeKit/SessionResources.swift`   | Codable contract, RPC calls, hub URLs                                                         |
+| iOS viewer | MyAgents `Apps/iOS/SessionResources/`                               | Shared shell (`ResourceViewer.swift`, model, touch surface, keyboard) and one folder per kind |
 
 ## Resource
 
