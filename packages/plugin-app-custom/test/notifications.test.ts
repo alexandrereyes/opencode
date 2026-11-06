@@ -331,6 +331,30 @@ it.effect("subagents and background shells keep the family working; a wake insid
   }),
 )
 
+it.effect("a shell a subagent left running after its turn does not hold back the end (rev. 2026-11-06)", () =>
+  Effect.gen(function* () {
+    const f = setup()
+    yield* f.registry.register(iphone, T)
+    yield* f.watch(ids.live)
+    const child = "ses_child_emulator"
+    yield* f.step(
+      T,
+      created(ids.live, T - minute),
+      execution("started", ids.live, T),
+      created(child, T + 1, ids.live),
+      execution("started", child, T + 2),
+      shellStarted(child, "sh_emu", T + 3, "android-emulator -avd Pixel"),
+    )
+    // The subagent answers and leaves its emulator on; the root still works.
+    yield* f.step(T + minute, execution("succeeded", child, T + minute))
+    yield* f.step(T + 2 * minute)
+    expect(f.pushes).toEqual([])
+    yield* f.step(T + 3 * minute, execution("succeeded", ids.live, T + 3 * minute))
+    yield* f.step(T + 3 * minute + limits.graceMs)
+    expect(f.pushes).toHaveLength(1)
+  }),
+)
+
 it.effect("registrations: one token per install, more than one device, unregister, expiry and invalid tokens", () =>
   Effect.gen(function* () {
     const f = setup((push) =>

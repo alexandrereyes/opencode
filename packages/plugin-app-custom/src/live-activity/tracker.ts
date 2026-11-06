@@ -228,7 +228,10 @@ type Entry = {
   readonly calls: Map<string, readonly Todo[]>
 }
 
-/** A shell a session started that has not finished: a background job keeps its family working. */
+/**
+ * A shell a session started that has not finished. It keeps its family working while someone waits on it (`waited`):
+ * its owner is top-level or still executes. A shell a subagent left running after its turn is only listed.
+ */
 type Shell = { readonly sessionID: string; readonly command: string; readonly startedAt: number }
 
 type Request = {
@@ -404,7 +407,7 @@ export function makeTracker(ctx: TrackerContext) {
     const roots = new Set(
       [
         ...[...sessions.values()].filter((entry) => entry.running).map((entry) => entry.id),
-        ...[...shells.values()].map((shell) => shell.sessionID),
+        ...waitedShells().map((shell) => shell.sessionID),
       ].flatMap((id) => rootOf(id) ?? []),
     )
     for (const root of roots) {
@@ -481,6 +484,18 @@ export function makeTracker(ctx: TrackerContext) {
     const top = visit(sessions.get(id), 0)
     return top && !top.parentID ? top : undefined
   }
+
+  /**
+   * Someone waits on the shell (rev. 2026-11-06): its end wakes only its owner, which then answers Alexandre when it is
+   * top-level, or its parent while it still executes. A subagent whose turn ended already delivered its result, so the
+   * shells it left running (an emulator, a dev server) never keep its family working (`custom.navigation`'s
+   * `detachedCount`).
+   */
+  const waited = (shell: Shell) => {
+    const owner = sessions.get(shell.sessionID)
+    return owner !== undefined && (!owner.parentID || owner.running)
+  }
+  const waitedShells = () => [...shells.values()].filter(waited)
 
   const worked = (id: string, at: number) => {
     const top = rootOf(id)
@@ -685,15 +700,15 @@ export function makeTracker(ctx: TrackerContext) {
   const failedStop = (entry: Entry) => !entry.running && entry.ended?.outcome === "failed"
 
   /**
-   * The session or a descendant at any depth executes, or a background shell of one of them still runs: the working
-   * family of Sessões and of the rows below (`family` in `derive`), taken below `entry`; never after its own failed
-   * run (`failedStop`).
+   * The session or a descendant at any depth executes, or a background shell of one of them that someone waits on
+   * (`waited`) still runs: the working family of Sessões and of the rows below (`family` in `derive`), taken below
+   * `entry`; never after its own failed run (`failedStop`).
    */
   const working = (entry: Entry) =>
     !failedStop(entry) &&
     (entry.running ||
       [...sessions.values()].some((other) => other.running && !other.archived && within(other.id, entry.id)) ||
-      [...shells.values()].some((shell) => within(shell.sessionID, entry.id)))
+      waitedShells().some((shell) => within(shell.sessionID, entry.id)))
   const within = (id: string, ancestor: string) => {
     const visit = (current: Entry | undefined, depth: number): boolean =>
       current !== undefined &&
@@ -735,9 +750,9 @@ export function makeTracker(ctx: TrackerContext) {
       const top = rootOf(entry.id)
       if (top) executing.set(top.id, [...(executing.get(top.id) ?? []), entry])
     }
-    // Unfinished shells (background jobs) of each family, at any depth.
+    // Unfinished shells (background jobs) of each family that someone waits on, at any depth.
     const background = new Map<string, Shell[]>()
-    for (const shell of shells.values()) {
+    for (const shell of waitedShells()) {
       const top = rootOf(shell.sessionID)
       if (top) background.set(top.id, [...(background.get(top.id) ?? []), shell])
     }
@@ -967,7 +982,7 @@ export function makeTracker(ctx: TrackerContext) {
     const live = new Set(
       [
         ...[...sessions.values()].filter((entry) => entry.running).map((entry) => entry.id),
-        ...[...shells.values()].map((shell) => shell.sessionID),
+        ...waitedShells().map((shell) => shell.sessionID),
       ].flatMap((id) => rootOf(id)?.id ?? []),
     )
     for (const entry of sessions.values()) {

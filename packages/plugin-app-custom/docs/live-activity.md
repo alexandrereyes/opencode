@@ -125,6 +125,11 @@ does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agor
   executes. It stops counting when the task ends; the completion notice then wakes the session as a new execution.
   Without any known turn of the top-level session, `startedAt` falls back to the earliest start among executing
   descendants and unfinished tasks. With only tasks pending, `activity` describes the newest one (`Rodando <command>`).
+- **Detached shells (rev. 2026-11-06):** a shell counts only while someone waits on it: its owner is the top-level
+  session, or a subagent that still executes. A shell's end wakes only its owner, and a subagent whose turn ended has
+  already delivered its result, so a shell it left running (an emulator, a dev server) never keeps the family working,
+  nor holds back "Avisar ao terminar" or describes the focus. Continuing that subagent makes its shells count again
+  until its turn ends. `custom.navigation` lists them apart (`detachedCount`, `detachedTitle`).
 - **Status precedence per session:** question > permission > failed > working > idle (rev. 2026-11-05: a session
   whose own last run failed is stopped with an error, never working, even while its subagents or background shells
   still run; they keep their own state in its Agentes, and its Progresso hides. Between 2026-10-29 and then, that
@@ -412,8 +417,9 @@ cancellation now arrives through `session.inbox.enqueued`: a synthetic item whos
 The legacy direct `session.synthetic` notice remains accepted. A rebuild uses the live `ctx.job.background()` list,
 the same source as Sessões, not historical tool results: a launch marked `running` in the transcript cannot revive
 a process that already ended, even when its cancellation notice is still parked in the inbox. Background subagents
-need nothing extra: the child session executes and rolls up. A long-lived background process (a dev server) keeps
-its session working until it exits.
+need nothing extra: the child session executes and rolls up. A long-lived background process (a dev server) of the
+top-level session keeps it working until it exits; one a subagent left behind after its turn does not (rev.
+2026-11-06, `waited` in `tracker.ts`).
 
 **Unread (rev. 2026-10-28).** The rule is `custom.navigation`'s `unreadAt` as the web and iOS lists combine it: a
 nonarchived top-level session whose `time.idle` is newer than `time.viewed`, either after a success or failure newer

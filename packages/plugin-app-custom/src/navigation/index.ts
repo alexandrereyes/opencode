@@ -13,6 +13,8 @@ interface NavigationContext {
   readonly scan: Plugin.Context["session"]["scan"]
   readonly pending: Requests["pending"]
   readonly background: Plugin.Context["job"]["background"]
+  /** Executing sessions at any depth: a subagent's shells count as its family's work only while it executes. */
+  readonly active: Plugin.Context["session"]["active"]
   /** A session's Progresso while it shows; the Live Activity hub folds the same events for every Location. */
   readonly progress?: (sessionID: string) => SessionProgress | undefined
 }
@@ -29,6 +31,7 @@ export const registerNavigation = Effect.fn("Navigation.register")(function* (ct
             scan: sessions.scan,
             pending: requests.pending,
             background: jobs.background,
+            active: sessions.active,
             progress: (sessionID) => sharedHub().progress(sessionID),
           },
           input,
@@ -58,6 +61,8 @@ export const list = Effect.fn("Navigation.list")(function* (
     (yield* ctx.background()).filter((job) => job.type !== "subagent").toSorted((a, b) => b.started - a.started),
     (job) => job.sessionID,
   )
+  // Unreadable, nothing executes: a subagent's shells are listed apart rather than kept working forever.
+  const active = background.size > 0 ? yield* ctx.active().pipe(Effect.orElseSucceed(() => ({}))) : {}
   return {
     ...(page.next === undefined ? {} : { next: page.next }),
     data: page.data.map((row) => {
@@ -75,6 +80,9 @@ export const list = Effect.fn("Navigation.list")(function* (
       const sessionQuestions = questions.get(row.session.id) ?? []
       const sessionBackground = background.get(row.session.id) ?? []
       const newest = sessionBackground[0]
+      // A shell's end wakes only its owner. A subagent whose turn ended already delivered its result, so nobody
+      // waits on the shells it left running (an emulator, a dev server): they are listed, not counted as work.
+      const waited = !row.session.parentID || Object.hasOwn(active, row.session.id)
       const progress = ctx.progress?.(row.session.id)
       return {
         session: encodeSession(row.session),
@@ -92,10 +100,16 @@ export const list = Effect.fn("Navigation.list")(function* (
               questionCount: sessionQuestions.length,
             }
           : {}),
-        ...(newest
+        ...(newest && waited
           ? {
               backgroundCount: sessionBackground.length,
               ...(newest.title ? { backgroundTitle: newest.title } : {}),
+            }
+          : {}),
+        ...(newest && !waited
+          ? {
+              detachedCount: sessionBackground.length,
+              ...(newest.title ? { detachedTitle: newest.title } : {}),
             }
           : {}),
         ...(progress ? { progress } : {}),

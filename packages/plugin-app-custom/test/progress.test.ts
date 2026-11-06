@@ -21,6 +21,7 @@ import {
   session,
   backgroundShellMessage,
   shellExited,
+  shellJob,
   shellStarted,
   todoMessage,
   todowrite,
@@ -212,8 +213,11 @@ test("a grandchild or a background shell keeps an idle session's list showing un
   await apply([execution("succeeded", "ses_grandchild", T0 + 7 * minute)])
   expect(tracker.progress(ids.live)).toBeUndefined()
   expect(tracker.progress("ses_child_1")).toBeUndefined()
-  // A background shell, of the session or of a descendant, is work of the family too.
-  await apply([shellStarted("ses_grandchild", "sh_1", T0 + 8 * minute, "bun test")])
+  // A shell the finished grandchild left running is waited on by nobody (rev. 2026-11-06): no work, no list.
+  await apply([shellStarted("ses_grandchild", "sh_left", T0 + 8 * minute, "android-emulator -avd Pixel")])
+  expect(tracker.progress(ids.live)).toBeUndefined()
+  // A background shell of the session itself is work of the family: its end wakes it.
+  await apply([shellStarted(ids.live, "sh_1", T0 + 8 * minute, "bun test")])
   expect(tracker.progress(ids.live)?.done).toBe(3)
   expect(tracker.derive(T0 + 8 * minute, host).state.sessions[0]).toMatchObject({
     status: "working",
@@ -248,6 +252,8 @@ test("a rebuild reads the list of an idle top-level session whose subagent or ba
     backgroundShellMessage("msg_2", "sh_9", T - 2 * minute, "bun run build"),
     todoMessage("msg_1", T - 3 * minute, plan),
   ])
+  // A rebuild trusts live jobs, not the transcript's launch (rev. 2026-11-03).
+  shelled.background.push(shellJob(ids.live, "sh_9", T - 2 * minute, "bun run build"))
   const rebuilt = makeTracker(shelled.ctx)
   await run(rebuilt.rebuild(T))
   expect(rebuilt.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
