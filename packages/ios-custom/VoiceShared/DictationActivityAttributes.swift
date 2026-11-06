@@ -51,11 +51,11 @@ enum DictationActivityText {
   static func recording(_ name: String?) -> String { name.map { "Gravando para \($0)" } ?? "Gravando ditado" }
   static func paused(_ time: String) -> String { "Gravação pausada · \(time)" }
   static func saved(_ time: String) -> String { "Áudio salvo · \(time)" }
-  static let savedBody = "Abra o OpenCode para transcrever"
+  static let savedBody = "Abra o MyAgents para transcrever"
   static let transcribing = "Transcrevendo ditado…"
   /// The stale `recording` (`staleDate` passed: the app stopped renewing it).
   static let staleTitle = "A gravação parou"
-  static let staleBody = "Abra o OpenCode para revisar o áudio."
+  static let staleBody = "Abra o MyAgents para revisar o áudio."
 
   /// `m:ss` with unbounded minutes ("0:04", "61:05").
   static func time(_ seconds: TimeInterval) -> String {

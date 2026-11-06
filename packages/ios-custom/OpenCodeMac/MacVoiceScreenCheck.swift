@@ -54,7 +54,7 @@ import OpenCodeKit
   var ownPID: Int32 { ProcessInfo.processInfo.processIdentifier }
   var frontPID: Int32? { scenario == "own" ? ownPID : Self.chrome }
   var apps: [VoiceScreenPlanner.App] {
-    [.init(pid: ownPID, name: "OpenCode"), .init(pid: Self.chrome, name: "Google Chrome")]
+    [.init(pid: ownPID, name: "MyAgents"), .init(pid: Self.chrome, name: "Google Chrome")]
   }
   var windows: [VoiceScreenWindow] {
     [VoiceScreenWindow(id: 900_001, pid: Self.chrome, app: "Google Chrome", title: "Documentação da API",

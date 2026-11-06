@@ -695,7 +695,7 @@ private actor LiveMemoryHTTP {
     var targets: [VoiceScreenTarget] = []
     let controller = screenController(transport, master, http) { target, _ throws(VoiceScreenRefusal) in
       targets.append(target)
-      return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 7]), sessionID: nil, subject: "da janela do OpenCode",
+      return VoiceScreenShot(jpeg: Data([0xFF, 0xD8, 7]), sessionID: nil, subject: "da janela do MyAgents",
         notice: VoiceScreenPlanner.deniedNotice)
     }
     let answered = expectation(description: "answered")

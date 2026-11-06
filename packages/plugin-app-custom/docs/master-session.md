@@ -68,7 +68,7 @@ lost to compaction.
   text and lists, 150–250 words in 20–35 s, and typed answers were forced into a spoken shape.
 
 `mac_query` (namespace `mac`, available to every agent, `src/mac-data`) reads Calendar, Reminders and Contacts through
-the OpenCode app on the Mac: `calendar` (`from`/`to`, `calendars`, `query`), `reminders` (`status`, `from`/`to`, `lists`,
+the MyAgents app on the Mac: `calendar` (`from`/`to`, `calendars`, `query`), `reminders` (`status`, `from`/`to`, `lists`,
 `query`), `contacts` (name/phone/e-mail `query`) or `status`. Results carry the Mac time zone, `total` and `truncated`
 (item `limit` and 20,000 serialized characters); a closed app, a source switched off or a missing grant fails with what
 Alexandre has to do. See `docs/mac-data.md`.

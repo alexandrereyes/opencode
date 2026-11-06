@@ -44,7 +44,7 @@ import UIKit
       let address: Address?
     }
     switch authorization {
-    case .denied, .restricted: return .failure(.denied, "Location access is off for OpenCode in iOS Settings.")
+    case .denied, .restricted: return .failure(.denied, "Location access is off for MyAgents in iOS Settings.")
     case .notDetermined: return .failure(.denied, "Location permission has not been granted yet (Você → Dados do iPhone).")
     case .unavailable: return .failure(.unavailable, "Location Services are turned off on the iPhone.")
     default: break

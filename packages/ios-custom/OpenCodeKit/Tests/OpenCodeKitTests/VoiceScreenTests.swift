@@ -16,8 +16,8 @@ struct VoiceScreenTests {
   @Test func contextIsOneLineWithOnlyTheOpenSession() {
     let shot = VoiceScreenShot(jpeg: Data([0xFF, 0xD8]), sessionID: "ses_aberta")
     #expect(shot.prompt("Dá uma olhada nessa tela") ==
-      "Dá uma olhada nessa tela\n\n[Captura da tela do app OpenCode anexada. Sessão aberta no app: ses_aberta]")
-    #expect(VoiceScreenShot(jpeg: Data(), sessionID: nil).prompt("Veja") == "Veja\n\n[Captura da tela do app OpenCode anexada.]")
+      "Dá uma olhada nessa tela\n\n[Captura da tela do app MyAgents anexada. Sessão aberta no app: ses_aberta]")
+    #expect(VoiceScreenShot(jpeg: Data(), sessionID: nil).prompt("Veja") == "Veja\n\n[Captura da tela do app MyAgents anexada.]")
   }
 
   @Test func delegationParsesTheScreenTarget() {
@@ -44,7 +44,7 @@ struct VoiceScreenTests {
   @Test func screenCapabilityGoesAheadOfThePromptUnlessItDocumentsTheScreen() {
     let edited = VoiceProtocol.withScreen("Prompt editado no servidor.", for: .iPhone)
     #expect(edited.hasSuffix("\n\nPrompt editado no servidor."))
-    #expect(edited.hasPrefix("Tela do app OpenCode no iPhone: você consegue ver a tela do OpenCode."))
+    #expect(edited.hasPrefix("Tela do app MyAgents no iPhone: você consegue ver a tela do MyAgents."))
     #expect(edited.contains("gere <|SpawnThinking|>; o app anexa ao") && edited.contains("tá vendo minha tela?"))
     // 02/11: GPT Live delegated "Olha isso aqui" every time, even when told to ask whether to look; the block says what
     // happens then (no capture) and how he can ask for one, never to ask first.

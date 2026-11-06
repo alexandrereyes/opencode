@@ -165,7 +165,7 @@ struct MacChatTitle: View {
     let row = store.rows.first { $0.id == runtime.selection.sessionID }
     let conversation = shownID.flatMap { store.liveConversation($0) }
     let title = master && runtime.selection.childID == nil ? "Sessão mestra"
-      : conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "OpenCode"
+      : conversation?.session?.displayTitle ?? row?.session.displayTitle ?? "MyAgents"
     // Its last run failed and it has not run again, whatever its family still does (Sessões' `.failed` row).
     let failed = conversation?.failedStop
       ?? (runtime.selection.childID == nil && row?.state == .failed)

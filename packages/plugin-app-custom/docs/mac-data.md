@@ -1,7 +1,7 @@
 # Mac Calendar, Reminders and Contacts (`custom.mac`)
 
 Any agent reads Alexandre's Calendar, Reminders and Contacts through one tool, `mac_query` (namespace `mac`, code
-mode). The OpenCode app on the Mac (`packages/ios-custom`, target `OpenCodeMac`) reads them on demand with EventKit
+mode). The MyAgents app on the Mac (`packages/ios-custom`, target `OpenCodeMac`) reads them on demand with EventKit
 and Contacts.framework, under its own macOS grants; the server holds none and stores nothing besides presence. The
 flow is the iPhone's (`docs/device.md`) with its own RPC, so an always-online Mac never answers `iphone_query`.
 
@@ -38,7 +38,7 @@ by `limit` (default 50, contacts 10) and 20,000 serialized characters, with `tot
 returns each source's macOS permission and in-app switch without prompting.
 
 Failures become instructions for the agent: `offline` (open the app), `timeout`, `disabled` (Ajustes → Dados do
-Mac), `notDetermined` (click Allow on the Mac's prompt), `denied` (enable "OpenCode" in System Settings → Privacy &
+Mac), `notDetermined` (click Allow on the Mac's prompt), `denied` (enable "MyAgents" in System Settings → Privacy &
 Security, with Full Access for Calendars and Reminders), `restricted`, `invalid` and `failed` (the app's message).
 
 ## App side

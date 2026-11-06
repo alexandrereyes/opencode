@@ -27,7 +27,7 @@ struct DashboardView: View {
         .navigationDestination(isPresented: $showVoice) { VoiceView(call: voice, pairing: model.pairing) }
         .toolbar {
           ToolbarItem(placement: .topBarLeading) {
-            Text("OpenCode").font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.watch(.primary))
+            Text("MyAgents").font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.watch(.primary))
           }
         }
     }
@@ -74,7 +74,7 @@ struct DashboardView: View {
   @ViewBuilder private var content: some View {
     if model.pairing == nil {
       Message(title: model.connection == .unauthorized ? "Pareamento expirado" : "Sem pareamento",
-        text: "Abra o OpenCode no iPhone para parear")
+        text: "Abra o MyAgents no iPhone para parear")
     } else if model.connection == .loading && model.entry == nil {
       ProgressView().tint(Color.watch(.primary))
     } else {

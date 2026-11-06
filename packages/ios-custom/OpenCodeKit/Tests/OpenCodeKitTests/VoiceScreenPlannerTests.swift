@@ -67,7 +67,7 @@ struct VoiceScreenPlannerTests {
 
   @Test func masterLineNamesWhatWasCapturedWithoutDescribingIt() {
     #expect(VoiceScreenShot(jpeg: Data(), sessionID: "ses_1", subject: VoiceScreenPlanner.subject(.own)).prompt("Olha")
-      == "Olha\n\n[Captura da janela do OpenCode anexada. Sessão aberta no app: ses_1]")
+      == "Olha\n\n[Captura da janela do MyAgents anexada. Sessão aberta no app: ses_1]")
     #expect(VoiceScreenShot(jpeg: Data(), sessionID: nil, subject: VoiceScreenPlanner.subject(.window(windows[1]))).prompt("Olha")
       == "Olha\n\n[Captura da janela de Google Chrome (“Docs”) anexada.]")
     #expect(VoiceScreenPlanner.subject(.window(windows[0])) == "da janela de OpenCode")

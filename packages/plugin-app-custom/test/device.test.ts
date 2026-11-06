@@ -70,7 +70,7 @@ it.effect("offline and disabled answer immediately, without emitting a request",
       status: "offline",
       device: "iPhone de teste",
       lastSeen: 10_000,
-      note: "The OpenCode app is not running on the iPhone (closed, suspended or disconnected).",
+      note: "The MyAgents app is not running on the iPhone (closed, suspended or disconnected).",
     })
     yield* node.device.attach(iphone)
     expect((yield* node.device.query({ source: "photos", limit: 3 })).output.status).toBe("disabled")

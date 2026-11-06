@@ -529,18 +529,18 @@ private final class OnceFlag: @unchecked Sendable {
     #expect(nothing.kinds.isEmpty && nothing.top == nil)
     #expect(nothing == WatchAttention(nil))
     #expect(nothing.line == "Nada para você")
-    #expect(nothing.cornerLabel == "OpenCode")
-    #expect(nothing.accessibilityLabel == "OpenCode: nada precisa de você")
+    #expect(nothing.cornerLabel == "MyAgents")
+    #expect(nothing.accessibilityLabel == "MyAgents: nada precisa de você")
   }
 
   @Test func eachKindHasItsOwnSymbolColorAndWords() throws {
     let expected: [(WatchAttention, String, ThemeRole, String, String, String)] = [
       (WatchAttention(try state(question: 1)), "questionmark.bubble.fill", .accent, "Pergunta", "Pergunta esperando",
-       "OpenCode: pergunta esperando"),
+       "MyAgents: pergunta esperando"),
       (WatchAttention(try state(permission: 1)), "hand.raised.fill", .warning, "Permissão", "Permissão pendente",
-       "OpenCode: permissão pendente"),
+       "MyAgents: permissão pendente"),
       (WatchAttention(try state(failed: 1)), "exclamationmark.triangle.fill", .error, "Erro", "Sessão com erro",
-       "OpenCode: sessão com erro"),
+       "MyAgents: sessão com erro"),
     ]
     for (attention, symbol, role, corner, line, spoken) in expected {
       let top = try #require(attention.top)
@@ -561,11 +561,11 @@ private final class OnceFlag: @unchecked Sendable {
     let two = WatchAttention(try state(question: 2, failed: 1))
     #expect(two.top == .question && two.cornerLabel == "Pergunta")
     #expect(two.line == "Pergunta · Erro")
-    #expect(two.accessibilityLabel == "OpenCode: pergunta e erro")
+    #expect(two.accessibilityLabel == "MyAgents: pergunta e erro")
     let all = WatchAttention(try state(question: 1, permission: 3, failed: 1))
     #expect(all.kinds == [.question, .permission, .failed])
     #expect(all.line == "Pergunta · Permissão · Erro")
-    #expect(all.accessibilityLabel == "OpenCode: pergunta, permissão e erro")
+    #expect(all.accessibilityLabel == "MyAgents: pergunta, permissão e erro")
     #expect(WatchAttention(try state(permission: 1, failed: 1)).top == .permission)
   }
 

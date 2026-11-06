@@ -216,7 +216,7 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
               state,
               now,
               attributes: { serverKey: device.serverKey, theme: device.theme },
-              alert: { title: "OpenCode", body: summary(state) },
+              alert: { title: "MyAgents", body: summary(state) },
             }),
             (result) => (result.status === "failed" ? Effect.sync(() => seen.retry.add(device.deviceID)) : Effect.void),
           ),

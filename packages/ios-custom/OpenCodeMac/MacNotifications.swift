@@ -67,7 +67,7 @@ import UserNotifications
     guard !MacLaunch.fixture, !NSApp.isActive else { return }
     let content = UNMutableNotificationContent()
     content.title = "Conversa por voz encerrada"
-    content.body = "A conexão de voz caiu. Abra o OpenCode para tentar novamente."
+    content.body = "A conexão de voz caiu. Abra o MyAgents para tentar novamente."
     content.sound = .default
     content.userInfo = ["voice": true]
     Task {

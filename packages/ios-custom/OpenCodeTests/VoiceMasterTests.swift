@@ -162,7 +162,7 @@ private actor VoiceMasterHTTP {
     let body = try XCTUnwrap(requests.first { $0.url!.path.hasSuffix("/prompt") }?.httpBody)
     let prompt = try JSONDecoder().decode(JSONValue.self, from: body).object
     let text = try XCTUnwrap(prompt?["text"]?.string)
-    XCTAssertTrue(text.hasPrefix("Dá uma olhada nessa tela\n\n[Captura da tela do app OpenCode anexada. Sessão aberta no app: ses_aberta]"))
+    XCTAssertTrue(text.hasPrefix("Dá uma olhada nessa tela\n\n[Captura da tela do app MyAgents anexada. Sessão aberta no app: ses_aberta]"))
     let file = try XCTUnwrap(prompt?["files"]?.array?.first?.object)
     XCTAssertEqual(file["name"]?.string, "tela-opencode.jpg")
     XCTAssertEqual(file["uri"]?.string, "data:image/jpeg;base64," + jpeg.base64EncodedString())
@@ -190,7 +190,7 @@ private actor VoiceMasterHTTP {
       Conversa por voz desde o pedido anterior (transcrição, pode ter erros):
       Voz: Quer que eu olhe a tela?
 
-      [Captura da tela do app OpenCode anexada.]
+      [Captura da tela do app MyAgents anexada.]
       """))
     XCTAssertEqual(prompt?["delivery"]?.string, "queue")
     master.stop()

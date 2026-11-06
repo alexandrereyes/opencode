@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleDevelopmentRegion</key><string>pt-BR</string>
-  <key>CFBundleDisplayName</key><string>OpenCode</string>
+  <key>CFBundleDisplayName</key><string>MyAgents</string>
   <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
@@ -14,7 +14,7 @@
     <key>CFBundleURLSchemes</key><array><string>br.com.alexandrem.opencode.watch</string></array>
   </dict></array>
   <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
-  <key>NSMicrophoneUsageDescription</key><string>O OpenCode usa o microfone nas conversas por voz com a Sessão mestra.</string>
+  <key>NSMicrophoneUsageDescription</key><string>O MyAgents usa o microfone nas conversas por voz com a Sessão mestra.</string>
   <key>UIBackgroundModes</key><array><string>audio</string><string>voip</string></array>
   <key>WKApplication</key><true/>
   <key>WKCompanionAppBundleIdentifier</key><string>br.com.alexandrem.opencode</string>

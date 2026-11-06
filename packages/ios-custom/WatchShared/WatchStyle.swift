@@ -147,7 +147,7 @@ struct ComplicationRectangular: View {
       VStack(alignment: .leading, spacing: 2) {
         // The brand keeps its width; the age, smaller, shrinks first.
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-          Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.watch(.primary))
+          Text("MyAgents").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.watch(.primary))
             .widgetAccentable().lineLimit(1).fixedSize()
           Spacer(minLength: 0)
           if let fetched {
@@ -204,7 +204,7 @@ struct VoiceComplicationRectangular: View {
     HStack(spacing: 8) {
       VoiceComplicationCircular().frame(width: 40, height: 40)
       VStack(alignment: .leading, spacing: 2) {
-        Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.watch(.primary))
+        Text("MyAgents").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.watch(.primary))
           .widgetAccentable().lineLimit(1)
         Text("Falar com a mestra").font(.system(size: 14, weight: .semibold))
           .foregroundStyle(Color.watch(.textStrong)).lineLimit(2).minimumScaleFactor(0.8)

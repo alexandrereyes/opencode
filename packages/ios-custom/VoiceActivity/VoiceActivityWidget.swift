@@ -24,7 +24,7 @@ struct VoiceStartControl: ControlWidget {
       }
     }
     .displayName("Falar com a mestra")
-    .description("Inicia a conversa por voz sem abrir o OpenCode. Exige o iPhone desbloqueado.")
+    .description("Inicia a conversa por voz sem abrir o MyAgents. Exige o iPhone desbloqueado.")
   }
 }
 
@@ -35,7 +35,7 @@ struct VoiceActivityWidget: Widget {
         Image(systemName: context.state.symbol)
           .foregroundStyle(context.state.color(.accent))
         VStack(alignment: .leading, spacing: 4) {
-          Text("OpenCode · Voz").font(.caption).foregroundStyle(context.state.color(.textSecondary))
+          Text("MyAgents · Voz").font(.caption).foregroundStyle(context.state.color(.textSecondary))
           Text(context.state.label).font(.headline).foregroundStyle(context.state.color(.textStrong))
         }
         Spacer(minLength: 0)

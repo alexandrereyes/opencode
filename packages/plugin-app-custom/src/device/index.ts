@@ -20,7 +20,7 @@ export const limits = {
 
 export const presenceKey = "device:presence"
 
-export const instructions = `Dados do iPhone de Alexandre: use iphone_status para ver se o app está conectado e quais fontes estão ligadas, e iphone_query para ler aparelho, rede, localização, Saúde, movimento ou fotos recentes na hora. Se a resposta vier offline, timeout, locked, disabled ou denied, diga isso claramente (por exemplo: abra o app OpenCode no iPhone, desbloqueie-o ou ligue a fonte em Você → Dados do iPhone) e não invente valores.`
+export const instructions = `Dados do iPhone de Alexandre: use iphone_status para ver se o app está conectado e quais fontes estão ligadas, e iphone_query para ler aparelho, rede, localização, Saúde, movimento ou fotos recentes na hora. Se a resposta vier offline, timeout, locked, disabled ou denied, diga isso claramente (por exemplo: abra o app MyAgents no iPhone, desbloqueie-o ou ligue a fonte em Você → Dados do iPhone) e não invente valores.`
 
 const Entry = Schema.Struct({
   deviceID: Schema.String,
@@ -184,7 +184,7 @@ export function makeDevice(ctx: DeviceContext) {
         status: "offline",
         ...(target ? { device: target.name, lastSeen: target.lastSeen } : {}),
         note: target
-          ? "The OpenCode app is not running on the iPhone (closed, suspended or disconnected)."
+          ? "The MyAgents app is not running on the iPhone (closed, suspended or disconnected)."
           : "No iPhone has connected to this server yet.",
       })
     if (target.sources.some((item) => item.source === input.source && !item.enabled))
@@ -246,7 +246,7 @@ export function registerTools(editor: ToolEditor, device: ReturnType<typeof make
   editor.add({
     name: "iphone_status",
     description:
-      "Check whether Alexandre's (the user's) iPhone is reachable before or instead of reading it: online is true while the OpenCode app is open on the iPhone or a voice call keeps it running. Lists each device's last contact (epoch ms) and every data source with its in-app switch and iOS permission.",
+      "Check whether Alexandre's (the user's) iPhone is reachable before or instead of reading it: online is true while the MyAgents app is open on the iPhone or a voice call keeps it running. Lists each device's last contact (epoch ms) and every data source with its in-app switch and iOS permission.",
     input: standard(Schema.Struct({})),
     output: standard(StatusOutput),
     options: { codemode: false },
@@ -255,7 +255,7 @@ export function registerTools(editor: ToolEditor, device: ReturnType<typeof make
   editor.add({
     name: "iphone_query",
     description: [
-      "Read live data from Alexandre's (the user's) iPhone when he asks about his phone, health, sleep, workouts, activity, location or recent photos. The OpenCode app on the iPhone collects it on demand within the timeout (default 5 s, max 30 s); nothing is stored on the server.",
+      "Read live data from Alexandre's (the user's) iPhone when he asks about his phone, health, sleep, workouts, activity, location or recent photos. The MyAgents app on the iPhone collects it on demand within the timeout (default 5 s, max 30 s); nothing is stored on the server.",
       "Sources: device (battery, low power, thermal, storage, model, iOS); network (Wi-Fi/cellular, expensive, constrained); location (current position and reverse-geocoded address; with the app in the background only the last known position);",
       `health (metrics sleep, steps, activeEnergy, restingHeartRate, hrv, workouts, weight; from/to as YYYY-MM-DD in the iPhone's time zone, at most ${limits.healthDays} days, default the last 7; granularity day = daily aggregates, sample = also individual sleep samples);`,
       `motion (CoreMotion steps, distance, floors and walking/running/automotive minutes per day; last ${limits.motionDays} days only); photos (recent photos' date, place and type; limit 1–10, default 5; thumbnails default true, attached as images).`,

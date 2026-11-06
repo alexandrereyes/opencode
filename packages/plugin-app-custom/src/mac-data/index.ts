@@ -200,8 +200,8 @@ export function makeMac(ctx: MacContext) {
     if (!target?.online)
       return yield* new Tool.Error({
         message: target
-          ? `The OpenCode app is not running on ${target.name} (closed or disconnected since ${new Date(target.seenAt).toISOString()}). Ask Alexandre to open it, then retry.`
-          : "The OpenCode app on the Mac has never connected to this server. Ask Alexandre to open it, then retry.",
+          ? `The MyAgents app is not running on ${target.name} (closed or disconnected since ${new Date(target.seenAt).toISOString()}). Ask Alexandre to open it, then retry.`
+          : "The MyAgents app on the Mac has never connected to this server. Ask Alexandre to open it, then retry.",
         metadata: { reason: "offline" },
       })
     const requestID = crypto.randomUUID()
@@ -223,13 +223,13 @@ export function makeMac(ctx: MacContext) {
       )
     if (Option.isNone(received))
       return yield* new Tool.Error({
-        message: `The OpenCode app on ${target.name} did not answer within ${limits.timeoutSeconds} seconds.`,
+        message: `The MyAgents app on ${target.name} did not answer within ${limits.timeoutSeconds} seconds.`,
         metadata: { reason: "timeout" },
       })
     const reply = Schema.decodeUnknownOption(Reply)(received.value)
     if (Option.isNone(reply))
       return yield* new Tool.Error({
-        message: `The OpenCode app on ${target.name} answered in an unexpected format: ${JSON.stringify(received.value).slice(0, 500)}`,
+        message: `The MyAgents app on ${target.name} answered in an unexpected format: ${JSON.stringify(received.value).slice(0, 500)}`,
       })
     if ("error" in reply.value) return yield* failure(reply.value)
     return bound(input, reply.value)
@@ -244,13 +244,13 @@ export function registerTools(editor: ToolEditor, mac: ReturnType<typeof makeMac
     name: toolName,
     description: [
       "Read Alexandre's (the user's) Calendar, Reminders or Contacts from his Mac (iCloud-synced, read-only) when he asks about his schedule, events, reminders/to-dos or a person's phone, e-mail, birthday or address.",
-      "The OpenCode app on the Mac reads them on demand, so it must be open.",
+      "The MyAgents app on the Mac reads them on demand, so it must be open.",
       "Dates are YYYY-MM-DD (a whole local day; `to` is inclusive) or ISO date-times; results carry the Mac time zone and ISO times with offset.",
       "calendar: events in [from, to], default today plus 7 days, at most 366 days; filter by calendar names or a text query.",
       "reminders: status pending (default; from/to filter the due date), completed (completion date, default last 30 days) or all; filter by list names or text.",
       "contacts: search by name, phone or e-mail; returns phones, e-mails, birthday (--MM-DD when the year is unknown) and addresses.",
       "status: macOS permission and in-app switch of each source, without prompting. Lists are bounded by limit (default 50; contacts 10) and 20,000 characters; check truncated and total.",
-      "Failures say what to do; relay them instead of guessing: offline (the app is closed on the Mac; he opens it), timeout, disabled (the source is off in the app's Ajustes → Dados do Mac), notDetermined (a macOS permission prompt on the Mac was not answered; he clicks Allow), denied (he enables OpenCode in System Settings → Privacy & Security), restricted (blocked by a device policy).",
+      "Failures say what to do; relay them instead of guessing: offline (the app is closed on the Mac; he opens it), timeout, disabled (the source is off in the app's Ajustes → Dados do Mac), notDetermined (a macOS permission prompt on the Mac was not answered; he clicks Allow), denied (he enables MyAgents in System Settings → Privacy & Security), restricted (blocked by a device policy).",
     ].join(" "),
     input: standard(MacData.Query),
     output: standard(Output),
@@ -275,18 +275,18 @@ function failure(error: { error: string; source: string | null; message: string 
     return new Tool.Error({ message: error.message, metadata })
   if (error.error === "disabled")
     return new Tool.Error({
-      message: `${pane.name} is turned off in the OpenCode app on the Mac. Ask Alexandre to turn it on in OpenCode → Ajustes → Dados do Mac, then retry.`,
+      message: `${pane.name} is turned off in the MyAgents app on the Mac. Ask Alexandre to turn it on in MyAgents → Ajustes → Dados do Mac, then retry.`,
       metadata,
     })
   if (error.error === "notDetermined")
     return new Tool.Error({
-      message: `The macOS prompt asking to give the OpenCode app access to ${pane.name} was not answered. Ask Alexandre to click Allow on that prompt on the Mac (or in OpenCode → Ajustes → Dados do Mac), then retry.`,
+      message: `The macOS prompt asking to give the MyAgents app access to ${pane.name} was not answered. Ask Alexandre to click Allow on that prompt on the Mac (or in MyAgents → Ajustes → Dados do Mac), then retry.`,
       metadata,
     })
   if (error.error === "restricted")
     return new Tool.Error({ message: `${pane.name} access is restricted by a macOS device policy.`, metadata })
   return new Tool.Error({
-    message: `${pane.name} access is denied for the OpenCode app. Ask Alexandre to enable "OpenCode" in System Settings → Privacy & Security → ${pane.en} (Ajustes do Sistema → Privacidade e Segurança → ${pane.pt})${pane.full ? " with Full Access" : ""}, then retry.`,
+    message: `${pane.name} access is denied for the MyAgents app. Ask Alexandre to enable "MyAgents" in System Settings → Privacy & Security → ${pane.en} (Ajustes do Sistema → Privacidade e Segurança → ${pane.pt})${pane.full ? " with Full Access" : ""}, then retry.`,
     metadata,
   })
 }

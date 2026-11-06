@@ -256,7 +256,7 @@ public enum WatchGatewayError: Error, Equatable, Sendable {
 
   public var message: String {
     switch self {
-    case .unauthorized: "Pareamento expirado. Abra o OpenCode no iPhone para parear de novo."
+    case .unauthorized: "Pareamento expirado. Abra o MyAgents no iPhone para parear de novo."
     case .gone: "Esse pedido já foi respondido."
     case .rateLimited: "Muitas requisições. Tente de novo em instantes."
     case .unreachable: "Mac indisponível."

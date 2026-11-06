@@ -427,7 +427,7 @@ private struct MacAboutSettings: View {
   let runtime: MacRuntime
   var body: some View {
     Form {
-      Section("OpenCode para Mac") {
+      Section("MyAgents para Mac") {
         LabeledContent("Versão e build", value: version)
         LabeledContent("Commit", value: commit)
         LabeledContent("Versão do servidor", value: runtime.store?.serverVersion ?? "Indisponível")

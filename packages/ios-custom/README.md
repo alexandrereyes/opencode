@@ -1606,7 +1606,7 @@ Você, another app or lock the iPhone while it records. What changed, and what d
   (`DictationPlace`: the conversation, the Sessão mestra or Nova sessão; a comment has none).
 - **Live Activity** (`DictationActivityAttributes` in VoiceShared, `DictationActivityWidget` in the VoiceActivity
   extension, Abacato's `VoiceRecordingWidget`): from hands-free on, the title, the system timer and Parar gravação
-  (`StopDictationIntent`, a `LiveActivityIntent` run in the app without opening it); paused, saved ("Abra o OpenCode
+  (`StopDictationIntent`, a `LiveActivityIntent` run in the app without opening it); paused, saved ("Abra o MyAgents
   para transcrever": the on-device transcription runs with the app open) or transcribing. Only the phase, the
   destination's title and the time; updates on state changes and a 60 s heartbeat that renews a 3-minute `staleDate`
   ("A gravação parou" if the app dies), never per frame. Relevance 75, between the call (100) and the agents (50);
@@ -3380,6 +3380,8 @@ column; stage 2 the LLM proxy window; stage 3 the layout parity with the approve
   fixture run never shares window frames, defaults or saved state with the installed app), team `ERRYZ68LX5`,
   automatic signing,
   hardened runtime, no App Sandbox (it reads checkouts, runs `git` and `opendiff`). No App Store or TestFlight.
+  Shown as **MyAgents** and installed as `~/Applications/MyAgents.app` by `script/install-mac.sh` (see
+  [Name: MyAgents and OpenCode](#name-myagents-and-opencode--6-november)).
 - `OpenCodeMac/` is a synchronized folder with the Mac-only code: `OpenCodeMacApp.swift` (scenes: main window,
   one window per resource, one per background task's output, the LLM proxy window, `Settings`; the menu bar),
   `MacRuntime.swift`, `MacWindow.swift`, `MacToolbar.swift`, `MacSessionColumn.swift`, `MacChatColumn.swift`
@@ -4938,6 +4940,44 @@ growing block's TextKit 2 view replaces its layout fragment views on every updat
 SwiftUI's constraint-based host, each change invalidates the window's root layout (`constraintsDidChangeInEngine` in
 `AppKitPlatformViewHost`); `ConversationActivity.project` and the Markdown parse of a long answer remain whole-history.
 
+## Name: MyAgents and OpenCode — 6 November
+
+**MyAgents** is the apps' brand: what Alexandre sees. **OpenCode** stays the technical identity and the name of the
+server, CLI and backend. A new build is an update of the same apps, with their data, Keychain items and permissions.
+
+- **Says MyAgents:** the name under the iPhone and Watch icons (`CFBundleDisplayName`), the Watch complication,
+  the `MyAgents Voz` widget and the Live Activity header, every permission prompt (`NS*UsageDescription`), Você ▸
+  Sobre o MyAgents, Now Playing, and messages that send him to the app or its settings ("Abra o MyAgents…",
+  "Ajustes › MyAgents › Atividades ao Vivo", "Autorize o MyAgents…"), the voice screen-capture lines included. On
+  the Mac: the installed bundle `~/Applications/MyAgents.app` (Finder, Dock, Spotlight), the menu bar, About and
+  Quit (`CFBundleName`), the main window's title and Ajustes ▸ Sobre ("MyAgents para Mac"). The plugin's
+  model-facing texts that name the app (`mac_query`, `iphone_*`, the Sessão mestra instructions) and the Live
+  Activity alert title also say MyAgents; those take effect with the next server update (`custom:update`).
+- **Still says OpenCode, on purpose:** what is the server, its API or the CLI ("servidor OpenCode", "API do OpenCode
+  V2", "Atualize o OpenCode no servidor", "Reconectando ao OpenCode…", "Snapshots do OpenCode", a pairing QR code from
+  `opencode pair`), the `opencode` web-search provider, and this package's own README.
+- **Never renamed (technical identity):** bundle identifiers (`br.com.alexandrem.opencode`, `.VoiceActivity`,
+  `.watchkitapp`, `.watchkitapp.widgets`, `.mac`, `.mac.debug`), the App Group and Keychain access groups, URL
+  schemes, APNs topics, ActivityKit attribute types (`AgentsActivityAttributes`, …), notification identifiers,
+  `UserDefaults` keys (`OpenCode…`), `Application Support/OpenCode/…`, `Caches`, `Library/Logs/OpenCode`, targets,
+  schemes, Swift modules and products (`OpenCode.app`, `OpenCodeWatch.app`, `OpenCodeMac.app` with the executable
+  `OpenCodeMac`), User-Agent strings, launch arguments (`-OpenCode…`), `OPENCODE_*` variables, the `OpenCodeCommit`
+  Info.plist key and the App Store Connect record (`6825859310`).
+- **Mac Info.plist:** `OpenCodeMac/Info.plist` is complete and the target no longer generates one
+  (`GENERATE_INFOPLIST_FILE = NO`): the generated plist always set `CFBundleName` to `$(PRODUCT_NAME)`
+  (`OpenCodeMac`, the name in the menu bar), overriding the file. The built plist has the same keys and values as
+  the former generated one except `CFBundleName`, `CFBundleDisplayName` and the usage descriptions' wording.
+- **Release.** iPhone and Watch: `script/testflight.sh` as before (the archive still holds `OpenCode.app`); renaming
+  the App Store Connect record is a separate, manual step. Mac: `script/install-mac.sh` builds the signed Release
+  app and installs it as `~/Applications/MyAgents.app`, replacing both an earlier `MyAgents.app` and the legacy
+  `~/Applications/OpenCode Mac.app` (one copy only, never two apps with the same identifier). Each replaced bundle
+  stays beside it as `<name>.app.bak-<UTC stamp>`, unregistered from LaunchServices. It refuses a bundle under
+  either name with another identifier, refuses while an installed copy runs, and never quits or opens the app; `--dry-run` prints the plan, `--app` installs an existing build and
+  `--applications <folder>` rehearses elsewhere. After the first install, replace the old **OpenCode Mac** Dock item
+  with MyAgents. macOS keeps the grants (Microphone, Calendars, Reminders, Contacts, Screen Recording), which follow
+  the identifier and team, not the bundle's name; System Settings lists the app as MyAgents.
+- Mac test copies (`test-mac-*.sh`) still come from the Debug `OpenCodeMac.app` and show MyAgents in the menu bar.
+
 ## Platform and distribution
 
 - **Only the latest iOS.** The deployment target is always the current major version (iOS 27 today) and moves up with
@@ -5583,11 +5623,12 @@ keeps the 300-second limit; the legacy combined two-theme run has a 600-second a
    select another config **outside the repository**.
    `--auth auto` (the default) uses a configured key, otherwise the Xcode account. A partially configured or unreadable
    key is an error, not a silent fallback. `--auth api-key` requires the key; `--auth xcode` explicitly ignores it.
-3. **App record:** in App Store Connect **Apps → + → New App**, create an iOS app named `OpenCode Agente` (or
-   `OpenCode Agente AR` if taken), primary language **Portuguese (Brazil)**, bundle ID and SKU both
-   `br.com.alexandrem.opencode`, with access limited to Alexandre. If the bundle ID is not listed, first register it
-   in the Developer portal or run a signed `--dry-run` so automatic signing registers it, then create the record.
-   The device display name remains `OpenCode`. Do not submit an App Store version.
+3. **App record:** it already exists (Apple ID `6825859310`, bundle ID and SKU `br.com.alexandrem.opencode`,
+   primary language **Portuguese (Brazil)**, access limited to Alexandre). It was created as `OpenCode Agente` and is
+   renamed to `MyAgents` in App Store Connect by hand; never create a second record for the new name. The name under
+   the icon comes from the build's `CFBundleDisplayName` (`MyAgents`, see
+   [Name: MyAgents and OpenCode](#name-myagents-and-opencode--6-november)), not from the record. Do not submit an App
+   Store version.
 4. **Internal distribution:** in the app's **TestFlight → Internal Testing**, create a private group for Alexandre,
    enable **automatic distribution**, and add only his App Store Connect user as a tester. Builds are internal-only;
    no external group or Beta App Review is involved. Apple's processing, binary validation, encryption questions and

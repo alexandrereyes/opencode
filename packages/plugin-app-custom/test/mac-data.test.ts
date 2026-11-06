@@ -119,7 +119,7 @@ it.effect("without an online Mac the tool fails at once, without emitting a requ
     yield* TestClock.adjust("10 seconds")
     yield* node.mac.detach({ deviceID: mac.deviceID })
     expect(failure(yield* node.tool.execute({ source: "status" }, build).pipe(Effect.exit)).message).toBe(
-      "The OpenCode app is not running on MacBook de teste (closed or disconnected since 1970-01-01T00:00:10.000Z). Ask Alexandre to open it, then retry.",
+      "The MyAgents app is not running on MacBook de teste (closed or disconnected since 1970-01-01T00:00:10.000Z). Ask Alexandre to open it, then retry.",
     )
     yield* node.mac.attach(mac)
     yield* TestClock.adjust(`${limits.leaseSeconds + 1} seconds`)
@@ -185,7 +185,7 @@ it.effect("an unanswered request times out and is forgotten", () =>
     yield* TestClock.adjust("1 millis")
     const error = failure(yield* Fiber.join(call))
     expect(error.message).toBe(
-      `The OpenCode app on MacBook de teste did not answer within ${limits.timeoutSeconds} seconds.`,
+      `The MyAgents app on MacBook de teste did not answer within ${limits.timeoutSeconds} seconds.`,
     )
     expect(error.metadata).toEqual({ reason: "timeout" })
     expect(node.mac.pending.size).toBe(0)
@@ -244,7 +244,7 @@ it.effect("app failures explain what Alexandre has to do", () =>
       (yield* ask({ source: "calendar" }, { error: "denied", source: "calendar", message: "macOS denied access" }))
         .exit,
     )
-    expect(denied.message).toContain('enable "OpenCode" in System Settings → Privacy & Security → Calendars')
+    expect(denied.message).toContain('enable "MyAgents" in System Settings → Privacy & Security → Calendars')
     expect(denied.message).toContain("Privacidade e Segurança → Calendários")
     expect(denied.message).toContain("Full Access")
     expect(denied.metadata).toEqual({ reason: "denied", source: "calendar" })
@@ -263,6 +263,6 @@ it.effect("app failures explain what Alexandre has to do", () =>
     )
     expect(invalid.message).toBe("No calendar named X")
     const malformed = failure((yield* ask({ source: "status" }, { source: "status" })).exit)
-    expect(malformed.message).toStartWith("The OpenCode app on MacBook de teste answered in an unexpected format")
+    expect(malformed.message).toStartWith("The MyAgents app on MacBook de teste answered in an unexpected format")
   }),
 )

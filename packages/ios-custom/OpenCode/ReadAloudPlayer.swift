@@ -443,7 +443,7 @@ extension Notification.Name {
     guard session || !commands.isEmpty else { return }
     MPNowPlayingInfoCenter.default().nowPlayingInfo = [
       MPMediaItemPropertyTitle: title,
-      MPMediaItemPropertyArtist: "OpenCode",
+      MPMediaItemPropertyArtist: "MyAgents",
       MPMediaItemPropertyPlaybackDuration: total,
       MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
       MPNowPlayingInfoPropertyPlaybackRate: phase == .playing ? Double(rate) : 0,

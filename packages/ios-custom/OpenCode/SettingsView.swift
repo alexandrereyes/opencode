@@ -105,7 +105,7 @@ struct SettingsView: View {
           }
         }.listRowBackground(theme.color(.surface))
         Section("Sobre") {
-          NavigationLink("Sobre o OpenCode") { AboutView(store: store) }
+          NavigationLink("Sobre o MyAgents") { AboutView(store: store) }
             .accessibilityIdentifier("settings-about")
           LabeledContent("Versão do app", value: appVersion)
         }.listRowBackground(theme.color(.surface))
@@ -366,7 +366,7 @@ private struct AboutView: View {
   let store: SessionStore
   var body: some View {
     List {
-      Section("OpenCode") {
+      Section("MyAgents") {
         LabeledContent("Versão e build", value: appVersion)
         LabeledContent("Commit", value: commit)
         LabeledContent("Versão do servidor", value: store.serverVersion ?? "Indisponível")

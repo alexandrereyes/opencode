@@ -58,7 +58,7 @@ public struct WatchAttention: Equatable, Sendable {
   }
 
   public var top: Kind? { kinds.first }
-  public var cornerLabel: String { top?.label ?? "OpenCode" }
+  public var cornerLabel: String { top?.label ?? "MyAgents" }
   /// `Pergunta esperando`, `Pergunta · Erro`, or `Nada para você`.
   public var line: String {
     guard let top else { return "Nada para você" }
@@ -67,10 +67,10 @@ public struct WatchAttention: Equatable, Sendable {
 
   /// `OpenCode: pergunta esperando`, `OpenCode: pergunta, permissão e erro`, or nothing waiting.
   public var accessibilityLabel: String {
-    guard let top else { return "OpenCode: nada precisa de você" }
-    guard kinds.count > 1 else { return "OpenCode: " + top.line.lowercased() }
+    guard let top else { return "MyAgents: nada precisa de você" }
+    guard kinds.count > 1 else { return "MyAgents: " + top.line.lowercased() }
     let labels = kinds.map { $0.label.lowercased() }
-    return "OpenCode: " + labels.dropLast().joined(separator: ", ") + " e " + (labels.last ?? "")
+    return "MyAgents: " + labels.dropLast().joined(separator: ", ") + " e " + (labels.last ?? "")
   }
 }
 

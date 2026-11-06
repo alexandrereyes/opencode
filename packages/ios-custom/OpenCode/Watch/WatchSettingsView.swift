@@ -82,7 +82,7 @@ struct WatchSettingsView: View {
   private var watchStatus: (text: String, icon: String, ok: Bool) {
     if !link.activated { return ("Verificando o Apple Watch…", "applewatch", false) }
     if !link.paired { return ("Nenhum Apple Watch pareado com este iPhone", "applewatch.slash", false) }
-    if !link.installed { return ("OpenCode não está instalado no relógio", "applewatch", false) }
+    if !link.installed { return ("MyAgents não está instalado no relógio", "applewatch", false) }
     return ("Apple Watch pronto para parear", "applewatch.radiowaves.left.and.right", true)
   }
 
@@ -110,7 +110,7 @@ struct WatchSettingsView: View {
       // The iPhone's local voice preference wins over the server default.
       result.voice = .init(voiceID: voice.voice.rawValue)
       try await link.send(result)
-      message = ("Enviado ao relógio. Abra o OpenCode no Apple Watch.", false)
+      message = ("Enviado ao relógio. Abra o MyAgents no Apple Watch.", false)
       Haptics.play(.success)
       await load()
     } catch {

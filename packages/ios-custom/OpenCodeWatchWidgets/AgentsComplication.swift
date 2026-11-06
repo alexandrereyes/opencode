@@ -23,7 +23,7 @@ struct AgentsComplication: Widget {
         .containerBackground(for: .widget) { Color.clear }
         .widgetURL(WatchLaunch.dashboard.url)
     }
-    .configurationDisplayName("OpenCode")
+    .configurationDisplayName("MyAgents")
     .description("Pergunta, permissão ou erro esperando por você.")
     .supportedFamilies([.accessoryCircular, .accessoryCorner, .accessoryRectangular])
     .pushHandler(AgentsPushHandler.self)

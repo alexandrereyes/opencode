@@ -610,7 +610,7 @@ final class SessionStore {
     guard !busy.contains(row.id) else { return }
     if !row.notify, !(await Self.authorizeNotifications()) {
       Haptics.play(.warning)
-      toast.show("Permita as notificações do OpenCode nos Ajustes para receber o aviso.", kind: .error)
+      toast.show("Permita as notificações do MyAgents nos Ajustes para receber o aviso.", kind: .error)
       return
     }
     await perform(row.id, feedback: .light) {

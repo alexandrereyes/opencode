@@ -580,7 +580,7 @@ public enum AgentsRecreation {
       case .recreated: "Atividade recriada. Confira o Conjunto Inteligente no relógio."
       case .started: "Atividade criada. Confira o Conjunto Inteligente no relógio."
       case .busy: "Já recriando a atividade."
-      case .disabled: "As Atividades ao Vivo estão desligadas para o OpenCode. Ative em Ajustes › OpenCode › Atividades ao Vivo."
+      case .disabled: "As Atividades ao Vivo estão desligadas para o MyAgents. Ative em Ajustes › MyAgents › Atividades ao Vivo."
       case .unavailable: "Sem conexão com o servidor. Tente de novo quando o app estiver conectado."
       case .noWork: "Nenhuma sessão trabalhando agora: o cartão volta sozinho quando houver trabalho."
       case .dismissed: "O cartão foi fechado no iPhone: ele volta quando as sessões pararem e recomeçarem."

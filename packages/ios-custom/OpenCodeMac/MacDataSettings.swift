@@ -20,7 +20,7 @@ struct MacDataSettings: View {
             .foregroundStyle(theme.color(.warning))
         }
       } footer: {
-        Text("Os agentes do OpenCode leem estes dados na hora, quando você pede, enquanto o app está aberto neste Mac. Com o app fechado, eles recebem que o Mac está offline.")
+        Text("Os agentes do MyAgents leem estes dados na hora, quando você pede, enquanto o app está aberto neste Mac. Com o app fechado, eles recebem que o Mac está offline.")
           .foregroundStyle(theme.color(.textSecondary))
       }
       Section("Fontes") {

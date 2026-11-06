@@ -19,7 +19,7 @@ struct AgentsLockScreenView: View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 6) {
         AgentsMascot(attributes: attributes).frame(width: 19, height: 16)
-        Text("OpenCode").font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
+        Text("MyAgents").font(.system(size: 13, weight: .semibold)).foregroundStyle(attributes.color(.textStrong))
         Spacer(minLength: 8)
         Text(state.host).font(.system(size: 11)).foregroundStyle(attributes.color(.textSecondary)).lineLimit(1)
       }.frame(height: AgentsLayout.lockHeader)
@@ -345,6 +345,6 @@ struct AgentsMascot: View {
       AgentsMascotShape(part: .spark).fill(attributes.color(.accent))
     }
     .aspectRatio(740.0 / 625.0, contentMode: .fit)
-    .accessibilityLabel("OpenCode")
+    .accessibilityLabel("MyAgents")
   }
 }

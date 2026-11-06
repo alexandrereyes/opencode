@@ -50,8 +50,8 @@ public enum VoiceScreenRefusal: Error, Equatable, Sendable, LocalizedError {
     let tail = " Nada foi enviado à Sessão mestra."
     return switch self {
     case .background:
-      "Não consigo ver a tela: o OpenCode não está aberto na frente. Só vejo a tela do próprio OpenCode, nunca a de outros apps." + tail
-    case .locked: "Não consigo ver a tela: o iPhone está bloqueado. Desbloqueie e abra o OpenCode." + tail
+      "Não consigo ver a tela: o MyAgents não está aberto na frente. Só vejo a tela do próprio MyAgents, nunca a de outros apps." + tail
+    case .locked: "Não consigo ver a tela: o iPhone está bloqueado. Desbloqueie e abra o MyAgents." + tail
     case .unavailable: "Ver a tela não funciona neste aparelho." + tail
     case .failed: "Não consegui capturar a tela agora." + tail
     case .appNotRunning(let name): "Não encontrei o app “\(name)” aberto neste Mac." + tail
@@ -59,7 +59,7 @@ public enum VoiceScreenRefusal: Error, Equatable, Sendable, LocalizedError {
       (name.map { "“\($0)” não tem nenhuma janela visível para eu ver." } ?? "Não há nenhuma janela na frente para eu ver.") + tail
     case .protected(let name): "O macOS não deixa capturar a janela de “\(name)”." + tail
     case .permission:
-      "Para ver outros apps, o OpenCode precisa da permissão de Gravação de Tela em Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela."
+      "Para ver outros apps, o MyAgents precisa da permissão de Gravação de Tela em Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela."
         + tail
     }
   }
@@ -120,7 +120,7 @@ public struct VoiceScreenShot: Sendable, Equatable {
   /// The delegated text plus one minimal line; the master reads the picture itself.
   public func prompt(_ text: String) -> String {
     let session = sessionID.map { " Sessão aberta no app: \($0)" } ?? ""
-    return text + "\n\n[Captura " + (subject ?? "da tela do app OpenCode") + " anexada." + session + "]"
+    return text + "\n\n[Captura " + (subject ?? "da tela do app MyAgents") + " anexada." + session + "]"
   }
 }
 
@@ -170,11 +170,11 @@ public enum VoiceScreenPlanner {
 
   public static let firstRequestNotice = """
     Pedi ao macOS a permissão de Gravação de Tela. Até ela ser liberada em Ajustes do Sistema → Privacidade e \
-    Segurança → Gravação de Tela, com o OpenCode reaberto, só vejo a janela do OpenCode; enviei essa janela à mestra.
+    Segurança → Gravação de Tela, com o MyAgents reaberto, só vejo a janela do MyAgents; enviei essa janela à mestra.
     """
   public static let deniedNotice = """
-    Sem a permissão de Gravação de Tela só vejo a janela do OpenCode; enviei essa janela à mestra. Para ver outros \
-    apps, libere o OpenCode em Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela.
+    Sem a permissão de Gravação de Tela só vejo a janela do MyAgents; enviei essa janela à mestra. Para ver outros \
+    apps, libere o MyAgents em Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela.
     """
 
   /// OpenCode counts as the screen only when it is the app in front; a call shown by OpenCode in the background
@@ -224,7 +224,7 @@ public enum VoiceScreenPlanner {
   /// The line's subject for the master: identifiers only, never a description.
   public static func subject(_ source: VoiceScreenSource) -> String {
     switch source {
-    case .own: "da janela do OpenCode"
+    case .own: "da janela do MyAgents"
     case .window(let window):
       "da janela de \(window.app)" + (window.title.flatMap { $0.isEmpty ? nil : " (“\($0.prefix(120))”)" } ?? "")
     case .display(_, _, let front): "da tela inteira do Mac" + (front.map { " (\($0) na frente)" } ?? "")

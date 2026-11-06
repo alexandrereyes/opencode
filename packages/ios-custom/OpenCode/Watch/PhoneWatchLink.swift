@@ -83,7 +83,7 @@ enum PhoneWatchError: LocalizedError {
     switch self {
     case .inactive: "Não foi possível falar com o Apple Watch. Tente de novo."
     case .notPaired: "Nenhum Apple Watch está pareado com este iPhone."
-    case .notInstalled: "Instale o OpenCode no relógio pelo app Watch e tente de novo."
+    case .notInstalled: "Instale o MyAgents no relógio pelo app Watch e tente de novo."
     }
   }
 }

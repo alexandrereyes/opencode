@@ -14,7 +14,7 @@ struct DeviceDataView: View {
           .foregroundStyle(theme.color(agent.connected ? .success : .textSecondary))
           .accessibilityIdentifier("device-data-connection")
       } footer: {
-        Text("Os agentes do OpenCode leem estes dados na hora, quando você pede, com o app aberto ou durante a conversa por voz. Com o app fechado, eles recebem que o iPhone está offline.")
+        Text("Os agentes do MyAgents leem estes dados na hora, quando você pede, com o app aberto ou durante a conversa por voz. Com o app fechado, eles recebem que o iPhone está offline.")
       }.listRowBackground(theme.color(.surface))
       Section("Fontes") {
         ForEach(DeviceSource.allCases) { source in row(source) }

@@ -54,7 +54,7 @@ struct MacMicrophonePermission: ViewModifier {
       Button("Abrir Ajustes do Sistema") { MacMicrophonePermission.openSettings() }
       Button("Agora não", role: .cancel) {}
     } message: {
-      Text("Autorize o OpenCode em Ajustes do Sistema › Privacidade e Segurança › Microfone para conversar por voz ou ditar.")
+      Text("Autorize o MyAgents em Ajustes do Sistema › Privacidade e Segurança › Microfone para conversar por voz ou ditar.")
     }
   }
   static func openSettings() {
@@ -114,7 +114,7 @@ struct MacVoiceSettings: View {
         Button("Abrir permissão do microfone") { MacMicrophonePermission.openSettings() }
       }
       Section("Ver a tela pela voz") {
-        Text("Diga “olha essa página”, “olha o Simulator” ou “olha minha tela toda”: a mestra recebe a foto. Para ver outros apps, o macOS pede a permissão de Gravação de Tela uma vez; sem ela, só a janela do OpenCode.").font(.caption)
+        Text("Diga “olha essa página”, “olha o Simulator” ou “olha minha tela toda”: a mestra recebe a foto. Para ver outros apps, o macOS pede a permissão de Gravação de Tela uma vez; sem ela, só a janela do MyAgents.").font(.caption)
         Button("Abrir permissão de Gravação de Tela") { NSWorkspace.shared.open(MacVoiceScreen.settingsURL) }
       }
       MacDictationSettings()
@@ -151,7 +151,7 @@ private struct MacDictationSettings: View {
       Text("Gravando agora por: \(current ?? "entrada padrão do sistema"). O ditado não muda a entrada padrão do Mac.")
         .font(.caption)
       Toggle("Pausar a música ao ditar", isOn: $pausesMedia)
-      Text("Pausa o que estiver tocando enquanto você dita e retoma ao parar ou pausar a gravação. Só retoma o que o OpenCode pausou.")
+      Text("Pausa o que estiver tocando enquanto você dita e retoma ao parar ou pausar a gravação. Só retoma o que o MyAgents pausou.")
         .font(.caption)
     }
     .onAppear(perform: refresh)

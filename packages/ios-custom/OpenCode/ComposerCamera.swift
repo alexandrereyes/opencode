@@ -66,7 +66,7 @@ extension ComposerCamera.Access {
   }
   var message: String {
     switch self {
-    case .denied: "Ative a câmera do OpenCode nos Ajustes para tirar fotos e anexá-las à mensagem."
+    case .denied: "Ative a câmera do MyAgents nos Ajustes para tirar fotos e anexá-las à mensagem."
     case .restricted: "O acesso à câmera está bloqueado neste iPhone (Tempo de Uso ou perfil de gerenciamento)."
     case .unavailable, .ready: "Não há câmera disponível agora. Use Fotos ou Arquivos para anexar uma imagem."
     }

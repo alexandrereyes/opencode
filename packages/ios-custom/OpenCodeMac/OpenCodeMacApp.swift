@@ -19,7 +19,7 @@ struct OpenCodeMacApp: App {
   }
 
   var body: some Scene {
-    WindowGroup("OpenCode", id: "main", for: MacWindowTarget.self) { $target in
+    WindowGroup("MyAgents", id: "main", for: MacWindowTarget.self) { $target in
       MacRoot(runtime: runtime, target: target)
     } defaultValue: {
       MacWindowTarget()

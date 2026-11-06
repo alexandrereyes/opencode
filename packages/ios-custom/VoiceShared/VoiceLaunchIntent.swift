@@ -19,7 +19,7 @@ import OpenCodeKit
 /// brings the app forward when iOS needs it (microphone prompt, Live Activities off or refused).
 struct StartVoiceIntent: AudioRecordingIntent, LiveActivityIntent {
   static let title: LocalizedStringResource = "Conversar com a Sessão mestra"
-  static let description = IntentDescription("Inicia a conversa por voz com a Sessão mestra sem abrir o OpenCode.")
+  static let description = IntentDescription("Inicia a conversa por voz com a Sessão mestra sem abrir o MyAgents.")
   // The call can operate Alexandre's Mac, so a locked iPhone must be unlocked first.
   static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
   static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
@@ -54,6 +54,6 @@ struct StartVoiceIntent: AudioRecordingIntent, LiveActivityIntent {
 enum VoiceLaunchError: Error, CustomLocalizedStringResourceConvertible {
   case needsApp
   var localizedStringResource: LocalizedStringResource {
-    "Abra o OpenCode para conversar por voz: o iPhone precisa da permissão do microfone ou das Atividades ao Vivo."
+    "Abra o MyAgents para conversar por voz: o iPhone precisa da permissão do microfone ou das Atividades ao Vivo."
   }
 }

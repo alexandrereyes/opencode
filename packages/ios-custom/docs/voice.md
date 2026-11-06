@@ -606,7 +606,7 @@ desde a terceira onda quem decide é o app, pelas palavras de Alexandre. O probe
 - **Envio:** mesmo formato do composer: `deliver` grava `tela-opencode.jpg` em `uploads/` do servidor e,
   se o modelo da mestra lê imagem, o prompt leva o `data:image/jpeg` inline. O texto é o pedido mais
   uma linha mínima com o que a imagem não mostra:
-  `[Captura da tela do app OpenCode anexada. Sessão aberta no app: ses_…]` (sem sessão aberta, só a
+  `[Captura da tela do app MyAgents anexada. Sessão aberta no app: ses_…]` (sem sessão aberta, só a
   primeira parte). Não há descrição da tela.
 - **Recusa:** com outro app na frente, a chamada em segundo plano ou o iPhone bloqueado, nada é
   capturado nem enviado à mestra. O motivo vai ao GPT Live por `delegation.context.append` (por
@@ -663,7 +663,7 @@ depois, delegou "Não, vai lá na Mestra que você consegue" como texto simples.
   entra quando **ele** é o app da frente; aí é a sua janela da frente (`MacRuntime.front`). Faixa de voz,
   sino, paleta e outros painéis do OpenCode nunca cobrem o app que Alexandre está olhando.
 - **`app`** + `screen_app`: a janela da frente do app pelo nome, sem diferenciar caixa e acentos, exato,
-  depois prefixo, depois contido ("chrome" → Google Chrome). "OpenCode" é a própria janela. Só pelo JSON antigo,
+  depois prefixo, depois contido ("chrome" → Google Chrome). "MyAgents" (o nome do app no macOS) é a própria janela. Só pelo JSON antigo,
   que esta rota não envia: por voz, app pelo nome não é suportado (o bloco do Mac não o cita).
 - **`display`**: o monitor da janela da frente (senão o principal), sem as janelas do OpenCode, a menos
   que ele esteja na frente. Por voz, quando ele diz "a tela toda" ou "a tela inteira".

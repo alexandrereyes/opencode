@@ -90,12 +90,12 @@ extension VoiceProtocol {
       """
     switch platform {
     case .iPhone: return """
-      Tela do app OpenCode no iPhone: você consegue ver a tela do OpenCode. Quando Alexandre falar da tela ou de um
+      Tela do app MyAgents no iPhone: você consegue ver a tela do MyAgents. Quando Alexandre falar da tela ou de um
       print ("tá vendo minha tela?", "olha minha tela", "tira um print"), gere <|SpawnThinking|>; o app anexa ao
       pedido uma captura tirada nesse momento, e o agente a analisa.
       \(rules)
       Se o retorno disser que não foi possível capturar, explique o motivo: só dá para ver a tela do próprio
-      OpenCode, aberto e com o iPhone desbloqueado, nunca a de outros apps.
+      MyAgents, aberto e com o iPhone desbloqueado, nunca a de outros apps.
       """
     case .mac: return """
       Tela do Mac: você consegue ver a tela do Mac. Quando Alexandre falar da tela ou de um print ("tá vendo minha
