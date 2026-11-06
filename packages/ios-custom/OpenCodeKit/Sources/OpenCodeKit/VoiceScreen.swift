@@ -33,6 +33,8 @@ public enum VoiceScreenRefusal: Error, Equatable, Sendable, LocalizedError {
   case background
   /// The iPhone is locked.
   case locked
+  /// The app is behind its Face ID lock (Você ▸ Segurança): what it shows is not his to send.
+  case appLocked
   /// This device or build cannot capture.
   case unavailable
   /// Rendering or encoding failed.
@@ -52,6 +54,7 @@ public enum VoiceScreenRefusal: Error, Equatable, Sendable, LocalizedError {
     case .background:
       "Não consigo ver a tela: o MyAgents não está aberto na frente. Só vejo a tela do próprio MyAgents, nunca a de outros apps." + tail
     case .locked: "Não consigo ver a tela: o iPhone está bloqueado. Desbloqueie e abra o MyAgents." + tail
+    case .appLocked: "Não consigo ver a tela: o MyAgents está bloqueado pelo Face ID. Desbloqueie o app e peça de novo." + tail
     case .unavailable: "Ver a tela não funciona neste aparelho." + tail
     case .failed: "Não consegui capturar a tela agora." + tail
     case .appNotRunning(let name): "Não encontrei o app “\(name)” aberto neste Mac." + tail
@@ -95,9 +98,12 @@ public enum VoiceScreenIntent {
 
 public enum VoiceScreenAccess {
   /// Only the app's own window, while it is in front and unlocked; never another app.
-  public static func refusal(appActive: Bool, protectedDataAvailable: Bool) -> VoiceScreenRefusal? {
+  public static func refusal(appActive: Bool, protectedDataAvailable: Bool, appLocked: Bool = false)
+    -> VoiceScreenRefusal?
+  {
     if !protectedDataAvailable { return .locked }
     if !appActive { return .background }
+    if appLocked { return .appLocked }
     return nil
   }
 }

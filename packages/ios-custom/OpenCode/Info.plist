@@ -16,6 +16,7 @@
     <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
     <key>UILaunchScreen</key><dict><key>UIColorName</key><string>LaunchBackground</string></dict>
     <key>NSLocalNetworkUsageDescription</key><string>O MyAgents acessa o servidor do seu Mac pela rede privada.</string>
+    <key>NSFaceIDUsageDescription</key><string>O MyAgents usa o Face ID para abrir o app quando você ativa Exigir Face ID em Você › Segurança.</string>
     <key>NSCameraUsageDescription</key><string>O MyAgents usa a câmera para tirar fotos que você anexa às mensagens e para ler o QR code de pareamento do seu servidor.</string>
     <key>NSMicrophoneUsageDescription</key><string>O MyAgents usa o microfone para ditar mensagens com transcrição neste iPhone e para conversar por voz com a Sessão mestra, inclusive durante a chamada em segundo plano.</string>
     <key>NSHealthShareUsageDescription</key><string>Os agentes do MyAgents leem seus dados do app Saúde (sono, passos, energia, frequência cardíaca, VFC, treinos e peso) quando você pede. O MyAgents nunca grava no Saúde.</string>

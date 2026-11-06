@@ -12,6 +12,8 @@ struct SettingsView: View {
   /// Servidores, pushed at once when Sessões' server list asked for Gerenciar servidores.
   @State private var showServers = false
   @AppStorage("OpenCodeCollapsibleUserMessages") private var collapsibleUserMessages = true
+  /// Why the last change of Exigir Face ID did not happen.
+  @State private var faceIDFailure: String?
   var body: some View {
     @Bindable var appearance = runtime.appearance
     NavigationStack {
@@ -88,6 +90,22 @@ struct SettingsView: View {
         Section("Apple Watch") {
           NavigationLink("Apple Watch") { WatchSettingsView(client: store.client, voice: runtime.voice.preferences) }
             .accessibilityIdentifier("settings-watch")
+        }.listRowBackground(theme.color(.surface))
+        Section {
+          let lock = AppLockScreen.shared.lock
+          Toggle("Exigir Face ID", isOn: Binding(get: { lock.enabled }, set: { on in
+            faceIDFailure = nil
+            Task { faceIDFailure = await lock.setEnabled(on)?.message }
+          }))
+          .disabled(lock.prompting)
+          .accessibilityIdentifier("settings-face-id")
+        } header: { Text("Segurança") } footer: {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Exigir Face ID ao abrir e sempre que voltar ao app.")
+            if let faceIDFailure {
+              Text(faceIDFailure).foregroundStyle(theme.color(.error)).accessibilityIdentifier("settings-face-id-error")
+            }
+          }
         }.listRowBackground(theme.color(.surface))
         Section("Servidor") {
           NavigationLink {

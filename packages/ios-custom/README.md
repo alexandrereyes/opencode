@@ -2343,6 +2343,52 @@ mounted navigation/tab bars as well as their appearance proxies. No theme colors
   `You are a subagent spawned by another session.\n`, and only in child user messages. Wire history remains untouched;
   changed wording, leading whitespace, CRLF or a missing newline is deliberately displayed in full.
 
+### Exigir Face ID — 6 November
+
+**Você ▸ Segurança ▸ Exigir Face ID** (iPhone only; off by default, `UserDefaults` key `OpenCodeFaceIDLock`, new):
+"Exigir Face ID ao abrir e sempre que voltar ao app". Nothing else changes: servers, credentials and pairing stay.
+
+- **Face ID only.** `FaceIDAuthenticator` (OpenCodeKit `AppLock.swift`) evaluates
+  `.deviceOwnerAuthenticationWithBiometrics`: no passcode, no app PIN, no silent fallback. The prompt has no password
+  button (`localizedFallbackTitle = ""`); a `.userFallback` answer would still keep it locked.
+  `canEvaluatePolicy` runs before reading `biometryType`, which must be `.faceID`. `NSFaceIDUsageDescription` is in
+  Info.plist.
+- **Turning it on or off** asks for Face ID first; a failure or cancel leaves it as it was and the section's footer
+  says why. Without Face ID (no hardware, not enrolled, turned off for the app, no passcode, locked out) it stays off
+  and nothing is prompted.
+- **When it locks.** A launch with it on starts locked. Every loss of focus locks at once, with no grace period:
+  `UIScene.willDeactivateNotification` (Control Center, the app switcher, a system sheet) and
+  `didEnterBackgroundNotification`. The next `didActivate` asks for Face ID once.
+- **Fails closed.** Cancel, a wrong face, lockout, Face ID removed or denied after it was turned on: it stays locked,
+  with the reason and **Tentar novamente**. Lockout says to lock the iPhone and unlock it with its passcode first.
+- **The prompt's own focus cycle.** The system prompt makes the scene inactive and then active. While a prompt is
+  in flight (`AppLock.prompting`), deactivation neither locks nor queues another prompt, so a cancelled prompt never
+  loops and a success is not undone. Needing Face ID (`locked`) and hiding the content (`covered`) are separate:
+  `covered = locked || (enabled && (!active || prompting))`, with `active` following every scene transition. So the
+  prompt that turns the lock off covers the screen too, and an answer that arrives before `didActivate` keeps the
+  cover until the scene is active. Going to the background cancels the prompt (`LAContext.invalidate()`); its late
+  answer, even a success, is ignored, and the next activation asks again.
+- **The cover.** While `covered`, `AppLockScreen` puts its own `UIWindow` (level `.alert + 1`) over the scene. Sheets, full-screen
+  covers, alerts, toasts and the composer are under it. Locking ends editing (the keyboard goes), makes the cover the
+  key window (hardware keys), hides the other windows from accessibility and takes the touches. The window is shown
+  in the notification handlers themselves, so the app switcher's snapshot shows only the cover.
+- **What goes on.** Only the UI is covered: `SessionStore`, voice calls, Live Activities, notifications, App Intents
+  and Dados do iPhone keep running. Deep links and notification taps navigate underneath and show after Face ID.
+  The voice screen capture refuses while covered (`VoiceScreenRefusal.appLocked`, also re-checked after its wait) and
+  the call goes on. The Mac and the Watch have no lock.
+- **Tests.** `swift test --filter AppLock` drives the state machine through a scripted authenticator: turning on and
+  off, cold start, inactive-only and background, the prompt's own cycle, cancel without a loop, every failure, a late
+  success after the background, and the cover around the turn-off prompt with its answer before and after
+  `didActivate`. `script/test-app-lock.py --derived <DerivedData> [tests…]` creates and deletes its own headless
+  simulator, enrolls a face and runs (without parallel clones) `OpenCodeUITests/AppLockTests` (DEBUG
+  `-OpenCodeAppLockFixture success,cancel,…`, `-OpenCodeAppLockFixtureDelay`, `-OpenCodeAppLockFixtureUnavailable`:
+  the switch, the cover during the turn-off prompt, cold start, Control Center (inactive only), the composer and
+  keyboard, Você, a late success) and `AppLockRealFaceIDTests` (the real LocalAuthentication prompt with a matching
+  face, checking that it opens once without looping), offline on the catalog. On 6 November the app switcher's
+  snapshot (`Library/SplashBoard/Snapshots/*.ktx` in the simulator's data container, read with `sips`) showed only
+  the cover with the lock on and the Sessões list with it off. Physical-device behavior (snapshot, VoiceOver,
+  lockout, a real face) was not verified.
+
 ### Sandbox safety and verification
 
 Every launch/relaunch **must** supply `-OpenCodeServerURL http://127.0.0.1:4177` plus the sandbox password in the

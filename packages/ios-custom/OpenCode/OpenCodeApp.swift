@@ -7,6 +7,7 @@ import SwiftUI
 struct OpenCodeApp: App {
   @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
   init() {
+    AppLockScreen.shared.install()
     FilePreviewStorage.clean()
     VoiceLaunchRouter.launcher = AppVoiceLauncher()
     AgentsActivityAgent.shared.watch()

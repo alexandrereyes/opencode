@@ -8,6 +8,9 @@ struct VoiceScreenTests {
     #expect(VoiceScreenAccess.refusal(appActive: false, protectedDataAvailable: true) == .background)
     #expect(VoiceScreenAccess.refusal(appActive: false, protectedDataAvailable: false) == .locked)
     #expect(VoiceScreenAccess.refusal(appActive: true, protectedDataAvailable: false) == .locked)
+    // Behind the Face ID lock the window shows nothing he unlocked: no capture, the call goes on.
+    #expect(VoiceScreenAccess.refusal(appActive: true, protectedDataAvailable: true, appLocked: true) == .appLocked)
+    #expect(VoiceScreenRefusal.appLocked.localizedDescription.contains("Face ID"))
     let background = VoiceScreenRefusal.background.localizedDescription
     #expect(background.contains("outros apps") && background.contains("Nada foi enviado"))
     #expect(VoiceScreenRefusal.locked.localizedDescription.contains("bloqueado"))

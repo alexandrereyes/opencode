@@ -30,7 +30,9 @@ private struct VoiceCaptureHidden: ViewModifier {
     #if os(iOS)
     let application = UIApplication.shared
     if let refusal = VoiceScreenAccess.refusal(appActive: application.applicationState == .active,
-      protectedDataAvailable: application.isProtectedDataAvailable) { throw refusal }
+      protectedDataAvailable: application.isProtectedDataAvailable, appLocked: AppLockScreen.shared.lock.covered) {
+      throw refusal
+    }
     guard let window = application.connectedScenes.compactMap({ $0 as? UIWindowScene })
       .first(where: { $0.activationState == .foregroundActive && $0.session.role == .windowApplication })?
       .keyWindow else { throw .background }
@@ -49,6 +51,8 @@ private struct VoiceCaptureHidden: ViewModifier {
     try? await Task.sleep(for: .milliseconds(80))
     // Re-check after the wait: the app may have left the foreground meanwhile.
     guard UIApplication.shared.applicationState == .active else { throw .background }
+    // Nor behind the Face ID lock, which may have closed meanwhile.
+    guard !AppLockScreen.shared.lock.covered else { throw .appLocked }
     let format = UIGraphicsImageRendererFormat(for: window.traitCollection)
     format.scale = min(window.screen.scale, 2)
     format.opaque = true
