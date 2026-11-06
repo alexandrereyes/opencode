@@ -45,7 +45,8 @@ Every call is `POST /api/rpc/custom.notifications/<method>` with `{"input":{…}
 
 The Live Activity hub's tracker is the source of truth, with its "working" roll-up (rev. 2026-10-28): a top-level
 session works while its own execution, any descendant's execution, or an unfinished background shell of the family
-runs. For each known, unarchived top-level session:
+that someone waits on runs: one of the top-level session or of a subagent that still executes. A shell a subagent
+left running after its turn (an emulator) does not hold back the end (rev. 2026-11-06). For each known, unarchived top-level session:
 
 1. The work must be seen by this process (a stop that happened while the server was down alerts nothing). A session
    first seen idle after startup that worked meanwhile (it started and failed between two evaluations) counts.

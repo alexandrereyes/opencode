@@ -28,10 +28,20 @@ export const Info = Schema.Struct({
   questionAt: Schema.Finite.pipe(Schema.optional),
   permissionCount: Schema.Int.pipe(Schema.optional),
   questionCount: Schema.Int.pipe(Schema.optional),
-  /** Background work other than subagents (shell commands) still running for this session. */
+  /**
+   * Background work other than subagents (shell commands) still running for this session that someone waits on: the
+   * session is top-level or still executes, so its end wakes a turn that reaches Alexandre. It keeps the family working.
+   */
   backgroundCount: Schema.Int.pipe(Schema.optional),
   /** The title (a shell's command) of the newest such work. */
   backgroundTitle: Schema.String.pipe(Schema.optional),
+  /**
+   * Shells a subagent left running after its turn ended (an emulator, a dev server): nobody waits on them, so they
+   * never keep the family working (rev. 2026-11-06). Absent on older servers, which counted them in `backgroundCount`.
+   */
+  detachedCount: Schema.Int.pipe(Schema.optional),
+  /** The command of the newest such shell. */
+  detachedTitle: Schema.String.pipe(Schema.optional),
   progress: Progress.pipe(Schema.optional),
 }).annotate({ identifier: "Navigation.Info" })
 
