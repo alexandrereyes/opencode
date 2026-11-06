@@ -21,6 +21,7 @@ import {
   session,
   backgroundShellMessage,
   shellExited,
+  shellJob,
   shellStarted,
   todoMessage,
   todowrite,
@@ -251,6 +252,8 @@ test("a rebuild reads the list of an idle top-level session whose subagent or ba
     backgroundShellMessage("msg_2", "sh_9", T - 2 * minute, "bun run build"),
     todoMessage("msg_1", T - 3 * minute, plan),
   ])
+  // A rebuild trusts live jobs, not the transcript's launch (rev. 2026-11-03).
+  shelled.background.push(shellJob(ids.live, "sh_9", T - 2 * minute, "bun run build"))
   const rebuilt = makeTracker(shelled.ctx)
   await run(rebuilt.rebuild(T))
   expect(rebuilt.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
