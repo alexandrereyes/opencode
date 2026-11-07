@@ -73,6 +73,23 @@ test("a new pin goes first; a pinned one keeps its place; unpinning and pinning 
   expect(profile.data.pinnedSessions).toEqual(["missing-session"])
 })
 
+test.each([
+  ["before an earlier pin", { before: "b" }, ["a", "c", "b", "d"]],
+  ["after an earlier pin", { after: "a" }, ["a", "c", "b", "d"]],
+  ["to the end, after the last pin", { after: "d" }, ["a", "b", "d", "c"]],
+  ["to the top, before the first pin", { before: "a" }, ["c", "a", "b", "d"]],
+  ["before an unknown neighbour: unchanged", { before: "x" }, ["a", "b", "c", "d"]],
+  ["without a neighbour: unchanged", {}, ["a", "b", "c", "d"]],
+] as const)("sidebar.pin.move puts the pin %s; the other pins keep their order", (_, place, expected) => {
+  const pinned = { ...profile, data: { ...profile.data, pinnedSessions: ["a", "b", "c", "d"] } }
+  const moved = applyIntent(pinned, { type: "sidebar.pin.move", session: "c", ...place })
+  expect(moved.data.pinnedSessions).toEqual([...expected])
+  expect(applyIntent(pinned, { type: "sidebar.pin.move", session: "x", before: "a" }).data.pinnedSessions).toEqual(
+    ["a", "b", "c", "d"],
+  )
+  expect(pinned.data.pinnedSessions).toEqual(["a", "b", "c", "d"])
+})
+
 test("sidebar.notify adds idempotently, removes, and leaves mutes and pins alone", () => {
   const added = applyIntent(profile, { type: "sidebar.notify", session: "watched-session", notify: true })
   const repeated = applyIntent(added, { type: "sidebar.notify", session: "watched-session", notify: true })
