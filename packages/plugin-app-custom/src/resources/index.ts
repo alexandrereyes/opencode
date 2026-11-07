@@ -4,6 +4,7 @@ import { Tool } from "@opencode/schema/tool"
 import { optional } from "@opencode/schema/schema"
 import { Effect, Option, Schedule, Schema } from "effect"
 import path from "node:path"
+import { sharedRegistry } from "../browser-handoff/registry.js"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
 import { bareSerials, known, parseSimulators, references, resolveSimulators, touchesResources } from "./discovery.js"
 import { blocking, refusal, returned } from "./lock.js"
@@ -73,14 +74,15 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           if (!result.token) return { resource: result.resource }
           return { resource: result.resource, ticket: yield* ticketFor(input.id, "control") }
         }).pipe(Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason }))),
-      // The contract's action (`browse-handoff-remoto.md`); browse handoff resources and the relay focus come next.
+      // `browse-handoff-remoto.md`, section 4: only a browse handoff's tab, and only while that handoff still waits.
       focus: (input, context) =>
-        call(() => hub.get(input.id)).pipe(
-          Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
-          Effect.flatMap(() =>
-            Effect.fail(context.error("unavailable", "This resource cannot be focused", { reason: "unsupported" })),
-          ),
-        ),
+        call(async () => {
+          const resource = await hub.get(input.id)
+          if (resource.capabilities?.focus !== true || !waiting(resource))
+            throw new HubError("unsupported", "This resource cannot be focused")
+          await hub.focus(input.id)
+          return {}
+        }).pipe(Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason }))),
       dismiss: (input, context) =>
         call(() => hub.remove(input.id)).pipe(
           Effect.as({}),
@@ -261,6 +263,15 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     Effect.forkScoped({ startImmediately: true }),
   )
 })
+
+/** Whether a resource's browse handoff still waits (the hub may still list it for a moment after it ended). */
+export function waiting(resource: Pick<Resources.Resource, "id" | "handoff">, registry = sharedRegistry()) {
+  const handoff = resource.handoff
+  return (
+    handoff !== undefined &&
+    registry.waiting().some((entry) => entry.id === handoff.id && entry.resourceID === resource.id)
+  )
+}
 
 /** "Recurso: [Simulador iOS · iPhone 17 · X](opencode-resource:…)" lines for the agent and the conversation. */
 export function links(resources: readonly Pick<Resources.Resource, "id" | "kind" | "label">[]) {

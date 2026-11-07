@@ -85,6 +85,9 @@ Admin (`authorization: Bearer <secret>` from `hub.json`; loopback only, never pr
 `GET|DELETE /admin/resources/<id>`, `POST /admin/resources/<id>/control`, `GET /admin/resources/<id>/snapshot`,
 `POST /admin/tickets`, `GET /admin/locks`, `GET /admin/simulators` (`{ simulators: [{ udid, name, booted }] }` from the
 hub's `simctl`), `POST /admin/events?wait=<ms>` (long poll; each event goes to exactly one caller), `POST /admin/shutdown`.
+Browse handoffs (rev. 2026-11-07, `browse-handoff-remoto.md`): the upsert also takes `capabilities` and `handoff`,
+`POST /admin/resources/<id>/end { reason }` ends one without an event, `POST /admin/announce { ids }` queues its
+`changed`, `POST /admin/resources/<id>/focus` (409 `unsupported`, 502 when the browser refuses).
 
 ### Remote hub (server on Linux)
 

@@ -16,6 +16,10 @@ export interface Entry {
   readonly updatedAt: number
   /** The agents' latest shell commands that named it, oldest first (`Resources.limits.activityKept`). */
   readonly activity?: readonly StoredActivity[]
+  /** What the viewer may offer (`Resources.Capabilities`); browse handoffs only. Never persisted. */
+  readonly capabilities?: Resources.Capabilities
+  /** The browse handoff this resource exists for (`browse-handoff-remoto.md`). Never persisted. */
+  readonly handoff?: Resources.Handoff
 }
 
 /** One agent shell command that named a resource; `call` is its tool call, open until the command ends. */
