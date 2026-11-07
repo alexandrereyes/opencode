@@ -52,6 +52,8 @@ export const settings = {
   sharpDensity: 1.2,
   /** Focus is probed this long after a tap, so page handlers can move it first. */
   focusDelayMs: 60,
+  /** Browser zoom (`browserZoom`) is read again at most this often, when input needs it. */
+  zoomCheckMs: 1_000,
 }
 
 export const launchArgs = ["--remote-debugging-port=0"]
@@ -602,6 +604,22 @@ export function decodeFocus(value: unknown): Focus {
   return { editable: true, field: field as Field }
 }
 
+/**
+ * The browser zoom of a page (Chrome's 125 %, Cmd +): its screencast frames measure the viewport in device-independent
+ * pixels (`frame`), while input takes CSS pixels (`innerWidth` × `innerHeight`). A uniform ratio other than 1 is the
+ * zoom; anything else (a window larger than an emulated viewport, see `fitWindow`) is not, and gives 1.
+ */
+export function browserZoom(
+  frame: { readonly deviceWidth: number; readonly deviceHeight: number },
+  innerWidth: unknown,
+  innerHeight: unknown,
+) {
+  if (typeof innerWidth !== "number" || typeof innerHeight !== "number" || innerWidth <= 0 || innerHeight <= 0) return 1
+  const x = frame.deviceWidth / innerWidth
+  const y = frame.deviceHeight / innerHeight
+  return Math.abs(x - 1) > 0.02 && Math.abs(x - y) <= 0.02 * x ? x : 1
+}
+
 /** One connection to the browser, following one tab. Shared by snapshot, stream and input of a resource. */
 class Live {
   sessionId = ""
@@ -618,6 +636,9 @@ class Live {
   density = 1
   /** Frames show the window rather than exactly the viewport (see `fitWindow`); sharp stills would not line up. */
   windowed = false
+  /** `browserZoom` of the followed tab, read at most every `settings.zoomCheckMs`. */
+  zoom = 1
+  private zoomAt = 0
   focus: Focus = { editable: false }
   editTaps = 0
   tabs: Tab[] = []
@@ -675,6 +696,7 @@ class Live {
     this.sessionId = attached.sessionId
     this.targetId = targetId
     this.metrics = undefined
+    this.zoomAt = 0
     await this.cdp.send("Page.enable", {}, this.sessionId)
     const device = await this.cdp
       .send(
@@ -812,7 +834,8 @@ class Live {
         this.metrics?.deviceHeight !== frame.metadata.deviceHeight
       this.metrics = frame.metadata
       if (resized) {
-        this.publish()
+        this.zoomAt = 0
+        void this.readZoom().then(() => this.publish())
         void this.fitWindow()
       }
       // A restarted screencast repeats its last frame; that would replace a sharper still with the same content.
@@ -1068,10 +1091,31 @@ class Live {
     if (entry) await this.cdp.send("Page.navigateToHistoryEntry", { entryId: entry.id }, this.sessionId)
   }
 
+  /** The mirrored viewport in CSS pixels, which input coordinates use. */
   private async viewport() {
-    if (this.metrics) return { width: this.metrics.deviceWidth, height: this.metrics.deviceHeight }
+    if (this.metrics) {
+      await this.readZoom()
+      return this.cssViewport()!
+    }
     const metrics = await this.cdp.send("Page.getLayoutMetrics", {}, this.sessionId)
     return { width: metrics.cssVisualViewport.clientWidth, height: metrics.cssVisualViewport.clientHeight }
+  }
+
+  private cssViewport() {
+    if (!this.metrics) return undefined
+    return { width: this.metrics.deviceWidth / this.zoom, height: this.metrics.deviceHeight / this.zoom }
+  }
+
+  /** Refreshes `zoom` when it is older than `settings.zoomCheckMs` (Alexandre may change it in his Chrome). */
+  private async readZoom() {
+    const frame = this.metrics
+    if (!frame || Date.now() - this.zoomAt < settings.zoomCheckMs) return
+    this.zoomAt = Date.now()
+    const inner = await this.cdp
+      .send("Runtime.evaluate", { expression: "[innerWidth, innerHeight]", returnByValue: true }, this.sessionId)
+      .catch(() => undefined)
+    const value = Array.isArray(inner?.result.value) ? inner.result.value : []
+    this.zoom = browserZoom(frame, value[0], value[1])
   }
 
   private probeFocusSoon(tap = false) {
@@ -1126,7 +1170,7 @@ class Live {
       tabs: this.tabs,
       focus: this.focus,
       editTaps: this.editTaps,
-      ...(this.metrics ? { viewport: { width: this.metrics.deviceWidth, height: this.metrics.deviceHeight } } : {}),
+      ...(this.metrics ? { viewport: rounded(this.cssViewport()!) } : {}),
     }
   }
 
@@ -1134,6 +1178,11 @@ class Live {
     this.sink?.meta({ ...this.state() })
   }
 }
+
+const rounded = (size: { width: number; height: number }) => ({
+  width: Math.round(size.width),
+  height: Math.round(size.height),
+})
 
 const isPage = (info: TargetInfo) => info.type === "page" && !info.url.startsWith("chrome://")
 

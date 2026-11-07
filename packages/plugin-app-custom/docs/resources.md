@@ -371,6 +371,12 @@ iPhone viewport in the default 500 × 572 window lost its bottom 87 px). The ada
 viewport (`Browser.setWindowBounds`, emulation untouched); windows are at least 500 px wide, so such a page keeps a
 margin on the right, and sharp stills (viewport only) are skipped so frames and taps share one geometry.
 
+Browser zoom (rev. 2026-11-07; Alexandre's Chrome runs at 125 %): screencast frames measure the viewport in
+device-independent pixels while input takes CSS pixels, so taps landed 25 % off. The adapter reads `innerWidth` ×
+`innerHeight` (at most once a second, when input needs it) and, when both differ from the frame by the same factor,
+maps touches, scrolls and `meta.viewport` through it (`browserZoom`). A window larger than an emulated viewport (above)
+is no zoom. Every mode shares it: `playwright-cli` sessions, attached ones and browse handoffs.
+
 **Meta** (`ChromeState`, replaced whole on every change): `{ url, title, canGoBack, canGoForward, targetID, tabs:
 [{ id, title, url }], focus: { editable, field? }, editTaps, viewport?: { width, height } }`. `focus.field` is one of
 `text multiline password email username url tel number search one-time-code`, classified in the page (through shadow
