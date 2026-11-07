@@ -8,6 +8,7 @@ import { namespaceOf, sameNamespace } from "../adapters/chrome.js"
 import { jpeg, size } from "../adapters/process.js"
 import type { Adapter, Entry, Image, StoredActivity, StreamSink } from "../adapters/types.js"
 import type { Simulator } from "../discovery.js"
+import { makeMachine } from "../machine.js"
 import { ResourceProtocol } from "../protocol.js"
 import { Resources } from "../rpc.js"
 import { makeInputQueue } from "./input-queue.js"
@@ -27,6 +28,8 @@ export interface HubOptions {
   readonly fallbackWidth?: number
   /** The Mac's iOS simulators (`GET /admin/simulators`), for plugins that cannot run `simctl` themselves. */
   readonly simulators?: () => Promise<readonly Simulator[]>
+  /** `handoff.machine` for a browse relay at `cdp` (`machine.ts` `makeMachine`). */
+  readonly machine?: (cdp: string | undefined) => Promise<string | undefined>
 }
 
 export const Upsert = Schema.Struct({
@@ -42,8 +45,19 @@ export const Upsert = Schema.Struct({
    * comes back with `running: false` or `POST /admin/calls/<call>/end` closes it.
    */
   activity: optional(Schema.Struct({ call: Schema.String, command: Schema.String, running: Schema.Boolean })),
+  /**
+   * A browse handoff's resource (`browse-handoff-remoto.md`): kept in memory only, removed by `POST
+   * /admin/resources/<id>/end`. The hub fills `handoff.machine` itself.
+   */
+  capabilities: optional(Resources.Capabilities),
+  handoff: optional(Resources.Handoff),
 })
 export type Upsert = typeof Upsert.Type
+
+export const EndInput = Schema.Struct({
+  reason: Schema.Literals(Object.values(Resources.handoffEndReasons)),
+})
+export const AnnounceInput = Schema.Struct({ ids: Schema.Array(Schema.String).check(Schema.isMaxLength(64)) })
 
 export const ControlInput = Schema.Struct({ action: Schema.Literals(["take", "renew", "release"]) })
 export const TicketInput = Schema.Struct({ id: Schema.String, capability: Resources.Capability })
@@ -96,6 +110,8 @@ const decodeStored = Schema.decodeUnknownOption(Schema.Array(StoredEntry))
 const decodeUpsert = Schema.decodeUnknownOption(Upsert)
 const decodeControl = Schema.decodeUnknownOption(ControlInput)
 const decodeTicket = Schema.decodeUnknownOption(TicketInput)
+const decodeEnd = Schema.decodeUnknownOption(EndInput)
+const decodeAnnounce = Schema.decodeUnknownOption(AnnounceInput)
 const decodeClient = Schema.decodeUnknownOption(Schema.fromJsonString(ResourceProtocol.ClientMessage))
 const decodeInputs = Schema.decodeUnknownOption(
   Schema.Struct({ events: Schema.Array(ResourceProtocol.Input).check(Schema.isMaxLength(64)) }),
@@ -165,6 +181,7 @@ const stoppedRetentionMs = 7 * 24 * 3_600_000
  */
 export function createHub(options: HubOptions) {
   const now = options.now ?? Date.now
+  const machine = options.machine ?? makeMachine()
   const entries = new Map<string, Entry>()
   const locks = new Map<string, { token: string; since: number; expiresAt: number }>()
   const lives = new Map<string, Live>()
@@ -194,7 +211,9 @@ export function createHub(options: HubOptions) {
     writing = setTimeout(() => {
       writing = undefined
       const temporary = `${file}.${process.pid}.tmp`
-      void Bun.write(temporary, JSON.stringify([...entries.values()]), { mode: 0o600 })
+      // A handoff's resource lives only as long as its handoff waits, which never outlasts this hub's server.
+      const kept = [...entries.values()].filter((entry) => !entry.handoff)
+      void Bun.write(temporary, JSON.stringify(kept), { mode: 0o600 })
         .then(() => fs.rename(temporary, file))
         .catch((error) => console.error("resources hub: could not persist the registry", error))
     }, 300)
@@ -251,6 +270,8 @@ export function createHub(options: HubOptions) {
             })),
           }
         : {}),
+      ...(entry.capabilities ? { capabilities: entry.capabilities } : {}),
+      ...(entry.handoff ? { handoff: entry.handoff } : {}),
     }
   }
 
@@ -274,6 +295,10 @@ export function createHub(options: HubOptions) {
       ...(input.activity || existing?.activity
         ? { activity: record(existing?.activity ?? [], input.activity, input.owner, at) }
         : {}),
+      ...((input.capabilities ?? existing?.capabilities)
+        ? { capabilities: input.capabilities ?? existing?.capabilities }
+        : {}),
+      ...((input.handoff ?? existing?.handoff) ? { handoff: input.handoff ?? existing?.handoff } : {}),
     }
     entries.set(id, entry)
     changed(id)
@@ -308,8 +333,23 @@ export function createHub(options: HubOptions) {
    */
   const register = async (input: Upsert) => {
     const adapter = options.adapters[input.kind]
+    if (input.handoff) return handoff(input, input.handoff)
     const meta = adapter.identify ? await adapter.identify(input.meta).catch(() => input.meta) : input.meta
     return upsert({ ...input, meta })
+  }
+
+  /**
+   * A browse handoff's resource exists only once its tab is known: the adapter must identify it (the relay answers and
+   * the session has the tab), else the registration fails and the handoff gets no resource. `machine` is the hub's.
+   */
+  const handoff = async (input: Upsert, handoff: Resources.Handoff) => {
+    const identify = options.adapters[input.kind].identify
+    if (!identify) throw new Error("This kind has no browse handoffs")
+    const meta = await identify(input.meta)
+    if (meta.kind !== "chrome" || !meta.targetID) throw new Error("The handoff's tab was not found")
+    const { machine: _, ...rest } = handoff
+    const id = await machine(meta.cdp).catch(() => undefined)
+    return upsert({ ...input, meta, handoff: { ...rest, ...(id ? { machine: id } : {}) } })
   }
 
   /** Closes a shell command on every resource it named: the resource stops counting as in use for it. */
@@ -332,9 +372,50 @@ export function createHub(options: HubOptions) {
     const live = lives.get(id)
     live?.controller.abort()
     if (locks.has(id)) void release(id, "returned").then(() => queues.delete(id))
+    const entry = entries.get(id)
     entries.delete(id)
     snapshots.delete(id)
+    if (entry) void options.adapters[entry.kind].forget?.(entry).catch(() => undefined)
     changed(id)
+  }
+
+  /**
+   * Ends a browse handoff's resource (`browse-handoff-remoto.md`, Lifecycle): Alexandre's control stops at once, without
+   * a hand-back notice; every viewer gets `end { reason }` and is closed; the entry goes. No `changed` event: the
+   * plugin announces the handoff's end first and then the resources' (`announce`).
+   */
+  const finish = async (id: string, reason: string) => {
+    const entry = entries.get(id)
+    if (!entry) return false
+    entries.delete(id)
+    snapshots.delete(id)
+    locks.delete(id)
+    await queues.get(id)?.reset()
+    queues.delete(id)
+    const live = lives.get(id)
+    if (live) {
+      lives.delete(id)
+      clearInterval(live.ticker)
+      clearTimeout(live.linger)
+      live.viewers.forEach((viewer) => {
+        viewer.text({ type: "end", reason })
+        viewer.close()
+      })
+      live.controller.abort()
+    }
+    void options.adapters[entry.kind].forget?.(entry).catch(() => undefined)
+    persist()
+    return true
+  }
+
+  /** `custom.resources/focus`: only resources whose capabilities offer it, through their adapter. */
+  const focus = async (id: string) => {
+    const entry = entries.get(id)
+    if (!entry) return "not_found" as const
+    const adapter = options.adapters[entry.kind]
+    if (entry.capabilities?.focus !== true || !entry.handoff || !adapter.focus) return "unsupported" as const
+    await adapter.focus(entry)
+    return "ok" as const
   }
 
   const broadcastControl = (id: string) => {
@@ -728,6 +809,8 @@ export function createHub(options: HubOptions) {
     if (!lock || !token || lock.token !== token) return "not_in_control" as const
     const adapter = options.adapters[entry.kind]
     if (!adapter.input) return "unsupported" as const
+    // A batch with an input the resource's capabilities refuse is not applied at all.
+    if (events.some((event) => !allowed(entry.capabilities, event))) return "not_allowed" as const
     locks.set(id, { ...lock, expiresAt: now() + Resources.limits.controlIdleMs })
     const queue = queues.get(id) ?? inputQueue(id)
     return queue.enqueue(token, events) ? ("ok" as const) : ("input_overflow" as const)
@@ -806,6 +889,12 @@ export function createHub(options: HubOptions) {
       )
       return "error" in listed ? new Response(listed.error, { status: 502 }) : Response.json(listed)
     }
+    if (resource === "announce" && request.method === "POST") {
+      const input = decodeAnnounce(await request.json().catch(() => undefined))
+      if (Option.isNone(input)) return status(400)
+      if (input.value.ids.length > 0) emit({ type: "changed", ids: input.value.ids })
+      return Response.json({})
+    }
     if (resource === "calls" && id && action === "end" && request.method === "POST") {
       end(decodeURIComponent(id))
       return Response.json({})
@@ -813,6 +902,8 @@ export function createHub(options: HubOptions) {
     if (resource === "tickets" && request.method === "POST") {
       const input = decodeTicket(await request.json().catch(() => undefined))
       if (Option.isNone(input)) return status(400)
+      // A resource that is gone (a handoff's, once it ended) is `not_found`; 409 is control not taken.
+      if (!entries.has(input.value.id)) return status(404)
       const result = ticket(input.value.id, input.value.capability)
       return result ? Response.json(result) : status(409)
     }
@@ -823,7 +914,12 @@ export function createHub(options: HubOptions) {
       })
     if (!id && request.method === "PUT") {
       const input = decodeUpsert(await request.json().catch(() => undefined))
-      return Option.isSome(input) ? Response.json(await register(input.value)) : status(400)
+      if (Option.isNone(input)) return status(400)
+      const result = await register(input.value).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+      )
+      return "error" in result ? new Response(result.error, { status: 502 }) : Response.json(result.value)
     }
     const decoded = decodeURIComponent(id ?? "")
     const entry = entries.get(decoded)
@@ -831,6 +927,21 @@ export function createHub(options: HubOptions) {
     if (!action && request.method === "GET") return Response.json(view(entry))
     if (!action && request.method === "DELETE") {
       remove(decoded)
+      return Response.json({})
+    }
+    if (action === "end" && request.method === "POST") {
+      const input = decodeEnd(await request.json().catch(() => undefined))
+      if (Option.isNone(input)) return status(400)
+      return (await finish(decoded, input.value.reason)) ? Response.json({}) : status(404)
+    }
+    if (action === "focus" && request.method === "POST") {
+      const result = await focus(decoded).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+      )
+      if ("error" in result) return new Response(result.error, { status: 502 })
+      if (result.value === "not_found") return status(404)
+      if (result.value === "unsupported") return Response.json({ reason: "unsupported" }, { status: 409 })
       return Response.json({})
     }
     if (action === "control" && request.method === "POST") {
@@ -1034,6 +1145,8 @@ export function createHub(options: HubOptions) {
     upsert,
     register,
     end,
+    finish,
+    focus,
     control,
     ticket,
     probe,
@@ -1048,6 +1161,7 @@ export function createHub(options: HubOptions) {
 export function idFor(meta: Resources.Meta) {
   if (meta.kind === "ios-simulator") return `ios-simulator:${meta.udid}`
   if (meta.kind === "android-emulator") return `android-emulator:${meta.avd ?? meta.serial ?? "unknown"}`
+  if (meta.browse) return `chrome:browse:${meta.browse}`
   // Sessions are per `playwright-cli` namespace: global ones keep the plain name, workspace ones add its full path.
   // Entries registered under older IDs (`chrome:default@<folder>`) keep them: `upsert` matches by `sameResource`.
   const namespace = meta.session && meta.workspace ? namespaceOf(meta.workspace) : ""
@@ -1115,6 +1229,9 @@ export function sameResource(a: Resources.Meta, b: Resources.Meta) {
     if (a.avd !== undefined && b.avd !== undefined) return a.avd === b.avd
     return a.serial !== undefined && a.serial === b.serial
   }
+  // A browse session is its own resource, even though every session shares the relay's endpoint.
+  if (a.kind === "chrome" && b.kind === "chrome" && (a.browse !== undefined || b.browse !== undefined))
+    return a.browse === b.browse
   if (a.kind === "chrome" && b.kind === "chrome")
     return (
       (a.session !== undefined && a.session === b.session && sameNamespace(a.workspace, b.workspace)) ||
@@ -1137,7 +1254,16 @@ export function label(entry: Pick<Entry, "name" | "meta">) {
   if (meta.kind === "ios-simulator") return join([meta.device, meta.name]) || `Simulador ${meta.udid.slice(0, 8)}`
   if (meta.kind === "android-emulator")
     return join([meta.device, meta.avd?.replaceAll("_", " ")]) || meta.serial || "Emulador Android"
+  if (meta.browse) return `Navegador · ${(meta.url && URL.parse(meta.url)?.host) || meta.browse}`
   return page(meta.url) ?? meta.title ?? meta.session ?? "Chrome"
+}
+
+/** Whether `capabilities` let `event` through: `false` refuses navigation (and the back button) or tab switching. */
+export function allowed(capabilities: Resources.Capabilities | undefined, event: ResourceProtocol.Input) {
+  if (event.type === "navigate")
+    return event.action === "tab" ? capabilities?.tabs !== false : capabilities?.navigation !== false
+  if (event.type === "button" && event.button === "back") return capabilities?.navigation !== false
+  return true
 }
 
 function page(value: string | undefined) {

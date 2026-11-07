@@ -1,0 +1,39 @@
+{
+  "id": "chrome:browse:github-login",
+  "kind": "chrome",
+  "label": "Navegador · github.com",
+  "purpose": "Faça login no GitHub e clique em Continue",
+  "owner": {
+    "sessionID": "ses_01JZLIVEACTIVITY0000000002",
+    "rootSessionID": "ses_01JZLIVEACTIVITY0000000001",
+    "agent": "build"
+  },
+  "state": "agent",
+  "meta": {
+    "kind": "chrome",
+    "cdp": "http://127.0.0.1:19988",
+    "browse": "github-login",
+    "targetID": "DCE46F98C99EA57BCEEAA18414974AC9",
+    "url": "https://github.com/login",
+    "title": "Sign in to GitHub · GitHub"
+  },
+  "discoveredAt": 1793104743000,
+  "lastUsedAt": 1793104743000,
+  "updatedAt": 1793104743000,
+  "live": {
+    "stream": true,
+    "input": true
+  },
+  "capabilities": {
+    "navigation": false,
+    "tabs": false,
+    "focus": true
+  },
+  "handoff": {
+    "id": "brw_5a1f0c2e9b7d4e3f8a6b1c0d2e4f6a8b",
+    "sessionID": "ses_01JZLIVEACTIVITY0000000002",
+    "message": "Faça login no GitHub e clique em Continue",
+    "since": 1793104740000,
+    "machine": "6bddb31758856bc72576df7efe962388680699da58a52a7f95758f14bc087956"
+  }
+}

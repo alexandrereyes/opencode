@@ -1,0 +1,19 @@
+{
+  "aps": {
+    "alert": {
+      "title": "Live Activity no iOS",
+      "body": "Navegador: Faça login no GitHub e clique em Continue"
+    },
+    "sound": "default",
+    "thread-id": "ses_01JZLIVEACTIVITY0000000001",
+    "interruption-level": "active"
+  },
+  "opencode": {
+    "kind": "session.attention",
+    "serverKey": "mac-principal",
+    "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+    "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
+    "attention": "browser",
+    "resourceID": "chrome:browse:github-login"
+  }
+}

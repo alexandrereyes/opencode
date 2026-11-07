@@ -112,6 +112,7 @@ export const list = Effect.fn("Navigation.list")(function* (
               browserAt: newestHandoff.since,
               browserCount: handoffs.get(row.session.id)?.length ?? 1,
               browserText: newestHandoff.message,
+              ...(newestHandoff.resourceID ? { browserResourceID: newestHandoff.resourceID } : {}),
             }
           : {}),
         ...(newest && waited

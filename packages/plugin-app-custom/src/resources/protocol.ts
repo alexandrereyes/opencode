@@ -115,8 +115,10 @@ export const maxFramesInFlight = 3
 /**
  * Hub → client text messages on `/stream`. Binary messages are frames (see `encodeFrame`). `features` comes first and
  * tells clients which optional messages this hub understands; older hubs never send it. `error` messages include
- * `input_failed` (an input could not be applied; the event itself is never echoed), `input_overflow` and
- * `invalid_ticket`; a stream that fails ends with `error` carrying the adapter's message.
+ * `input_failed` (an input could not be applied; the event itself is never echoed), `input_overflow`,
+ * `invalid_ticket` and (rev. 2026-11-07) `not_allowed` (the resource's `capabilities` refuse that input); a stream
+ * that fails ends with `error` carrying the adapter's message. `end` reasons: `ended`, and for a browse handoff's
+ * resource `handoff_completed`, `handoff_timeout`, `handoff_cancelled`, `handoff_failed` (`Resources.handoffEndReasons`).
  */
 export type ServerMessage =
   | {

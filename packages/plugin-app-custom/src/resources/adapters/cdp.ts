@@ -46,6 +46,7 @@ export interface Commands {
   }
   "Browser.setWindowBounds": { params: { windowId: number; bounds: { width?: number; height?: number } }; result: {} }
   "Target.activateTarget": { params: { targetId: string }; result: {} }
+  "Page.bringToFront": { params: {}; result: {} }
   "Page.enable": { params: {}; result: {} }
   "Page.startScreencast": {
     params: { format: "jpeg" | "png"; quality?: number; maxWidth?: number; maxHeight?: number; everyNthFrame?: number }
@@ -124,6 +125,12 @@ export interface Events {
 
 export class CDPError extends Error {}
 
+/** A URL as messages may show it: never its query or credentials. */
+export function withoutQuery(url: string) {
+  const parsed = URL.parse(url)
+  return parsed ? `${parsed.protocol}//${parsed.host}${parsed.pathname}` : "(invalid URL)"
+}
+
 /** What the Chrome adapter needs from a DevTools connection: the browser WebSocket (`CDP`) or the Playwright relay. */
 export interface Transport {
   send<M extends keyof Commands>(
@@ -175,13 +182,17 @@ export class CDP implements Transport {
     })
   }
 
-  /** Connects to `ws://…/devtools/browser/…`; rejects after `timeout` milliseconds. */
+  /**
+   * Connects to `ws://…/devtools/browser/…`; rejects after `timeout` milliseconds. Errors name the URL without its query,
+   * which carries the browse relay's token.
+   */
   static connect(url: string, timeout = 5_000) {
+    const shown = withoutQuery(url)
     return new Promise<CDP>((resolve, reject) => {
       const socket = new WebSocket(url)
       const timer = setTimeout(() => {
         socket.close()
-        reject(new CDPError(`CDP connection to ${url} timed out`))
+        reject(new CDPError(`CDP connection to ${shown} timed out`))
       }, timeout)
       socket.addEventListener("open", () => {
         clearTimeout(timer)
@@ -189,7 +200,7 @@ export class CDP implements Transport {
       })
       socket.addEventListener("error", () => {
         clearTimeout(timer)
-        reject(new CDPError(`CDP connection to ${url} failed`))
+        reject(new CDPError(`CDP connection to ${shown} failed`))
       })
     })
   }

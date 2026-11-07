@@ -79,6 +79,11 @@ export const Attention = Schema.Struct({
   kind: AttentionKind,
   since: Schema.Number,
   text: optional(Schema.String),
+  /**
+   * rev. 2026-11-07, kind `browser` only (`browse-handoff-remoto.md`): the resource that shows the handoff's tab, when
+   * it has one.
+   */
+  resourceID: optional(Schema.String),
 }).annotate({ identifier: "LiveActivity.Attention" })
 
 export const RowStatus = Schema.Literals(["question", "permission", "browser", "failed", "working", "idle"]).annotate({

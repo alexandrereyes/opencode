@@ -1,0 +1,26 @@
+[
+  {
+    "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+    "ended": {
+      "id": "brw_5a1f0c2e9b7d4e3f8a6b1c0d2e4f6a8b",
+      "resourceID": "chrome:browse:github-login",
+      "outcome": "completed"
+    }
+  },
+  {
+    "sessionID": "ses_01JZLIVEACTIVITY0000000001",
+    "ended": {
+      "id": "brw_5a1f0c2e9b7d4e3f8a6b1c0d2e4f6a8b",
+      "resourceID": "chrome:browse:github-login",
+      "outcome": "timeout"
+    }
+  },
+  {
+    "sessionID": "ses_01JZOAUTHLOGIN000000000003",
+    "ended": { "id": "brw_0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b", "outcome": "cancelled" }
+  },
+  {
+    "sessionID": "ses_01JZOAUTHLOGIN000000000003",
+    "ended": { "id": "brw_0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b", "outcome": "failed" }
+  }
+]

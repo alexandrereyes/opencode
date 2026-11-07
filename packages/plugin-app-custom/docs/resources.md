@@ -42,6 +42,7 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | `live`                                    | `{ stream, input }`: whether the adapter implements them (without `stream` the hub streams snapshots)                                                                                     |
 | `discoveredAt`, `lastUsedAt`, `updatedAt` | Epoch ms                                                                                                                                                                                  |
 | `activity`                                | Optional (rev. 2026-10-30): the agents' latest shell commands that named it, newest first, at most 5: `{ at, command, sessionID?, agent?, running? }`; see [Activity](#activity)          |
+| `capabilities`, `handoff`                 | Optional (rev. 2026-11-07): what the viewer may offer (`false` = the hub refuses it) and the browse handoff a `chrome:browse:<session>` resource exists for; see [browse-handoff-remoto.md](browse-handoff-remoto.md) |
 
 Two registrations name the same resource when they share a UDID, a Playwright session or CDP endpoint, or, for
 Android, the same AVD (see [Android identity](#android-identity)); the hub merges them into one entry (metadata
@@ -84,6 +85,9 @@ Admin (`authorization: Bearer <secret>` from `hub.json`; loopback only, never pr
 `GET|DELETE /admin/resources/<id>`, `POST /admin/resources/<id>/control`, `GET /admin/resources/<id>/snapshot`,
 `POST /admin/tickets`, `GET /admin/locks`, `GET /admin/simulators` (`{ simulators: [{ udid, name, booted }] }` from the
 hub's `simctl`), `POST /admin/events?wait=<ms>` (long poll; each event goes to exactly one caller), `POST /admin/shutdown`.
+Browse handoffs (rev. 2026-11-07, `browse-handoff-remoto.md`): the upsert also takes `capabilities` and `handoff`,
+`POST /admin/resources/<id>/end { reason }` ends one without an event, `POST /admin/announce { ids }` queues its
+`changed`, `POST /admin/resources/<id>/focus` (409 `unsupported`, 502 when the browser refuses).
 
 ### Remote hub (server on Linux)
 
@@ -368,7 +372,14 @@ dropped. While only watching, the stream is the screencast alone.
 After `playwright-cli resize`, headless Chrome screencasts its window instead of the emulated viewport (a 393 × 659
 iPhone viewport in the default 500 × 572 window lost its bottom 87 px). The adapter then grows the window to hold the
 viewport (`Browser.setWindowBounds`, emulation untouched); windows are at least 500 px wide, so such a page keeps a
-margin on the right, and sharp stills (viewport only) are skipped so frames and taps share one geometry.
+margin on the right, and sharp stills (viewport only) are skipped so frames and taps share one geometry. Never in
+Alexandre's own Chrome (attached sessions and browse handoffs).
+
+Browser zoom (rev. 2026-11-07; Alexandre's Chrome runs at 125 %): screencast frames measure the viewport in
+device-independent pixels while input takes CSS pixels, so taps landed 25 % off. The adapter reads `innerWidth` ×
+`innerHeight` (at most once a second, when input needs it) and, when both differ from the frame by the same factor,
+maps touches, scrolls and `meta.viewport` through it (`browserZoom`). A window larger than an emulated viewport (above)
+is no zoom. Every mode shares it: `playwright-cli` sessions, attached ones and browse handoffs.
 
 **Meta** (`ChromeState`, replaced whole on every change): `{ url, title, canGoBack, canGoForward, targetID, tabs:
 [{ id, title, url }], focus: { editable, field? }, editTaps, viewport?: { width, height } }`. `focus.field` is one of

@@ -364,6 +364,7 @@ export function scene(name: Scene, server = world()) {
       sessionID: "ses_child_3",
       since: 1793104740000,
       message: "Faça login no GitHub e clique em Continue",
+      resourceID: "chrome:browse:github-login",
     })
   return Effect.gen(function* () {
     for (const event of events) yield* tracker.apply(event, "created" in event ? event.created : T)

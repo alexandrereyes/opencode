@@ -29,6 +29,13 @@ export function makeRegistry() {
     add: (entry: Entry) => {
       entries.set(entry.id, entry)
     },
+    /** Gives a call that has not started waiting its resource; false when it already ended. */
+    attach: (id: string, resourceID: string) => {
+      const entry = entries.get(id)
+      if (!entry || entry.waiting) return false
+      entries.set(id, { ...entry, resourceID })
+      return true
+    },
     /** Marks a call as waiting; false when it already ended. */
     reveal: (id: string) => {
       const entry = entries.get(id)
@@ -37,13 +44,12 @@ export function makeRegistry() {
       notify()
       return true
     },
-    /** Removes the entries `match` selects; the removed ones that were waiting are returned. */
+    /** Removes the entries `match` selects and returns them (only removing waiting ones is a change). */
     remove: (match: (entry: Entry) => boolean) => {
       const removed = [...entries.values()].filter(match)
       for (const entry of removed) entries.delete(entry.id)
-      const waiting = removed.filter((entry) => entry.waiting)
-      if (waiting.length > 0) notify()
-      return waiting
+      if (removed.some((entry) => entry.waiting)) notify()
+      return removed
     },
     /** The calls waiting now, oldest first. */
     waiting: (): readonly Entry[] =>
@@ -69,6 +75,7 @@ export const wire = (entry: Entry): BrowserHandoffs.Handoff => ({
   messageID: entry.messageID,
   message: entry.message,
   since: entry.since,
+  ...(entry.resourceID ? { resourceID: entry.resourceID } : {}),
 })
 
 declare global {

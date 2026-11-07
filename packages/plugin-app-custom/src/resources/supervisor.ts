@@ -15,7 +15,7 @@ const decodeInfo = Schema.decodeUnknownOption(Info)
 
 export class HubError extends Error {
   constructor(
-    readonly reason: "hub" | "not_found" | "failed",
+    readonly reason: "hub" | "not_found" | "failed" | "unsupported",
     message: string,
   ) {
     super(message)
@@ -305,6 +305,27 @@ export function makeHubClient(options: HubSettings) {
         takenAt: Number(response.headers.get("x-taken-at") ?? Date.now()),
         ...(width > 0 ? { width, height } : {}),
       }
+    },
+    /**
+     * Ends a browse handoff's resource (`browse-handoff-remoto.md`): its viewers get `end { reason }` and it is gone,
+     * without a `changed` event yet (`announce`). Never starts the hub: only a running one has it.
+     */
+    finish: (id: string, reason: (typeof Resources.handoffEndReasons)[keyof typeof Resources.handoffEndReasons]) =>
+      json<{}>(`${resource(id)}/end`, { method: "POST", body: JSON.stringify({ reason }), spawn: false }).then(
+        () => undefined,
+      ),
+    /** Queues a `changed` event for `ids`, relayed as `rpc.custom.resources.changed` like every other. */
+    announce: (ids: readonly string[]) =>
+      json<{}>("/admin/announce", { method: "POST", body: JSON.stringify({ ids }), spawn: false }).then(
+        () => undefined,
+      ),
+    /** `custom.resources/focus`: `unsupported` when the resource does not offer it. */
+    focus: async (id: string) => {
+      const response = await request(`${resource(id)}/focus`, { method: "POST", spawn: false, slow: true })
+      if (!response) throw unavailable()
+      if (response.status === 404) throw new HubError("not_found", "Resource not found")
+      if (response.status === 409) throw new HubError("unsupported", "This resource cannot be focused")
+      if (!response.ok) throw new HubError("failed", (await response.text()) || "Focus failed")
     },
     /** Ends a shell command on the resources it named. Never starts the hub: only a running one marked it. */
     end: (call: string) =>

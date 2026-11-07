@@ -35,6 +35,8 @@ export const Info = Schema.Struct({
   browserAt: Schema.Finite.pipe(Schema.optional),
   browserCount: Schema.Int.pipe(Schema.optional),
   browserText: Schema.String.pipe(Schema.optional),
+  /** rev. 2026-11-07 (`browse-handoff-remoto.md`): the newest one's resource, when it has one. */
+  browserResourceID: Schema.String.pipe(Schema.optional),
   /**
    * Background work other than subagents (shell commands) still running for this session that someone waits on: the
    * session is top-level or still executes, so its end wakes a turn that reaches Alexandre. It keeps the family working.

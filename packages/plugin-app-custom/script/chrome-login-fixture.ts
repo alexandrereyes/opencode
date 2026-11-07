@@ -1,7 +1,11 @@
 /**
- * Local login page for the Chrome resource checks: a form with e-mail and password, a long scrollable area, and a
+ * Local login page for the Chrome resource checks: a form with e-mail and password, a link to another origin
+ * (`localhost` instead of `127.0.0.1`, for allowlists), a long scrollable area, and a
  * second page for back/forward, and `/animacao` (a spinner that repaints continuously). `POST /login` answers with the e-mail and the password length only; `GET /last`
- * returns the last login (e-mail and password length, never the password) and the deepest scroll reported by the page.
+ * returns the last login (e-mail and password length, never the password), the deepest scroll reported by the page and
+ * what the page saw of the keyboard and its focus: shortcut and named keys (`Meta+l`, `Backspace`; never a typed
+ * character) and `blur`/`focus`/`hidden`/`visible` events, so a check can tell a key the page got from one the browser
+ * took.
  *
  *   bun packages/plugin-app-custom/script/chrome-login-fixture.ts --port 5173
  */
@@ -9,12 +13,18 @@ import { parseArgs } from "node:util"
 
 const args = parseArgs({ options: { port: { type: "string", default: "0" } } }).values
 
-const last = { email: "", passwordLength: 0, maxScroll: 0 }
+const last = { email: "", passwordLength: 0, maxScroll: 0, keys: [] as string[], focus: [] as string[] }
 
 const page = (title: string, body: string) => `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-<script>addEventListener("scroll", () => { if (scrollY > 0) navigator.sendBeacon("/scrolled?y=" + Math.round(scrollY)) })</script>
+<script>addEventListener("scroll", () => { if (scrollY > 0) navigator.sendBeacon("/scrolled?y=" + Math.round(scrollY)) })
+addEventListener("keydown", (e) => {
+  const mods = (e.metaKey ? "Meta+" : "") + (e.ctrlKey ? "Control+" : "") + (e.altKey ? "Alt+" : "")
+  if (mods || e.key.length > 1) navigator.sendBeacon("/seen?key=" + encodeURIComponent(mods + e.key))
+})
+for (const kind of ["blur", "focus"]) addEventListener(kind, () => navigator.sendBeacon("/seen?focus=" + kind))
+document.addEventListener("visibilitychange", () => navigator.sendBeacon("/seen?focus=" + document.visibilityState))</script>
 <style>
   body { font: 17px -apple-system, system-ui, sans-serif; margin: 0; background: #f7f8fb; color: #111; }
   main { max-width: 420px; margin: 0 auto; padding: 32px 20px; }
@@ -25,17 +35,19 @@ const page = (title: string, body: string) => `<!doctype html>
   .row { padding: 18px 0; border-bottom: 1px solid #dde; } a { color: #1f6feb; }
 </style></head><body><main>${body}</main></body></html>`
 
-const login = page(
-  "Entrar · Abacato",
-  `<h1>Abacato</h1><h2 style="text-align:center">Entrar</h2>
+const login = () =>
+  page(
+    "Entrar · Abacato",
+    `<h1>Abacato</h1><h2 style="text-align:center">Entrar</h2>
   <form method="post" action="/login">
     <label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="username" placeholder="voce@exemplo.com">
     <label for="password">Senha</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Sua senha">
     <button id="submit" type="submit">Entrar</button>
   </form>
   <p style="text-align:center"><a id="help" href="/ajuda">Esqueci minha senha</a></p>
+  <p style="text-align:center"><a id="outside" href="http://localhost:${server.port}/ajuda">Ajuda em outra origem</a></p>
   ${Array.from({ length: 40 }, (_, index) => `<div class="row" id="row-${index + 1}">Linha ${index + 1}</div>`).join("")}`,
-)
+  )
 
 const server = Bun.serve({
   port: Number(args.port),
@@ -48,12 +60,19 @@ const server = Bun.serve({
       last.maxScroll = Math.max(last.maxScroll, Number(url.searchParams.get("y")) || 0)
       return new Response(null, { status: 204 })
     }
+    if (url.pathname === "/seen") {
+      const key = url.searchParams.get("key")
+      const focus = url.searchParams.get("focus")
+      if (key) last.keys.push(key.slice(0, 40))
+      if (focus) last.focus.push(focus.slice(0, 20))
+      return new Response(null, { status: 204 })
+    }
     if (url.pathname === "/reset") {
-      Object.assign(last, { email: "", passwordLength: 0, maxScroll: 0 })
+      Object.assign(last, { email: "", passwordLength: 0, maxScroll: 0, keys: [], focus: [] })
       return new Response(null, { status: 204 })
     }
     if (url.pathname === "/" || url.pathname === "/login") {
-      if (request.method !== "POST") return html(login)
+      if (request.method !== "POST") return html(login())
       const form = await request.formData()
       const email = String(form.get("email") ?? "")
       const length = String(form.get("password") ?? "").length

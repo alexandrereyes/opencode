@@ -71,6 +71,11 @@ export const ChromeMeta = Schema.Struct({
   workspace: optional(Schema.String),
   /** CDP HTTP endpoint, for example `http://127.0.0.1:9333`. */
   cdp: optional(Schema.String),
+  /**
+   * rev. 2026-11-07 (`browse-handoff-remoto.md`): a browse session (`session_new` id) reached through the browse relay
+   * at `cdp`. Only that session's waiting-handoff tab is visible on the connection.
+   */
+  browse: optional(Schema.String),
   /** CDP target (page) the viewer follows. */
   targetID: optional(Schema.String),
   url: optional(Schema.String),
@@ -103,6 +108,40 @@ export const Activity = Schema.Struct({
   running: optional(Schema.Boolean),
 }).annotate({ identifier: "Resources.Activity" })
 
+/**
+ * rev. 2026-11-07 (`browse-handoff-remoto.md`): what the viewer may offer, beyond watching and touching. `false` means
+ * the hub refuses it (`error not_allowed`), so the viewer hides it; absent means allowed, as on every resource before.
+ */
+export interface Capabilities extends Schema.Schema.Type<typeof Capabilities> {}
+export const Capabilities = Schema.Struct({
+  /** The address bar, back, forward and reload (`navigate` inputs with `url`, `back`, `forward`, `reload`). */
+  navigation: optional(Schema.Boolean),
+  /** Switching tabs (`navigate` with `tab`) and the tab list. */
+  tabs: optional(Schema.Boolean),
+  /**
+   * `focus` (bring the tab to the front in its own browser on the Mac). Unlike the others it is offered only when
+   * `true`: absent means the resource has no such action.
+   */
+  focus: optional(Schema.Boolean),
+}).annotate({ identifier: "Resources.Capabilities" })
+
+/** rev. 2026-11-07: the browse handoff a `chrome:browse:<session>` resource exists for (`browse-handoff-remoto.md`). */
+export interface Handoff extends Schema.Schema.Type<typeof Handoff> {}
+export const Handoff = Schema.Struct({
+  /** `custom.browser-handoffs` item ID. */
+  id: Schema.String,
+  /** The agent session whose call waits (top-level or a subagent); `owner` names the same session and its root. */
+  sessionID: Schema.String,
+  message: Schema.String,
+  since: Schema.Number,
+  /**
+   * The machine the tab's Chrome runs on (`machine.ts`: SHA-256 of its `IOPlatformUUID`), present only when the plugin
+   * can vouch for it: the browse relay runs on the hub's Mac and accepts browsers on loopback only. The Mac app shows
+   * "Abrir no Chrome" only when it equals its own.
+   */
+  machine: optional(Schema.String),
+}).annotate({ identifier: "Resources.Handoff" })
+
 export interface Resource extends Schema.Schema.Type<typeof Resource> {}
 export const Resource = Schema.Struct({
   id: ID,
@@ -122,7 +161,22 @@ export const Resource = Schema.Struct({
   live: Schema.Struct({ stream: Schema.Boolean, input: Schema.Boolean }),
   /** The agents' latest shell commands that named it, newest first; absent until one does (and on older hubs). */
   activity: optional(Schema.Array(Activity)),
+  /** rev. 2026-11-07: see `Capabilities`; absent on every resource but browse handoffs, and on older hubs. */
+  capabilities: optional(Capabilities),
+  /** rev. 2026-11-07: present only on `chrome:browse:<session>` resources, which exist only while it waits. */
+  handoff: optional(Handoff),
 }).annotate({ identifier: "Resources.Resource" })
+
+/**
+ * rev. 2026-11-07: `end` reasons a viewer of a browse handoff's resource receives when the handoff stops waiting (the
+ * resource is removed right after). Other resources keep ending with `ended`.
+ */
+export const handoffEndReasons = {
+  completed: "handoff_completed",
+  timeout: "handoff_timeout",
+  cancelled: "handoff_cancelled",
+  failed: "handoff_failed",
+} as const
 
 export const Capability = Schema.Literals(["view", "control"]).annotate({ identifier: "Resources.Capability" })
 export type Capability = typeof Capability.Type
@@ -167,6 +221,9 @@ export const limits = {
   activityCommandLength: 160,
 }
 
+export const FocusInput = Schema.Struct({ id: ID }).annotate({ identifier: "Resources.FocusInput" })
+export const FocusOutput = Schema.Struct({}).annotate({ identifier: "Resources.FocusOutput" })
+
 const error = { unavailable: Schema.toStandardSchemaV1(Unavailable) }
 
 export const Definition = Rpc.define({
@@ -208,6 +265,17 @@ export const Definition = Rpc.define({
         Schema.Struct({ id: ID, action: Schema.Literals(["take", "renew", "release"]) }),
       ),
       output: Schema.toStandardSchemaV1(Schema.Struct({ resource: Resource, ticket: optional(Ticket) })),
+      errors: error,
+    },
+    /**
+     * rev. 2026-11-07 (`browse-handoff-remoto.md`): brings the resource's tab to the front of its window and that window
+     * to the front of its browser, for "Abrir no Chrome" on the Mac (which then activates the browser app). Only
+     * resources with `capabilities.focus: true`, only while their handoff waits, only their own tab:
+     * `unavailable { reason: "unsupported" }` otherwise (`not_found` once the resource is gone).
+     */
+    focus: {
+      input: Schema.toStandardSchemaV1(FocusInput),
+      output: Schema.toStandardSchemaV1(FocusOutput),
       errors: error,
     },
     /** Removes a resource from the lists; it reappears if an agent uses it again. */
