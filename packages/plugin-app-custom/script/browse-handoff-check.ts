@@ -16,6 +16,12 @@
  *
  *   bun packages/plugin-app-custom/script/browse-handoff-check.ts --server-url http://127.0.0.1:4196 --home <sandbox> \
  *     --session <browse session> --scenario completed|timeout|cancelled|keys [--fixture http://127.0.0.1:5191]
+ *
+ * `--app <state.json>`: the apps act instead of this script's own viewer. Once the handoff waits it writes the agent's
+ * session, the resource and the page's positions (normalized to the viewport) to that file and waits for the end:
+ * `completed` when the app taps Continue, `timeout` after `--timeout-ms` (default 90 s here), `cancelled` and `failed`
+ * (the tab closes) 10 s after the app takes control, and `nosession` (a browse call without `session`: no
+ * resource, so no Resolver) is interrupted once `<state.json>.done` exists. The end is then checked from the events.
  */
 import { readFileSync } from "node:fs"
 import os from "node:os"
@@ -33,12 +39,17 @@ const args = parseArgs({
     model: { type: "string", default: "anthropic/claude-haiku-5-5" },
     email: { type: "string", default: "teste@exemplo.com" },
     password: { type: "string", default: "senha-falsa-123" },
+    app: { type: "string" },
+    "timeout-ms": { type: "string" },
   },
 }).values
 const server = args["server-url"]!
 if (/:(4096|4178|4179)\b/.test(server)) throw new Error("Never against production")
-const scenario = args.scenario as "completed" | "timeout" | "cancelled" | "keys"
-const expected = scenario === "keys" ? "completed" : scenario
+const scenario = args.scenario as "completed" | "timeout" | "cancelled" | "keys" | "failed" | "nosession"
+const expected = scenario === "keys" ? "completed" : scenario === "nosession" ? "cancelled" : scenario
+const app = args.app
+if (!app && (scenario === "failed" || scenario === "nosession")) throw new Error(`--scenario ${scenario} needs --app`)
+const timeoutMs = Number(args["timeout-ms"] ?? (app ? 90_000 : 20_000))
 const browse = args.session!
 const resourceID = `chrome:browse:${browse}`
 const started = Date.now()
@@ -121,7 +132,7 @@ const code = [
     ? [visit("/ajuda"), visit("/"), visit("/ajuda"), `await page.goBack({ waitUntil: "load" })`]
     : []),
   ...(scenario === "keys" ? [] : [visit("/")]),
-  `await handoff(${JSON.stringify(message)}${scenario === "timeout" ? ", { timeoutMs: 20000 }" : ""})`,
+  `await handoff(${JSON.stringify(message)}${scenario === "timeout" ? `, { timeoutMs: ${timeoutMs} }` : ""})`,
   `const email = await page.inputValue("#email")`,
   `await page.click("#submit")`,
   `await page.waitForSelector("#welcome")`,
@@ -132,12 +143,14 @@ await api(`/api/session/${sessionID}/prompt`, {
     "Chame exatamente uma vez, pelo execute do Code Mode, tools.browse.execute com estes argumentos, sem mudar nada,",
     "e espere o resultado; depois responda apenas com o resultado ou o erro, numa linha.",
     "```json",
-    JSON.stringify({ session: browse, code }),
+    // `nosession`: the call names no browse session (the current one acts), so the handoff gets no resource.
+    JSON.stringify(scenario === "nosession" ? { code } : { session: browse, code }),
     "```",
   ].join("\n"),
 })
 
 type Handoff = { id: string; sessionID: string; message: string; resourceID?: string }
+if (scenario === "nosession") await appWithoutSession()
 const handoff = await until(async () => {
   const { data } = await rpc<{ data: Handoff[] }>("custom.browser-handoffs/list", { sessionID })
   return data.find((item) => item.resourceID)
@@ -172,6 +185,7 @@ check(
   { label: resource.label, capabilities: resource.capabilities, handoff: resource.handoff, owner: resource.owner },
 )
 check("no token in the resource", !JSON.stringify(resource).includes(relayToken()))
+if (app) await appActs()
 
 type Ticket = { ticket: string; path: string; loopbackPort: number }
 const control = await rpc<{ ticket?: Ticket }>("custom.resources/control", { id: resourceID, action: "take" })
@@ -315,7 +329,12 @@ if (scenario === "completed") {
 
 await until(async () => (ended ? true : undefined), "the stream's end", 60_000).catch(() => undefined)
 await Promise.race([closed, Bun.sleep(3_000)])
-const reason = { completed: "handoff_completed", timeout: "handoff_timeout", cancelled: "handoff_cancelled" }[expected]
+const reason = {
+  completed: "handoff_completed",
+  timeout: "handoff_timeout",
+  cancelled: "handoff_cancelled",
+  failed: "handoff_failed",
+}[expected]
 check("stream ends with the reason and closes", ended === reason && ws.readyState === WebSocket.CLOSED, ended)
 await until(
   async () =>
@@ -481,8 +500,159 @@ async function positions(ids: string[]) {
       }
     }
     await cdp("Target.detachFromTarget", { sessionId })
-    return result
+    // The viewport's size too (`viewport`), so an app can map the normalized points onto its letterboxed frame.
+    return Object.assign(result, { viewport: { x: size.w, y: size.h } })
   } finally {
     ws.close()
   }
+}
+
+/** `--app`: the state file for the apps, then the scenario's trigger, then the end checked from the events only. */
+async function appActs(): Promise<never> {
+  const points = await positions(["email", "password", "continue"])
+  await Bun.write(app!, JSON.stringify({ scenario, sessionID, resourceID, handoffID: handoff.id, points }, null, 2))
+  log("state for the app written; waiting for it to act")
+  if (scenario === "cancelled" || scenario === "failed") {
+    await until(
+      async () =>
+        (await rpc<{ control?: unknown }>("custom.resources/get", { id: resourceID })).control ? true : undefined,
+      "the app to take control",
+      600_000,
+    )
+    // Time for the app's checks of its viewer in control before the end.
+    await Bun.sleep(10_000)
+    if (scenario === "cancelled") {
+      log("interrupting the agent's session")
+      await api(`/api/session/${sessionID}/interrupt`, {})
+    } else {
+      log("closing the handoff's tab")
+      await closeTab(String(resource.meta.targetID))
+    }
+  }
+  const changed = await until(
+    async () =>
+      timeline.find(
+        (item) =>
+          item.what === "rpc.custom.browser-handoffs.changed" &&
+          (item.data as { ended?: { id: string } }).ended?.id === handoff.id,
+      ),
+    "the handoff to end",
+    scenario === "timeout" ? timeoutMs + 60_000 : 600_000,
+  )
+  await until(
+    async () =>
+      timeline.some(
+        (item) =>
+          item.what === "rpc.custom.resources.changed" &&
+          JSON.stringify(item.data).includes(resourceID) &&
+          item.at > changed.at,
+      )
+        ? true
+        : undefined,
+    "resources.changed after the end",
+    10_000,
+  ).catch(() => undefined)
+  const outcome = (changed.data as { ended?: { outcome: string; resourceID?: string } }).ended
+  check("ended outcome", outcome?.outcome === expected && outcome.resourceID === resourceID, outcome)
+  const gone = await rpc("custom.resources/get", { id: resourceID }).then(
+    () => "still there",
+    (error: Error & { body?: string }) => error.body ?? error.message,
+  )
+  check("resource gone (not_found)", gone.includes("not_found"), gone)
+  return finish()
+}
+
+/** `--app --scenario nosession`: a waiting handoff without a resource, ended by interrupting once the app looked. */
+async function appWithoutSession(): Promise<never> {
+  const waiting = await until(async () => {
+    const { data } = await rpc<{ data: { id: string; resourceID?: string }[] }>("custom.browser-handoffs/list", {
+      sessionID,
+    })
+    return data[0]
+  }, "the waiting handoff")
+  check("no resourceID without a browse session", waiting.resourceID === undefined, waiting.resourceID)
+  await Bun.write(app!, JSON.stringify({ scenario, sessionID, handoffID: waiting.id }, null, 2))
+  log("state for the app written; waiting for", `${app}.done`)
+  await until(async () => ((await Bun.file(`${app}.done`).exists()) ? true : undefined), "the app's check", 600_000)
+  await api(`/api/session/${sessionID}/interrupt`, {})
+  await until(
+    async () => {
+      const { data } = await rpc<{ data: unknown[] }>("custom.browser-handoffs/list", { sessionID })
+      return data.length === 0 ? true : undefined
+    },
+    "the handoff to end",
+    60_000,
+  )
+  return finish()
+}
+
+/** `--app`: the agent finished, the page and the logs, then the cleanup. */
+async function finish(): Promise<never> {
+  await until(
+    async () =>
+      (await api<{ data: Record<string, unknown> }>("/api/session/active")).data[sessionID] ? undefined : true,
+    "the agent to finish",
+    120_000,
+  ).catch(() => undefined)
+  const page = (await (await fetch(`${args.fixture}/last`)).json()) as { email: string; passwordLength: number }
+  if (scenario === "completed")
+    check(
+      "the page got the typed login",
+      page.email === args.email && page.passwordLength === args.password!.length,
+      page,
+    )
+  const history = await api<{
+    data: { content?: { type: string; name?: string; state?: { status: string; content?: { text?: string }[] } }[] }[]
+  }>(`/api/session/${sessionID}/message?limit=20`)
+  const execute = history.data
+    .flatMap((item) => item.content ?? [])
+    .find((part) => part.type === "tool" && part.name === "execute")
+  log(
+    "agent's execute:",
+    execute?.state?.status,
+    (execute?.state?.content?.[0]?.text ?? "").replace(/\s+/g, " ").slice(0, 240),
+  )
+  const secrets = [args.password!, relayToken()]
+  const logs = [
+    path.join(args.home!, "server.log"),
+    path.join(args.home!, "xdg/state/opencode/resources-hub/hub.log"),
+    path.join(os.homedir(), ".local/state/browse/logs/relay.log"),
+  ]
+  const found = await Promise.all(
+    logs.map(async (file) => {
+      const text = await Bun.file(file)
+        .text()
+        .catch(() => "")
+      return {
+        file: path.basename(file),
+        bytes: text.length,
+        leaks: secrets.filter((secret) => text.includes(secret)).length,
+      }
+    }),
+  )
+  check(
+    "no password or token in the logs",
+    found.every((item) => item.leaks === 0),
+    found,
+  )
+  // The app may still be looking at the session: it goes only once the app is done.
+  await until(async () => ((await Bun.file(`${app}.done`).exists()) ? true : undefined), "the app to finish", 600_000)
+  await fetch(`${server}/api/session/${sessionID}`, { method: "DELETE", headers: { authorization: auth } })
+  await Bun.$`rm -rf ${repo}`.quiet()
+  console.log(JSON.stringify(results, null, 2))
+  process.exit(Object.values(results).every((value) => value === "ok" || value === scenario) ? 0 : 1)
+}
+
+/** `--app --scenario failed`: closes the handoff's tab through the relay, as Alexandre closing it would. */
+async function closeTab(targetId: string) {
+  const headers = { authorization: `Bearer ${relayToken()}`, "opencode-browser-session-id": browse }
+  const version = await (await fetch("http://127.0.0.1:19988/json/version", { headers })).json()
+  const socket = new WebSocket(version.webSocketDebuggerUrl)
+  await new Promise(
+    (resolve, reject) => ((socket.onopen = resolve), (socket.onerror = () => reject(new Error("relay")))),
+  )
+  const answered = new Promise((resolve) => (socket.onmessage = resolve))
+  socket.send(JSON.stringify({ id: 1, method: "Target.closeTarget", params: { targetId } }))
+  await Promise.race([answered, Bun.sleep(5_000)])
+  socket.close()
 }
