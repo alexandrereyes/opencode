@@ -36,6 +36,7 @@ test.each([
   ["two-questions", "state-two-questions"],
   ["mixed", "state-mixed"],
   ["failed-only", "state-failed-only"],
+  ["browser", "state-browser"],
 ] satisfies [Scene, string][])("events folded into the %s situation produce %s.json", async (name, file) => {
   const tracker = await run(scene(name))
   const state = tracker.derive(T, host).state

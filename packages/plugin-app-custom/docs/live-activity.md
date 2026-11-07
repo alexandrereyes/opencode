@@ -388,6 +388,7 @@ All in [`live-activity/`](live-activity/), generated for 2026-10-27 09:41 BRT (`
 | `state-working.json`                                     | Only working sessions, no attention (minimal shows the ring)                                        |
 | `state-failed-only.json`                                 | No focus, one failed session (minimal `!1`)                                                         |
 | `state-progress.json`                                    | Two working sessions with a Progresso (`unit: "todos"`, `current`) and one unread (rev. 2026-10-30) |
+| `state-browser.json`                                     | A subagent of the focus waits on a browse handoff: row, attention and need of kind `browser` (rev. 2026-11-07) |
 | `push-start.json` / `push-update.json` / `push-end.json` | Complete APNs bodies                                                                                |
 
 ## Change control

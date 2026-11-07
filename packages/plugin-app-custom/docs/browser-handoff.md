@@ -72,7 +72,8 @@ Precedence everywhere: question > permission > browser > failed > working > unre
 
 ## Tests
 
-`test/browser-handoff.test.ts` (detection, grace period, every way a call ends, two Locations, the tracker, the
+`docs/live-activity/state-browser.json` is the normative Live Activity state with a handoff, shared with the
+apps' tests. `test/browser-handoff.test.ts` (detection, grace period, every way a call ends, two Locations, the tracker, the
 notifier, Sessões and the family). `script/e2e-browser-handoff.ts` runs real Luna 6 / low prompts on an owned
 sandbox against `test/fixture/browse-mcp.ts`, a fake browse whose `execute` blocks while its code hands off: no relay,
 no Chrome. It checks every surface above, the clear on Continue and on interruption, and that code without a handoff

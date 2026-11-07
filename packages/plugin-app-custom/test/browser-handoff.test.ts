@@ -7,7 +7,6 @@ import { detect, handoffMessage, maxMessage, messages } from "../src/browser-han
 import { makeHandoffs } from "../src/browser-handoff/index"
 import { makeRegistry, wire } from "../src/browser-handoff/registry"
 import { BrowserHandoffs } from "../src/browser-handoff/rpc"
-import { LiveActivity } from "../src/live-activity/rpc"
 import { makeTracker } from "../src/live-activity/tracker"
 import { makeRegistry as makeActivities } from "../src/live-activity/lifecycle"
 import { makeNotificationRegistry, makeNotifier } from "../src/notifications/index"
@@ -152,65 +151,28 @@ test("a replaced input still ends its call; another Location never settles or an
   await b.close()
 })
 
-test("the Live Activity rolls a handoff up to its root as attention of kind browser, after questions and permissions", async () => {
+test("a handoff ranks after questions, marks the activity urgent and gives the watch no request", async () => {
+  // Its place in the state is the normative `state-browser.json` (live-activity.test.ts).
   const server = world()
   const tracker = makeTracker(server.ctx)
   await run(
     Effect.gen(function* () {
-      for (const event of [
-        created(ids.live, T - 10 * minute),
-        execution("started", ids.live, T - 9 * minute),
-        created("ses_child", T - 8 * minute, ids.live),
-        execution("started", "ses_child", T - 8 * minute),
-        created(ids.cache, T - 10 * minute),
-        execution("started", ids.cache, T - 9 * minute),
-      ])
-        yield* tracker.apply(event, T)
+      yield* tracker.apply(created(ids.live, T - 10 * minute), T)
+      yield* tracker.apply(execution("started", ids.live, T - 9 * minute), T)
     }),
   )
-  expect(tracker.derive(T, host).state.counts).toEqual({
-    working: 2,
-    question: 0,
-    permission: 0,
-    failed: 0,
-    idle: 0,
-    unread: 0,
-  })
-  server.handoffs.push({ id: "brw_1", sessionID: "ses_child", since: T - 2 * minute, message: "Faça login no GitHub" })
-  await run(tracker.refreshHandoffs())
-  const derived = tracker.derive(T, host)
-  const state = derived.state
-  expect(Schema.decodeUnknownSync(LiveActivity.AgentsState)(state)).toEqual(state)
-  expect(state.counts).toEqual({ working: 1, question: 0, permission: 0, failed: 0, idle: 0, unread: 0, browser: 1 })
-  expect(state.activeTotal).toBe(2)
-  expect(state.attentionTotal).toBe(1)
-  expect(state.attention).toEqual([
-    expect.objectContaining({
-      sessionID: ids.live,
-      kind: "browser",
-      since: T - 2 * minute,
-      text: "Faça login no GitHub",
-    }),
-  ])
-  expect(state.sessions.map((row) => [row.sessionID, row.status])).toEqual([
-    [ids.live, "browser"],
-    [ids.cache, "working"],
-  ])
-  expect(state.needs).toEqual([
-    expect.objectContaining({ sessionID: ids.live, kind: "browser", since: T - 2 * minute }),
-  ])
-  expect(derived.marks.get(`browser:${ids.live}`)?.title).toBe("Navegador aguardando")
-  expect(derived.pending).toEqual([expect.objectContaining({ id: "brw_1", kind: "browser" })])
-  // The watch answers questions and permissions only: no request to open for a handoff.
-  expect(derived.requests.has(ids.live)).toBe(false)
-  // A question of the same family outranks the handoff.
+  server.handoffs.push({ id: "brw_1", sessionID: ids.live, since: T - 2 * minute, message: "Faça login" })
+  const waiting = tracker.derive(T, host)
+  expect(waiting.marks.get(`browser:${ids.live}`)?.title).toBe("Navegador aguardando")
+  expect(waiting.pending).toEqual([expect.objectContaining({ id: "brw_1", kind: "browser" })])
+  expect(waiting.requests.has(ids.live)).toBe(false)
   const form = question("frm_1", ids.live, T - minute, "Seguir?")
   server.forms.push(form)
   await run(tracker.apply({ type: "form.created", data: { form } }, T))
-  const asked = tracker.derive(T, host).state
-  expect(asked.sessions[0]).toMatchObject({ sessionID: ids.live, status: "question" })
-  expect(asked.counts.browser).toBeUndefined()
-  expect(tracker.derive(T, host).requests.get(ids.live)).toBe("frm_1")
+  const asked = tracker.derive(T, host)
+  expect(asked.state.sessions[0]).toMatchObject({ sessionID: ids.live, status: "question" })
+  expect(asked.state.counts.browser).toBeUndefined()
+  expect(asked.requests.get(ids.live)).toBe("frm_1")
 })
 
 test("a waiting handoff alerts once, collapsed per session, without a request to open", async () => {

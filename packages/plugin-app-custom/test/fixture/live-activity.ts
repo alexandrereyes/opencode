@@ -264,7 +264,15 @@ export function world() {
   }
 }
 
-export type Scene = "working" | "one-question" | "two-questions" | "mixed" | "failed-only" | "calm" | "progress"
+export type Scene =
+  | "working"
+  | "one-question"
+  | "two-questions"
+  | "mixed"
+  | "failed-only"
+  | "calm"
+  | "progress"
+  | "browser"
 
 /**
  * Builds the fixture situations from live events only. `pending` requests live in the world and reach the tracker
@@ -349,8 +357,17 @@ export function scene(name: Scene, server = world()) {
     at(execution("succeeded", ids.live, T - minute))
     at(interrupted(ids.deploy, T - 30_000))
   }
+  // A subagent of the focus waits on a browse handoff (rev. 2026-11-07, `docs/browser-handoff.md`).
+  if (name === "browser")
+    server.handoffs.push({
+      id: "brw_live",
+      sessionID: "ses_child_3",
+      since: 1793104740000,
+      message: "Faça login no GitHub e clique em Continue",
+    })
   return Effect.gen(function* () {
     for (const event of events) yield* tracker.apply(event, "created" in event ? event.created : T)
+    yield* tracker.refreshHandoffs()
     return tracker
   })
 }
