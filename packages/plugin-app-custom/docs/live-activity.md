@@ -296,11 +296,21 @@ singles one out as "the" session; `focus` is no longer rendered here (it stays i
 
 **Attention first (rev. 2026-10-29, Option A of `.agent-artifacts/atencao/live-atencao.png`).** While `forYou`
 (question + permission + failed + unread) is above zero, `forYou` / `para você` is in the centre (the ring itself
-follows "State ring" below); the counters list them first and `N trabalhando` last in `textSecondary`,
+follows "State ring" below); the counters list them first and `N agentes trabalhando` last in `textSecondary`,
 dropped first beyond four lines; the attention line shows the first `needs` item with its kind (`pergunta`,
 `permissão`, `erro`, `respondeu`) and `+K` = `forYou` − 1. Compact: `forYou` in a `primary` pill. Expanded: `forYou
-para você · N trabalhando` over the first two `needs`. Card taps open the first `needs` session. With `forYou` zero
+para você · N agentes trabalhando` over the first two `needs`. Card taps open the first `needs` session. With `forYou` zero
 the rules below apply unchanged. Without `needs` (older backends) the app uses `attention`, then failed and idle rows.
+
+**`N agentes trabalhando` (rev. 2026-11-06).** The sessions working read `1 agente trabalhando` / `5 agentes
+trabalhando` where they fit whole: the expanded island's header with `forYou` zero (`counts.working`, in
+`textStrong`, instead of `N ativas`), its `forYou para você · N agentes trabalhando`, and the Lock Screen's
+`trabalhando` counter line (`N agentes trabalhando`). Checked with two-digit counts (`12 para você · 12 agentes
+trabalhando`); the fonts are fixed sizes, so the system text size changes nothing. The compact trailing keeps the
+bare number (the words widened the compact island to the screen's edges and truncated; VoiceOver reads `N agentes
+trabalhando`), and the Lock Screen ring's centre keeps `N ativas` (`trabalhando` does not fit inside the 72-point
+ring; the counter line beside it says it). The minimal island and the Smart Stack card show no count text. Nothing
+changes in the content state: the app derives the text from `counts`.
 
 **State ring (rev. 2026-10-30, replaces the arc rules above and the Smart Stack's subagent ring).** One ring, the
 app's `AgentsStatusRing` drawn by `AgentsStatusRingView`, on the Lock Screen card, around the minimal island's mascot,
@@ -321,7 +331,7 @@ half orange, half gray.
 - Compact: leading mascot. Trailing `attentionTotal/activeTotal` (first number `warning`, second `textSecondary`)
   when `attentionTotal > 0`; otherwise `activeTotal` in `success`.
 - Expanded: header `N ativas · M precisa(m) de você` (second part `warning`), plus ` · K com erro` in `error` when
-  failed > 0; then `sessions` rows (avatar, title, project, status at right: `Pergunta` `accent`, `Permissão`
+  failed > 0 (superseded by "Attention first" and `N agentes trabalhando` above); then `sessions` rows (avatar, title, project, status at right: `Pergunta` `accent`, `Permissão`
   `warning`, `Erro` `error`, `Trabalhando` `success` with ` · done/total` when progress, `Não lida` `primary` for `idle` rows).
   A row whose progress is `todos` with `current` shows `Agora: <current>` in place of the project and a bare
   `done/total` (`success`) as its status, so the item keeps the room (rev. 2026-10-30).
