@@ -64,13 +64,29 @@ export interface HandoffResources {
   readonly announce: (resourceID: string) => Effect.Effect<void>
 }
 
-/** How a call that `execute.after` reports ended its handoff. */
+/**
+ * How a call that `execute.after` reports ended its handoff, from browse's error text (0.0.14; the messages are pinned
+ * in `test/browser-handoff.test.ts` against the installed package):
+ *
+ * - `Handoff timed out after <ms>ms waiting for the user: …` → `timeout`;
+ * - `Handoff cancelled because its target detached|crashed: …` (the tab closed or crashed) → `failed`;
+ * - `Handoff cancelled because its session was stopped, deleted or reset: …`, `Execute stopped because its caller
+ *   disconnected.` (the call was interrupted), `Execute stopped: the session was stopped, deleted or reset`, `Session …
+ *   was deleted|reset while this ran, so it was stopped.`, `The user took tab … back (browse toolbar button) while this
+ *   script ran, so it was stopped.`, and any abort or interruption → `cancelled`;
+ * - anything else (`Execute timed out after …`, an unresponsive browser) → `failed`.
+ */
 export function afterOutcome(event: After): BrowserHandoffs.Outcome {
   if (event.status === "completed") return "completed"
   const message = event.error?.message ?? ""
-  // browse: `Handoff timed out after <ms>ms waiting for the user: …`.
-  if (/handoff timed out/i.test(message)) return "timeout"
-  if (/\b(abort|cancel|interrupt)/i.test(message)) return "cancelled"
+  if (/\bHandoff timed out after \d+ms waiting for the user\b/.test(message)) return "timeout"
+  if (/\bHandoff cancelled because its target (detached|crashed)\b/.test(message)) return "failed"
+  if (
+    /\bHandoff cancelled because its session was stopped\b|\bExecute stopped\b|\bso it was stopped\b|\b(abort|interrupt)/i.test(
+      message,
+    )
+  )
+    return "cancelled"
   return "failed"
 }
 

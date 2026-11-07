@@ -1,4 +1,6 @@
-import { expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
+import { readdirSync } from "node:fs"
+import path from "node:path"
 import { Effect, Exit, Schema, Scope } from "effect"
 import { Session } from "@opencode/schema/session"
 import { Project } from "@opencode/schema/project"
@@ -438,9 +440,13 @@ test("a call that ends while its resource is being registered never waits and it
 test("outcomes, the browse session and the hub port", async () => {
   const base = browseCall("x", "login")
   expect(afterOutcome({ ...base, status: "completed" })).toBe("completed")
-  expect(afterOutcome({ ...base, status: "error", error: { message: "Handoff timed out after 5000ms waiting" } })).toBe(
-    "timeout",
-  )
+  expect(
+    afterOutcome({
+      ...base,
+      status: "error",
+      error: { message: "Handoff timed out after 5000ms waiting for the user: x" },
+    }),
+  ).toBe("timeout")
   expect(afterOutcome({ ...base, status: "error", error: { message: "The operation was aborted" } })).toBe("cancelled")
   expect(afterOutcome({ ...base, status: "error", error: { message: "Target closed" } })).toBe("failed")
   expect(afterOutcome({ ...base, status: "error" })).toBe("failed")
@@ -505,4 +511,77 @@ test("the hub port registers the locked resource, refuses one an older hub retur
     root,
   )
   expect(await run(failing.open(handoff))).toBeUndefined()
+})
+
+/**
+ * browse 0.0.14's own error texts for a call that hands off, as its source writes them (`${…}` are its values). The
+ * outcome rule matches on them; the second test finds every one in the installed package, so a browse that rewords one
+ * fails here instead of silently turning an outcome into `failed`.
+ */
+const browseErrors: readonly { readonly source: string; readonly outcome: BrowserHandoffs.Outcome }[] = [
+  {
+    source: "Handoff timed out after ${options.timeoutMs}ms waiting for the user: ${options.message}",
+    outcome: "timeout",
+  },
+  {
+    source: "Handoff cancelled because its session was stopped, deleted or reset: ${options.message}",
+    outcome: "cancelled",
+  },
+  { source: "Handoff cancelled because its target ${targetEvent}: ${options.message}", outcome: "failed" },
+  { source: "Execute stopped because its caller disconnected.", outcome: "cancelled" },
+  { source: "Execute stopped: the session was stopped, deleted or reset", outcome: "cancelled" },
+  {
+    source: 'Session ${id} was ${operation === "delete" ? "deleted" : "reset"} while this ran, so it was stopped.',
+    outcome: "cancelled",
+  },
+  {
+    source: "The user took tab ${tabId} back (browse toolbar button) while this script ran, so it was stopped.",
+    outcome: "cancelled",
+  },
+  {
+    source:
+      "Execute timed out after ${effectiveTimeoutMs}ms. Pass --timeout-ms <ms> (or timeoutMs in MCP) for longer runs, or 0 to disable.",
+    outcome: "failed",
+  },
+  { source: "The browser isn't responding (asleep or frozen?). Wake it and try again.", outcome: "failed" },
+]
+
+/** A message as browse would produce it: every `${…}` filled in (`targetEvent` is `detached` or `crashed`). */
+const filled = (source: string, targetEvent = "detached") =>
+  source
+    .replace("${targetEvent}", targetEvent)
+    .replace('${operation === "delete" ? "deleted" : "reset"}', "deleted")
+    .replace(/\$\{[^}]*\}/g, (match) =>
+      /Ms\}$/.test(match) ? "20000" : match.includes("message") ? "Entre e clique em Continue" : "s1",
+    )
+
+describe("browse's error texts decide a handoff's outcome", () => {
+  test("each real message, as the MCP tool reports it, maps to its outcome", () => {
+    const base = browseCall("x", "login")
+    const outcome = (message: string) => afterOutcome({ ...base, status: "error", error: { message } })
+    for (const item of browseErrors) {
+      expect({ message: filled(item.source), outcome: outcome(filled(item.source)) }).toEqual({
+        message: filled(item.source),
+        outcome: item.outcome,
+      })
+      // Code Mode and the MCP client may prefix it (`Error: …`) or append browse's hints.
+      expect(outcome(`Error: ${filled(item.source)}\nLogs: none`)).toBe(item.outcome)
+    }
+    expect(outcome(filled(browseErrors[2]!.source, "crashed"))).toBe("failed")
+  })
+
+  const dist = process.env.OPENCODE_BROWSE_PACKAGE ?? "/opt/homebrew/lib/node_modules/@opencode/browse"
+  const files = (() => {
+    try {
+      return readdirSync(path.join(dist, "dist")).filter((file) => file.endsWith(".mjs"))
+    } catch {
+      return []
+    }
+  })()
+  test.skipIf(files.length === 0)("every message is still in the installed browse package", async () => {
+    const version = (await Bun.file(path.join(dist, "package.json")).json()).version
+    const text = (await Promise.all(files.map((file) => Bun.file(path.join(dist, "dist", file)).text()))).join("\n")
+    const missing = browseErrors.filter((item) => !text.includes(item.source)).map((item) => item.source)
+    expect({ version, missing }).toEqual({ version, missing: [] })
+  })
 })
