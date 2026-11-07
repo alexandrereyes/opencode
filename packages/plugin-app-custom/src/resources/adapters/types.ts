@@ -95,4 +95,8 @@ export interface Adapter {
   recover?(): Promise<void>
   /** Alexandre's control ended (returned or expired): undo viewer-only behavior, such as Chrome's sharp stills. */
   released?(entry: Entry): Promise<void>
+  /** Brings the resource to the front where it runs (`custom.resources/focus`); only for `capabilities.focus`. */
+  focus?(entry: Entry): Promise<void>
+  /** The resource left the registry: close what the adapter keeps open for it. */
+  forget?(entry: Entry): Promise<void>
 }

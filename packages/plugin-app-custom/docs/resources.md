@@ -369,7 +369,8 @@ dropped. While only watching, the stream is the screencast alone.
 After `playwright-cli resize`, headless Chrome screencasts its window instead of the emulated viewport (a 393 × 659
 iPhone viewport in the default 500 × 572 window lost its bottom 87 px). The adapter then grows the window to hold the
 viewport (`Browser.setWindowBounds`, emulation untouched); windows are at least 500 px wide, so such a page keeps a
-margin on the right, and sharp stills (viewport only) are skipped so frames and taps share one geometry.
+margin on the right, and sharp stills (viewport only) are skipped so frames and taps share one geometry. Never in
+Alexandre's own Chrome (attached sessions and browse handoffs).
 
 Browser zoom (rev. 2026-11-07; Alexandre's Chrome runs at 125 %): screencast frames measure the viewport in
 device-independent pixels while input takes CSS pixels, so taps landed 25 % off. The adapter reads `innerWidth` ×
