@@ -14,7 +14,8 @@ apps read them in their tests the way they read `live-activity/state-browser.jso
 One resource per browse session: `chrome:browse:<browse session>`, kind `chrome`, `meta` `{ kind: "chrome", cdp:
 "http://127.0.0.1:<relay port>", browse: "<browse session>", targetID?, url?, title? }`. The browse session is the call's
 explicit `session` argument (`session_new` id; `~/.agents/AGENTS.md` asks agents to pass it). A call without one gets no
-resource: the handoff still waits and still is "Precisa de você", but it has no `resourceID`.
+resource: the handoff still waits and still is "Precisa de você", but it has no `resourceID`. (browse's MCP then
+runs it in a session of its own, `mcp-<id>`, which stays in the relay until it is deleted or idles out.)
 
 ## 1. From a handoff to its resource
 
@@ -120,10 +121,14 @@ answers (either way), activates the Chrome app (`com.google.Chrome`; the button 
 
 **With browse 0.0.14 it always answers `failed`** (rev. 2026-11-07, found end to end): Chrome refuses
 `Target.activateTarget` to extensions (`Not allowed`), and the relay blocks the fallback, `Page.bringToFront`, unless
-its own environment sets `OPENCODE_BROWSER_ALLOW_FOREGROUND=1` (which would also let agents raise the window). So today
-"Abrir no Chrome" brings Chrome forward, and the handoff's tab is in front only if it already was in its window. The
-plugin tries both on every call, so the action starts working whenever browse allows one, with no app change. Same
-locks as input:
+its own environment sets `OPENCODE_BROWSER_ALLOW_FOREGROUND=1` (which would also let agents raise the window). The
+plugin tries both on every call, so `focus` starts answering `{}` whenever browse allows one, with no app change.
+
+**Decision (Alexandre, rev. 2026-11-07): the Mac app falls back to AppleScript.** It always calls `focus` first; when
+it answers `failed`, the app selects the handoff's tab itself through Chrome's AppleScript (the tab showing `meta.url`,
+`meta.title` to break ties) and activates Chrome, which asks macOS once for the app's Automation permission over
+Chrome. `unsupported` and `not_found` still mean no button (the handoff is over). The relay keeps
+`OPENCODE_BROWSER_ALLOW_FOREGROUND` unset, and the schema is unchanged. Same locks as input:
 
 - only resources with `capabilities.focus: true` and a waiting `handoff`, only their own target (the session-scoped
   connection cannot address another tab);
@@ -177,9 +182,14 @@ Compatible precisions found while implementing; none changes a schema or an exam
 - **Relay token.** The hub's adapter reads it per request from where browse keeps it (`OPENCODE_BROWSER_HOME`, else
   `$XDG_DATA_HOME/browse`, else `~/.local/share/browse`; `OPENCODE_BROWSE_RELAY_TOKEN_FILE` names the file, for
   sandboxes whose XDG directories are their own). It goes only into request headers and the WebSocket URL, which
-  stays in memory; connection errors print URLs without their query.
+  stays in memory; connection errors print URLs without their query. browse's own MCP in such a sandbox
+  finds the relay only through the `relay-token` of the XDG directories it runs with: give it the real ones (or put the
+  token there).
+- **The hub's log stays empty** (`<state>/resources-hub/hub.log`) unless something fails: it logs no routine events,
+  and never inputs.
 - **End to end**: `script/browse-handoff-check.ts` drives a sandbox agent's real handoff in Alexandre's Chrome on the
-  login fixture, for `completed`, `timeout` and `cancelled`.
+  login fixture, for `completed`, `timeout`, `cancelled`, `failed`, `nosession` and `keys`; with `--app` it waits for
+  the iPhone or Mac app to act instead of acting itself.
 
 ## Examples
 
