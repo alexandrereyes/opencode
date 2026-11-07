@@ -7,6 +7,7 @@ registered iPhone. There are no switches besides the per-session bell (rev. 2026
 | --- | --- | --- |
 | Question | always, any top-level session (subagents roll up) | at once, once per request and device |
 | Permission | always, any top-level session | only if still pending after 3 s and auto-approval is off |
+| Browse handoff (rev. 2026-11-07) | always, any top-level session | once the call has waited 3 s (`browser-handoff.md`), once per call |
 | Failure that stops the session | always | once per stop; provider retries do not alert |
 | Success | only with "Avisar ao terminar" | once per finish |
 | Interruption (by Alexandre or a shutdown) | never | — |
@@ -96,7 +97,8 @@ send `apns-collapse-id: attention:<sessionID>`, so a newer request or failure of
 }
 ```
 
-`attention` is `question`, `permission` (both with `requestID`) or `failed`. A bell success is
+`attention` is `question`, `permission` (both with `requestID`), `browser` (rev. 2026-11-07: a browse handoff; body
+`Navegador: <message>`, no `requestID`, since nothing is answered in the app) or `failed`. A bell success is
 `{"kind":"session.finished", …, "outcome":"succeeded"}` without a collapse ID.
 
 The title is the session title clipped to 80 characters ("Sem título" when empty); the body names the project like

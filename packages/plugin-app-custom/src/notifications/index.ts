@@ -69,7 +69,8 @@ export type Alert =
   | { readonly kind: "finished"; readonly ref: Root["ref"] }
   | { readonly kind: "failed"; readonly ref: Root["ref"] }
   | {
-      readonly kind: "question" | "permission"
+      /** `browser`: a browse handoff waiting (`docs/browser-handoff.md`); `requestID` is the handoff's, never sent. */
+      readonly kind: "question" | "permission" | "browser"
       readonly ref: Root["ref"]
       readonly requestID: string
       readonly text?: string
@@ -222,7 +223,10 @@ export function makeNotifier(input: {
               // The activity just ended (its token was refused) or APNs failed: the notification is the fallback.
               return (result.status === "invalid" ? registry.drop(deviceID, token, now) : Effect.void).pipe(
                 Effect.andThen(
-                  Effect.logInfo("Session alert falls back to a notification", { kind: alert.kind, reason: result.reason }),
+                  Effect.logInfo("Session alert falls back to a notification", {
+                    kind: alert.kind,
+                    reason: result.reason,
+                  }),
                 ),
                 Effect.andThen(fallback),
               )
@@ -261,7 +265,8 @@ export function body(alert: Alert, serverKey: string) {
             kind: "session.attention",
             ...target,
             attention: alert.kind,
-            ...("requestID" in alert ? { requestID: alert.requestID } : {}),
+            // A handoff is no request the app can open or answer: it is done in the browser.
+            ...("requestID" in alert && alert.kind !== "browser" ? { requestID: alert.requestID } : {}),
           },
   }
 }
@@ -270,6 +275,7 @@ function text(alert: Alert) {
   if (alert.kind === "finished") return `Terminou · ${alert.ref.project}`
   if (alert.kind === "failed") return `Parou com erro · ${alert.ref.project}`
   if (alert.kind === "question") return `Pergunta: ${alert.text ?? "responda na sessão"}`
+  if (alert.kind === "browser") return `Navegador: ${alert.text ?? "conclua a etapa no navegador"}`
   return `Permissão: ${alert.text ?? "aprove ou negue na sessão"}`
 }
 

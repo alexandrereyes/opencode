@@ -67,7 +67,8 @@ export const Focus = Schema.Struct({
   progress: optional(Progress),
 }).annotate({ identifier: "LiveActivity.Focus" })
 
-export const AttentionKind = Schema.Literals(["question", "permission"]).annotate({
+/** `browser` (rev. 2026-11-07): a browse handoff waits on Alexandre in the browser (`docs/browser-handoff.md`). */
+export const AttentionKind = Schema.Literals(["question", "permission", "browser"]).annotate({
   identifier: "LiveActivity.AttentionKind",
 })
 export type AttentionKind = typeof AttentionKind.Type
@@ -80,7 +81,7 @@ export const Attention = Schema.Struct({
   text: optional(Schema.String),
 }).annotate({ identifier: "LiveActivity.Attention" })
 
-export const RowStatus = Schema.Literals(["question", "permission", "failed", "working", "idle"]).annotate({
+export const RowStatus = Schema.Literals(["question", "permission", "browser", "failed", "working", "idle"]).annotate({
   identifier: "LiveActivity.RowStatus",
 })
 export type RowStatus = typeof RowStatus.Type
@@ -92,7 +93,7 @@ export const Row = Schema.Struct({
   progress: optional(Progress),
 }).annotate({ identifier: "LiveActivity.Row" })
 
-export const NeedKind = Schema.Literals(["question", "permission", "failed", "unread"]).annotate({
+export const NeedKind = Schema.Literals(["question", "permission", "browser", "failed", "unread"]).annotate({
   identifier: "LiveActivity.NeedKind",
 })
 export type NeedKind = typeof NeedKind.Type
@@ -114,6 +115,8 @@ export const Counts = Schema.Struct({
   idle: Schema.Int,
   /** rev. 2026-10-28; optional so builds from before it keep decoding. */
   unread: optional(Schema.Int),
+  /** rev. 2026-11-07: sessions waiting on a browse handoff; present only when nonzero. */
+  browser: optional(Schema.Int),
 }).annotate({ identifier: "LiveActivity.Counts" })
 
 export interface AgentsState extends Schema.Schema.Type<typeof AgentsState> {}

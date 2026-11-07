@@ -6,7 +6,7 @@ import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/schema/session"
 import { SessionEvent } from "@opencode/schema/session-event"
 import { SessionMessage } from "@opencode/schema/session-message"
-import { makeTracker, type Event, type TrackerContext } from "../../src/live-activity/tracker"
+import { makeTracker, type Event, type Handoff, type TrackerContext } from "../../src/live-activity/tracker"
 
 /** Fixture clock: 2026-10-27 09:41 BRT, the `updatedAt` of the contract fixtures. */
 export const T = 1793104860000
@@ -175,6 +175,8 @@ export function world() {
   const background: BackgroundJob[] = []
   const forms: Form.Info[] = []
   const permissions: Permission.Request[] = []
+  /** Browse handoffs waiting (`docs/browser-handoff.md`). */
+  const handoffs: Handoff[] = []
   const prompts = new Map<string, number>()
   const transcripts = new Map<string, SessionMessage.Info[]>()
   const watched = new Set<string>()
@@ -183,6 +185,7 @@ export function world() {
   /** Location directories with `experimental.todo` on. */
   const todo = new Set<string>()
   const ctx: TrackerContext = {
+    handoffs: () => handoffs,
     background: () => Effect.sync(() => background),
     todo: (directory) => Effect.sync(() => todo.has(directory)),
     session: {
@@ -243,10 +246,33 @@ export function world() {
     },
   }
   const add = (info: Session.Info) => infos.set(info.id, info)
-  return { ctx, infos, active, background, forms, permissions, prompts, reads, add, transcripts, watched, settings, todo }
+  return {
+    ctx,
+    infos,
+    active,
+    background,
+    forms,
+    permissions,
+    handoffs,
+    prompts,
+    reads,
+    add,
+    transcripts,
+    watched,
+    settings,
+    todo,
+  }
 }
 
-export type Scene = "working" | "one-question" | "two-questions" | "mixed" | "failed-only" | "calm" | "progress"
+export type Scene =
+  | "working"
+  | "one-question"
+  | "two-questions"
+  | "mixed"
+  | "failed-only"
+  | "calm"
+  | "progress"
+  | "browser"
 
 /**
  * Builds the fixture situations from live events only. `pending` requests live in the world and reach the tracker
@@ -331,8 +357,17 @@ export function scene(name: Scene, server = world()) {
     at(execution("succeeded", ids.live, T - minute))
     at(interrupted(ids.deploy, T - 30_000))
   }
+  // A subagent of the focus waits on a browse handoff (rev. 2026-11-07, `docs/browser-handoff.md`).
+  if (name === "browser")
+    server.handoffs.push({
+      id: "brw_live",
+      sessionID: "ses_child_3",
+      since: 1793104740000,
+      message: "Faça login no GitHub e clique em Continue",
+    })
   return Effect.gen(function* () {
     for (const event of events) yield* tracker.apply(event, "created" in event ? event.created : T)
+    yield* tracker.refreshHandoffs()
     return tracker
   })
 }

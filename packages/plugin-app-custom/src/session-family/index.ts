@@ -9,6 +9,8 @@ import { Effect, Schema } from "effect"
 import { sharedHub } from "../live-activity/index.js"
 import type { SessionProgress } from "../live-activity/tracker.js"
 import { Family } from "./rpc.js"
+import { sharedRegistry, wire } from "../browser-handoff/registry.js"
+import type { BrowserHandoffs } from "../browser-handoff/rpc.js"
 
 const encodeSession = Schema.encodeSync(Session.Info)
 const encodeMember = Schema.encodeSync(SessionFamily.Member)
@@ -21,6 +23,8 @@ type FamilyContext = {
   readonly pending: Requests["pending"]
   /** A session's Progresso while it shows; the Live Activity hub folds the same events for every Location. */
   readonly progress?: (sessionID: string) => SessionProgress | undefined
+  /** Browse handoffs waiting now, any Location (`docs/browser-handoff.md`). */
+  readonly handoffs?: () => readonly BrowserHandoffs.Handoff[]
 }
 
 export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyContext, sessionID: Session.ID) {
@@ -46,7 +50,8 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
       members.set(id, depth)
       return depth
     })
-  yield* Effect.forEach([...new Set([...permissions, ...forms].map((item) => item.sessionID))], depthOf)
+  const handoffs = ctx.handoffs?.() ?? []
+  yield* Effect.forEach([...new Set([...permissions, ...forms, ...handoffs].map((item) => item.sessionID))], depthOf)
   const order = (a: { sessionID: string; created?: number }, b: { sessionID: string; created?: number }) =>
     (members.get(a.sessionID) ?? -1) - (members.get(b.sessionID) ?? -1) || (a.created ?? 0) - (b.created ?? 0)
   // The subagent lists show each active descendant's Progresso; one that waits on its own subagents keeps it in its
@@ -55,6 +60,9 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
     const value = ctx.progress?.(item.id)
     return value ? [[item.id, value] as const] : []
   })
+  const browser = handoffs
+    .filter((item) => (members.get(item.sessionID) ?? -1) >= 0)
+    .toSorted((a, b) => (members.get(a.sessionID) ?? -1) - (members.get(b.sessionID) ?? -1) || a.since - b.since)
   return {
     count: family.count,
     cost: family.cost,
@@ -68,6 +76,7 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
       .toSorted(order)
       .map((item) => encodePermission(item)),
     ...(progress.length > 0 ? { progress: Object.fromEntries(progress) } : {}),
+    ...(browser.length > 0 ? { browser } : {}),
   }
 })
 
@@ -97,6 +106,7 @@ export const registerFamily = Effect.fn("Family.register")(function* (ctx: Conte
             get: ctx.session.get,
             pending: ctx.request.pending,
             progress: (sessionID) => sharedHub().progress(sessionID),
+            handoffs: () => sharedRegistry().waiting().map(wire),
           },
           input.sessionID,
         ).pipe(

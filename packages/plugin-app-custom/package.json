@@ -42,7 +42,8 @@
     "./question-drafts/rpc": "./src/question-drafts/rpc.ts",
     "./live-activity/rpc": "./src/live-activity/rpc.ts",
     "./notifications/rpc": "./src/notifications/rpc.ts",
-    "./watch/rpc": "./src/watch/rpc.ts"
+    "./watch/rpc": "./src/watch/rpc.ts",
+    "./browser-handoff/rpc": "./src/browser-handoff/rpc.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && bun script/copy-assets.ts",

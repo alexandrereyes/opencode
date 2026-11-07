@@ -29,6 +29,13 @@ export const Info = Schema.Struct({
   permissionCount: Schema.Int.pipe(Schema.optional),
   questionCount: Schema.Int.pipe(Schema.optional),
   /**
+   * rev. 2026-11-07 (`docs/browser-handoff.md`): browse calls of this session waiting on Alexandre in the browser;
+   * when the newest started, how many, and the newest one's message.
+   */
+  browserAt: Schema.Finite.pipe(Schema.optional),
+  browserCount: Schema.Int.pipe(Schema.optional),
+  browserText: Schema.String.pipe(Schema.optional),
+  /**
    * Background work other than subagents (shell commands) still running for this session that someone waits on: the
    * session is top-level or still executes, so its end wakes a turn that reaches Alexandre. It keeps the family working.
    */
