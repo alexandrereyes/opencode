@@ -7,6 +7,7 @@ import { BrowserHandoffs } from "../src/browser-handoff/rpc"
 import { list } from "../src/navigation"
 import { Navigation } from "../src/navigation/rpc"
 import { body } from "../src/notifications/index"
+import { machineID, machinePrefix } from "../src/resources/machine"
 import { Resources } from "../src/resources/rpc"
 
 /**
@@ -34,7 +35,7 @@ test("the handoff list, its changes, the resource and the stream messages decode
     "failed",
   ])
   const resource = Schema.decodeUnknownSync(Resources.Resource)(await fixture("resource"))
-  expect(resource.capabilities).toEqual({ navigation: false, tabs: false })
+  expect(resource.capabilities).toEqual({ navigation: false, tabs: false, focus: true })
   expect(resource.meta).toMatchObject({ kind: "chrome", browse: "github-login" })
   expect(resource.handoff?.id).toBe(listed.data[0]?.id)
   const messages = (await fixture("stream-messages")) as { type: string; reason?: string; message?: string }[]
@@ -42,6 +43,23 @@ test("the handoff list, its changes, the resource and the stream messages decode
     Object.values(Resources.handoffEndReasons),
   )
   expect(messages.find((item) => item.type === "error")?.message).toBe("not_allowed")
+  const focus = await fixture("focus")
+  expect(Schema.decodeUnknownSync(Resources.FocusInput)(focus.input)).toEqual({ id: resource.id })
+  expect(Schema.decodeUnknownSync(Resources.FocusOutput)(focus.output)).toEqual({})
+  for (const error of focus.errors)
+    expect(Schema.decodeUnknownSync(Resources.Unavailable)(error.unavailable)).toBeDefined()
+})
+
+test("the machine identity is the documented hash of the IOPlatformUUID, the same the Mac app computes", async () => {
+  const identity = await fixture("machine-identity")
+  expect(identity.prefix).toBe(machinePrefix)
+  for (const vector of identity.vectors) expect(machineID(vector.platformUUID)).toBe(vector.machine)
+  // Case and surrounding whitespace never change it; another machine always does.
+  const [first, second] = identity.vectors
+  expect(machineID(` ${first.platformUUID.toLowerCase()}\n`)).toBe(first.machine)
+  expect(first.machine).not.toBe(second.machine)
+  const resource = Schema.decodeUnknownSync(Resources.Resource)(await fixture("resource"))
+  expect(resource.handoff?.machine).toBe(first.machine)
 })
 
 test("Sessões carries the newest handoff's resource and the push names it", async () => {

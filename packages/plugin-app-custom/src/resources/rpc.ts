@@ -118,6 +118,11 @@ export const Capabilities = Schema.Struct({
   navigation: optional(Schema.Boolean),
   /** Switching tabs (`navigate` with `tab`) and the tab list. */
   tabs: optional(Schema.Boolean),
+  /**
+   * `focus` (bring the tab to the front in its own browser on the Mac). Unlike the others it is offered only when
+   * `true`: absent means the resource has no such action.
+   */
+  focus: optional(Schema.Boolean),
 }).annotate({ identifier: "Resources.Capabilities" })
 
 /** rev. 2026-11-07: the browse handoff a `chrome:browse:<session>` resource exists for (`browse-handoff-remoto.md`). */
@@ -129,6 +134,12 @@ export const Handoff = Schema.Struct({
   sessionID: Schema.String,
   message: Schema.String,
   since: Schema.Number,
+  /**
+   * The machine the tab's Chrome runs on (`machine.ts`: SHA-256 of its `IOPlatformUUID`), present only when the plugin
+   * can vouch for it: the browse relay runs on the hub's Mac and accepts browsers on loopback only. The Mac app shows
+   * "Abrir no Chrome" only when it equals its own.
+   */
+  machine: optional(Schema.String),
 }).annotate({ identifier: "Resources.Handoff" })
 
 export interface Resource extends Schema.Schema.Type<typeof Resource> {}
@@ -210,6 +221,9 @@ export const limits = {
   activityCommandLength: 160,
 }
 
+export const FocusInput = Schema.Struct({ id: ID }).annotate({ identifier: "Resources.FocusInput" })
+export const FocusOutput = Schema.Struct({}).annotate({ identifier: "Resources.FocusOutput" })
+
 const error = { unavailable: Schema.toStandardSchemaV1(Unavailable) }
 
 export const Definition = Rpc.define({
@@ -251,6 +265,17 @@ export const Definition = Rpc.define({
         Schema.Struct({ id: ID, action: Schema.Literals(["take", "renew", "release"]) }),
       ),
       output: Schema.toStandardSchemaV1(Schema.Struct({ resource: Resource, ticket: optional(Ticket) })),
+      errors: error,
+    },
+    /**
+     * rev. 2026-11-07 (`browse-handoff-remoto.md`): brings the resource's tab to the front of its window and that window
+     * to the front of its browser, for "Abrir no Chrome" on the Mac (which then activates the browser app). Only
+     * resources with `capabilities.focus: true`, only while their handoff waits, only their own tab:
+     * `unavailable { reason: "unsupported" }` otherwise (`not_found` once the resource is gone).
+     */
+    focus: {
+      input: Schema.toStandardSchemaV1(FocusInput),
+      output: Schema.toStandardSchemaV1(FocusOutput),
       errors: error,
     },
     /** Removes a resource from the lists; it reappears if an agent uses it again. */

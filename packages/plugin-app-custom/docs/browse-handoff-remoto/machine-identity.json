@@ -1,0 +1,14 @@
+{
+  "prefix": "opencode-browse-machine/v1\u0000",
+  "encoding": "machine = lowercase hex SHA-256 of UTF-8 (prefix + IOPlatformUUID uppercased, trimmed)",
+  "vectors": [
+    {
+      "platformUUID": "8B2D5C1E-4F3A-4B6C-9D8E-7F6A5B4C3D2E",
+      "machine": "6bddb31758856bc72576df7efe962388680699da58a52a7f95758f14bc087956"
+    },
+    {
+      "platformUUID": "00000000-1111-2222-3333-444444444444",
+      "machine": "33cfbfaf9f92abbc33b0aefe2145ee32565da470541d2d7e53fd7db05df5975b"
+    }
+  ]
+}

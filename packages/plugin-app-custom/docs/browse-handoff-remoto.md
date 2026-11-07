@@ -56,10 +56,12 @@ resource exists, so an item without it (or an older server) offers no remote act
 
 `Resources.Resource` gains two optional fields (`resource.json`):
 
-- `capabilities`: `{ navigation?: boolean, tabs?: boolean }`. **`false` means the hub refuses it**; absent means allowed,
-  as on every resource so far. A browse handoff's resource is `{ navigation: false, tabs: false }`: the app hides the
-  address bar, back, forward, reload and the tab list.
-- `handoff`: `{ id, sessionID, message, since }`, present only on these resources: the viewer may show the message.
+- `capabilities`: `{ navigation?: boolean, tabs?: boolean, focus?: boolean }`. For `navigation` and `tabs`,
+  **`false` means the hub refuses it** and absent means allowed, as on every resource so far. `focus` is the opposite:
+  offered only when `true` (section 4). A browse handoff's resource is `{ navigation: false, tabs: false, focus: true }`:
+  the app hides the address bar, back, forward, reload and the tab list.
+- `handoff`: `{ id, sessionID, message, since, machine? }`, present only on these resources: the viewer may show the
+  message; `machine` is section 4's.
 
 What the server enforces, whatever the app shows:
 
@@ -77,14 +79,61 @@ Everything else is the existing viewer: live frames, `touch`, `scroll`, `key`, `
 switches the iPhone keyboard to secure entry), control tickets. Continue is a tap on the card in the page (trusted
 CDP input); there is no separate "complete" call.
 
-## 4. Compatibility
+## 4. On the Mac: the stage and "Abrir no Chrome"
+
+- **iPhone**: the action opens the resource's viewer full screen. **Mac**: it opens the live tab in the stage (the area
+  beside the chat that already shows browsers and emulators) and adds **"Abrir no Chrome"**, which brings Alexandre's
+  Chrome to the front on that very tab. The button shows only when `capabilities.focus` is `true` **and**
+  `handoff.machine` equals the Mac app's own machine identity.
+
+### Machine identity
+
+`machine` = lowercase hex SHA-256 of the UTF-8 bytes of `"opencode-browse-machine/v1\u0000"` + the Mac's
+`IOPlatformUUID` (trimmed, uppercased) (`src/resources/machine.ts`; vectors in `machine-identity.json`). The hub reads
+its own `IOPlatformUUID` (`ioreg -rd1 -c IOPlatformExpertDevice`); the Mac app reads its own through IOKit
+(`IOPlatformExpertDevice` → `IOPlatformUUID`) and hashes it the same way.
+
+The plugin sets `machine` only when it can vouch that the tab's Chrome runs on the hub's Mac: the adapter reaches the
+relay on loopback (`meta.cdp` is `127.0.0.1`) **and** the relay accepts browsers on loopback only (the hub checks that
+the relay port refuses connections on the Mac's non-loopback addresses; browse's `set hostname 0.0.0.0` or a remote
+pairing makes it omit `machine`). Otherwise the field is absent and no Mac shows the button.
+
+Why this does not give false positives:
+
+- The identity is of the machine where the **hub and the relay** run, which is where the Chrome is, not of the server
+  the app talks to. When the server runs on the OrbStack Linux machine (`resources.md`, "Remote hub") the hub still
+  runs on the Mac, so the identity is the Mac's; a Mac app on another machine, reaching this server through WARP, the
+  4096 proxy or any tunnel, has another `IOPlatformUUID` and never matches. Comparing server URLs or "is the server on
+  loopback" would be wrong both ways (a tunnel can look local; the Linux server is not on the Mac).
+- `IOPlatformUUID` is stable across reboots, network changes and app reinstalls, unique per Mac, and identical for the
+  hub and the app on one Mac. The hash keeps the raw hardware UUID off the network (the resource also reaches the
+  iPhone and the watch) while staying comparable.
+- It is not an authorization: the server trusts the app already. A wrong match could at most bring the app's own local
+  Chrome forward; the `focus` action itself keeps every lock of section 3.
+
+### Focus action
+
+`custom.resources/focus { id }` → `{}` (`focus.json`). The plugin brings the handoff's tab to the front of its window
+and that window to the front of the browser, through the relay on that session's tab (`Target.activateTarget`; if
+the relay refuses it, `focus` answers `failed` and the app still activates Chrome). The Mac app calls it and, once it answers, activates the Chrome
+app (`com.google.Chrome`; the button hides while no Chrome runs). Same locks as input:
+
+- only resources with `capabilities.focus: true` and a waiting `handoff`, only their own target (the session-scoped
+  connection cannot address another tab);
+- `unavailable { reason: "unsupported" }` for any other resource or after its handoff stopped waiting, `not_found` once
+  the resource is gone, `failed` when the relay refuses the activation;
+- it neither navigates nor changes tabs of other sessions, and it needs no control ticket (it only shows the tab;
+  typing still requires `control take`).
+
+## 5. Compatibility
 
 - **Old app, new server**: unknown fields are ignored. The resource appears in the family's resource list like any
   Chrome resource; opening it works, and the navigation controls it still shows are refused by the hub
   (`error not_allowed`). Old apps show the `end` reason as a generic end.
 - **New app, old server**: no `resourceID`, no `capabilities`, no `handoff`: the app offers no remote action and
   everything else behaves as before.
-- New optional fields only; no existing field, literal or reason changes meaning. `Unavailable.reason` keeps its
+- **Mac app with a server without `focus` or `machine`**: no "Abrir no Chrome"; the stage still shows the tab.
+- New optional fields and one new RPC method only; no existing field, literal or reason changes meaning. `Unavailable.reason` keeps its
   literals (a refused input is a stream `error`, not an RPC reason).
 
 ## Examples
@@ -99,3 +148,5 @@ CDP input); there is no separate "complete" call.
 | `stream-messages.json`                | `meta` of the tab, `error not_allowed` and each `end` reason         |
 | `push-browser.json`                   | the APNs body (built by `notifications/index.ts` `body`)             |
 | `../live-activity/state-browser.json` | Live Activity state with a `browser` attention and its `resourceID`  |
+| `focus.json`                          | `custom.resources/focus` input, output and its errors                |
+| `machine-identity.json`               | the machine identity's prefix, encoding and test vectors             |

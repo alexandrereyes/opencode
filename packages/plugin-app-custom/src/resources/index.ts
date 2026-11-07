@@ -73,6 +73,14 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           if (!result.token) return { resource: result.resource }
           return { resource: result.resource, ticket: yield* ticketFor(input.id, "control") }
         }).pipe(Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason }))),
+      // The contract's action (`browse-handoff-remoto.md`); browse handoff resources and the relay focus come next.
+      focus: (input, context) =>
+        call(() => hub.get(input.id)).pipe(
+          Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
+          Effect.flatMap(() =>
+            Effect.fail(context.error("unavailable", "This resource cannot be focused", { reason: "unsupported" })),
+          ),
+        ),
       dismiss: (input, context) =>
         call(() => hub.remove(input.id)).pipe(
           Effect.as({}),

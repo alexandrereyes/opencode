@@ -93,6 +93,7 @@ describe("resources contract", () => {
       "snapshot",
       "ticket",
       "control",
+      "focus",
       "dismiss",
     ])
     expect(Object.keys(Resources.Definition.events)).toEqual(["changed"])

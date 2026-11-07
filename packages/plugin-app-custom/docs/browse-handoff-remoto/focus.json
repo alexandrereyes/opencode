@@ -1,0 +1,27 @@
+{
+  "method": "custom.resources/focus",
+  "input": {
+    "id": "chrome:browse:github-login"
+  },
+  "output": {},
+  "errors": [
+    {
+      "while": "the resource has no focus capability, or its handoff no longer waits but the hub still lists it",
+      "unavailable": {
+        "reason": "unsupported"
+      }
+    },
+    {
+      "while": "the handoff ended and the resource is gone",
+      "unavailable": {
+        "reason": "not_found"
+      }
+    },
+    {
+      "while": "the relay refused to activate the tab",
+      "unavailable": {
+        "reason": "failed"
+      }
+    }
+  ]
+}
