@@ -75,12 +75,22 @@ export function applyIntent(profile: Preferences.Profile, intent: Preferences.In
     data.projects[intent.server] = library
   }
   if (intent.type === "sidebar.order") data.sidebarOrder = [...intent.order]
+  // The list is the Fixadas order: a new pin goes first (rev. 2026-11-07; it used to go last). One already pinned
+  // keeps its place, and pinning again after unpinning brings it back to the top.
   if (intent.type === "sidebar.pin")
     data.pinnedSessions = intent.pinned
       ? data.pinnedSessions.includes(intent.session)
         ? data.pinnedSessions
-        : [...data.pinnedSessions, intent.session]
+        : [intent.session, ...data.pinnedSessions]
       : data.pinnedSessions.filter((item) => item !== intent.session)
+  if (intent.type === "sidebar.pin.move") {
+    const target = intent.before ?? intent.after
+    const rest = data.pinnedSessions.filter((item) => item !== intent.session)
+    const index = target === undefined ? -1 : rest.indexOf(target)
+    // An unknown session or neighbour (unpinned meanwhile on another client) leaves the order alone.
+    if (rest.length < data.pinnedSessions.length && index >= 0)
+      data.pinnedSessions = rest.toSpliced(intent.before === undefined ? index + 1 : index, 0, intent.session)
+  }
   if (intent.type === "sidebar.mute")
     data.mutedSessions = intent.muted
       ? data.mutedSessions?.includes(intent.session)

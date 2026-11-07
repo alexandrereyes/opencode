@@ -83,6 +83,14 @@ export const Intent = Schema.Union([
   }),
   Schema.Struct({ type: Schema.Literal("sidebar.order"), order: Schema.Array(Schema.String) }),
   Schema.Struct({ type: Schema.Literal("sidebar.pin"), session: Schema.String, pinned: Schema.Boolean }),
+  // Reorders Fixadas by dragging (rev. 2026-11-07): `session` lands right before `before`, or right after `after`, both
+  // keys of `pinnedSessions`; every other pin keeps its place, including those another section shows.
+  Schema.Struct({
+    type: Schema.Literal("sidebar.pin.move"),
+    session: Schema.String,
+    before: Schema.optionalKey(Schema.String),
+    after: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({ type: Schema.Literal("sidebar.mute"), session: Schema.String, muted: Schema.Boolean }),
   Schema.Struct({ type: Schema.Literal("sidebar.notify"), session: Schema.String, notify: Schema.Boolean }),
   Schema.Struct({
