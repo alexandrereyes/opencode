@@ -1,0 +1,27 @@
+[
+  {
+    "type": "meta",
+    "value": {
+      "url": "https://github.com/login",
+      "title": "Sign in to GitHub · GitHub",
+      "canGoBack": false,
+      "canGoForward": false,
+      "targetID": "DCE46F98C99EA57BCEEAA18414974AC9",
+      "tabs": [
+        {
+          "id": "DCE46F98C99EA57BCEEAA18414974AC9",
+          "title": "Sign in to GitHub · GitHub",
+          "url": "https://github.com/login"
+        }
+      ],
+      "focus": { "editable": true, "field": "password" },
+      "editTaps": 1,
+      "viewport": { "width": 1108, "height": 617 }
+    }
+  },
+  { "type": "error", "message": "not_allowed" },
+  { "type": "end", "reason": "handoff_completed" },
+  { "type": "end", "reason": "handoff_timeout" },
+  { "type": "end", "reason": "handoff_cancelled" },
+  { "type": "end", "reason": "handoff_failed" }
+]

@@ -1,0 +1,28 @@
+{
+  "session": {
+    "id": "ses_01JZLIVEACTIVITY0000000001",
+    "projectID": "global",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "time": {
+      "created": 1793104000000,
+      "updated": 1793104740000
+    },
+    "title": "Live Activity no iOS",
+    "location": {
+      "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity"
+    }
+  },
+  "browserAt": 1793104740000,
+  "browserCount": 1,
+  "browserText": "Faça login no GitHub e clique em Continue",
+  "browserResourceID": "chrome:browse:github-login"
+}

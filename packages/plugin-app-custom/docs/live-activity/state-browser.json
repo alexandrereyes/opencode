@@ -27,7 +27,8 @@
       "directory": "/Users/alexandremartins/Worktrees/opencode2-live-activity",
       "kind": "browser",
       "since": 1793104740000,
-      "text": "Faça login no GitHub e clique em Continue"
+      "text": "Faça login no GitHub e clique em Continue",
+      "resourceID": "chrome:browse:github-login"
     }
   ],
   "attentionTotal": 1,

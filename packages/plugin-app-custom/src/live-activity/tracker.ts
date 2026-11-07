@@ -201,6 +201,8 @@ export type Handoff = {
   readonly sessionID: string
   readonly since: number
   readonly message: string
+  /** The resource that shows its tab (`browse-handoff-remoto.md`), when it has one. */
+  readonly resourceID?: string
 }
 
 /** A session's Progresso as the apps, the Live Activity and Mestra show it. */
@@ -253,6 +255,8 @@ type Request = {
   readonly sessionID: string
   readonly since: number
   readonly text?: string
+  /** Browse handoffs only. */
+  readonly resourceID?: string
 }
 
 /**
@@ -280,6 +284,8 @@ export type Pending = {
   readonly ref: ReturnType<typeof ref>
   readonly since: number
   readonly text?: string
+  /** Browse handoffs only: the resource that shows its tab. */
+  readonly resourceID?: string
 }
 
 export type Derived = {
@@ -385,6 +391,7 @@ export function makeTracker(ctx: TrackerContext) {
       sessionID: item.sessionID,
       since: item.since,
       text: item.message,
+      ...(item.resourceID ? { resourceID: item.resourceID } : {}),
     }))
 
   /** Reads the sessions that own a waiting handoff and their ancestors, so the handoff rolls up to its root. */
@@ -952,6 +959,7 @@ export function makeTracker(ctx: TrackerContext) {
         kind: row.status === "question" ? "question" : row.status === "browser" ? "browser" : "permission",
         since: row.oldest?.since ?? now,
         ...(row.oldest?.text ? { text: clip(row.oldest.text, limits.text) } : {}),
+        ...(row.status === "browser" && row.oldest?.resourceID ? { resourceID: row.oldest.resourceID } : {}),
       }),
     )
     const sessionRows = ordered.map((row): LiveActivity.Row => {
@@ -1012,6 +1020,7 @@ export function makeTracker(ctx: TrackerContext) {
           ref: ref(top),
           since: request.since,
           ...(request.text ? { text: clip(request.text, limits.text) } : {}),
+          ...(request.resourceID ? { resourceID: request.resourceID } : {}),
         }))
       }),
       autoApprove: settings.autoApprove,

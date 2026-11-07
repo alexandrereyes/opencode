@@ -64,6 +64,11 @@ reload on any `rpc.*` event, so the fields below follow without a read of their 
 
 Precedence everywhere: question > permission > browser > failed > working > unread.
 
+## Finishing it from the apps
+
+Rev. 2026-11-07: a handoff whose call names its browse `session` also gets a `resourceID`, the resource that shows its
+tab in the viewer; see `browse-handoff-remoto.md`.
+
 ## Compatibility
 
 - **Old app, new server:** unknown fields are ignored; the Live Activity decodes kind and status `browser` as unknown,

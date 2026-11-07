@@ -74,6 +74,8 @@ export type Alert =
       readonly ref: Root["ref"]
       readonly requestID: string
       readonly text?: string
+      /** `browser` only: the resource that shows the handoff's tab (`browse-handoff-remoto.md`). */
+      readonly resourceID?: string
     }
 
 /**
@@ -169,6 +171,7 @@ export function makeNotifier(input: {
         ref: request.ref,
         requestID: request.id,
         ...(request.text ? { text: request.text } : {}),
+        ...(request.resourceID ? { resourceID: request.resourceID } : {}),
       })
     }
     const devices = alerts.length > 0 ? yield* input.registry.list(now) : []
@@ -267,6 +270,7 @@ export function body(alert: Alert, serverKey: string) {
             attention: alert.kind,
             // A handoff is no request the app can open or answer: it is done in the browser.
             ...("requestID" in alert && alert.kind !== "browser" ? { requestID: alert.requestID } : {}),
+            ...("resourceID" in alert && alert.resourceID ? { resourceID: alert.resourceID } : {}),
           },
   }
 }

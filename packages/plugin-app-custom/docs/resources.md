@@ -16,32 +16,33 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 
 ## Pieces
 
-| Piece      | Where                                                               | Role                                                                                          |
-| ---------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Contract   | `src/resources/rpc.ts`, `src/resources/protocol.ts`                 | Resource shape, RPC, stream/input wire protocol                                               |
-| Plugin     | `src/resources/index.ts`, `lock.ts`, `supervisor.ts`                | `custom.resources` RPC, control lock in `execute.before`, relays hub events, starts the hub   |
-| Hub        | `src/resources/hub/`                                                | Separate Bun process: registry, locks, tickets, probes, shared streams, input                 |
-| Adapters   | `src/resources/adapters/<kind>.ts`                                  | One per kind: liveness, snapshot, stream, input                                               |
-| iOS mirror | MyAgents `OpenCodeKit/Sources/OpenCodeKit/SessionResources.swift`   | Codable contract, RPC calls, hub URLs                                                         |
-| iOS viewer | MyAgents `Apps/iOS/SessionResources/`                               | Shared shell (`ResourceViewer.swift`, model, touch surface, keyboard) and one folder per kind |
+| Piece      | Where                                                             | Role                                                                                          |
+| ---------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Contract   | `src/resources/rpc.ts`, `src/resources/protocol.ts`               | Resource shape, RPC, stream/input wire protocol                                               |
+| Plugin     | `src/resources/index.ts`, `lock.ts`, `supervisor.ts`              | `custom.resources` RPC, control lock in `execute.before`, relays hub events, starts the hub   |
+| Hub        | `src/resources/hub/`                                              | Separate Bun process: registry, locks, tickets, probes, shared streams, input                 |
+| Adapters   | `src/resources/adapters/<kind>.ts`                                | One per kind: liveness, snapshot, stream, input                                               |
+| iOS mirror | MyAgents `OpenCodeKit/Sources/OpenCodeKit/SessionResources.swift` | Codable contract, RPC calls, hub URLs                                                         |
+| iOS viewer | MyAgents `Apps/iOS/SessionResources/`                             | Shared shell (`ResourceViewer.swift`, model, touch surface, keyboard) and one folder per kind |
 
 ## Resource
 
 `Resources.Resource` (`rpc.ts`):
 
-| Field                                     | Meaning                                                                                                                                                                                   |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                      | `<kind>:<native id>`: `ios-simulator:<UDID>`, `android-emulator:<AVD or serial>`, `chrome:<playwright session or CDP endpoint>`                                                           |
-| `kind`                                    | `ios-simulator`, `android-emulator`, `chrome` (clients must tolerate unknown kinds)                                                                                                       |
-| `label`                                   | Display name derived from `meta` (`iPhone 17 · OpenCode Salto Turno`, `Pixel 9 · abacato v2`, `localhost:5173/login`) unless registration named it                                        |
-| `purpose`                                 | Optional, from explicit registration                                                                                                                                                      |
-| `owner`                                   | `{ sessionID, rootSessionID, agent? }`: the session whose tool call used it (a subagent's own session) and the family's root; lists group by root and show "via <subagente>"              |
-| `state`                                   | `user` (Alexandre controls it) › `agent` (a command naming it is running, or ended in the last 90 s) › `live` (running, used in the last 10 min) › `idle` ("Livre") › `stopped` › `gone`  |
-| `control`                                 | `{ holder: "user", since, expiresAt }` while Alexandre holds control                                                                                                                      |
-| `meta`                                    | Per kind, tagged by `kind`: iOS `{ udid, name?, device?, runtime? }`; Android `{ serial?, avd?, consolePort?, grpcPort?, device? }`; Chrome `{ session?, cdp?, targetID?, url?, title? }` |
-| `live`                                    | `{ stream, input }`: whether the adapter implements them (without `stream` the hub streams snapshots)                                                                                     |
-| `discoveredAt`, `lastUsedAt`, `updatedAt` | Epoch ms                                                                                                                                                                                  |
-| `activity`                                | Optional (rev. 2026-10-30): the agents' latest shell commands that named it, newest first, at most 5: `{ at, command, sessionID?, agent?, running? }`; see [Activity](#activity)          |
+| Field                                     | Meaning                                                                                                                                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                      | `<kind>:<native id>`: `ios-simulator:<UDID>`, `android-emulator:<AVD or serial>`, `chrome:<playwright session or CDP endpoint>`                                                             |
+| `kind`                                    | `ios-simulator`, `android-emulator`, `chrome` (clients must tolerate unknown kinds)                                                                                                         |
+| `label`                                   | Display name derived from `meta` (`iPhone 17 · OpenCode Salto Turno`, `Pixel 9 · abacato v2`, `localhost:5173/login`) unless registration named it                                          |
+| `purpose`                                 | Optional, from explicit registration                                                                                                                                                        |
+| `owner`                                   | `{ sessionID, rootSessionID, agent? }`: the session whose tool call used it (a subagent's own session) and the family's root; lists group by root and show "via <subagente>"                |
+| `state`                                   | `user` (Alexandre controls it) › `agent` (a command naming it is running, or ended in the last 90 s) › `live` (running, used in the last 10 min) › `idle` ("Livre") › `stopped` › `gone`    |
+| `control`                                 | `{ holder: "user", since, expiresAt }` while Alexandre holds control                                                                                                                        |
+| `meta`                                    | Per kind, tagged by `kind`: iOS `{ udid, name?, device?, runtime? }`; Android `{ serial?, avd?, consolePort?, grpcPort?, device? }`; Chrome `{ session?, cdp?, targetID?, url?, title? }`   |
+| `live`                                    | `{ stream, input }`: whether the adapter implements them (without `stream` the hub streams snapshots)                                                                                       |
+| `discoveredAt`, `lastUsedAt`, `updatedAt` | Epoch ms                                                                                                                                                                                    |
+| `activity`                                | Optional (rev. 2026-10-30): the agents' latest shell commands that named it, newest first, at most 5: `{ at, command, sessionID?, agent?, running? }`; see [Activity](#activity)            |
+| `capabilities`, `handoff`                 | Optional (rev. 2026-11-07): what the viewer may offer (`false` = the hub refuses it) and the browse handoff a `chrome:browse:<session>` resource exists for; see `browse-handoff-remoto.md` |
 
 Two registrations name the same resource when they share a UDID, a Playwright session or CDP endpoint, or, for
 Android, the same AVD (see [Android identity](#android-identity)); the hub merges them into one entry (metadata
@@ -246,7 +247,7 @@ hand-encoded protobuf, no dependency). Reference: the SDK's `emulator/lib/emulat
   (fail closed, matching the probe, which reports stopped when adb cannot name the AVD), and nothing is sent. A
   resource known only by serial (first discovery, before a probe binds it) acts on whatever emulator answers there.
   A stream is stopped when its resource moves to another serial or AVD, or a poll finds another AVD on its serial.
-  Until 2026-11-04 the hub matched by serial *or* AVD, so when AVD_A stopped and AVD_B reused its port, A's entry
+  Until 2026-11-04 the hub matched by serial _or_ AVD, so when AVD_A stopped and AVD_B reused its port, A's entry
   took B's serial, AVD and model, and the app showed B twice. On load, entries whose `meta.avd` differs from their ID's
   AVD get their own AVD back, lose the other emulator's serial, ports and model, and turn `stopped` until a probe
   finds them (owner, name, purpose, history, lock stay). Several entries left as the same AVD (serial-made IDs) keep

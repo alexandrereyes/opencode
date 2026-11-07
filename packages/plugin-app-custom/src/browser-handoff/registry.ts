@@ -69,6 +69,7 @@ export const wire = (entry: Entry): BrowserHandoffs.Handoff => ({
   messageID: entry.messageID,
   message: entry.message,
   since: entry.since,
+  ...(entry.resourceID ? { resourceID: entry.resourceID } : {}),
 })
 
 declare global {
