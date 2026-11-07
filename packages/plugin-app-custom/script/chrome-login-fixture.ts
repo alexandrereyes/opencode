@@ -1,5 +1,6 @@
 /**
- * Local login page for the Chrome resource checks: a form with e-mail and password, a long scrollable area, and a
+ * Local login page for the Chrome resource checks: a form with e-mail and password, a link to another origin
+ * (`localhost` instead of `127.0.0.1`, for allowlists), a long scrollable area, and a
  * second page for back/forward, and `/animacao` (a spinner that repaints continuously). `POST /login` answers with the e-mail and the password length only; `GET /last`
  * returns the last login (e-mail and password length, never the password) and the deepest scroll reported by the page.
  *
@@ -25,17 +26,19 @@ const page = (title: string, body: string) => `<!doctype html>
   .row { padding: 18px 0; border-bottom: 1px solid #dde; } a { color: #1f6feb; }
 </style></head><body><main>${body}</main></body></html>`
 
-const login = page(
-  "Entrar · Abacato",
-  `<h1>Abacato</h1><h2 style="text-align:center">Entrar</h2>
+const login = () =>
+  page(
+    "Entrar · Abacato",
+    `<h1>Abacato</h1><h2 style="text-align:center">Entrar</h2>
   <form method="post" action="/login">
     <label for="email">E-mail</label><input id="email" name="email" type="email" autocomplete="username" placeholder="voce@exemplo.com">
     <label for="password">Senha</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Sua senha">
     <button id="submit" type="submit">Entrar</button>
   </form>
   <p style="text-align:center"><a id="help" href="/ajuda">Esqueci minha senha</a></p>
+  <p style="text-align:center"><a id="outside" href="http://localhost:${server.port}/ajuda">Ajuda em outra origem</a></p>
   ${Array.from({ length: 40 }, (_, index) => `<div class="row" id="row-${index + 1}">Linha ${index + 1}</div>`).join("")}`,
-)
+  )
 
 const server = Bun.serve({
   port: Number(args.port),
@@ -53,7 +56,7 @@ const server = Bun.serve({
       return new Response(null, { status: 204 })
     }
     if (url.pathname === "/" || url.pathname === "/login") {
-      if (request.method !== "POST") return html(login)
+      if (request.method !== "POST") return html(login())
       const form = await request.formData()
       const email = String(form.get("email") ?? "")
       const length = String(form.get("password") ?? "").length

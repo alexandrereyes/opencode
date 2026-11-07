@@ -115,8 +115,15 @@ Why this does not give false positives:
 
 `custom.resources/focus { id }` → `{}` (`focus.json`). The plugin brings the handoff's tab to the front of its window
 and that window to the front of the browser, through the relay on that session's tab (`Target.activateTarget`; if
-the relay refuses it, `focus` answers `failed` and the app still activates Chrome). The Mac app calls it and, once it answers, activates the Chrome
-app (`com.google.Chrome`; the button hides while no Chrome runs). Same locks as input:
+the relay refuses it, `focus` answers `failed` and the app still activates Chrome). The Mac app calls it and, once it
+answers (either way), activates the Chrome app (`com.google.Chrome`; the button hides while no Chrome runs).
+
+**With browse 0.0.14 it always answers `failed`** (rev. 2026-11-07, found end to end): Chrome refuses
+`Target.activateTarget` to extensions (`Not allowed`), and the relay blocks the fallback, `Page.bringToFront`, unless
+its own environment sets `OPENCODE_BROWSER_ALLOW_FOREGROUND=1` (which would also let agents raise the window). So today
+"Abrir no Chrome" brings Chrome forward, and the handoff's tab is in front only if it already was in its window. The
+plugin tries both on every call, so the action starts working whenever browse allows one, with no app change. Same
+locks as input:
 
 - only resources with `capabilities.focus: true` and a waiting `handoff`, only their own target (the session-scoped
   connection cannot address another tab);
@@ -135,6 +142,36 @@ app (`com.google.Chrome`; the button hides while no Chrome runs). Same locks as 
 - **Mac app with a server without `focus` or `machine`**: no "Abrir no Chrome"; the stage still shows the tab.
 - New optional fields and one new RPC method only; no existing field, literal or reason changes meaning. `Unavailable.reason` keeps its
   literals (a refused input is a stream `error`, not an RPC reason).
+
+## 6. Implementation notes (rev. 2026-11-07)
+
+Compatible precisions found while implementing; none changes a schema or an example.
+
+- **A refused batch is refused whole.** An `input` message (or `POST …/input`) whose `events` hold one refused input
+  answers one `error not_allowed` and applies none of them; the app never mixes navigation with other input anyway.
+- **Order at the start is not guaranteed.** The hub announces a new resource (`resources.changed`) on its own, so it may
+  arrive just before or just after the handoff's `browser-handoffs.changed`; the order at the end is (section 2).
+- **Only that tab, literally.** Popups or tabs the page opens during the handoff (an OAuth window) are not shown and
+  cannot be reached from the viewer. If the handoff's tab closes, the resource may show `state: "gone"` for a moment
+  before its end arrives with `handoff_failed` or `handoff_cancelled`.
+- **A tab in the background** keeps streaming (about 7 fps); the stream sends the existing `notice` when Chrome reports
+  it hidden.
+- **Browser zoom.** Touches and `meta.viewport` are in CSS pixels also when Alexandre's Chrome is zoomed (125 % today):
+  `viewport` is the page's size (for example 1120 × 662 at 125 % for frames of 1400 × 828); frames keep their own size.
+- **Where things run.** The plugin (`browser-handoff/index.ts`) registers the resource through the hub's upsert with
+  `meta { cdp: "http://127.0.0.1:<OPENCODE_BROWSER_PORT or 19988>", browse }`, `capabilities` and `handoff`; the hub
+  asks the Chrome adapter to identify the session's tab first (`/json/list` filtered to that session, the session's
+  own page preferred) and refuses the registration without one; it computes `handoff.machine` and keeps these
+  resources in memory only. At the end it calls `POST /admin/resources/<id>/end { reason }` (viewers end, control is
+  dropped without a hand-back notice, no event), emits `browser-handoffs.changed` with `ended`, then
+  `POST /admin/announce`. A hub from before this contract ignores `handoff`; the plugin then removes what it
+  registered and gives the handoff no `resourceID`.
+- **Relay token.** The hub's adapter reads it per request from where browse keeps it (`OPENCODE_BROWSER_HOME`, else
+  `$XDG_DATA_HOME/browse`, else `~/.local/share/browse`; `OPENCODE_BROWSE_RELAY_TOKEN_FILE` names the file, for
+  sandboxes whose XDG directories are their own). It goes only into request headers and the WebSocket URL, which
+  stays in memory; connection errors print URLs without their query.
+- **End to end**: `script/browse-handoff-check.ts` drives a sandbox agent's real handoff in Alexandre's Chrome on the
+  login fixture, for `completed`, `timeout` and `cancelled`.
 
 ## Examples
 
