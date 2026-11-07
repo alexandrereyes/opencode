@@ -29,6 +29,7 @@ import { registerQuestionDrafts } from "./question-drafts/index.js"
 import { registerLiveActivity } from "./live-activity/index.js"
 import { registerWatch } from "./watch/index.js"
 import { registerBrowserHandoffs } from "./browser-handoff/index.js"
+import { registerBrowseGuard } from "./browse-guard/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -63,6 +64,7 @@ export default Plugin.define({
       yield* registerQuotes(ctx)
       yield* registerQuestionDrafts(ctx)
       yield* registerBrowserHandoffs(ctx)
+      yield* registerBrowseGuard(ctx)
       yield* registerLiveActivity(ctx)
       yield* registerWatch(ctx)
     }),
