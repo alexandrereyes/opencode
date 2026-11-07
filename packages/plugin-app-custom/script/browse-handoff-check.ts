@@ -5,14 +5,17 @@
  * - `completed`: the resource appears with the handoff, frames arrive, taps and typing reach the page (secure field
  *   included), `navigate` is refused, `focus` brings the tab forward, a tap on browse's Continue finishes the call;
  * - `timeout`: the handoff gives up after `timeoutMs`; a link to another origin stays blocked by the allowlist;
- * - `cancelled`: the agent's session is interrupted while the handoff waits.
+ * - `cancelled`: the agent's session is interrupted while the handoff waits;
+ * - `keys`: browser shortcuts sent as `key` inputs (Cmd+L and a typed URL, Cmd+T, Cmd+[, Cmd+], Alt+←, Cmd+R,
+ *   Backspace outside a field, Cmd+W) reach the page only: the tab keeps its URL, the session its tabs and the page its
+ *   focus, with history both ways so going back or forward would show; then Continue finishes it.
  *
  * Each checks the end in the contract's order (stream `end`, `browser-handoffs.changed` with `ended`,
  * `resources.changed`) and that the resource is gone. Positions on the page are read through the relay (its token is
  * read here and never printed). The browse session must exist with `--allow-origin <fixture>`.
  *
  *   bun packages/plugin-app-custom/script/browse-handoff-check.ts --server-url http://127.0.0.1:4196 --home <sandbox> \
- *     --session <browse session> --scenario completed|timeout|cancelled [--fixture http://127.0.0.1:5191]
+ *     --session <browse session> --scenario completed|timeout|cancelled|keys [--fixture http://127.0.0.1:5191]
  */
 import { readFileSync } from "node:fs"
 import os from "node:os"
@@ -34,7 +37,8 @@ const args = parseArgs({
 }).values
 const server = args["server-url"]!
 if (/:(4096|4178|4179)\b/.test(server)) throw new Error("Never against production")
-const scenario = args.scenario as "completed" | "timeout" | "cancelled"
+const scenario = args.scenario as "completed" | "timeout" | "cancelled" | "keys"
+const expected = scenario === "keys" ? "completed" : scenario
 const browse = args.session!
 const resourceID = `chrome:browse:${browse}`
 const started = Date.now()
@@ -110,8 +114,13 @@ const sessionID = (
 ).data.id
 log("agent session", sessionID)
 const message = "Entre com o login de teste e clique em Continue"
+const visit = (route: string) => `await page.goto(${JSON.stringify(`${args.fixture}${route}`)}, { waitUntil: "load" })`
 const code = [
-  `await page.goto(${JSON.stringify(`${args.fixture}/`)}, { waitUntil: "domcontentloaded" })`,
+  // `keys`: history both ways (/ajuda before and after the login page), so a back or forward would change the URL.
+  ...(scenario === "keys"
+    ? [visit("/ajuda"), visit("/"), visit("/ajuda"), `await page.goBack({ waitUntil: "load" })`]
+    : []),
+  ...(scenario === "keys" ? [] : [visit("/")]),
   `await handoff(${JSON.stringify(message)}${scenario === "timeout" ? ", { timeoutMs: 20000 }" : ""})`,
   `const email = await page.inputValue("#email")`,
   `await page.click("#submit")`,
@@ -241,6 +250,46 @@ if (scenario === "completed") {
   )
   log("tapping Continue")
   await tap((await positions(["continue"])).continue!)
+} else if (scenario === "keys") {
+  const before = { url: meta.url, tabs: await sessionTabs() }
+  const key = (key: string, modifiers: string[] = []) => ({
+    type: "key",
+    key,
+    ...(modifiers.length ? { modifiers } : {}),
+  })
+  const shortcuts: [string, unknown[]][] = [
+    ["Cmd+L, a URL, Enter", [key("l", ["meta"]), { type: "text", text: "example.com" }, key("Enter")]],
+    ["Cmd+T", [key("t", ["meta"])]],
+    ["Cmd+[", [key("[", ["meta"])]],
+    ["Cmd+]", [key("]", ["meta"])]],
+    ["Alt+←", [key("ArrowLeft", ["alt"])]],
+    ["Cmd+R", [key("r", ["meta"])]],
+    ["Backspace outside a field", [key("Backspace")]],
+    ["Cmd+W", [key("w", ["meta"])]],
+  ]
+  const seen = async () => (await (await fetch(`${args.fixture}/last`)).json()) as { keys: string[]; focus: string[] }
+  log("before", JSON.stringify(before))
+  for (const [name, events] of shortcuts) {
+    await fetch(`${args.fixture}/seen?focus=-`)
+    const mark = await seen()
+    send(events)
+    await Bun.sleep(1_500)
+    const after = { url: meta.url, tabs: await sessionTabs() }
+    const page = await seen()
+    const focus = page.focus.slice(mark.focus.length)
+    const keys = page.keys.slice(mark.keys.length)
+    check(
+      `key ${name}: the page got it, no navigation, tab or focus change`,
+      after.url === before.url &&
+        JSON.stringify(after.tabs) === JSON.stringify(before.tabs) &&
+        ended === undefined &&
+        keys.length >= events.filter((event) => (event as { type: string }).type === "key").length &&
+        !focus.some((item) => item === "blur" || item === "hidden"),
+      { url: after.url, tabs: after.tabs.length, pageKeys: keys, focus, errors: errors.slice(2) },
+    )
+  }
+  log("tapping Continue")
+  await tap((await positions(["continue"])).continue!)
 } else if (scenario === "timeout") {
   const before = meta.url
   await tap((await positions(["outside"])).outside!)
@@ -266,7 +315,7 @@ if (scenario === "completed") {
 
 await until(async () => (ended ? true : undefined), "the stream's end", 60_000).catch(() => undefined)
 await Promise.race([closed, Bun.sleep(3_000)])
-const reason = { completed: "handoff_completed", timeout: "handoff_timeout", cancelled: "handoff_cancelled" }[scenario]
+const reason = { completed: "handoff_completed", timeout: "handoff_timeout", cancelled: "handoff_cancelled" }[expected]
 check("stream ends with the reason and closes", ended === reason && ws.readyState === WebSocket.CLOSED, ended)
 await until(
   async () =>
@@ -298,7 +347,7 @@ check(
   endAt >= 0 && changedAt > endAt && resourcesAt > changedAt,
   timeline.slice(-6),
 )
-check("ended outcome", outcome?.outcome === scenario && outcome.resourceID === resourceID, outcome)
+check("ended outcome", outcome?.outcome === expected && outcome.resourceID === resourceID, outcome)
 const gone = await rpc("custom.resources/get", { id: resourceID }).then(
   () => "still there",
   (error: Error & { body?: string }) => error.body ?? error.message,
@@ -357,6 +406,20 @@ await fetch(`${server}/api/session/${sessionID}`, { method: "DELETE", headers: {
 await Bun.$`rm -rf ${repo}`.quiet()
 console.log(JSON.stringify(results, null, 2))
 process.exit(Object.values(results).every((value) => value === "ok" || value === scenario) ? 0 : 1)
+
+/** The browse session's tabs as the relay lists them (URL each). */
+async function sessionTabs() {
+  const headers = { authorization: `Bearer ${relayToken()}`, "opencode-browser-session-id": browse }
+  const listed = (await (await fetch("http://127.0.0.1:19988/json/list", { headers })).json()) as {
+    id: string
+    type: string
+    url: string
+    opencodeBrowserSessionId?: string
+  }[]
+  return listed
+    .filter((item) => item.opencodeBrowserSessionId === browse && item.type === "page")
+    .map((item) => `${item.id} ${item.url}`)
+}
 
 function relayToken() {
   return readFileSync(path.join(os.homedir(), ".local/share/browse/relay-token"), "utf8").trim()

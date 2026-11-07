@@ -149,6 +149,14 @@ Compatible precisions found while implementing; none changes a schema or an exam
 
 - **A refused batch is refused whole.** An `input` message (or `POST …/input`) whose `events` hold one refused input
   answers one `error not_allowed` and applies none of them; the app never mixes navigation with other input anyway.
+- **Browser shortcuts are no way around `navigation: false`.** `key` inputs reach the page only: Chrome does not run
+  its accelerators for DevTools input (`script/browse-handoff-check.ts --scenario keys`, in Alexandre's Chrome: Cmd+L
+  and a typed URL, Cmd+T, Cmd+W, Cmd+[, Cmd+], Alt+←, Cmd+R and Backspace outside a field leave the URL, the session's
+  tabs and the page's focus as they were, with history both ways). A page's own key handlers stay under the allowlist.
+- **`ticket` for a resource that is gone answers `not_found`** for every kind, as section 2 asks; it used to answer
+  `failed` (the hub's 409). The apps (`ResourceViewerModel`, iPhone and Mac) treat both alike: the viewer shows "Sem
+  conexão com o recurso; tentando de novo…" and retries; existing resources still get their tickets as before, and a
+  `control` ticket without control still answers `failed`.
 - **Order at the start is not guaranteed.** The hub announces a new resource (`resources.changed`) on its own, so it may
   arrive just before or just after the handoff's `browser-handoffs.changed`; the order at the end is (section 2).
 - **Only that tab, literally.** Popups or tabs the page opens during the handoff (an OAuth window) are not shown and
