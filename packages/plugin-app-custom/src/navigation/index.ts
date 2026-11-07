@@ -6,6 +6,8 @@ import { Navigation } from "./rpc.js"
 import { Session } from "@opencode/schema/session"
 import { sharedHub } from "../live-activity/index.js"
 import type { SessionProgress } from "../live-activity/tracker.js"
+import { sharedRegistry, wire } from "../browser-handoff/registry.js"
+import type { BrowserHandoffs } from "../browser-handoff/rpc.js"
 
 const encodeSession = Schema.encodeSync(Session.Info)
 
@@ -17,6 +19,8 @@ interface NavigationContext {
   readonly active: Plugin.Context["session"]["active"]
   /** A session's Progresso while it shows; the Live Activity hub folds the same events for every Location. */
   readonly progress?: (sessionID: string) => SessionProgress | undefined
+  /** Browse handoffs waiting now, any Location (`docs/browser-handoff.md`). */
+  readonly handoffs?: () => readonly BrowserHandoffs.Handoff[]
 }
 
 export const registerNavigation = Effect.fn("Navigation.register")(function* (ctx: Context) {
@@ -33,6 +37,7 @@ export const registerNavigation = Effect.fn("Navigation.register")(function* (ct
             background: jobs.background,
             active: sessions.active,
             progress: (sessionID) => sharedHub().progress(sessionID),
+            handoffs: () => sharedRegistry().waiting().map(wire),
           },
           input,
         ),
@@ -56,6 +61,7 @@ export const list = Effect.fn("Navigation.list")(function* (
       .filter((form) => form.metadata?.kind === "question" || form.metadata?.kind === "websearch.provider"),
     (form) => form.sessionID,
   )
+  const handoffs = Map.groupBy(ctx.handoffs?.() ?? [], (handoff) => handoff.sessionID)
   // A running subagent keeps its own child Session active; other background work (shells) has no Session state.
   const background = Map.groupBy(
     (yield* ctx.background()).filter((job) => job.type !== "subagent").toSorted((a, b) => b.started - a.started),
@@ -79,6 +85,7 @@ export const list = Effect.fn("Navigation.list")(function* (
       const sessionPermissions = permissions.get(row.session.id) ?? []
       const sessionQuestions = questions.get(row.session.id) ?? []
       const sessionBackground = background.get(row.session.id) ?? []
+      const newestHandoff = (handoffs.get(row.session.id) ?? []).toSorted((a, b) => b.since - a.since)[0]
       const newest = sessionBackground[0]
       // A shell's end wakes only its owner. A subagent whose turn ended already delivered its result, so nobody
       // waits on the shells it left running (an emulator, a dev server): they are listed, not counted as work.
@@ -98,6 +105,13 @@ export const list = Effect.fn("Navigation.list")(function* (
           ? {
               questionAt: Math.max(...sessionQuestions.map((form) => form.created ?? 0)),
               questionCount: sessionQuestions.length,
+            }
+          : {}),
+        ...(newestHandoff
+          ? {
+              browserAt: newestHandoff.since,
+              browserCount: handoffs.get(row.session.id)?.length ?? 1,
+              browserText: newestHandoff.message,
             }
           : {}),
         ...(newest && waited

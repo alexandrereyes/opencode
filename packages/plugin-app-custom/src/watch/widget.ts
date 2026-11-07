@@ -31,6 +31,8 @@ export const limits = {
 export type Key = {
   readonly question: boolean
   readonly permission: boolean
+  /** rev. 2026-11-07: a browse handoff waits (`docs/browser-handoff.md`). */
+  readonly browser: boolean
   readonly failed: boolean
 }
 
@@ -38,11 +40,13 @@ export function key(state: LiveActivity.AgentsState | null): Key {
   return {
     question: (state?.counts.question ?? 0) > 0,
     permission: (state?.counts.permission ?? 0) > 0,
+    browser: (state?.counts.browser ?? 0) > 0,
     failed: (state?.counts.failed ?? 0) > 0,
   }
 }
 
-const same = (a: Key, b: Key) => a.question === b.question && a.permission === b.permission && a.failed === b.failed
+const same = (a: Key, b: Key) =>
+  a.question === b.question && a.permission === b.permission && a.browser === b.browser && a.failed === b.failed
 
 /**
  * WidgetKit pushes (`apns-push-type: widgets`) that ask the watch complication to reload. Only a kind appearing or

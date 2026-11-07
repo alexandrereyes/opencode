@@ -7,6 +7,7 @@ import { Form } from "@opencode/schema/form"
 import { Permission } from "@opencode/schema/permission"
 import { Schema } from "effect"
 import { Navigation } from "../navigation/rpc.js"
+import { BrowserHandoffs } from "../browser-handoff/rpc.js"
 
 export const Snapshot = Schema.Struct({
   count: SessionFamily.Info.fields.count,
@@ -19,6 +20,11 @@ export const Snapshot = Schema.Struct({
    * rule and source as the Sessões rows. Absent when none shows one, and on older servers.
    */
   progress: Schema.Record(Schema.String, Navigation.Progress).pipe(Schema.optional),
+  /**
+   * rev. 2026-11-07: browse calls of the family waiting on Alexandre in the browser (`docs/browser-handoff.md`),
+   * oldest first. Absent when none waits, and on older servers.
+   */
+  browser: Schema.Array(BrowserHandoffs.Handoff).pipe(Schema.optional),
 })
 export type Snapshot = typeof Snapshot.Type
 

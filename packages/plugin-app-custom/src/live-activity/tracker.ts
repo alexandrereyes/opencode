@@ -188,6 +188,19 @@ export type TrackerContext = {
    * migrated V1 sessions never come back.
    */
   todo: (directory: string) => Effect.Effect<boolean>
+  /**
+   * The browse handoffs waiting now, any Location (`docs/browser-handoff.md`): attention of kind `browser`, after
+   * questions and permissions. Absent means none.
+   */
+  handoffs?: () => readonly Handoff[]
+}
+
+/** A waiting browse handoff as the tracker reads it. */
+export type Handoff = {
+  readonly id: string
+  readonly sessionID: string
+  readonly since: number
+  readonly message: string
 }
 
 /** A session's Progresso as the apps, the Live Activity and Mestra show it. */
@@ -362,6 +375,21 @@ export function makeTracker(ctx: TrackerContext) {
     }))
     // Owners may be subagent descendants or sessions this process has not seen yet; walk them up to their root.
     for (const owner of new Set(state.requests.map((request) => request.sessionID))) yield* lineage(owner)
+  })
+
+  /** Browse handoffs as requests of kind `browser`, never notified twice: their ID is the call's. */
+  const handoffRequests = (): Request[] =>
+    (ctx.handoffs?.() ?? []).map((item) => ({
+      id: item.id,
+      kind: "browser" as const,
+      sessionID: item.sessionID,
+      since: item.since,
+      text: item.message,
+    }))
+
+  /** Reads the sessions that own a waiting handoff and their ancestors, so the handoff rolls up to its root. */
+  const refreshHandoffs = Effect.fn("LiveActivity.refreshHandoffs")(function* () {
+    for (const owner of new Set(handoffRequests().map((request) => request.sessionID))) yield* lineage(owner)
   })
 
   /** Reconstructs running, waiting, failed and recently idle sessions, e.g. after a restart. */
@@ -738,7 +766,7 @@ export function makeTracker(ctx: TrackerContext) {
   /** Computes the contract state; also moves the focus, which must stay put while it keeps working. */
   const derive = (now: number, host: string): Derived => {
     const owned = new Map<string, Request[]>()
-    for (const request of state.requests) {
+    for (const request of [...state.requests, ...handoffRequests()]) {
       const top = rootOf(request.sessionID)
       if (!top || top.archived) continue
       owned.set(top.id, [...(owned.get(top.id) ?? []), request])
@@ -786,11 +814,14 @@ export function makeTracker(ctx: TrackerContext) {
       .filter((entry) => !entry.parentID && !entry.archived)
       .flatMap((entry) => {
         const requests = owned.get(entry.id) ?? []
+        // A question outranks a permission, which outranks a browse handoff: the order of "Precisa de você".
         const kind = requests.some((request) => request.kind === "question")
           ? ("question" as const)
-          : requests.length > 0
+          : requests.some((request) => request.kind === "permission")
             ? ("permission" as const)
-            : undefined
+            : requests.length > 0
+              ? ("browser" as const)
+              : undefined
         const oldest = requests
           .filter((request) => request.kind === kind)
           .toSorted((a, b) => a.since - b.since || a.id.localeCompare(b.id))[0]
@@ -847,6 +878,7 @@ export function makeTracker(ctx: TrackerContext) {
     const ordered = [
       ...of("question").toSorted(bySince),
       ...of("permission").toSorted(bySince),
+      ...of("browser").toSorted(bySince),
       ...of("failed").toSorted(byEnded),
       ...(focused ? [focused] : []),
       ...working
@@ -858,10 +890,11 @@ export function makeTracker(ctx: TrackerContext) {
     const needs = [
       ...of("question").toSorted(bySince),
       ...of("permission").toSorted(bySince),
+      ...of("browser").toSorted(bySince),
       ...of("failed").toSorted(byEnded),
       ...unread,
     ].map((row): LiveActivity.Need => {
-      if (row.status === "question" || row.status === "permission")
+      if (row.status === "question" || row.status === "permission" || row.status === "browser")
         return { ...row.ref, kind: row.status, since: row.oldest?.since ?? now }
       if (row.status === "failed") return { ...row.ref, kind: "failed", since: row.entry.ended?.at ?? now }
       return { ...row.ref, kind: "unread", since: unreadAt(row.entry) }
@@ -874,11 +907,16 @@ export function makeTracker(ctx: TrackerContext) {
       // Finished successfully in the last 30 minutes, read or not (the original meaning).
       idle: of("idle").filter((row) => idle(row.entry)).length,
       unread: of("idle").filter((row) => row.unread).length,
+      // Only when some session waits on one, so builds from before it see the same counts.
+      ...(of("browser").length > 0 ? { browser: of("browser").length } : {}),
     }
-    const waiting = rows.filter((row) => row.status === "question" || row.status === "permission").toSorted(bySince)
+    const browser = counts.browser ?? 0
+    const waiting = rows
+      .filter((row) => row.status === "question" || row.status === "permission" || row.status === "browser")
+      .toSorted(bySince)
     const focusProgress = focused ? progress(focused) : undefined
     const marks = new Map<string, Mark>([
-      ...[...of("question"), ...of("permission"), ...of("failed")].map(
+      ...[...of("question"), ...of("permission"), ...of("browser"), ...of("failed")].map(
         (row) =>
           [
             `${row.status}:${row.entry.id}`,
@@ -888,7 +926,9 @@ export function makeTracker(ctx: TrackerContext) {
                   ? "Pergunta pendente"
                   : row.status === "permission"
                     ? "Permissão pendente"
-                    : "Sessão parou com erro",
+                    : row.status === "browser"
+                      ? "Navegador aguardando"
+                      : "Sessão parou com erro",
               body: `${row.ref.title} · ${row.ref.project}`,
             },
           ] as const,
@@ -909,7 +949,7 @@ export function makeTracker(ctx: TrackerContext) {
     const attention = waiting.map(
       (row): LiveActivity.Attention => ({
         ...row.ref,
-        kind: row.status === "question" ? "question" : "permission",
+        kind: row.status === "question" ? "question" : row.status === "browser" ? "browser" : "permission",
         since: row.oldest?.since ?? now,
         ...(row.oldest?.text ? { text: clip(row.oldest.text, limits.text) } : {}),
       }),
@@ -924,7 +964,7 @@ export function makeTracker(ctx: TrackerContext) {
         updatedAt: now,
         host: clip(host, limits.host),
         counts,
-        activeTotal: counts.working + counts.question + counts.permission,
+        activeTotal: counts.working + counts.question + counts.permission + browser,
         ...(focused
           ? {
               focus: {
@@ -936,14 +976,19 @@ export function makeTracker(ctx: TrackerContext) {
             }
           : {}),
         attention: attention.slice(0, limits.attention),
-        attentionTotal: counts.question + counts.permission,
+        attentionTotal: counts.question + counts.permission + browser,
         sessions: sessionRows.slice(0, limits.rows),
         needs: needs.slice(0, limits.needs),
       },
       dashboard: { attention, sessions: sessionRows, needs },
       marks,
       ...(expiries.length > 0 ? { wakeAt: Math.min(...expiries) } : {}),
-      requests: new Map(waiting.flatMap((row) => (row.oldest ? [[row.entry.id, row.oldest.id] as const] : []))),
+      // The watch answers questions and permissions only; a handoff is done in the browser.
+      requests: new Map(
+        waiting.flatMap((row) =>
+          row.oldest && row.status !== "browser" ? [[row.entry.id, row.oldest.id] as const] : [],
+        ),
+      ),
       roots: new Map(
         [...sessions.values()]
           .filter((entry) => !entry.parentID && !entry.archived)
@@ -977,6 +1022,7 @@ export function makeTracker(ctx: TrackerContext) {
   const prune = (now: number) => {
     const owners = new Set([
       ...state.requests.map((request) => request.sessionID),
+      ...handoffRequests().map((request) => request.sessionID),
       ...[...shells.values()].map((shell) => shell.sessionID),
     ])
     const live = new Set(
@@ -994,7 +1040,7 @@ export function makeTracker(ctx: TrackerContext) {
     }
   }
 
-  return { rebuild, apply, refreshPending, derive, prune, sessions, progress }
+  return { rebuild, apply, refreshPending, refreshHandoffs, derive, prune, sessions, progress }
 }
 
 export type Tracker = ReturnType<typeof makeTracker>

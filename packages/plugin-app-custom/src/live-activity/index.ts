@@ -8,6 +8,7 @@ import { makeNotificationRegistry, makeNotifier, type Notifier } from "../notifi
 import { Notifications } from "../notifications/rpc.js"
 import { Preferences } from "../preferences/rpc.js"
 import { tool } from "../progress/todos.js"
+import { sharedRegistry, type Registry } from "../browser-handoff/registry.js"
 import { LiveActivity } from "./rpc.js"
 import { eventTypes, makeTracker, type Event, type Tracker, type TrackerContext } from "./tracker.js"
 
@@ -32,6 +33,8 @@ export type Member = {
 export type HubOptions = {
   readonly host: Effect.Effect<string>
   readonly apns: Effect.Effect<Client | undefined>
+  /** Browse handoffs waiting on Alexandre (`docs/browser-handoff.md`). */
+  readonly handoffs?: Pick<Registry, "waiting" | "listen">
 }
 
 type Running = {
@@ -65,11 +68,17 @@ export function makeHub(options: HubOptions) {
         ...member.ctx,
         todo: (directory) =>
           members.find((item) => item.todo?.directory === directory)?.todo?.enabled ?? Effect.succeed(false),
+        handoffs: () => options.handoffs?.waiting() ?? [],
       }),
       registry: makeRegistry(member.ctx.storage),
       notifications: makeNotificationRegistry(member.ctx.storage),
     }
     runtime.current = running
+    // A handoff starting to wait or ending changes the state without a server event of its own.
+    if (options.handoffs) {
+      const stop = options.handoffs.listen(() => Queue.offerUnsafe(running.signal, undefined))
+      yield* Scope.addFinalizer(scope, Effect.sync(stop))
+    }
     // Subscribe before rebuilding so nothing published meanwhile is lost; events wait for the rebuild.
     yield* member.ctx.events.pipe(
       Stream.runForEach((event) =>
@@ -118,6 +127,7 @@ export function makeHub(options: HubOptions) {
     const emitted = { key: "null", at: -Infinity }
     return Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
+      yield* running.tracker.refreshHandoffs()
       running.tracker.prune(now)
       const derived = running.tracker.derive(now, host)
       const state = visible(derived.state, now)
@@ -282,7 +292,11 @@ declare global {
  * evaluation's code serves the process until it restarts.
  */
 export function sharedHub() {
-  globalThis.opencodeCustomLiveActivityHub ??= makeHub({ host: computerName, apns: load() })
+  globalThis.opencodeCustomLiveActivityHub ??= makeHub({
+    host: computerName,
+    apns: load(),
+    handoffs: sharedRegistry(),
+  })
   return globalThis.opencodeCustomLiveActivityHub
 }
 

@@ -68,11 +68,12 @@ AgentsState {
     failed: number                  // sessions stopped with an error (see "Failed")
     idle: number                    // sessions that finished successfully in the last 30 minutes (kept for older builds)
     unread?: number                 // rev. 2026-10-28: finished sessions with unread output (see "Unread")
+    browser?: number                // rev. 2026-11-07: sessions waiting on a browse handoff; only when > 0
   }
-  activeTotal: number               // working + question + permission ("4 ativas")
+  activeTotal: number               // working + question + permission + browser ("4 ativas")
   focus?: Focus                     // the session shown with progress; absent when nothing is working
   attention: Attention[]            // pending questions/permissions, oldest first, at most 3
-  attentionTotal: number            // question + permission (may exceed attention.length)
+  attentionTotal: number            // question + permission + browser (may exceed attention.length)
   sessions: Row[]                   // rows for the expanded Dynamic Island, at most 4, ordered (see below)
   needs?: Need[]                    // rev. 2026-10-29: what needs Alexandre, at most 3, ordered (see "Needs")
 }
@@ -92,18 +93,19 @@ Progress {
 }
 
 Attention = SessionRef & {
-  kind: "question" | "permission"
+  kind: "question" | "permission" | "browser"   // "browser" rev. 2026-11-07 (`browser-handoff.md`)
   since: number                     // epoch ms the oldest pending request of this kind was asked
-  text?: string                     // question text, or permission summary such as "bash · bun test --filter oauth"; ≤ 120
+  text?: string                     // question text, permission summary such as "bash · bun test --filter oauth", or the
+                                    // handoff message; ≤ 120
 }
 
 Row = SessionRef & {
-  status: "question" | "permission" | "failed" | "working" | "idle"
+  status: "question" | "permission" | "browser" | "failed" | "working" | "idle"
   progress?: Progress               // only for working rows
 }
 
 Need = SessionRef & {
-  kind: "question" | "permission" | "failed" | "unread"
+  kind: "question" | "permission" | "browser" | "failed" | "unread"
   since: number                     // asked (oldest pending request), failed (execution end) or answered (unread time)
 }
 ```
@@ -112,6 +114,12 @@ Need = SessionRef & {
 does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agora: …` (rev. 2026-10-30).
 
 ### Backend rules
+
+- **Browse handoffs (rev. 2026-11-07, `browser-handoff.md`):** a browse `execute` call waiting on Alexandre in the
+  browser counts as attention of kind `browser`, rolled up to its top-level session like a request. Precedence:
+  question > permission > browser > failed > working > unread; it orders after permissions in `sessions`, `needs` and
+  `attention`. `counts.browser` is sent only while some session waits, so builds from before it decode the same counts;
+  they decode the new kind and status as unknown. The watch's `requestID` is never set for it (nothing to answer).
 
 - **Tracked sessions:** top-level (no parent), not archived, across **all** Locations of the server. Subagent child
   sessions never appear as rows; their state **rolls up into their top-level session** (at any depth), the same way

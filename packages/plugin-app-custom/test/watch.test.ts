@@ -1515,12 +1515,14 @@ it.effect("WidgetKit pushes: the key holds only the kinds, and a state the watch
   Effect.gen(function* () {
     const { sent, run, widget, paired } = yield* widgetSetup()
     const minute = widgetLimits.spacingMs
-    expect(key(null)).toEqual({ question: false, permission: false, failed: false })
+    expect(key(null)).toEqual({ question: false, permission: false, browser: false, failed: false })
     expect(key(counted({ question: 2, permission: 1, failed: 3, working: 9, unread: 4 }))).toEqual({
       question: true,
       permission: true,
+      browser: false,
       failed: true,
     })
+    expect(key(counted({ browser: 1 })).browser).toBe(true)
     expect(key(counted({ working: 0, idle: 3, unread: 3 }))).toEqual(key(null))
     yield* run(agents(2, 0, 0), T)
     // The watch reloaded on its own and read the new question before the server looked: no push for it.
