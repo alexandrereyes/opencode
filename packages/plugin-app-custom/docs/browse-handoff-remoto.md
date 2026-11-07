@@ -3,8 +3,11 @@
 Rev. 2026-11-07. Contract between this plugin and the MyAgents apps for **finishing a browse `handoff()` from the
 iPhone or the Mac**: the existing resource viewer (`resources.md`) shows the agent's tab in Alexandre's real Chrome,
 takes his touches and keyboard (secure entry for passwords) and lets him press the handoff card's **Continue**. It
-builds on `browser-handoff.md` (a handoff that waits is "Precisa de você") and on the spike
-`spike-browse-handoff-remoto.md`. Change it only compatibly and update this file with the change.
+builds on `browser-handoff.md` (a handoff that waits is "Precisa de você") and on a spike (2026-11-07, not merged),
+whose findings hold: the relay scopes a CDP connection to one browse session with its token; the plugin learns the
+session only from the call's explicit `session`; Continue lives in a closed shadow root and checks `isTrusted`, which
+CDP mouse input satisfies, and nothing else (no relay route, no MCP tool) ends a handoff. Change it only compatibly and
+update this file with the change.
 
 Normative examples: `docs/browse-handoff-remoto/*.json` (decoded by `test/browse-handoff-remoto-contract.test.ts`; the
 apps read them in their tests the way they read `live-activity/state-browser.json`).
