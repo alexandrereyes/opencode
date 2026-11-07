@@ -302,6 +302,14 @@ dropped first beyond four lines; the attention line shows the first `needs` item
 para você · N trabalhando` over the first two `needs`. Card taps open the first `needs` session. With `forYou` zero
 the rules below apply unchanged. Without `needs` (older backends) the app uses `attention`, then failed and idle rows.
 
+**`N trabalhando` (rev. 2026-11-06).** With `forYou` zero the expanded island's header reads `counts.working
+trabalhando` (`5 trabalhando`, `1 trabalhando`) instead of `N ativas`, the same sessions, in `textStrong`. The
+compact trailing keeps the bare number (the words widened the compact island to the screen's edges and truncated;
+VoiceOver reads `N trabalhando`), and the Lock Screen ring's centre keeps `N ativas` (`trabalhando` does not fit
+inside the 72-point ring; the first counter line beside it already reads `N trabalhando`). The minimal island and
+the Smart Stack card show no count text. Nothing changes in the content state: the app derives the text from
+`counts`.
+
 **State ring (rev. 2026-10-30, replaces the arc rules above and the Smart Stack's subagent ring).** One ring, the
 app's `AgentsStatusRing` drawn by `AgentsStatusRingView`, on the Lock Screen card, around the minimal island's mascot,
 on the Smart Stack card and in the watch app's complications and Painel. One segment per state with sessions,
@@ -321,7 +329,7 @@ half orange, half gray.
 - Compact: leading mascot. Trailing `attentionTotal/activeTotal` (first number `warning`, second `textSecondary`)
   when `attentionTotal > 0`; otherwise `activeTotal` in `success`.
 - Expanded: header `N ativas · M precisa(m) de você` (second part `warning`), plus ` · K com erro` in `error` when
-  failed > 0; then `sessions` rows (avatar, title, project, status at right: `Pergunta` `accent`, `Permissão`
+  failed > 0 (superseded by "Attention first" and `N trabalhando` above); then `sessions` rows (avatar, title, project, status at right: `Pergunta` `accent`, `Permissão`
   `warning`, `Erro` `error`, `Trabalhando` `success` with ` · done/total` when progress, `Não lida` `primary` for `idle` rows).
   A row whose progress is `todos` with `current` shows `Agora: <current>` in place of the project and a bare
   `done/total` (`success`) as its status, so the item keeps the room (rev. 2026-10-30).
