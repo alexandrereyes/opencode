@@ -1,7 +1,7 @@
 /**
  * Local login page for the Chrome resource checks: a form with e-mail and password, a link to another origin
  * (`localhost` instead of `127.0.0.1`, for allowlists), a long scrollable area, and a
- * second page for back/forward, and `/animacao` (a spinner that repaints continuously). `POST /login` answers with the e-mail and the password length only; `GET /last`
+ * second page for back/forward, and `/animacao` (a spinner that repaints continuously). `POST /login` redirects to `/secure`, which shows the e-mail and the password length only; `GET /last`
  * returns the last login (e-mail and password length, never the password), the deepest scroll reported by the page and
  * what the page saw of the keyboard and its focus: shortcut and named keys (`Meta+l`, `Backspace`; never a typed
  * character) and `blur`/`focus`/`hidden`/`visible` events, so a check can tell a key the page got from one the browser
@@ -77,13 +77,16 @@ const server = Bun.serve({
       const email = String(form.get("email") ?? "")
       const length = String(form.get("password") ?? "").length
       Object.assign(last, { email, passwordLength: length })
+      // Like most real logins (the-internet.herokuapp.com's included): POST, then a redirect to another page.
+      return new Response(null, { status: 303, headers: { location: "/secure" } })
+    }
+    if (url.pathname === "/secure")
       return html(
         page(
           "Bem-vindo · Abacato",
-          `<h1 id="welcome">Bem-vindo</h1><p id="who">${Bun.escapeHTML(email)}</p><p id="length">Senha com ${length} caracteres</p><p><a href="/login">Sair</a></p>`,
+          `<h1 id="welcome">Bem-vindo</h1><p id="who">${Bun.escapeHTML(last.email)}</p><p id="length">Senha com ${last.passwordLength} caracteres</p><p><a href="/login">Sair</a></p>`,
         ),
       )
-    }
     if (url.pathname === "/animacao")
       return html(
         page(
