@@ -3,7 +3,8 @@
  * whose browse `execute` hands off in Alexandre's Chrome, on the login fixture (`chrome-login-fixture.ts`, fake data):
  *
  * - `completed`: the resource appears with the handoff, frames arrive, taps and typing reach the page (secure field
- *   included), `navigate` is refused, `focus` brings the tab forward, a tap on browse's Continue finishes the call;
+ *   included), `navigate` is refused, the login is submitted and the page navigates (a redirect, like real sites), `focus`
+ *   brings the tab forward, a tap on browse's Continue on the new page finishes the call;
  * - `timeout`: the handoff gives up after `timeoutMs`; a link to another origin stays blocked by the allowlist;
  * - `cancelled`: the agent's session is interrupted while the handoff waits;
  * - `keys`: browser shortcuts sent as `key` inputs (Cmd+L and a typed URL, Cmd+T, Cmd+[, Cmd+], Alt+←, Cmd+R,
@@ -133,10 +134,10 @@ const code = [
     : []),
   ...(scenario === "keys" ? [] : [visit("/")]),
   `await handoff(${JSON.stringify(message)}${scenario === "timeout" ? `, { timeoutMs: ${timeoutMs} }` : ""})`,
-  `const email = await page.inputValue("#email")`,
-  `await page.click("#submit")`,
+  // The person may have submitted the login already (real sites navigate then); otherwise the agent does.
+  `if (await page.locator("#submit").count()) await page.click("#submit")`,
   `await page.waitForSelector("#welcome")`,
-  `return { email, title: await page.title() }`,
+  `return { url: page.url(), title: await page.title() }`,
 ].join("\n")
 await api(`/api/session/${sessionID}/prompt`, {
   text: [
@@ -195,6 +196,7 @@ ws.binaryType = "arraybuffer"
 let frames = 0
 let meta: { url?: string; tabs?: unknown[]; focus?: { editable: boolean; field?: string }; viewport?: object } = {}
 const errors: string[] = []
+const notices: string[] = []
 let ended: string | undefined
 const closed = new Promise<void>((resolve) => ws.addEventListener("close", () => resolve()))
 ws.onmessage = (event) => {
@@ -206,6 +208,7 @@ ws.onmessage = (event) => {
   const value = JSON.parse(event.data) as { type: string; value?: typeof meta; message?: string; reason?: string }
   if (value.type === "meta") meta = value.value ?? {}
   if (value.type === "error") errors.push(value.message ?? "")
+  if (value.type === "notice") notices.push(value.message ?? "")
   if (value.type === "end") {
     ended = value.reason
     note("stream end", value.reason)
@@ -252,6 +255,14 @@ if (scenario === "completed") {
   check("tap focuses the password field (secure entry)", meta.focus?.field === "password", meta.focus)
   send([{ type: "text", text: args.password }])
   await Bun.sleep(500)
+  // Like Alexandre on a real site: submit, the page navigates, then Continue on the new page.
+  await tap((await positions(["submit"])).submit!)
+  await until(
+    async () => (String(meta.url).endsWith("/secure") ? true : undefined),
+    "the page after the login",
+    10_000,
+  ).catch(() => undefined)
+  check("the login navigates to another page", String(meta.url).endsWith("/secure"), meta.url)
   const focus = await rpc<object>("custom.resources/focus", { id: resourceID }).then(
     (value) => ({ value }),
     (error: Error) => ({ error: error.message }),
@@ -264,6 +275,7 @@ if (scenario === "completed") {
   )
   log("tapping Continue")
   await tap((await positions(["continue"])).continue!)
+  check("no blocked-input notice", !notices.some((item) => item.includes("ignorando os toques")), notices)
 } else if (scenario === "keys") {
   const before = { url: meta.url, tabs: await sessionTabs() }
   const key = (key: string, modifiers: string[] = []) => ({

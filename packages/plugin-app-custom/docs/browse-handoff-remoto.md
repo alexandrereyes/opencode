@@ -170,6 +170,19 @@ Compatible precisions found while implementing; none changes a schema or an exam
 - **Only that tab, literally.** Popups or tabs the page opens during the handoff (an OAuth window) are not shown and
   cannot be reached from the viewer. If the handoff's tab closes, the resource may show `state: "gone"` for a moment
   before its end arrives with `handoff_failed` or `handoff_cancelled`.
+- **A Chrome dialog over the tab swallows every tap** (rev. 2026-11-08, found on the iPhone): after a login with a
+  password Chrome finds in a data breach (the-internet.herokuapp.com's public `tomsmith` / `SuperSecretPassword!`),
+  its password manager covers the tab with a warning, and Chrome then drops all input to that tab, from the viewer and
+  from browse's own Playwright alike, while CDP still answers each command. The frames show only the page, so Continue
+  seemed to do nothing. The adapter counts the trusted pointer events the page receives (from an isolated world, never
+  the page's own scripts) and, when a tap never arrives, sends the viewers the existing `notice` (a tap over an
+  `iframe`, `frame`, `embed` or `object`, such as a captcha or a 3-D Secure frame, reaches that document instead and is
+  not checked): "O Chrome do Mac
+  está ignorando os toques: um aviso do próprio Chrome cobre a página (por exemplo, sobre uma senha exposta em
+  vazamento). Feche-o no Mac para continuar." (at most every 10 s). Closing the warning on the Mac lets the taps
+  through again; turning off Chrome's "Avisar se as senhas forem expostas em uma violação de dados" avoids it.
+  Nothing in browse 0.0.15 changed here (its card, relay handoff code and the extension's content script are as in
+  0.0.14); a tab nobody shows also takes about 5 s per tap, but the taps arrive.
 - **A tab in the background** keeps streaming (about 7 fps); the stream sends the existing `notice` when Chrome reports
   it hidden.
 - **Browser zoom.** Touches and `meta.viewport` are in CSS pixels also when Alexandre's Chrome is zoomed (125 % today):
