@@ -49,7 +49,7 @@ test("the attributes fixture is a valid theme and the push fixtures decode their
   expect(Schema.decodeUnknownSync(LiveActivity.Attributes)(await fixture("attributes"))).toEqual(
     await fixture("attributes"),
   )
-  for (const name of ["push-start", "push-update", "push-end"])
+  for (const name of ["push-start", "push-update", "push-idle"])
     Schema.decodeUnknownSync(LiveActivity.AgentsState)((await fixture(name)).aps["content-state"])
   const theme = (await fixture("attributes")).theme
   expect(() => Schema.decodeUnknownSync(LiveActivity.Theme)({ ...theme, accent: "#fff" })).toThrow()

@@ -76,7 +76,7 @@ function setup(answer?: (push: Push) => Result) {
   return { shared, registry, pushes: fake.pushes, lifecycle, evaluate }
 }
 
-it.effect("an admitted restart cancellation publishes zero work and lets the activity end", () =>
+it.effect("an admitted restart cancellation publishes zero work, and the parked activity stays", () =>
   Effect.gen(function* () {
     const tracker = makeTracker(world().ctx)
     yield* tracker.apply(created(ids.live, T - minute), T)
@@ -90,11 +90,9 @@ it.effect("an admitted restart cancellation publishes zero work and lets the act
     yield* tracker.apply(inboxShellNotice(ids.live, "sh_restart_monitor", T + 1, "cancelled"), T + 1)
     yield* evaluate(tracker, T + limits.coalesceMs)
     expect(pushes.at(-1)?.body).toMatchObject({ aps: { event: "update", "content-state": { activeTotal: 0 } } })
-    yield* evaluate(tracker, T + limits.coalesceMs + limits.endMs)
-    expect(pushes.at(-1)).toMatchObject({
-      priority: 10,
-      body: { aps: { event: "end", "content-state": { activeTotal: 0 } } },
-    })
+    const count = pushes.length
+    yield* evaluate(tracker, T + limits.coalesceMs + limits.heartbeatMs)
+    expect(pushes).toHaveLength(count)
   }),
 )
 
@@ -195,35 +193,73 @@ it.effect("attention changes push at priority 10 with push-update.json; other ch
   }),
 )
 
-it.effect("a new failed session is urgent; the end comes after 10 calm minutes with push-end.json", () =>
+it.effect(
+  "a new failed session is urgent; with nothing working the activity parks with push-idle.json, never ends",
+  () =>
+    Effect.gen(function* () {
+      const { registry, pushes, evaluate } = setup()
+      const tracker = yield* scene("working")
+      yield* registry.register(iphone, T - 2 * minute)
+      yield* registry.activity({ deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" }, T - minute)
+      yield* evaluate(tracker, T - 30_000)
+      yield* tracker.apply(execution("failed", ids.deploy, T), T)
+      yield* evaluate(tracker, T)
+      expect(pushes.at(-1)).toMatchObject({ priority: 10 })
+      expect(pushes.at(-1)?.body).not.toHaveProperty("aps.alert")
+      // Rev. 2026-11-08: nothing working parks the activity. One update carries the calm state with an 8-hour
+      // stale-date; then no heartbeat, no routine update and no end, while the activity stays registered.
+      const { registry: idleRegistry, pushes: idlePushes, evaluate: idleEvaluate } = setup()
+      const calm = yield* scene("calm")
+      yield* idleRegistry.register(iphone, T - 2 * minute)
+      yield* idleRegistry.activity({ deviceID: iphone.deviceID, activityID: "act-2", pushToken: "cc33" }, T - minute)
+      const parked = T + 10 * minute
+      yield* idleEvaluate(calm, parked)
+      expect(idlePushes).toHaveLength(1)
+      expect(idlePushes[0]).toMatchObject({ token: "cc33", priority: 5 })
+      expect(idlePushes[0]?.body).toEqual(yield* Effect.promise(() => fixture("push-idle")))
+      expect(idlePushes[0]?.expiration).toBe(Math.floor(parked / 1000) + limits.parkedStaleMs / 1000)
+      // Nothing more to wake for until iOS would end the activity.
+      expect(yield* idleEvaluate(calm, parked + minute)).toBe(T - minute + limits.lifeMs)
+      yield* idleEvaluate(calm, T + 3 * limits.heartbeatMs)
+      expect(idlePushes).toHaveLength(1)
+      expect((yield* idleRegistry.list(T)).at(0)?.activity?.activityID).toBe("act-2")
+      // Work again: the same activity is updated again, at once and as before, never a new start.
+      yield* idleEvaluate(yield* scene("working"), T + 3 * limits.heartbeatMs + minute)
+      expect(idlePushes.at(-1)).toMatchObject({ token: "cc33" })
+      expect(idlePushes.at(-1)?.body).toHaveProperty("aps.event", "update")
+      expect(idlePushes.at(-1)?.body).toHaveProperty(
+        ["aps", "stale-date"],
+        Math.floor((T + 3 * limits.heartbeatMs + minute) / 1000) + limits.staleMs / 1000,
+      )
+    }),
+)
+
+it.effect("parked, only what needs Alexandre is pushed: a new question goes at once, routine changes wait", () =>
   Effect.gen(function* () {
     const { registry, pushes, evaluate } = setup()
-    const tracker = yield* scene("working")
+    const server = world()
+    const tracker = yield* scene("calm", server)
     yield* registry.register(iphone, T - 2 * minute)
     yield* registry.activity({ deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" }, T - minute)
-    yield* evaluate(tracker, T - 30_000)
-    yield* tracker.apply(execution("failed", ids.deploy, T), T)
     yield* evaluate(tracker, T)
-    expect(pushes.at(-1)).toMatchObject({ priority: 10 })
-    expect(pushes.at(-1)?.body).not.toHaveProperty("aps.alert")
-    const { registry: endRegistry, pushes: endPushes, evaluate: endEvaluate } = setup()
-    const calm = yield* scene("calm")
-    yield* endRegistry.register(iphone, T - 2 * minute)
-    yield* endRegistry.activity({ deviceID: iphone.deviceID, activityID: "act-2", pushToken: "cc33" }, T - minute)
-    yield* endEvaluate(calm, T)
-    expect(yield* endEvaluate(calm, T + minute)).toBe(T + limits.endMs)
-    const before = endPushes.length
-    yield* endEvaluate(calm, T + limits.endMs)
-    expect(endPushes).toHaveLength(before + 1)
-    expect(endPushes.at(-1)).toMatchObject({ token: "cc33", priority: 10 })
-    expect(endPushes.at(-1)?.body).toEqual(yield* Effect.promise(() => fixture("push-end")))
-    expect((yield* endRegistry.list(T)).at(0)?.activity).toBeUndefined()
-    // The ended card leaves the screen at once, so the next push-to-start never sits next to it.
-    const ended = Math.floor((T + limits.endMs) / 1000)
-    expect(endPushes.at(-1)?.body).toHaveProperty(["aps", "dismissal-date"], ended)
-    yield* endEvaluate(yield* scene("working"), T + limits.endMs + minute)
-    expect(endPushes.at(-1)).toMatchObject({ token: "aa11", priority: 10 })
-    expect(endPushes.at(-1)?.body).toHaveProperty("aps.event", "start")
+    expect(pushes).toHaveLength(1)
+    // A routine change (a session renamed) waits for work to come back.
+    yield* tracker.apply(
+      { type: "session.renamed", created: T + minute, data: { sessionID: ids.live, title: "Outro" } },
+      T,
+    )
+    yield* evaluate(tracker, T + 2 * minute)
+    expect(pushes).toHaveLength(1)
+    // A question changes what needs Alexandre: pushed at once, still parked.
+    server.forms.push(question("frm_parked", ids.live, T + 3 * minute, "Qual banco usar?"))
+    yield* tracker.refreshPending(T + 3 * minute)
+    yield* evaluate(tracker, T + 3 * minute)
+    expect(pushes).toHaveLength(2)
+    expect(pushes[1]).toMatchObject({ priority: 10 })
+    expect(pushes[1]?.body).toHaveProperty(
+      ["aps", "stale-date"],
+      Math.floor((T + 3 * minute) / 1000) + limits.parkedStaleMs / 1000,
+    )
   }),
 )
 
@@ -280,20 +316,31 @@ it.effect("an unread answer and its reading on another device update the badge a
   }),
 )
 
-it.effect("an activity that expires (about 8 h) while work goes on rearms push-to-start and is no dismissal", () =>
+it.effect("an activity that expires (8 h) while work goes on rearms push-to-start and is no dismissal", () =>
   Effect.gen(function* () {
     const hours = 3_600_000
-    // APNs refuses the token of an activity ActivityKit ended: the device may get a new one at once.
+    const working = yield* scene("working")
+    // 8 hours after its registration ActivityKit has ended it, whatever APNs answers: work brings a new one at once.
+    const aged = setup()
+    yield* aged.registry.register(iphone, T - 8 * hours)
+    yield* aged.registry.activity({ deviceID: iphone.deviceID, activityID: "act-0", pushToken: "ab00" }, T - 8 * hours)
+    yield* aged.registry.started(iphone.deviceID, T - 8 * hours)
+    yield* aged.evaluate(yield* scene("calm"), T - 8 * hours + minute)
+    yield* aged.evaluate(working, T)
+    expect(aged.pushes.map((push) => [push.token, (push.body as { aps: { event: string } }).aps.event])).toEqual([
+      ["ab00", "update"],
+      ["aa11", "start"],
+    ])
+    expect((yield* aged.registry.list(T)).at(0)).toMatchObject({ expired: "act-0", dismissed: false })
+
+    // APNs refuses the token of an activity ActivityKit ended (7 h 50 min after it was registered): rearmed too.
     const expired = setup((push) =>
       push.token === "bb22" ? { status: "invalid", reason: "ExpiredToken" } : { status: "sent" },
     )
-    const working = yield* scene("working")
-    yield* expired.registry.register(iphone, T - 8 * hours)
-    yield* expired.registry.activity(
-      { deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" },
-      T - 8 * hours,
-    )
-    yield* expired.registry.started(iphone.deviceID, T - 8 * hours)
+    const registered = T - 7 * hours - 50 * minute
+    yield* expired.registry.register(iphone, registered)
+    yield* expired.registry.activity({ deviceID: iphone.deviceID, activityID: "act-1", pushToken: "bb22" }, registered)
+    yield* expired.registry.started(iphone.deviceID, registered)
     yield* expired.evaluate(working, T)
     expect((yield* expired.registry.list(T)).at(0)).toMatchObject({ expired: "act-1", rearm: true, dismissed: false })
     yield* expired.evaluate(working, T + 1)
@@ -305,6 +352,22 @@ it.effect("an activity that expires (about 8 h) while work goes on rearms push-t
     // The user then clears the ended card: the app reports it dismissed, but it is not a refusal.
     yield* expired.registry.ended({ deviceID: iphone.deviceID, activityID: "act-1", reason: "dismissed" }, T + 2)
     expect((yield* expired.registry.list(T)).at(0)?.dismissed).toBe(false)
+
+    // A token refused long before 8 hours: the user dismissed the card while the app was not running. Like a
+    // reported swipe, no push-to-start until activeTotal returns to 0.
+    const gone = setup((push) =>
+      push.token === "ee55" ? { status: "invalid", reason: "Unregistered" } : { status: "sent" },
+    )
+    yield* gone.registry.register(iphone, T - 2 * hours)
+    yield* gone.registry.activity({ deviceID: iphone.deviceID, activityID: "act-4", pushToken: "ee55" }, T - 2 * hours)
+    yield* gone.evaluate(working, T)
+    expect((yield* gone.registry.list(T)).at(0)).toMatchObject({ dismissed: true })
+    expect((yield* gone.registry.list(T)).at(0)?.expired).toBeUndefined()
+    yield* gone.evaluate(working, T + minute)
+    expect(gone.pushes.map((push) => push.token)).toEqual(["ee55"])
+    yield* gone.evaluate(yield* scene("calm"), T + 2 * minute)
+    yield* gone.evaluate(working, T + 3 * minute)
+    expect(gone.pushes.at(-1)?.body).toHaveProperty("aps.event", "start")
 
     // Reported dismissed 8 h after it started (the app found the cleared card on launch): no refusal either; a token
     // re-reported meanwhile keeps the original start.
@@ -455,7 +518,8 @@ it.effect("unconfigured hub stores registrations, answers snapshot and emits cha
     expect(yield* hub.handlers.register(iphone)).toEqual({ push: "unconfigured" })
     expect(yield* hub.handlers.activity({ deviceID: iphone.deviceID, activityID: "a", pushToken: "bb22" })).toEqual({})
     expect(shared.values.get(devicesKey)).toHaveLength(1)
-    expect(yield* hub.handlers.snapshot()).toEqual({ state: null })
+    // Nothing works: the activity's state is the idle one (rev. 2026-11-08), not `null`.
+    expect((yield* hub.handlers.snapshot()).state).toMatchObject({ activeTotal: 0, counts: { working: 0 } })
     yield* Queue.offerAll(queue, [created(ids.live, T), execution("started", ids.live, T)])
     yield* settled
     const snapshot = yield* hub.handlers.snapshot()

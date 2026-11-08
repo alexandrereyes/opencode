@@ -123,8 +123,9 @@ export function makeHub(options: HubOptions) {
     host: string,
     push: { readonly lifecycle: Lifecycle; readonly notifier: Notifier } | undefined,
   ) => {
-    // The app learns the boot state through `snapshot`; `changed` reports differences from then on.
-    const emitted = { key: "null", at: -Infinity }
+    // The app learns the boot state through `snapshot`; `changed` reports differences from then on (the first pass
+    // only records it: since rev. 2026-11-08 an idle boot state is a state too, not `null`).
+    const emitted = { key: undefined as string | undefined, at: -Infinity }
     return Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
       yield* running.tracker.refreshHandoffs()
@@ -132,6 +133,7 @@ export function makeHub(options: HubOptions) {
       const derived = running.tracker.derive(now, host)
       const state = visible(derived.state, now)
       const key = state ? stateKey(state) : "null"
+      emitted.key ??= key
       const wakes = derived.wakeAt === undefined ? [] : [derived.wakeAt]
       if (key !== emitted.key && now - emitted.at < emitMs) wakes.push(emitted.at + emitMs)
       if (key !== emitted.key && now - emitted.at >= emitMs) {
@@ -261,11 +263,13 @@ export function makeHub(options: HubOptions) {
 export type Hub = ReturnType<typeof makeHub>
 
 /**
- * `null` while nothing is working, waiting or failed (nor any answer unread on the watch). Activity states are
- * trimmed to fit an update push; the watch keeps the full HTTP lists. Unread answers never keep an activity alive.
+ * Activity states are trimmed to fit an update push; the watch keeps the full HTTP lists. The activity always gets the
+ * state (rev. 2026-11-08): with nothing working it stays on screen, parked, and the app no longer ends it; it starts
+ * one only while something works, waits or failed. The watch gets `null` while nothing is working, waiting or failed
+ * and no answer is unread.
  */
 function visible(state: LiveActivity.AgentsState, now: number, surface: "activity" | "watch" = "activity") {
-  if (state.activeTotal === 0 && state.counts.failed === 0 && !(surface === "watch" && (state.counts.unread ?? 0) > 0))
+  if (surface === "watch" && state.activeTotal === 0 && state.counts.failed === 0 && (state.counts.unread ?? 0) === 0)
     return null
   return surface === "watch" ? state : fit({ event: "update", state, now })
 }

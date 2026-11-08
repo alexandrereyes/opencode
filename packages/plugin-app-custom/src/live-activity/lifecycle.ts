@@ -10,11 +10,17 @@ export const limits = {
   forgetMs: 30 * 86_400_000,
   startMs: 5 * 60_000,
   coalesceMs: 10_000,
+  /** While something works. Parked (nothing working), there is no heartbeat (rev. 2026-11-08). */
   heartbeatMs: 10 * 60_000,
-  /** `activeTotal` and `counts.failed` must stay 0 this long before the activity ends. */
-  endMs: 10 * 60_000,
   staleMs: 15 * 60_000,
-  /** ActivityKit ends a Live Activity after 8 hours; a little earlier counts, as clocks and reports drift. */
+  /**
+   * The `stale-date` of a parked state (nothing working, rev. 2026-11-08): the whole life of an activity, so the calm
+   * card never turns stale while iOS keeps it, without routine pushes to refresh it.
+   */
+  parkedStaleMs: 8 * 3_600_000,
+  /** ActivityKit ends a Live Activity 8 hours after it starts: past this since its registration, it is gone. */
+  lifeMs: 8 * 3_600_000,
+  /** The same limit, a little earlier, for reports and refused tokens, as clocks and reports drift. */
   activityMs: 8 * 3_600_000 - 15 * 60_000,
   bodyBytes: 4096,
 }
@@ -111,6 +117,13 @@ export function makeRegistry(storage: Storage) {
         const { activity: _, expired: __, rearm: ___, ...rest } = device
         return { ...rest, dismissed: device.dismissed || refused, ...(refused ? {} : { rearm: true }) }
       }),
+    /** Past `lifeMs`, ActivityKit has ended the activity: push-to-start may start a new one while work goes on. */
+    expire: (deviceID: string, activityID: string, now: number) =>
+      edit(now, deviceID, (device) => {
+        if (device.activity?.activityID !== activityID) return device
+        const { activity: _, ...rest } = device
+        return { ...rest, expired: activityID, rearm: true }
+      }),
     unregister: (deviceID: string, now: number) => edit(now, deviceID, () => undefined),
     started: (deviceID: string, now: number) =>
       edit(now, deviceID, (device) => {
@@ -124,18 +137,23 @@ export function makeRegistry(storage: Storage) {
           : devices,
       ),
     /**
-     * Drops a token APNs reported invalid: the push-to-start token, or the activity it updates. An activity token
-     * dies with its activity (ActivityKit ends one after 8 hours), so push-to-start is rearmed for work still going.
+     * Drops a token APNs reported invalid: the push-to-start token, or the activity it updates. An activity token dies
+     * with its activity. Near its 8 hours, ActivityKit ended it: push-to-start is rearmed for work still going. Earlier
+     * (rev. 2026-11-08: an activity no longer ends when work stops, and the app reports its own ends), the user
+     * dismissed it while the app was not running: like a reported swipe, no push-to-start until `activeTotal` returns
+     * to 0 and rises again.
      */
     drop: (deviceID: string, token: string, now: number) =>
       edit(now, deviceID, (device) => {
         const { activity, pushToStartToken, ...rest } = device
         const lost = activity !== undefined && activity.pushToken === token
+        const expired = lost && now - activity.registeredAt >= limits.activityMs
         return {
           ...rest,
           ...(pushToStartToken && pushToStartToken !== token ? { pushToStartToken } : {}),
           ...(activity && !lost ? { activity } : {}),
-          ...(lost ? { expired: activity.activityID, rearm: true } : {}),
+          ...(expired ? { expired: activity.activityID, rearm: true } : {}),
+          ...(lost && !expired ? { dismissed: true } : {}),
         }
       }),
   }
@@ -148,15 +166,18 @@ export type Registry = ReturnType<typeof makeRegistry>
  * a deadline it returned passes; it returns the pushes to deliver separately so APNs never delays the caller.
  */
 export function makeLifecycle(input: { readonly registry: Registry; readonly send: Client["send"] }) {
-  const activities = new Map<string, { lastPushAt: number; sent: string; marks: ReadonlySet<string> }>()
+  /** `parked`: the last push carried a parked state, with its long `stale-date`. */
+  const activities = new Map<
+    string,
+    { lastPushAt: number; sent: string; marks: ReadonlySet<string>; parked: boolean }
+  >()
   // Push-to-start needs a rise of activeTotal from 0 observed after the device's last start push or activity.
   const seen = { zeroAt: -Infinity, activity: new Map<string, number>(), retry: new Set<string>() }
-  const calm = { since: undefined as number | undefined }
 
   const evaluate = Effect.fn("LiveActivity.evaluate")(function* (derived: Derived, now: number) {
     const state = derived.state
-    const quiet = state.activeTotal === 0 && state.counts.failed === 0
-    calm.since = quiet ? (calm.since ?? now) : undefined
+    // Nothing works (rev. 2026-11-08): the activity stays, parked, with no heartbeat and no routine update.
+    const parked = isParked(state)
     if (state.activeTotal === 0) {
       seen.zeroAt = now
       yield* input.registry.rearm(now)
@@ -191,7 +212,15 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
         }),
         Effect.flatMap(after),
       )
-    for (const device of yield* input.registry.list(now)) {
+    for (const listed of yield* input.registry.list(now)) {
+      let device = listed
+      // ActivityKit has ended it (8 hours): a new one may start at once while work goes on.
+      if (device.activity && now - device.activity.registeredAt >= limits.lifeMs) {
+        const { activity: gone, ...rest } = device
+        yield* input.registry.expire(device.deviceID, gone.activityID, now)
+        activities.delete(gone.activityID)
+        device = { ...rest, expired: gone.activityID, rearm: true }
+      }
       const activity = device.activity
       if (!activity) {
         const last = device.startPushedAt ?? -Infinity
@@ -225,47 +254,30 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
       }
       // An activity that covered active work spends that rise; one that ended while calm leaves the device armed.
       if (state.activeTotal > 0) seen.activity.set(device.deviceID, now)
+      wakes.push(activity.registeredAt + limits.lifeMs)
       const memo = activities.get(activity.activityID) ?? {
         lastPushAt: activity.registeredAt,
         sent: "",
         marks,
+        parked: false,
       }
       activities.set(activity.activityID, memo)
       const since = now - memo.lastPushAt
-      if (quiet && calm.since !== undefined) {
-        const endAt = Math.max(calm.since + limits.endMs, memo.lastPushAt + limits.coalesceMs)
-        if (now < endAt) {
-          wakes.push(endAt)
-        } else {
-          memo.lastPushAt = now
-          wakes.push(now + limits.coalesceMs)
-          jobs.push(
-            deliver(
-              device,
-              "end",
-              push(activity.pushToken, device.environment, 10, { event: "end", state, now }),
-              (result) =>
-                // Delivered or dropped, the activity is over for the backend; a failed end is retried.
-                result.status === "failed"
-                  ? Effect.void
-                  : input.registry
-                      .ended({ deviceID: device.deviceID, activityID: activity.activityID, reason: "ended" }, now)
-                      .pipe(Effect.andThen(Effect.sync(() => activities.delete(activity.activityID)))),
-            ),
-          )
-          continue
-        }
-      }
       const added = [...marks].filter((mark) => !memo.marks.has(mark))
       const urgent = added.length > 0 || [...memo.marks].some((mark) => !marks.has(mark))
-      const due = urgent || (key !== memo.sent && since >= limits.coalesceMs) || since >= limits.heartbeatMs
+      // Parked, one push carries the parked state (its long stale-date); after it, only what needs Alexandre.
+      const due = parked
+        ? urgent || (!memo.parked && since >= limits.coalesceMs)
+        : urgent || (key !== memo.sent && since >= limits.coalesceMs) || since >= limits.heartbeatMs
       if (!due) {
-        wakes.push(memo.lastPushAt + (key === memo.sent ? limits.heartbeatMs : limits.coalesceMs))
+        if (!parked) wakes.push(memo.lastPushAt + (key === memo.sent ? limits.heartbeatMs : limits.coalesceMs))
+        else if (!memo.parked) wakes.push(memo.lastPushAt + limits.coalesceMs)
         continue
       }
       memo.lastPushAt = now
       memo.sent = key
       memo.marks = marks
+      memo.parked = parked
       wakes.push(now + limits.coalesceMs)
       jobs.push(
         deliver(
@@ -278,6 +290,7 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
             result.status === "failed"
               ? Effect.sync(() => {
                   memo.sent = ""
+                  memo.parked = false
                 })
               : Effect.void,
         ),
@@ -295,7 +308,7 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
 export type Lifecycle = ReturnType<typeof makeLifecycle>
 
 export type BodyInput = {
-  readonly event: "start" | "update" | "end"
+  readonly event: "start" | "update"
   readonly state: LiveActivity.AgentsState
   readonly now: number
   readonly attributes?: LiveActivity.Attributes
@@ -312,12 +325,10 @@ export function body(input: BodyInput) {
       // Below voice (100), including push-to-start and background updates. Match OpenCodeKit.LiveActivityRelevance.
       "relevance-score": 50,
       "content-state": input.state,
-      "stale-date": timestamp + limits.staleMs / 1000,
+      "stale-date": timestamp + (isParked(input.state) ? limits.parkedStaleMs : limits.staleMs) / 1000,
       ...(input.attributes ? { "attributes-type": "AgentsActivityAttributes", attributes: input.attributes } : {}),
       ...(input.alert ? { alert: input.alert } : {}),
       ...(input.event === "start" ? { "input-push-token": 1 } : {}),
-      // An ended card leaves the screen at once, so it never lingers next to the next activity.
-      ...(input.event === "end" ? { "dismissal-date": timestamp } : {}),
     },
   }
 }
@@ -366,6 +377,11 @@ export function fit(input: BodyInput) {
 export function push(token: string, environment: LiveActivity.Environment, priority: 5 | 10, input: BodyInput): Push {
   const payload = body({ ...input, state: fit(input) })
   return { token, environment, priority, expiration: payload.aps["stale-date"], body: payload }
+}
+
+/** Nothing works: the activity shows the calm state until iOS ends it or the user dismisses it (rev. 2026-11-08). */
+export function isParked(state: LiveActivity.AgentsState) {
+  return state.counts.working === 0
 }
 
 /** Push-to-start alert text, e.g. "2 sessões trabalhando". */

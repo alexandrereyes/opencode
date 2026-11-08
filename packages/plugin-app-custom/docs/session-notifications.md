@@ -114,8 +114,9 @@ One alert per question, permission or failure and device (rev. 2026-10-30), pref
   (`title` = session title, `body` as above). No notification is sent. The iPhone shows it on the card and the Dynamic
   Island and the watch mirrors it, so each buzzes once.
 - **Otherwise** (no activity: expired, dismissed, never started, or the device has none): the notification above.
-- **The activity update fails:** APNs refusing the token (the activity just ended) drops it, rearms push-to-start and
-  sends the notification instead; any other failure sends the notification too. Nothing is left without an alert.
+- **The activity update fails:** APNs refusing the token (the activity just ended) drops it (rearming push-to-start
+  when it was near its 8 hours, holding it as a dismissal before, see `live-activity.md` End) and sends the
+  notification instead; any other failure sends the notification too. Nothing is left without an alert.
 - A bell **success** always goes as a notification: the activity only shows work and attention.
 - The lifecycle's own updates (state changes, heartbeats) never carry an `alert`, and the watch complication's
   widget pushes (`content-changed`) are silent.
