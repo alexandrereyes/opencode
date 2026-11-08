@@ -233,6 +233,13 @@ test("a tap Chrome drops tells the viewers that a Chrome dialog covers the page,
   await tap()
   expect(relay.view.delivered).toBe(1)
   expect(viewer.notices).toEqual([])
+  // A tap on an embedded document (a captcha, an OAuth or 3-D Secure frame) reaches it, never the main frame's count:
+  // it is not checked.
+  relay.view.iframes.push({ x: 400, y: 200, width: 320, height: 240 })
+  await tap()
+  expect(relay.view.delivered).toBe(1)
+  expect(viewer.notices).toEqual([])
+  relay.view.iframes.length = 0
   // A drag scrolls instead of clicking: nothing to check.
   relay.view.blocked = true
   await adapter.input!(entry, { type: "touch", phase: "began", x: 0.2, y: 0.5 })

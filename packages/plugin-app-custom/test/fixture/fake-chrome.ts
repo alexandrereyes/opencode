@@ -46,7 +46,11 @@ export function fakeBrowser(options: { readonly token?: string }) {
     inner: [1120, 616.8] as [number, number],
     delivered: 0,
     blocked: false,
+    /** Embedded documents (CSS px): presses there reach them, never the main frame's count. */
+    iframes: [] as { x: number; y: number; width: number; height: number }[],
   }
+  const inIframe = (x: number, y: number) =>
+    view.iframes.some((box) => x >= box.x && x < box.x + box.width && y >= box.y && y < box.y + box.height)
   /**
    * What bringing a tab forward meets: Chrome refuses `Target.activateTarget` to the extension, and the relay blocks
    * `Page.bringToFront` unless its environment allows it (both as browse 0.0.14 behaves by default).
@@ -89,15 +93,19 @@ export function fakeBrowser(options: { readonly token?: string }) {
     "Page.createIsolatedWorld": () => ({ executionContextId: 7 }),
     "Runtime.evaluate": (params) => {
       const expression = String(params.expression)
-      if (params.contextId === 7 && expression.includes("__opencodeDelivered"))
+      if (params.contextId === 7 && expression.includes("__opencodeDelivered")) {
+        const point = /elementFromPoint\(([\d.]+), ([\d.]+)\)/.exec(expression)
+        if (point && inIframe(Number(point[1]), Number(point[2]))) return { result: { value: null } }
         return { result: { value: view.delivered } }
+      }
       if (expression.includes("maxTouchPoints")) return { result: { value: [false, 2] } }
       if (expression === "[innerWidth, innerHeight]") return { result: { value: view.inner } }
       if (expression === "document.visibilityState") return { result: { value: "visible" } }
       return { result: { value: { editable: false } } }
     },
     "Input.dispatchMouseEvent": (params) => {
-      if (params.type === "mousePressed" && !view.blocked) view.delivered++
+      if (params.type === "mousePressed" && !view.blocked && !inIframe(Number(params.x), Number(params.y)))
+        view.delivered++
       return {}
     },
     "Input.dispatchKeyEvent": () => ({}),

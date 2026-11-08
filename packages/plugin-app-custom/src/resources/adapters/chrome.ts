@@ -1139,7 +1139,9 @@ class Live {
     const y = event.y * viewport.height
     // The first finger's tap is checked for delivery (`inputBlocked`); the count starts before it goes down.
     const checked = (event.pointer ?? 0) === 0 && (event.phase === "began" || event.phase === "ended")
-    if (checked && event.phase === "began") this.tapBefore = this.delivered()
+    // A tap on an embedded document (a captcha, an OAuth or 3-D Secure frame) reaches that document, never the main
+    // frame's count: it is not checked.
+    if (checked && event.phase === "began") this.tapBefore = this.delivered({ x, y })
     if (this.touch) {
       const type = {
         began: "touchStart" as const,
@@ -1164,7 +1166,7 @@ class Live {
    * undefined when the count cannot be read. Chrome acknowledges a dispatched event once the page handled it, so a tap
    * the count has not seen soon after is one Chrome dropped.
    */
-  private async delivered(): Promise<number | undefined> {
+  private async delivered(point?: { x: number; y: number }): Promise<number | undefined> {
     this.probe ??= this.cdp
       .send("Page.createIsolatedWorld", { frameId: this.targetId, worldName: "opencode-input-check" }, this.sessionId)
       .then((world) => world.executionContextId)
@@ -1172,9 +1174,12 @@ class Live {
     const contextId = await this.probe
     if (contextId === undefined) return (this.probe = undefined)
     const result = await this.cdp
-      .send("Runtime.evaluate", { expression: deliveredScript, contextId, returnByValue: true }, this.sessionId)
+      .send("Runtime.evaluate", { expression: deliveredScript(point), contextId, returnByValue: true }, this.sessionId)
       .catch(() => undefined)
-    if (typeof result?.result.value === "number") return result.result.value
+    const value: unknown = result?.result.value
+    // `null`: the point is over an embedded document.
+    if (value === null && point) return undefined
+    if (typeof value === "number") return value
     this.probe = undefined
     return undefined
   }
@@ -1381,8 +1386,12 @@ function cdpMessage(error: unknown) {
   return (text.startsWith("{") ? Option.getOrUndefined(decodeJSON(text))?.message : undefined) ?? text
 }
 
-/** Runs in an isolated world: the trusted pointer events the page received since it first ran. */
-const deliveredScript = `(() => {
+/**
+ * Runs in an isolated world: the trusted pointer events the main frame received since it first ran, or `null` when
+ * `point` (CSS pixels) is over an embedded document (`iframe`, `frame`, `embed`, `object`), whose events never reach it.
+ */
+const deliveredScript = (point?: { x: number; y: number }) => `(() => {
+  ${point ? `const hit = document.elementFromPoint(${point.x}, ${point.y}); if (hit && ["IFRAME", "FRAME", "EMBED", "OBJECT"].includes(hit.tagName)) return null` : ""}
   if (!globalThis.__opencodeDelivered) {
     const count = { value: 0 }
     for (const type of ["pointerdown", "mousedown", "touchstart"])

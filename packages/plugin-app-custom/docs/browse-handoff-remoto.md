@@ -175,7 +175,9 @@ Compatible precisions found while implementing; none changes a schema or an exam
   its password manager covers the tab with a warning, and Chrome then drops all input to that tab, from the viewer and
   from browse's own Playwright alike, while CDP still answers each command. The frames show only the page, so Continue
   seemed to do nothing. The adapter counts the trusted pointer events the page receives (from an isolated world, never
-  the page's own scripts) and, when a tap never arrives, sends the viewers the existing `notice`: "O Chrome do Mac
+  the page's own scripts) and, when a tap never arrives, sends the viewers the existing `notice` (a tap over an
+  `iframe`, `frame`, `embed` or `object`, such as a captcha or a 3-D Secure frame, reaches that document instead and is
+  not checked): "O Chrome do Mac
   está ignorando os toques: um aviso do próprio Chrome cobre a página (por exemplo, sobre uma senha exposta em
   vazamento). Feche-o no Mac para continuar." (at most every 10 s). Closing the warning on the Mac lets the taps
   through again; turning off Chrome's "Avisar se as senhas forem expostas em uma violação de dados" avoids it.
