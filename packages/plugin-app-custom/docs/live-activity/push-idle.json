@@ -1,7 +1,7 @@
 {
   "aps": {
     "timestamp": 1793105460,
-    "event": "end",
+    "event": "update",
     "relevance-score": 50,
     "content-state": {
       "v": 1,
@@ -75,7 +75,6 @@
         }
       ]
     },
-    "stale-date": 1793106360,
-    "dismissal-date": 1793105460
+    "stale-date": 1793134260
   }
 }

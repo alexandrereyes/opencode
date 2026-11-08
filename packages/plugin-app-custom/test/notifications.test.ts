@@ -539,8 +539,10 @@ it.effect("an activity token refused at the moment of the question falls back to
       ["bb22", "liveactivity", "Pergunta: Ainda chega?"],
       ["aa11", "alert", "Pergunta: Ainda chega?"],
     ])
-    // The dead activity is dropped (and push-to-start rearmed): the next question goes straight to the notification.
-    expect((yield* f.activities.list(T + 2)).at(0)).toMatchObject({ expired: "act-1", rearm: true })
+    // The dead activity is dropped: the next question goes straight to the notification. Refused long before its 8
+    // hours, it counts as dismissed by the user (rev. 2026-11-08), so no push-to-start brings it back.
+    expect((yield* f.activities.list(T + 2)).at(0)).toMatchObject({ dismissed: true })
+    expect((yield* f.activities.list(T + 2)).at(0)?.activity).toBeUndefined()
     const next = question("frm_2", ids.cache, T + 2, "E esta?")
     f.server.forms.push(next)
     yield* f.step(T + 2, { type: "form.created", data: { form: next } })

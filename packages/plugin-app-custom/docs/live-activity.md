@@ -154,13 +154,13 @@ does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agor
   [session-notifications.md](session-notifications.md)), so `mutedSessions` no longer hides anything. No time window: it stays
   unread until the session is viewed (`session.viewed`), archived or deleted. Chats follow the same rule as other
   top-level sessions; the current Sessão mestra (`masterSessions.local`), which Sessões never lists, is never unread
-  (rev. 2026-10-29). Unread sessions never keep a Live Activity alive (the end rule is unchanged).
+  (rev. 2026-10-29). Unread sessions never start a Live Activity (rev. 2026-11-08: nothing ends one any more, see End).
 - **Needs (rev. 2026-10-29):** every session that needs Alexandre, the rows of the Sessões "Precisa de você" section
   and the iOS `counts.forYou` = question + permission + failed + unread (one per session, by the precedence above):
   question, permission (oldest `since` first), failed (most recent first), unread (most recent first); cut to 3.
   `attention` keeps only requests, so older apps (and the watch's Responder, which needs a request) are unchanged.
-  The watch gateway's `/state` also answers while only unread sessions wait; `snapshot` and `changed` stay `null`
-  then.
+  The watch gateway's `/state` also answers while only unread sessions wait. `snapshot` and `changed` always carry the
+  state since rev. 2026-11-08 (the calm one included), so the app updates the activity it keeps on screen.
 - **Focus:** among working sessions, keep the current focus while it is still working; otherwise pick the one whose
   execution started most recently. Absent when `counts.working == 0`.
 - **activity** (from the latest step activity of the most recently active **executing** session in the focus
@@ -193,10 +193,10 @@ Same plugin RPC mechanism as `custom.device` (iOS calls it with `rpc("custom.liv
 | `activity`   | `{ deviceID, activityID, pushToken }`                                                       | `{}`                                                                           |
 | `ended`      | `{ deviceID, activityID, reason: "ended" \| "dismissed" }`                                  | `{}`                                                                           |
 | `unregister` | `{ deviceID }`                                                                              | `{}`                                                                           |
-| `snapshot`   | `{}`                                                                                        | `{ state: AgentsState \| null }` (`null` = nothing working, waiting or failed) |
+| `snapshot`   | `{}`                                                                                        | `{ state: AgentsState \| null }` (`null` only from servers before rev. 2026-11-08) |
 
-Event **`changed`**: `{ state: AgentsState | null }`, emitted when the state changes, coalesced to at most one per
-second. Wire type `rpc.custom.live-activity.changed`. Exactly one delivery per change to a connected app, even with
+Event **`changed`**: `{ state: AgentsState | null }`, emitted when the state changes (not for the state at the hub's
+start, which `snapshot` gives), coalesced to at most one per second. Wire type `rpc.custom.live-activity.changed`. Exactly one delivery per change to a connected app, even with
 several Location plugin instances.
 
 - `deviceID` is the same ID the app already uses for `custom.device` (1–100 chars).
@@ -210,10 +210,11 @@ several Location plugin instances.
 ## Lifecycle
 
 **Start.** A device/serverKey may have at most one live activity **on screen, in any state** (rev. 2026-10-27: the
-device showed an ended card lingering above a new one). Ended activities never stay visible.
+device showed an ended card lingering above a new one). Ended activities never stay visible once a new one starts.
 
 - In foreground the app starts it locally (`Activity.request(..., pushType: .token)`) when `snapshot`/`changed`
-  returns a non-null state and none exists, then calls `activity` with its push token.
+  returns a state with something working, waiting or failed (`activeTotal` or `counts.failed` above 0) and none
+  exists, then calls `activity` with its push token. A calm state never starts one; it only updates the one on screen.
 - With the app closed, the backend sends **push-to-start** when `activeTotal` goes from 0 to > 0, the device has a
   `pushToStartToken`, and no activity is registered for it. At most one push-to-start per device per 5 minutes. If
   the user dismissed the previous activity (`ended` with `dismissed`), do not push-to-start again until `activeTotal`
@@ -246,11 +247,34 @@ device showed an ended card lingering above a new one). Ended activities never s
 - Otherwise coalesced, `apns-priority: 5`, at most one every 10 seconds per activity. Progresso advances are such
   routine changes (rev. 2026-10-30): never urgent, folded with the activity text into that slot, so a plan that moves
   three times within 10 seconds costs one push carrying the last list; no new cadence and no new budget.
-- A heartbeat update every 10 minutes while active. Every push sets `stale-date` = now + 15 minutes.
+- A heartbeat update every 10 minutes while something works. A push of a working state sets `stale-date` = now + 15
+  minutes.
+- **Parked (rev. 2026-11-08):** while nothing works (`counts.working == 0`), there is no heartbeat and no routine
+  update. One update, coalesced like any routine one, carries the parked state (`push-idle.json`) with `stale-date` =
+  now + 8 hours: an activity lives at most 8 hours, so the calm card never looks stale while iOS keeps it, without a
+  push to refresh it. After it, only urgent updates (what needs Alexandre changed) go out, also with the 8-hour
+  `stale-date`, plus the session alerts. Changes that need nobody (a renamed session, an idle row expiring) wait
+  until work comes back, when routine updates and the heartbeat resume on the same activity.
 
-**End.** When `activeTotal` and `counts.failed` have been 0 for 10 minutes, the backend pushes `end` with the final
-state and `dismissal-date` = now (**immediate removal**, rev. 2026-10-27; it used to linger 30 minutes). While the
-app runs it does the same locally with `.immediate` dismissal; a null state never keeps an idle-only card.
+**End (rev. 2026-11-08: never for lack of work).** Neither the backend nor the app ends the activity when work stops:
+it stays on screen, parked, showing the calm state ("Tudo em dia", or `N para você` while something needs Alexandre),
+until iOS ends it (8 hours after it started) or Alexandre dismisses it. Until then (rev. 2026-10-27) the backend
+pushed `end` with `dismissal-date` = now after 10 calm minutes, and the app did the same locally; `push-end.json` is
+gone with it. The two ways out are told apart:
+
+- **iOS ends it (8 hours).** With the app running, `activityStateUpdates` goes to `.ended` (the card may stay up to
+  4 more hours, then `.dismissed`); the app reports `ended` once, which rearms push-to-start. With the app not
+  running, nothing reaches the backend, so it relies on time: an activity registered `lifeMs` (8 h) ago is gone, and
+  the next evaluation drops it (`expire`: `expired`, `rearm`), so work brings a new one by push-to-start at once. A
+  token APNs refuses 7 h 45 min (`activityMs`) or more after the registration counts the same way, and so does a
+  `dismissed` report for such an old activity (the card cleared after iOS ended it).
+- **Alexandre dismisses it.** With the app running, `activityStateUpdates` goes straight to `.dismissed` within the
+  8 hours (an activity the app ended itself is reported `ended`); the backend sets `dismissed` and holds push-to-start
+  until `activeTotal` returns to 0 and rises again. With the app not running, the only sign is a token APNs refuses
+  before 7 h 45 min: since the app reports every end of its own, that counts as a dismissal too (held the same way).
+  It may also never show, if APNs keeps accepting the dead token: then the backend keeps updating it and starts a new
+  one only after the 8 hours, never sooner. This is the least bad reading: a dismissal is never taken for an expiry
+  and undone, and an expiry is only missed between 7 h 45 min and 8 h.
 
 ## APNs (backend)
 
@@ -265,7 +289,8 @@ app runs it does the same locally with `.immediate` dismissal; a null state neve
 - `410` or `400 BadDeviceToken`/`Unregistered` ⇒ drop that token. Other errors are logged and retried on the next
   scheduled push; never block session execution.
 - Bodies: [`push-start.json`](live-activity/push-start.json), [`push-update.json`](live-activity/push-update.json),
-  [`push-end.json`](live-activity/push-end.json). `push-start` carries `attributes-type`, `attributes` and
+  [`push-idle.json`](live-activity/push-idle.json) (the parked update; rev. 2026-11-08, it replaced `push-end.json`).
+  `push-start` carries `attributes-type`, `attributes` and
   `input-push-token: 1`, so iOS issues an update token for the new activity, which the app reports with `activity`.
 - Every body includes `aps.relevance-score: 50`, matching `OpenCodeKit.LiveActivityRelevance.agents`.
   Voice uses 100 on every local start/update, including network recovery. This orders this app's activities
@@ -337,7 +362,8 @@ half orange, half gray.
 **Dynamic Island** (from `opcao-3-painel-cotas.png`):
 
 - Compact: leading mascot. Trailing `attentionTotal/activeTotal` (first number `warning`, second `textSecondary`)
-  when `attentionTotal > 0`; otherwise `activeTotal` in `success`.
+  when `attentionTotal > 0`; otherwise `activeTotal` in `success`. Parked with nothing for Alexandre
+  (rev. 2026-11-08), the trailing side is empty: the mascot alone, no `0`.
 - Expanded: header `N ativas · M precisa(m) de você` (second part `warning`), plus ` · K com erro` in `error` when
   failed > 0 (superseded by "Attention first" and `N agentes trabalhando` above); then `sessions` rows (avatar, title, project, status at right: `Pergunta` `accent`, `Permissão`
   `warning`, `Erro` `error`, `Trabalhando` `success` with ` · done/total` when progress, `Não lida` `primary` for `idle` rows).
@@ -389,7 +415,7 @@ All in [`live-activity/`](live-activity/), generated for 2026-10-27 09:41 BRT (`
 | `state-failed-only.json`                                 | No focus, one failed session (minimal `!1`)                                                         |
 | `state-progress.json`                                    | Two working sessions with a Progresso (`unit: "todos"`, `current`) and one unread (rev. 2026-10-30) |
 | `state-browser.json`                                     | A subagent of the focus waits on a browse handoff: row, attention and need of kind `browser` (rev. 2026-11-07) |
-| `push-start.json` / `push-update.json` / `push-end.json` | Complete APNs bodies                                                                                |
+| `push-start.json` / `push-update.json` / `push-idle.json` | Complete APNs bodies (`push-idle.json`: the parked update, 8-hour `stale-date`, rev. 2026-11-08) |
 
 ## Change control
 
@@ -470,22 +496,22 @@ of its `permission.asked` or `form.created` event, recorded by `src/request-time
 
 **Push decisions.** The push-to-start alert is `OpenCode` / `N sessões trabalhando` (plus pending counts). A
 push-to-start requires an observed `activeTotal` of 0 after the device's last start push and after the last moment a
-registered activity covered active work, so work already running at boot or registration does not start one, while an
-activity that ended during the calm (the backend's own `end`, sent with `dismissal-date` = now) leaves the device
-armed for the next rise. Push-to-start is only sent while no activity is registered: a failed `end` keeps the
-activity registered and is retried, so no new card starts beside it. An activity registered with `activity` gets a routine update within
-10 s. `end` is sent with priority 10 and also respects the 10 s per-activity spacing; after it is delivered (or the
-token is invalid) the activity is removed from the registration. A failed update clears the "already sent" marker so
-the next 10 s slot retries; a failed start is retried after the 5-minute window.
+registered activity covered active work, so work already running at boot or registration does not start one. Since
+rev. 2026-11-08 an activity stays registered through the calm, so push-to-start only follows its end (8 hours,
+`rearm`) or a dismissal and a new rise. Push-to-start is only sent while no activity is registered, so no new card
+starts beside one. An activity registered with `activity` gets a routine update within 10 s. A failed update clears
+the "already sent" marker so the next 10 s slot retries; a failed start is retried after the 5-minute window.
 
 **One alert per device (rev. 2026-10-30).** Questions, permissions and failures alert once per device, decided by the
 session alerts: through the live activity when the device has one (iPhone, and the watch mirrors it), otherwise as a
 notification (see [session-notifications.md](session-notifications.md#live-activity-alerts)). The updates this
 lifecycle sends never carry an `alert`; push-to-start keeps its own.
 
-**Expiry (rev. 2026-10-29).** ActivityKit ends an activity after 8 hours. Its token then fails (APNs 410/invalid):
-the registry drops it, remembers the activity as `expired` and sets `rearm`, which arms push-to-start while work goes
-on (cleared by the next start push). An `ended` report that is no user refusal also rearms. A `dismissed` report for
+**Expiry (rev. 2026-10-29; rev. 2026-11-08).** ActivityKit ends an activity after 8 hours. The registry then drops it,
+remembers the activity as `expired` and sets `rearm`, which arms push-to-start while work goes on (cleared by the next
+start push): 8 hours after its registration (`lifeMs`, whatever APNs answers, as nothing reports an end while the
+app is not running), or when APNs refuses its token 7 h 45 min or more after it. A token refused earlier is a
+dismissal (see End). An `ended` report that is no user refusal also rearms. A `dismissed` report for
 the expired activity, or for one registered 7 h 45 min or more ago (`limits.activityMs`; `registeredAt` now survives
 token re-reports), is no refusal either: only a swipe within the 8 hours sets `dismissed` and holds push-to-start
 until `activeTotal` returns to 0.
