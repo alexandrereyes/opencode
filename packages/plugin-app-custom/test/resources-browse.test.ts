@@ -3,7 +3,14 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { CDP, withoutQuery } from "../src/resources/adapters/cdp"
-import { handoffTab, listPages, makeChromeAdapter, relayTokenFile } from "../src/resources/adapters/chrome"
+import {
+  blockedNotice,
+  handoffTab,
+  listPages,
+  makeChromeAdapter,
+  relayTokenFile,
+  settings,
+} from "../src/resources/adapters/chrome"
 import { entryOf, fakeBrowser, token, watch } from "./fixture/fake-chrome"
 
 /**
@@ -195,4 +202,53 @@ test("an unknown handoff tab is not replaced by another; forget closes the conne
   expect(error.message).toContain("ws://127.0.0.1:1/devtools/browser/x")
   expect(error.message).not.toContain(token)
   expect(withoutQuery(`http://user:pass@h:1/p?opencodeBrowserToken=${token}`)).toBe("http://h:1/p")
+})
+
+/**
+ * Chrome ignores every input to a tab while a dialog of its own covers it: after a login with a password found in a
+ * data breach (the test site's tomsmith / SuperSecretPassword!), its password manager's warning blocks the page, the
+ * remote viewer cannot see it and Continue did nothing (2026-11-08). A tap the page never received now says why.
+ */
+test("a tap Chrome drops tells the viewers that a Chrome dialog covers the page, once per interval", async () => {
+  const relay = fakeBrowser({ token })
+  stops.push(() => relay.server.stop(true))
+  const timing = { check: settings.inputCheckMs, notice: settings.blockedNoticeMs }
+  settings.inputCheckMs = 200
+  settings.blockedNoticeMs = 60_000
+  stops.push(() => {
+    settings.inputCheckMs = timing.check
+    settings.blockedNoticeMs = timing.notice
+  })
+  const adapter = makeChromeAdapter()
+  stops.push(() => adapter.close())
+  const entry = entryOf({ kind: "chrome", cdp: relay.cdp, browse: "login", targetID: "TAB1" })
+  const viewer = watch(adapter, entry)
+  stops.push(() => viewer.stop())
+  await viewer.until(() => viewer.states.at(-1)?.viewport !== undefined)
+  const tap = async () => {
+    await adapter.input!(entry, { type: "touch", phase: "began", x: 0.5, y: 0.5 })
+    await adapter.input!(entry, { type: "touch", phase: "ended", x: 0.5, y: 0.5 })
+    await Bun.sleep(500)
+  }
+  await tap()
+  expect(relay.view.delivered).toBe(1)
+  expect(viewer.notices).toEqual([])
+  // A drag scrolls instead of clicking: nothing to check.
+  relay.view.blocked = true
+  await adapter.input!(entry, { type: "touch", phase: "began", x: 0.2, y: 0.5 })
+  await adapter.input!(entry, { type: "touch", phase: "moved", x: 0.2, y: 0.8 })
+  await adapter.input!(entry, { type: "touch", phase: "ended", x: 0.2, y: 0.8 })
+  await Bun.sleep(500)
+  expect(viewer.notices).toEqual([])
+  await tap()
+  expect(viewer.notices).toEqual([blockedNotice])
+  await tap()
+  expect(viewer.notices).toEqual([blockedNotice])
+  // The count is read in an isolated world, never the page's own.
+  const reads = relay.sent.filter((item) => item.method === "Runtime.evaluate" && item.params.contextId === 7)
+  expect(reads.length).toBeGreaterThan(0)
+  expect(relay.sent.filter((item) => item.method === "Page.createIsolatedWorld")[0]?.params).toEqual({
+    frameId: "TAB1",
+    worldName: "opencode-input-check",
+  })
 })

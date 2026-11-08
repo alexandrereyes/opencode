@@ -55,6 +55,10 @@ export const settings = {
   focusDelayMs: 60,
   /** Browser zoom (`browserZoom`) is read again at most this often, when input needs it. */
   zoomCheckMs: 1_000,
+  /** A tap the page has not received this long after Chrome acknowledged it was ignored (`inputBlocked`). */
+  inputCheckMs: 1_500,
+  /** The blocked-input notice repeats at most this often. */
+  blockedNoticeMs: 10_000,
 }
 
 export const launchArgs = ["--remote-debugging-port=0"]
@@ -748,6 +752,9 @@ class Live {
   density = 1
   /** Frames show the window rather than exactly the viewport (see `fitWindow`); sharp stills would not line up. */
   windowed = false
+  /** The isolated world that counts the trusted taps the page receives (`delivered`), per document. */
+  private probe?: Promise<number | undefined>
+  private blockedAt = 0
   /** `browserZoom` of the followed tab, read at most every `settings.zoomCheckMs`. */
   zoom = 1
   private zoomAt = 0
@@ -796,6 +803,7 @@ class Live {
       if (sessionId !== this.sessionId || event.frame.parentId) return
       // A new document (also when the agent navigates) deserves a prompt sharp still.
       this.interactedAt = Date.now()
+      this.probe = undefined
       void this.refreshHistory()
     })
     this.cdp.on("Page.navigatedWithinDocument", (_event, sessionId) => {
@@ -816,6 +824,7 @@ class Live {
     this.targetId = targetId
     this.metrics = undefined
     this.zoomAt = 0
+    this.probe = undefined
     await this.cdp.send("Page.enable", {}, this.sessionId)
     const device = await this.cdp
       .send(
@@ -1128,6 +1137,9 @@ class Live {
     const viewport = await this.viewport()
     const x = event.x * viewport.width
     const y = event.y * viewport.height
+    // The first finger's tap is checked for delivery (`inputBlocked`); the count starts before it goes down.
+    const checked = (event.pointer ?? 0) === 0 && (event.phase === "began" || event.phase === "ended")
+    if (checked && event.phase === "began") this.tapBefore = this.delivered()
     if (this.touch) {
       const type = {
         began: "touchStart" as const,
@@ -1140,8 +1152,50 @@ class Live {
       if (type === "touchMove") this.scrolledAt = Date.now()
       await this.cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points }, this.sessionId)
     }
-    if (!this.touch) await this.mouseFromTouch(event.phase, x, y, event.pointer ?? 0)
+    const clicked = this.touch || (await this.mouseFromTouch(event.phase, x, y, event.pointer ?? 0))
     if (event.phase === "ended" && (event.pointer ?? 0) === 0) this.probeFocusSoon(true)
+    if (checked && event.phase === "ended" && clicked) void this.inputBlocked(this.tapBefore)
+  }
+
+  private tapBefore?: Promise<number | undefined>
+
+  /**
+   * Trusted pointer events the page has received, counted from an isolated world (never the page's own scripts), or
+   * undefined when the count cannot be read. Chrome acknowledges a dispatched event once the page handled it, so a tap
+   * the count has not seen soon after is one Chrome dropped.
+   */
+  private async delivered(): Promise<number | undefined> {
+    this.probe ??= this.cdp
+      .send("Page.createIsolatedWorld", { frameId: this.targetId, worldName: "opencode-input-check" }, this.sessionId)
+      .then((world) => world.executionContextId)
+      .catch(() => undefined)
+    const contextId = await this.probe
+    if (contextId === undefined) return (this.probe = undefined)
+    const result = await this.cdp
+      .send("Runtime.evaluate", { expression: deliveredScript, contextId, returnByValue: true }, this.sessionId)
+      .catch(() => undefined)
+    if (typeof result?.result.value === "number") return result.result.value
+    this.probe = undefined
+    return undefined
+  }
+
+  /**
+   * Chrome ignores every input to a tab while a dialog of its own covers it, such as the password manager's warning
+   * after a login with a password found in a data breach. The viewer only sees the page, so taps seem to do nothing;
+   * a tap the page never received says why, at most every `settings.blockedNoticeMs`.
+   */
+  private async inputBlocked(before: Promise<number | undefined> | undefined) {
+    const start = await before
+    if (start === undefined || this.blockedAt > Date.now() - settings.blockedNoticeMs) return
+    const deadline = Date.now() + settings.inputCheckMs
+    while (Date.now() < deadline) {
+      const now = await this.delivered()
+      if (now === undefined || now !== start) return
+      await Bun.sleep(250)
+    }
+    if ((await this.delivered()) !== start) return
+    this.blockedAt = Date.now()
+    this.sink?.notice?.(blockedNotice)
   }
 
   /**
@@ -1154,17 +1208,17 @@ class Live {
     x: number,
     y: number,
     pointer: number,
-  ) {
-    if (pointer !== 0) return
+  ): Promise<boolean> {
+    if (pointer !== 0) return false
     if (phase === "began") {
       this.gesture = { start: { x, y }, last: { x, y }, scrolling: false }
       this.scrolledAt = 0
-      return
+      return false
     }
     const gesture = this.gesture
-    if (!gesture) return
+    if (!gesture) return false
     if (phase === "moved") {
-      if (!gesture.scrolling && Math.hypot(x - gesture.start.x, y - gesture.start.y) < settings.dragSlop) return
+      if (!gesture.scrolling && Math.hypot(x - gesture.start.x, y - gesture.start.y) < settings.dragSlop) return false
       gesture.scrolling = true
       this.scrolledAt = Date.now()
       const deltaX = gesture.last.x - x
@@ -1175,10 +1229,10 @@ class Live {
         { type: "mouseWheel", x: gesture.start.x, y: gesture.start.y, deltaX, deltaY },
         this.sessionId,
       )
-      return
+      return false
     }
     this.gesture = undefined
-    if (phase === "cancelled" || gesture.scrolling) return
+    if (phase === "cancelled" || gesture.scrolling) return false
     await this.cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 }, this.sessionId)
     await this.cdp.send(
       "Input.dispatchMouseEvent",
@@ -1190,6 +1244,7 @@ class Live {
       { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1 },
       this.sessionId,
     )
+    return true
   }
 
   /**
@@ -1325,6 +1380,21 @@ function cdpMessage(error: unknown) {
   const text = error instanceof Error ? error.message : String(error)
   return (text.startsWith("{") ? Option.getOrUndefined(decodeJSON(text))?.message : undefined) ?? text
 }
+
+/** Runs in an isolated world: the trusted pointer events the page received since it first ran. */
+const deliveredScript = `(() => {
+  if (!globalThis.__opencodeDelivered) {
+    const count = { value: 0 }
+    for (const type of ["pointerdown", "mousedown", "touchstart"])
+      addEventListener(type, (event) => { if (event.isTrusted) count.value++ }, { capture: true, passive: true })
+    globalThis.__opencodeDelivered = count
+  }
+  return globalThis.__opencodeDelivered.value
+})()`
+
+/** What the viewers read when Chrome ignores their taps (`inputBlocked`). */
+export const blockedNotice =
+  "O Chrome do Mac está ignorando os toques: um aviso do próprio Chrome cobre a página (por exemplo, sobre uma senha exposta em vazamento). Feche-o no Mac para continuar."
 
 const rounded = (size: { width: number; height: number }) => ({
   width: Math.round(size.width),

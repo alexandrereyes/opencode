@@ -37,7 +37,16 @@ export const pages = [
 export function fakeBrowser(options: { readonly token?: string }) {
   const sent: Sent[] = []
   const refused: string[] = []
-  const view = { device: [1400, 771] as [number, number], inner: [1120, 616.8] as [number, number] }
+  /**
+   * `delivered` counts the trusted presses the page received (what the adapter reads from its isolated world);
+   * `blocked` drops them, as Chrome does while a dialog of its own covers the tab.
+   */
+  const view = {
+    device: [1400, 771] as [number, number],
+    inner: [1120, 616.8] as [number, number],
+    delivered: 0,
+    blocked: false,
+  }
   /**
    * What bringing a tab forward meets: Chrome refuses `Target.activateTarget` to the extension, and the relay blocks
    * `Page.bringToFront` unless its environment allows it (both as browse 0.0.14 behaves by default).
@@ -77,14 +86,20 @@ export function fakeBrowser(options: { readonly token?: string }) {
     "Page.getLayoutMetrics": () => ({
       cssVisualViewport: { clientWidth: view.inner[0], clientHeight: view.inner[1], pageX: 0, pageY: 0 },
     }),
+    "Page.createIsolatedWorld": () => ({ executionContextId: 7 }),
     "Runtime.evaluate": (params) => {
       const expression = String(params.expression)
+      if (params.contextId === 7 && expression.includes("__opencodeDelivered"))
+        return { result: { value: view.delivered } }
       if (expression.includes("maxTouchPoints")) return { result: { value: [false, 2] } }
       if (expression === "[innerWidth, innerHeight]") return { result: { value: view.inner } }
       if (expression === "document.visibilityState") return { result: { value: "visible" } }
       return { result: { value: { editable: false } } }
     },
-    "Input.dispatchMouseEvent": () => ({}),
+    "Input.dispatchMouseEvent": (params) => {
+      if (params.type === "mousePressed" && !view.blocked) view.delivered++
+      return {}
+    },
     "Input.dispatchKeyEvent": () => ({}),
     "Input.insertText": () => ({}),
   }

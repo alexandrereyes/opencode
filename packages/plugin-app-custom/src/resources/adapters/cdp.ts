@@ -71,8 +71,12 @@ export interface Commands {
   "Page.navigateToHistoryEntry": { params: { entryId: number }; result: {} }
   "Page.navigate": { params: { url: string }; result: { errorText?: string } }
   "Page.reload": { params: { ignoreCache?: boolean }; result: {} }
+  "Page.createIsolatedWorld": {
+    params: { frameId: string; worldName?: string }
+    result: { executionContextId: number }
+  }
   "Runtime.evaluate": {
-    params: { expression: string; returnByValue: true; silent?: boolean }
+    params: { expression: string; returnByValue: true; silent?: boolean; contextId?: number }
     result: { result: { value?: unknown } }
   }
   "Input.dispatchMouseEvent": {
