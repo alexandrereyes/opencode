@@ -5,6 +5,7 @@ import path from "node:path"
 import { defaults, load } from "../live-activity/apns.js"
 import { sharedHub } from "../live-activity/index.js"
 import { makeGateway, type Gateway } from "./gateway.js"
+import { privateEnv } from "../private-env.js"
 import { warmMaster } from "../master/index.js"
 import { Master } from "../master/rpc.js"
 import { Voice } from "../voice/rpc.js"
@@ -13,7 +14,10 @@ import { bunSideband, proxyOrigin } from "./voice.js"
 
 /** Cloudflare Access service token the watch sends to `watch-mac.alexandrem.com.br` (never committed). */
 export const accessFile = path.join(os.homedir(), ".config/opencode/watch/cf-access-service-token.json")
-/** The same JSON, injected by `mycred run` from the MyCredentials policy `opencode-servidor`; wins over the file. */
+/**
+ * The same JSON from MyCredentials, kept by the server in its private environment (`bin/private-env`, manual.json
+ * `mycred`) or, outside it, in `process.env`; wins over the file.
+ */
 export const accessVariable = "OPENCODE_WATCH_ACCESS_JSON"
 export const defaultPort = 4192
 
@@ -24,7 +28,9 @@ const Access = Schema.fromJsonString(Schema.Struct({ clientId: Schema.String, cl
  * the vault. Errors name the source but never carry its content, since the schema's own messages quote the input.
  */
 export const readAccess = Effect.fn("Watch.access")(function* (file: string = accessFile) {
-  const content = yield* Config.String(accessVariable).pipe(Config.withDefault(""), Effect.orElseSucceed(() => ""))
+  const content =
+    privateEnv(accessVariable) ??
+    (yield* Config.String(accessVariable).pipe(Config.withDefault(""), Effect.orElseSucceed(() => "")))
   const source = content ? accessVariable : file
   const text = content
     ? content
@@ -32,7 +38,7 @@ export const readAccess = Effect.fn("Watch.access")(function* (file: string = ac
         Effect.mapError(
           () =>
             new Error(
-              `A credencial do Cloudflare Access do relógio não está configurada no Mac: falta ${accessVariable} (policy opencode-servidor do MyCredentials) e o arquivo ${file}.`,
+              `A credencial do Cloudflare Access do relógio não está configurada no Mac: falta ${accessVariable} (manual.json mycred, MyCredentials) e o arquivo ${file}.`,
             ),
         ),
       )

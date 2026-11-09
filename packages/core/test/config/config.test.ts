@@ -17,6 +17,7 @@ import { ConfigPermissionV1 } from "@opencode/core/v1/config/permission"
 import { ConfigNormalize } from "@opencode/core/config/normalize"
 import { ConfigVariable } from "@opencode/core/config/variable"
 import { FSUtil } from "@opencode/util/fs-util"
+import { PrivateEnv } from "@opencode/util/private-env"
 import { Watcher } from "@opencode/core/filesystem/watcher"
 import { Bus } from "@opencode/core/bus"
 import { Global } from "@opencode/util/global"
@@ -1598,6 +1599,17 @@ describe("Config", () => {
         env: { QUOTED: String.raw`a\"b`, FRAGMENT: '{"k":"v"}' },
       })
       expect(JSON.parse(text)).toEqual({ quoted: 'a"b', fragment: { k: "v" } })
+    }).pipe(Effect.provide(AppNodeBuilder.build(FSUtil.node))),
+  )
+
+  it.effect("substitutes a variable of the private environment, on every load", () =>
+    Effect.gen(function* () {
+      const env = { [PrivateEnv.variable]: JSON.stringify(["/bin/sh", "-c", "printf 'CONFIG_TEST_SEALED\\0sealed-value\\0'"]) }
+      expect(PrivateEnv.load(env)).toEqual({ status: "loaded", names: ["CONFIG_TEST_SEALED"] })
+      expect(process.env.CONFIG_TEST_SEALED).toBeUndefined()
+      const load = ConfigVariable.substitute({ type: "virtual", source: "test", dir: "/", text: '{ "v": "{env:CONFIG_TEST_SEALED}" }' })
+      expect(JSON.parse(yield* load)).toEqual({ v: "sealed-value" })
+      expect(JSON.parse(yield* load)).toEqual({ v: "sealed-value" })
     }).pipe(Effect.provide(AppNodeBuilder.build(FSUtil.node))),
   )
 

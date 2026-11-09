@@ -1131,43 +1131,54 @@ test("the launcher pins the resources hub port the 4096 proxy forwards to", asyn
   expect(custom.server).toContain("export OPENCODE_RESOURCES_HUB_PORT='4300'")
 })
 
-test("the server starts through MyCredentials when manual.json names a policy, and without it when the vault fails", async () => {
+test("manual.json mycred keeps secrets out of the server's environment: bin/private-env prints them for the server", async () => {
   const home = await fixture()
-  await Bun.write(`${home}/manual.json`, JSON.stringify({ mycred: { keychain: "opencode-servidor", helper: `${home}/mycred` } }))
-  const config = await settings(home)
-  await Bun.write(`${home}/serve`, scripts(home, config).server)
+  const variables = { WATCH_JSON: "opencode/watch/token.json", APNS_P8: "opencode/apns/key.p8", AFTER: "opencode/after" }
+  await Bun.write(
+    `${home}/manual.json`,
+    JSON.stringify({ mycred: { keychain: "opencode-skills", helper: `${home}/mycred`, variables } }),
+  )
+  const output = scripts(home, await settings(home))
+  expect(output.server).not.toContain("mycred")
+  await Bun.write(`${home}/serve`, output.server)
   await Bun.write(`${home}/releases/${first}/server-config.json`, "{}")
-  await Bun.write(`${home}/releases/${first}/bin/opencode`, '#!/bin/sh\nprintf "opencode %s|%s\\n" "${INJECTED-none}" "$*"\n')
+  await Bun.write(`${home}/releases/${first}/bin/opencode`, '#!/bin/sh\nprintf "%s" "$OPENCODE_PRIVATE_ENV_COMMAND"\n')
   await chmod(`${home}/releases/${first}/bin/opencode`, 0o755)
-  // Fake helper: `check` exits with $CHECK; `run` injects a variable and executes the program after `--`.
+  const served = Bun.spawnSync(["/bin/sh", `${home}/serve`])
+  expect(JSON.parse(served.stdout.toString())).toEqual([`${home}/bin/private-env`])
+  expect(scripts(home, { ...(await settings(home)), mycred: undefined }).privateEnv).toBeUndefined()
+  await Bun.write(`${home}/private-env`, output.privateEnv ?? "")
+  // Fake helper: `get` prints a multi-line value per path, or exits with $DOWN for the path named in $DOWN_PATH.
   await Bun.write(
     `${home}/mycred`,
-    '#!/bin/sh\nprintf "mycred %s\\n" "$*" >&2\n[ "$1" = check ] && exit "$CHECK"\nwhile [ "$1" != -- ]; do shift; done\nshift\nINJECTED=yes exec "$@"\n',
+    '#!/bin/sh\n[ "$1 $2 $3" = "get --keychain opencode-skills" ] || exit 64\nfor last; do :; done\n[ "$last" = "${DOWN_PATH-}" ] && exit "$DOWN"\nprintf "value of %s\\nsecond line\\n" "$last"\n',
   )
   await chmod(`${home}/mycred`, 0o755)
-  const start = async (check: number) => {
-    const child = Bun.spawn(["/bin/sh", `${home}/serve`], {
-      env: { ...process.env, CHECK: String(check) },
-      stdout: "pipe",
-      stderr: "pipe",
-    })
+  const run = async (env: Record<string, string>) => {
+    const child = Bun.spawn(["/bin/sh", `${home}/private-env`], { env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" })
     const [code, stdout, stderr] = await Promise.all([
       child.exited,
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ])
-    return { code, stdout, stderr }
+    return { code, pairs: stdout.split("\0"), stderr }
   }
-  const serve = "serve --service --hostname 127.0.0.1 --port 4178"
-
-  const vault = await start(0)
-  expect(vault.stdout).toBe(`opencode yes|${serve}\n`)
-  expect(vault.stderr).toContain("mycred run --keychain opencode-servidor --quiet --timeout 15 -- ")
-
-  const fallback = await start(69)
-  expect(fallback.code).toBe(0)
-  expect(fallback.stdout).toBe(`opencode none|${serve}\n`)
-  expect(fallback.stderr).toContain("MyCredentials policy opencode-servidor unavailable")
+  const all = await run({})
+  expect(all.code).toBe(0)
+  expect(all.pairs).toEqual([
+    "WATCH_JSON", "value of opencode/watch/token.json\nsecond line",
+    "APNS_P8", "value of opencode/apns/key.p8\nsecond line",
+    "AFTER", "value of opencode/after\nsecond line",
+    "",
+  ])
+  // A missing credential skips only its variable; an unreachable vault stops the rest, and the server still starts.
+  const missing = await run({ DOWN_PATH: "opencode/apns/key.p8", DOWN: "66" })
+  expect(missing.pairs.filter((_, index) => index % 2 === 0)).toEqual(["WATCH_JSON", "AFTER", ""])
+  expect(missing.stderr).toContain("MyCredentials opencode/apns/key.p8 unavailable (exit 66); the server starts without APNS_P8")
+  const down = await run({ DOWN_PATH: "opencode/apns/key.p8", DOWN: "69" })
+  expect(down.code).toBe(0)
+  expect(down.pairs.filter((_, index) => index % 2 === 0)).toEqual(["WATCH_JSON", ""])
+  expect(`${missing.stderr}${down.stderr}`).not.toContain("value of")
 })
 
 // The Mac runtime reads its LaunchAgent with /usr/bin/plutil; on Linux, installMacProxy (below) covers the proxy.

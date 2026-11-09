@@ -178,6 +178,22 @@ Other customizations:
   (2026-11-05) `run-coordinator.ts` did not change; `execution.ts` and `runner/llm.ts` changed only in #60974 (trace)
   and #61421 (perf). #61880 (retries for `ENOTFOUND`/`EAI_AGAIN` for up to an hour) changes the retry policy, not this
   terminal, and is not applied.
+- Private environment (2026-11-09, our own change, no upstream PR). Files: `packages/util/src/private-env.ts` (new,
+  with `private-env.test.ts`), `packages/server/src/process.ts` (one `PrivateEnv.load()` at the top of
+  `ServerProcess.start`), `packages/core/src/config/variable.ts` (`{env:NAME}`) and `packages/core/src/integration.ts`
+  (env-method connections and their resolution), tests `core/test/config/config.test.ts` and
+  `core/test/integration.test.ts`. **Why:** server secrets from MyCredentials (`docs/custom-macos.md`, "Secrets from
+  MyCredentials") must reach `{env:…}` in configuration, env-method integrations and the custom plugin without being
+  inherited by agent shells, MCP servers and other children, where an `env` would put them in an agent's context and
+  skill scripts would use them unmasked. Removing them from `process.env` after start is not enough: Bun hands the
+  process's initial environment to every `Bun.spawn` without an explicit `env` (verified on Bun 1.4.4), and `ps eww`
+  reads it. So they never enter the environment: the launcher names a command in `OPENCODE_PRIVATE_ENV_COMMAND`,
+  `ServerProcess.start` runs it before anything spawns or reads configuration and keeps its `NAME\0value\0` output in
+  a `Map` under `Symbol.for("opencode.private-env")`, which the plugin (a separate build) reads too. Reads fall back to
+  `process.env`, so nothing changes without the variable. **Exit:** upstream offers a way to give the server secrets
+  that its children do not inherit; until then, at each integration check that `{env:}` substitution and env-method
+  connections still go through `variable.ts` and `integration.ts`, and that `ServerProcess.start` runs before the
+  first spawn.
 - MCP OAuth for Google Workspace (2026-11-09, our own change, no upstream PR). Files: `packages/schema/src/mcp.ts`
   (`oauth.authorization_params`, a string map), `packages/core/src/mcp/oauth.ts`, `core/test/mcp-oauth.test.ts`, and
   the generated `packages/protocol/openapi.json` and `packages/client/src/promise/generated/types.ts`. **Why:** Google's
@@ -287,6 +303,14 @@ packages/core/src/session/run-coordinator.ts
 packages/core/src/session/execution.ts
 packages/core/test/session-execution.test.ts
 packages/core/test/session-move.test.ts
+# Private environment
+packages/util/src/private-env.ts
+packages/util/src/private-env.test.ts
+packages/server/src/process.ts
+packages/core/src/config/variable.ts
+packages/core/src/integration.ts
+packages/core/test/config/config.test.ts
+packages/core/test/integration.test.ts
 # MCP OAuth for Google Workspace (openapi.json and generated types.ts are listed under Skill slash)
 packages/schema/src/mcp.ts
 packages/core/src/mcp/oauth.ts

@@ -5,6 +5,7 @@ import path from "path"
 import { Effect } from "effect"
 import { type ParseError, parse } from "jsonc-parser"
 import { FSUtil } from "@opencode/util/fs-util"
+import { PrivateEnv } from "@opencode/util/private-env"
 
 type ParseSource =
   | {
@@ -26,7 +27,7 @@ type SubstituteInput = ParseSource & {
 export const substitute = Effect.fn("ConfigVariable.substitute")(function* (input: SubstituteInput) {
   const env = (escape: boolean) =>
     input.text.replace(/\{env:([^}]+)\}/g, (_, name: string) => {
-      const value = (input.env?.[name] ?? process.env[name]) || ""
+      const value = (input.env?.[name] ?? PrivateEnv.get(name) ?? process.env[name]) || ""
       return escape ? JSON.stringify(value).slice(1, -1) : value
     })
   // Escape only when raw values break the JSON (e.g. Windows paths), so configs that parse today keep their meaning.

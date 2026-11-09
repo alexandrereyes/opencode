@@ -6,7 +6,7 @@ import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
-import { settings } from "./custom-release"
+import { scripts, settings } from "./custom-release"
 
 const source = path.resolve(import.meta.dirname, "../../..")
 const args = parseArgs({
@@ -121,7 +121,9 @@ async function up() {
     if (home === (await realpath(config)) || home === (await realpath(path.dirname(manual.database))))
       throw new Error("Sandbox must not use production configuration or persistence")
     const configTarget = path.join(home, "config/opencode")
-    await copyConfig(config, configTarget)
+    // With manual.json mycred, the watch token and APNs key arrive through the private environment (below); their
+    // fallback files stay in production's configuration only.
+    await copyConfig(config, configTarget, manual.mycred ? ["watch", "apns"] : [])
     await Promise.all(
       ["data/opencode", "xdg/data", "xdg/state", "xdg/cache"].map((name) =>
         mkdir(path.join(home, name), { recursive: true, mode: 0o700 }),
@@ -179,6 +181,13 @@ async function up() {
       XDG_STATE_HOME: path.join(home, "xdg/state"),
       XDG_CACHE_HOME: path.join(home, "xdg/cache"),
       OPENCODE_CUSTOM_LAUNCHD: "1",
+    }
+    // The same MyCredentials secrets as production, through the same private channel: never in environment.json.
+    const secrets = scripts(home, manual).privateEnv
+    if (secrets) {
+      await privateFile(path.join(home, "private-env"), secrets)
+      await chmod(path.join(home, "private-env"), 0o700)
+      Object.assign(runtime, { OPENCODE_PRIVATE_ENV_COMMAND: JSON.stringify([path.join(home, "private-env")]) })
     }
     await privateFile(path.join(home, "environment.json"), JSON.stringify(runtime))
     console.log("Building the custom plugin and the upstream web app (service worker disabled)…")
@@ -266,13 +275,15 @@ function copyCredentials(production: string, sandbox: string) {
   }
 }
 
-async function copyConfig(from: string, to: string) {
+/** `skip`: top-level entries left out, such as secret files the sandbox receives another way. */
+async function copyConfig(from: string, to: string, skip: ReadonlyArray<string> = []) {
   await mkdir(to, { recursive: true, mode: 0o700 })
   const entries = await readdir(from, { withFileTypes: true })
   await Promise.all(
     entries
       .filter(
         (entry) =>
+          !skip.includes(entry.name) &&
           !/^(?:\.git|\.DS_Store|backups?|service(?:-.*)?\.json)$|(?:\.bak|\.backup|\.before-|\.pre-)|(?:package-lock\.json|bun\.lock)$/.test(
             entry.name,
           ),

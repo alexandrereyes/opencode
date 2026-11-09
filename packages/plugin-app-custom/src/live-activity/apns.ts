@@ -2,6 +2,7 @@ import { Clock, Config, Effect, Option, Schema } from "effect"
 import { createPrivateKey, sign, type KeyObject } from "node:crypto"
 import http2 from "node:http2"
 import type { LiveActivity } from "./rpc.js"
+import { privateEnv } from "../private-env.js"
 
 export const defaults = {
   teamID: "ERRYZ68LX5",
@@ -44,7 +45,7 @@ export type Client = {
   readonly close: Effect.Effect<void>
 }
 
-/** The `.p8` key's content, injected by `mycred run` from the MyCredentials policy `opencode-servidor`. */
+/** The `.p8` key's content from MyCredentials, in the server's private environment (`bin/private-env`) or `process.env`. */
 export const keyVariable = "OPENCODE_APNS_KEY_P8"
 
 /**
@@ -53,7 +54,7 @@ export const keyVariable = "OPENCODE_APNS_KEY_P8"
  * while servers still start without the vault. Logs name the source, never the key or the parser's error.
  */
 export const load = Effect.fn("LiveActivity.Apns.load")(function* () {
-  const keyContent = yield* Config.String(keyVariable).pipe(Config.withDefault(""))
+  const keyContent = privateEnv(keyVariable) ?? (yield* Config.String(keyVariable).pipe(Config.withDefault("")))
   const keyPath = yield* Config.String("OPENCODE_APNS_KEY_PATH").pipe(Config.withDefault(""))
   const keyID = yield* Config.String("OPENCODE_APNS_KEY_ID").pipe(Config.withDefault(""))
   const teamID = yield* Config.String("OPENCODE_APNS_TEAM_ID").pipe(Config.withDefault(defaults.teamID))
@@ -63,7 +64,7 @@ export const load = Effect.fn("LiveActivity.Apns.load")(function* () {
   if (!keyID) return undefined
   if (!keyContent && !keyPath) {
     yield* Effect.logWarning(
-      `Live Activity APNs key is not configured: set ${keyVariable} (MyCredentials policy opencode-servidor) or OPENCODE_APNS_KEY_PATH; pushes stay off`,
+      `Live Activity APNs key is not configured: set ${keyVariable} (manual.json mycred, MyCredentials) or OPENCODE_APNS_KEY_PATH; pushes stay off`,
     )
     return undefined
   }

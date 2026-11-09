@@ -519,8 +519,8 @@ token re-reports), is no refusal either: only a swipe within the 8 hours sets `d
 until `activeTotal` returns to 0.
 
 **APNs configuration.** Set `OPENCODE_APNS_KEY_ID` and the key: `OPENCODE_APNS_KEY_P8`, the `.p8` content injected
-by `mycred run` from the MyCredentials policy `opencode-servidor` (`opencode/apns/AuthKey_<id>.p8`, see `manual.json`
-`mycred` in `docs/custom-macos.md`), wins over `OPENCODE_APNS_KEY_PATH`, the `.p8` file, kept as a fallback while a
+into the server's private environment from MyCredentials (`opencode/apns/AuthKey_<id>.p8`, see `manual.json` `mycred`
+in `docs/custom-macos.md`; never in `process.env`, so no child inherits it), wins over `OPENCODE_APNS_KEY_PATH`, the `.p8` file, kept as a fallback while a
 server starts without the vault. Optionally `OPENCODE_APNS_TEAM_ID` and `OPENCODE_APNS_BUNDLE_ID`. They are read once
 when the hub starts. With a key ID, the log says `Live Activity APNs enabled` with the key's `source` (the variable's
 name or the file path), or warns that the key is missing or unreadable and keeps pushes off (`unconfigured`); logs

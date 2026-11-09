@@ -28,8 +28,8 @@ Watch ══UDP (Opus, DTLS/ICE-lite)══▶ OpenAI GPT Live  (media never cro
   (same process-global hub pattern as `custom.live-activity`). It is not the OpenCode API: it exposes only the
   allowlisted routes below, so the public hostname never reaches shell, files or arbitrary sessions.
 - The Cloudflare side already exists (`core-infra/cloudflare-one/watch-mac-cloudflare-manifest.json`). The service
-  token (`{clientId, clientSecret}`) comes from `OPENCODE_WATCH_ACCESS_JSON`, injected by `mycred run` from the
-  MyCredentials policy `opencode-servidor` (`opencode/watch/cf-access-service-token.json`), or else from the fallback
+  token (`{clientId, clientSecret}`) comes from `OPENCODE_WATCH_ACCESS_JSON`, which the server keeps in its private
+  environment from MyCredentials (`opencode/watch/cf-access-service-token.json`, `manual.json` `mycred`), or else from the fallback
   file `~/.config/opencode/watch/cf-access-service-token.json` (0600). Every watch
   request sends `CF-Access-Client-Id`, `CF-Access-Client-Secret` and a non-default `User-Agent: OpenCodeWatch/<v>`
   (Cloudflare blocks some default agents with error 1010).
