@@ -2,10 +2,11 @@ import { Effect } from "effect"
 import type { Context } from "../context.js"
 
 /**
- * An optional `description` the agent writes for each `shell`, `grep` and Code Mode `execute` call: why it runs, in a
- * few words of Portuguese, for the apps' activity rows (`docs/tool-descriptions.md`). The field is added to the JSON
- * schema the model receives, on every request (`context`, and `compaction` and `generate` so their tool list matches the
- * one the prompt cache holds), never to the tools themselves: the call's input is stored as the model sent it, field
+ * The `description` the agent writes for each `shell`, `grep` and Code Mode `execute` call: why it runs, in a few
+ * words of Portuguese, for the apps' activity rows, Sessões, the voice and the Live Activity
+ * (`docs/tool-descriptions.md`). The field is added to the JSON schema the model receives, as required, on every
+ * request (`context`, and `compaction` and `generate` so their tool list matches the one the prompt cache holds), never
+ * to the tools themselves: a call without it still runs, the call's input is stored as the model sent it, field
  * included, and the tools' own decoding drops it before they run.
  */
 const rules =
@@ -28,7 +29,10 @@ export const fields = {
 
 type Definitions = Record<string, { description: string; input: unknown }>
 
-/** Adds the field after each tool's main argument, unless the schema already has a `description` of its own. */
+/**
+ * Adds the field after each tool's main argument and requires it, unless the schema already has a `description` of
+ * its own. Required only here: the tools' own schemas never see it, so a call without one is not refused.
+ */
 export function describeTools(tools: Definitions) {
   for (const [name, field] of Object.entries(fields)) {
     const schema = tools[name]?.input
@@ -39,6 +43,11 @@ export function describeTools(tools: Definitions) {
     const at = entries.findIndex(([key]) => key === field.after) + 1
     entries.splice(at === 0 ? entries.length : at, 0, ["description", { type: "string", description: field.text }])
     ;(schema as { properties: Record<string, unknown> }).properties = Object.fromEntries(entries)
+    const required = (schema as { required?: unknown }).required
+    ;(schema as { required: string[] }).required = [
+      ...(Array.isArray(required) ? required.filter((key): key is string => typeof key === "string") : []),
+      "description",
+    ]
   }
 }
 

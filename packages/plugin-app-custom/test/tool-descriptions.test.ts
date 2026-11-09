@@ -47,9 +47,9 @@ test("the model's schema gets an optional description right after each tool's ma
     const keys = Object.keys(schema.properties)
     expect(keys[keys.indexOf(field.after) + 1]).toBe("description")
     expect(schema.properties.description).toEqual({ type: "string", description: field.text })
-    // Optional, and nothing else changes: the other arguments, what is required, no extra keys allowed.
+    // Required of the model, and nothing else changes: the other arguments, no extra keys allowed.
     const original = before[name]!.input as typeof schema
-    expect(schema.required).toEqual(original.required)
+    expect(schema.required).toEqual([...(original.required ?? []), "description"])
     expect(schema.additionalProperties).toEqual(original.additionalProperties)
     expect({ ...schema.properties, description: undefined }).toEqual({ ...original.properties, description: undefined })
   }
@@ -79,7 +79,7 @@ test("every request gets the same bytes, a schema with its own description is le
   expect(Object.keys(own.read.input.properties)).toEqual(["path"])
 })
 
-test("the tools accept a call with the description and run without it", async () => {
+test("the tools accept a call with the description and run without it, and one without it as well", async () => {
   const context: Tool.Context = {
     sessionID: "ses_test" as never,
     agent: "build" as never,
@@ -92,5 +92,7 @@ test("the tools accept a call with the description and run without it", async ()
   await Effect.runPromise(execute(tools.shell, { command: "git status", description }, context))
   await Effect.runPromise(execute(tools.grep, { pattern: "TODO", description }, context))
   await Effect.runPromise(execute(tools.execute as Tool.Info, { code: "return 1", description }, context))
-  expect(received).toEqual([{ command: "git status" }, { pattern: "TODO" }, { code: "return 1" }])
+  // Required only of the model: a call without it still runs.
+  await Effect.runPromise(execute(tools.shell, { command: "pwd" }, context))
+  expect(received).toEqual([{ command: "git status" }, { pattern: "TODO" }, { code: "return 1" }, { command: "pwd" }])
 })
