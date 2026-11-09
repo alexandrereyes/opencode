@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { ConfigProvider, Effect } from "effect"
+import { ConfigProvider, Effect, Logger } from "effect"
 import { TestClock } from "effect/testing"
 import { generateKeyPairSync, verify } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -188,17 +188,38 @@ it.live("credentials come from the environment; a missing key or key ID means un
     const directory = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "apns-")))
     const file = path.join(directory, "AuthKey.p8")
     yield* Effect.promise(() => Bun.write(file, keys().privateKey.export({ type: "pkcs8", format: "pem" }).toString()))
+    const pem = keys().privateKey.export({ type: "pkcs8", format: "pem" }).toString()
+    const missing = path.join(directory, "missing.p8")
+    const notAKey = "-----BEGIN PRIVATE KEY-----\nnot-a-key-c0ffee\n-----END PRIVATE KEY-----\n"
+    // Each case runs with its own log, which must never carry key material.
     const withEnv = (env: Record<string, string>) =>
-      load().pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))))
-    expect(yield* withEnv({})).toBeUndefined()
-    expect(yield* withEnv({ OPENCODE_APNS_KEY_PATH: file })).toBeUndefined()
-    expect(yield* withEnv({ OPENCODE_APNS_KEY_ID: "KEY1234567" })).toBeUndefined()
-    expect(
-      yield* withEnv({ OPENCODE_APNS_KEY_PATH: path.join(directory, "missing.p8"), OPENCODE_APNS_KEY_ID: "K" }),
-    ).toBeUndefined()
-    const client = yield* withEnv({ OPENCODE_APNS_KEY_PATH: file, OPENCODE_APNS_KEY_ID: "KEY1234567" })
-    expect(client).toBeDefined()
-    yield* client?.close ?? Effect.void
+      Effect.gen(function* () {
+        const lines: string[] = []
+        const logger = Logger.make((entry) => lines.push(JSON.stringify(entry.message)))
+        const client = yield* load().pipe(
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+          Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
+        )
+        yield* client?.close ?? Effect.void
+        expect(lines.join("\n")).not.toContain("PRIVATE KEY")
+        expect(lines.join("\n")).not.toContain("c0ffee")
+        return { configured: client !== undefined, log: lines.join("\n") }
+      })
+    const id = { OPENCODE_APNS_KEY_ID: "KEY1234567" }
+    const cases: [Record<string, string>, boolean, string | undefined][] = [
+      [{}, false, undefined],
+      [{ OPENCODE_APNS_KEY_PATH: file }, false, undefined],
+      [{ ...id, OPENCODE_APNS_KEY_P8: pem, OPENCODE_APNS_KEY_PATH: missing }, true, "OPENCODE_APNS_KEY_P8"],
+      [{ ...id, OPENCODE_APNS_KEY_PATH: file }, true, file],
+      [{ ...id }, false, "pushes stay off"],
+      [{ ...id, OPENCODE_APNS_KEY_PATH: missing }, false, missing],
+      [{ ...id, OPENCODE_APNS_KEY_P8: notAKey, OPENCODE_APNS_KEY_PATH: file }, false, "unreadable"],
+    ]
+    for (const [env, configured, logged] of cases) {
+      const result = yield* withEnv(env)
+      expect({ env: Object.keys(env), configured: result.configured }).toEqual({ env: Object.keys(env), configured })
+      if (logged) expect(result.log).toContain(logged)
+    }
     yield* Effect.promise(() => rm(directory, { recursive: true }))
   }),
 )

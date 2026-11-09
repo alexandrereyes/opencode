@@ -44,22 +44,40 @@ export type Client = {
   readonly close: Effect.Effect<void>
 }
 
-/** APNs credentials from the environment, or `undefined` (push `unconfigured`) when the key or its ID is missing. */
+/** The `.p8` key's content, injected by `mycred run` from the MyCredentials policy `opencode-servidor`. */
+export const keyVariable = "OPENCODE_APNS_KEY_P8"
+
+/**
+ * APNs credentials from the environment, or `undefined` (push `unconfigured`) when the key or its ID is missing.
+ * The key's content in `OPENCODE_APNS_KEY_P8` wins over the file in `OPENCODE_APNS_KEY_PATH`, kept as a fallback
+ * while servers still start without the vault. Logs name the source, never the key or the parser's error.
+ */
 export const load = Effect.fn("LiveActivity.Apns.load")(function* () {
+  const keyContent = yield* Config.String(keyVariable).pipe(Config.withDefault(""))
   const keyPath = yield* Config.String("OPENCODE_APNS_KEY_PATH").pipe(Config.withDefault(""))
   const keyID = yield* Config.String("OPENCODE_APNS_KEY_ID").pipe(Config.withDefault(""))
   const teamID = yield* Config.String("OPENCODE_APNS_TEAM_ID").pipe(Config.withDefault(defaults.teamID))
   const bundleID = yield* Config.String("OPENCODE_APNS_BUNDLE_ID").pipe(Config.withDefault(defaults.bundleID))
   // Tests only: a local stand-in for Apple's hosts, so a sandbox can exercise delivery without reaching any device.
   const origin = yield* Config.String("OPENCODE_APNS_ORIGIN").pipe(Config.withDefault(""))
-  if (!keyPath || !keyID) return undefined
-  const key = yield* Effect.tryPromise(() => Bun.file(keyPath).text()).pipe(
-    Effect.map((pem) => createPrivateKey(pem)),
-    Effect.tapError((error) => Effect.logWarning("Live Activity APNs key is unreadable; pushes stay off", { error })),
+  if (!keyID) return undefined
+  if (!keyContent && !keyPath) {
+    yield* Effect.logWarning(
+      `Live Activity APNs key is not configured: set ${keyVariable} (MyCredentials policy opencode-servidor) or OPENCODE_APNS_KEY_PATH; pushes stay off`,
+    )
+    return undefined
+  }
+  const source = keyContent ? keyVariable : keyPath
+  const key = yield* (keyContent ? Effect.succeed(keyContent) : Effect.tryPromise(() => Bun.file(keyPath).text())).pipe(
+    Effect.flatMap((pem) => Effect.try(() => createPrivateKey(pem))),
+    Effect.tapError(() =>
+      Effect.logWarning("Live Activity APNs key is unreadable or not a private key; pushes stay off", { source }),
+    ),
     Effect.option,
   )
   if (Option.isNone(key)) return undefined
   if (origin) yield* Effect.logWarning("APNs requests go to a test origin instead of Apple", { origin })
+  yield* Effect.logInfo("Live Activity APNs enabled", { source, keyID })
   return makeClient({ key: key.value, keyID, teamID, bundleID, ...(origin ? { origin: () => origin } : {}) })
 }, Effect.orDie)
 

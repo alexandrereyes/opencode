@@ -13,9 +13,37 @@ import { bunSideband, proxyOrigin } from "./voice.js"
 
 /** Cloudflare Access service token the watch sends to `watch-mac.alexandrem.com.br` (never committed). */
 export const accessFile = path.join(os.homedir(), ".config/opencode/watch/cf-access-service-token.json")
+/** The same JSON, injected by `mycred run` from the MyCredentials policy `opencode-servidor`; wins over the file. */
+export const accessVariable = "OPENCODE_WATCH_ACCESS_JSON"
 export const defaultPort = 4192
 
 const Access = Schema.fromJsonString(Schema.Struct({ clientId: Schema.String, clientSecret: Schema.String }))
+
+/**
+ * Reads the token at every pairing: the variable first, the file as a fallback while servers still start without
+ * the vault. Errors name the source but never carry its content, since the schema's own messages quote the input.
+ */
+export const readAccess = Effect.fn("Watch.access")(function* (file: string = accessFile) {
+  const content = yield* Config.String(accessVariable).pipe(Config.withDefault(""), Effect.orElseSucceed(() => ""))
+  const source = content ? accessVariable : file
+  const text = content
+    ? content
+    : yield* Effect.tryPromise(() => Bun.file(file).text()).pipe(
+        Effect.mapError(
+          () =>
+            new Error(
+              `A credencial do Cloudflare Access do relógio não está configurada no Mac: falta ${accessVariable} (policy opencode-servidor do MyCredentials) e o arquivo ${file}.`,
+            ),
+        ),
+      )
+  const access = yield* Schema.decodeUnknownEffect(Access)(text).pipe(
+    Effect.mapError(
+      () => new Error(`A credencial do Cloudflare Access do relógio em ${source} não é um JSON com clientId e clientSecret.`),
+    ),
+  )
+  yield* Effect.logInfo("Watch Cloudflare Access token read", { source })
+  return access
+})
 
 declare global {
   var opencodeCustomWatchGateway: Gateway | undefined
@@ -31,10 +59,7 @@ export function sharedGateway() {
       Config.withDefault(defaultPort),
       Effect.orElseSucceed(() => defaultPort),
     ),
-    access: Effect.tryPromise(() => Bun.file(accessFile).text()).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(Access)),
-      Effect.mapError(() => new Error("A credencial do Cloudflare Access do relógio não está configurada no Mac.")),
-    ),
+    access: Effect.suspend(() => readAccess()),
     apns: load(),
     widgetBundleID: Config.String("OPENCODE_APNS_BUNDLE_ID").pipe(
       Config.withDefault(defaults.bundleID),
