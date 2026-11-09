@@ -1,13 +1,13 @@
 # Finishing a browse handoff from the apps
 
-Rev. 2026-11-07. Contract between this plugin and the MyAgents apps for **finishing a browse `handoff()` from the
-iPhone or the Mac**: the existing resource viewer (`resources.md`) shows the agent's tab in Alexandre's real Chrome,
-takes his touches and keyboard (secure entry for passwords) and lets him press the handoff card's **Continue**. It
-builds on `browser-handoff.md` (a handoff that waits is "Precisa de você") and on a spike (2026-11-07, not merged),
-whose findings hold: the relay scopes a CDP connection to one browse session with its token; the plugin learns the
-session only from the call's explicit `session`; Continue lives in a closed shadow root and checks `isTrusted`, which
-CDP mouse input satisfies, and nothing else (no relay route, no MCP tool) ends a handoff. Change it only compatibly and
-update this file with the change.
+Rev. 2026-11-08 (calls without `session`). Contract between this plugin and the MyAgents apps for **finishing a
+browse `handoff()` from the iPhone or the Mac**: the existing resource viewer (`resources.md`) shows the agent's tab in
+Alexandre's real Chrome, takes his touches and keyboard (secure entry for passwords) and lets him press the handoff
+card's **Continue**. It builds on `browser-handoff.md` (a handoff that waits is "Precisa de você") and on a spike
+(2026-11-07, not merged), whose findings hold: the relay scopes a CDP connection to one browse session with its token;
+the plugin learns the session from the call's explicit `session`, else as "Sessão do browse" below tells; Continue
+lives in a closed shadow root and checks `isTrusted`, which CDP mouse input satisfies, and nothing else (no relay
+route, no MCP tool) ends a handoff. Change it only compatibly and update this file with the change.
 
 Normative examples: `docs/browse-handoff-remoto/*.json` (decoded by `test/browse-handoff-remoto-contract.test.ts`; the
 apps read them in their tests the way they read `live-activity/state-browser.json`).
@@ -16,9 +16,35 @@ apps read them in their tests the way they read `live-activity/state-browser.jso
 
 One resource per browse session: `chrome:browse:<browse session>`, kind `chrome`, `meta` `{ kind: "chrome", cdp:
 "http://127.0.0.1:<relay port>", browse: "<browse session>", targetID?, url?, title? }`. The browse session is the call's
-explicit `session` argument (`session_new` id; `~/.agents/AGENTS.md` asks agents to pass it). A call without one gets no
-resource: the handoff still waits and still is "Precisa de você", but it has no `resourceID`. (browse's MCP then
-runs it in a session of its own, `mcp-<id>`, which stays in the relay until it is deleted or idles out.)
+explicit `session` argument, else the agent's current one when the plugin can tell it for sure (below). Otherwise the
+call gets no resource: the handoff still waits and still is "Precisa de você", but it has no `resourceID`.
+
+### Sessão do browse (rev. 2026-11-08, browse 0.0.16)
+
+browse 0.0.16's MCP server keeps a **current session per caller**, keyed by the `_meta["ai.opencode/sessionID"]` the
+OpenCode server sends with every MCP call (the agent's own session, a subagent's included). Until the agent makes
+another current, it is `mcp-` and the first 8 hex digits of the SHA-256 of that session ID; `session_new`,
+`session_use`, `session_reset` with an id, `session_adopt` or `execute` with a `session`, and `session_delete` of the
+current one (which leaves a random `mcp-…`) change it. It lives only in the MCP process (forgotten when it restarts);
+`OPENCODE_BROWSER_SESSION` in its environment shares one for everyone. Nothing outside the process reports it: not the
+relay (`/cli/sessions` has no owner, no handoff), not the call's progress.
+
+So the plugin (`browser-handoff/current.ts`) follows each agent session's browse calls through `execute.after` (their
+input and structured output) for the sessions that may be current, always with browse's default among them, and takes
+those **candidates** as the call starts. At the grace time (3 s) it reads `/cli/sessions` (with the relay token, which
+stays in the request header; only ids and `updatedAt` are kept) and takes the **one candidate the relay stamped since
+the call began** (browse stamps a session as an `execute` starts in it). Then everything goes as with an explicit
+`session`: same identity, same locks, the hub still refuses it without that session's tab.
+
+No resource (as before this revision) when:
+
+- **none** of the candidates was stamped since the call began: the agent's current session is one the plugin cannot
+  know (a `session_new` whose answer it did not see, `OPENCODE_BROWSER_SESSION`, a call still queued behind another in
+  its session, or the relay not answering);
+- **two or more** were: for example parallel calls of one agent in different sessions; either could hold the handoff;
+- the relay token or `/cli/sessions` cannot be read.
+
+`test/browser-handoff-current.test.ts` pins the derivation and the calls that move it against the installed package.
 
 ## 1. From a handoff to its resource
 
@@ -204,8 +230,9 @@ Compatible precisions found while implementing; none changes a schema or an exam
 - **The hub's log stays empty** (`<state>/resources-hub/hub.log`) unless something fails: it logs no routine events,
   and never inputs.
 - **End to end**: `script/browse-handoff-check.ts` drives a sandbox agent's real handoff in Alexandre's Chrome on the
-  login fixture, for `completed`, `timeout`, `cancelled`, `failed`, `nosession` and `keys`; with `--app` it waits for
-  the iPhone or Mac app to act instead of acting itself.
+  login fixture, for `completed`, `timeout`, `cancelled`, `failed`, `keys` and `bare` (`completed` with a call that
+  names no browse session, which gets the Resolver all the same); with `--app` it waits for the iPhone or Mac app to act
+  instead of acting itself. (`nosession`, a call without a Resolver, is gone with this revision.)
 
 ## Examples
 

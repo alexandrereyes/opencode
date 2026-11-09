@@ -137,8 +137,19 @@ export function fakeBrowser(options: { readonly token?: string }) {
       if (url.pathname === "/cli/sessions")
         return Response.json({
           sessions: [
-            { id: "login", pageUrl: "http://127.0.0.1:5191/" },
-            { id: "pessoal", pageUrl: "https://banco.example/extrato" },
+            {
+              id: "login",
+              pageUrl: "http://127.0.0.1:5191/",
+              updatedAt: "2026-11-08T20:00:01.500Z",
+              stateKeys: ["cookies"],
+            },
+            {
+              id: "pessoal",
+              pageUrl: "https://banco.example/extrato",
+              updatedAt: "2026-11-08T19:00:00.000Z",
+              allowedOrigins: ["banco.example"],
+            },
+            { id: "sem-hora", pageUrl: null },
           ],
         })
       return new Response(null, { status: 404 })

@@ -67,7 +67,8 @@ Precedence everywhere: question > permission > browser > failed > working > unre
 ## Finishing it from the apps
 
 Rev. 2026-11-07: a handoff whose call names its browse `session` also gets a `resourceID`, the resource that shows its
-tab in the viewer; see `browse-handoff-remoto.md`.
+tab in the viewer; see `browse-handoff-remoto.md`. Rev. 2026-11-08: so does a call that names none, when the plugin can
+tell the agent's current browse session for sure (`browse-handoff-remoto.md`, "Sessão do browse").
 
 ## Compatibility
 

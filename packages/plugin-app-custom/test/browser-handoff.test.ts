@@ -13,8 +13,10 @@ import {
   endedOutcome,
   hubResources,
   makeHandoffs,
+  type FindSession,
   type HandoffResources,
 } from "../src/browser-handoff/index"
+import { callerSession } from "../src/browser-handoff/current"
 import { makeRegistry, wire } from "../src/browser-handoff/registry"
 import { BrowserHandoffs } from "../src/browser-handoff/rpc"
 import { makeTracker } from "../src/live-activity/tracker"
@@ -297,7 +299,9 @@ test("Sessões and the session family carry the waiting handoffs", async () => {
 })
 
 /** A Location whose handoffs get resources from a fake hub that logs every step in order. */
-async function withResources(options: { readonly openMs?: number; readonly refuse?: boolean } = {}) {
+async function withResources(
+  options: { readonly openMs?: number; readonly refuse?: boolean; readonly find?: FindSession } = {},
+) {
   const registry = makeRegistry()
   const scope = await run(Scope.make())
   const log: string[] = []
@@ -318,6 +322,7 @@ async function withResources(options: { readonly openMs?: number; readonly refus
     graceMs: 30,
     now: () => T,
     resources,
+    ...(options.find ? { find: options.find } : {}),
     announce: (sessionID, ended) =>
       Effect.sync(() => {
         log.push(`browser-handoffs.changed ${sessionID}${ended ? ` ${ended.outcome}` : ""}`)
@@ -368,7 +373,7 @@ test("a handoff that names its browse session waits with its resource and ends i
   await close()
 })
 
-test("each way a handoff ends has its outcome, and calls without a session or a relay get no resource", async () => {
+test("each way a handoff ends has its outcome, and calls without a found session or a relay get no resource", async () => {
   const { registry, handoffs, log, endings, close } = await withResources()
   const outcome = async (id: string, finish: () => Promise<unknown>) => {
     await run(handoffs.before(browseCall(id, `s-${id}`)))
@@ -397,7 +402,7 @@ test("each way a handoff ends has its outcome, and calls without a session or a 
   ).toBe("cancelled")
   expect(await outcome("c5", () => run(handoffs.unload))).toBe("cancelled")
 
-  // No `session`: it still waits and is still announced, without a resource.
+  // No `session` and nothing to find it with: it still waits and is still announced, without a resource.
   log.length = 0
   await run(handoffs.before(browseCall("c6")))
   await Bun.sleep(100)
@@ -419,6 +424,62 @@ test("each way a handoff ends has its outcome, and calls without a session or a 
     `browser-handoffs.changed ${ids.live} completed`,
   ])
   await refused.close()
+})
+
+test("a call without `session` gets the resource of the browse session found for it, or none when unsure", async () => {
+  const asked: { candidates: readonly string[]; since: number }[] = []
+  let answer: string | undefined
+  const { registry, handoffs, log, close } = await withResources({
+    find: (candidates, since) =>
+      Effect.sync(() => {
+        asked.push({ candidates, since })
+        return answer
+      }),
+  })
+  const mine = callerSession(ids.live)
+  answer = mine
+  await run(handoffs.before(browseCall("b1")))
+  await Bun.sleep(100)
+  // The agent never chose one: browse's default for its session, from when the call began.
+  expect(asked).toEqual([{ candidates: [mine], since: T }])
+  expect(registry.waiting().map((entry) => entry.resourceID)).toEqual([`chrome:browse:${mine}`])
+  expect(log).toEqual([`open ${mine} build`, `browser-handoffs.changed ${ids.live}`])
+  await run(handoffs.after({ ...browseCall("b1"), status: "completed", result: { output: { session: mine } } }))
+  expect(log.slice(2)).toEqual([
+    `end chrome:browse:${mine} completed`,
+    `browser-handoffs.changed ${ids.live} completed`,
+    `resources.changed chrome:browse:${mine}`,
+  ])
+
+  // The agent's own `session_use` moves its candidates; an explicit `session` never asks.
+  await run(
+    handoffs.after({
+      ...call(ids.live, "u1", ""),
+      tool: "browse_session_use",
+      input: { id: "conta" },
+      status: "completed",
+      result: { output: { currentSession: "conta" } },
+    }),
+  )
+  log.length = 0
+  asked.length = 0
+  await run(handoffs.before(browseCall("b2", "login")))
+  await Bun.sleep(100)
+  expect(asked).toEqual([])
+  expect(log).toEqual(["open login build", `browser-handoffs.changed ${ids.live}`])
+  await run(handoffs.after({ ...browseCall("b2", "login"), status: "completed" }))
+
+  // Unsure (none or several touched): it waits without a resource, as before.
+  log.length = 0
+  answer = undefined
+  await run(handoffs.before(browseCall("b3")))
+  await Bun.sleep(100)
+  // `login` became current with the explicit call.
+  expect(asked).toEqual([{ candidates: [mine, "login"], since: T }])
+  expect(registry.waiting().map((entry) => entry.resourceID)).toEqual([undefined])
+  expect(log).toEqual([`browser-handoffs.changed ${ids.live}`])
+  await run(handoffs.after({ ...browseCall("b3"), status: "completed" }))
+  await close()
 })
 
 test("a call that ends while its resource is being registered never waits and its resource goes quietly", async () => {
