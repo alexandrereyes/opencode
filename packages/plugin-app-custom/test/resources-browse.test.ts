@@ -12,7 +12,7 @@ import {
   relayTokenFile,
   settings,
 } from "../src/resources/adapters/chrome"
-import { entryOf, fakeBrowser, token, watch } from "./fixture/fake-chrome"
+import { entryOf, fakeBrowser, handoffEntry, token, watch } from "./fixture/fake-chrome"
 
 /**
  * The Chrome adapter's browse mode (`docs/browse-handoff-remoto.md`) against a fake browse relay: the relay token, the
@@ -83,7 +83,7 @@ test("the handoff's tab is the session's own page; other sessions' tabs and the 
       "y",
     )?.targetId,
   ).toBe("A")
-  const probed = (await adapter.probe([entryOf(meta)])).get("chrome:browse:login")
+  const probed = (await adapter.probe([handoffEntry(meta)])).get("chrome:browse:login")
   expect(probed).toEqual({
     status: "running",
     meta: { kind: "chrome", browse: "login", cdp: relay.cdp, targetID: "TAB1", url: meta.url, title: meta.title },
@@ -91,10 +91,23 @@ test("the handoff's tab is the session's own page; other sessions' tabs and the 
   const shown = JSON.stringify([meta, probed])
   expect(shown).not.toContain("Banco")
   expect(shown).not.toContain(token)
-  // The handoff's tab closed: the resource is gone rather than another tab of the session.
-  expect((await adapter.probe([entryOf({ ...meta, targetID: "CLOSED" })])).get("chrome:browse:login")?.status).toBe(
-    "gone",
-  )
+  // The handoff's tab closed: never another tab of the session; the session goes on, so the resource stops.
+  expect(
+    (await adapter.probe([handoffEntry({ ...meta, targetID: "CLOSED" })])).get("chrome:browse:login")?.status,
+  ).toBe("stopped")
+  // Without a handoff the resource follows the session: its own page once the followed tab closed.
+  expect(
+    (await adapter.probe([entryOf({ ...meta, targetID: "CLOSED" })])).get("chrome:browse:login")?.meta,
+  ).toMatchObject({ targetID: "TAB1" })
+  expect(
+    (await adapter.probe([entryOf({ ...meta, targetID: "TAB2" })])).get("chrome:browse:login")?.meta,
+  ).toMatchObject({ targetID: "TAB2" })
+  // A session the relay no longer lists is gone (the hub removes its resource).
+  expect(
+    (
+      await adapter.probe([entryOf({ kind: "chrome", cdp: relay.cdp, browse: "apagada" }, "chrome:browse:apagada")])
+    ).get("chrome:browse:apagada")?.status,
+  ).toBe("gone")
   expect(relay.refused).toEqual([])
 
   // A wrong token: refused by the relay, and no message carries either token.
@@ -109,7 +122,8 @@ test("the handoff's tab is the session's own page; other sessions' tabs and the 
     expect(relay.refused.length).toBeGreaterThan(0)
     const fresh = makeChromeAdapter()
     stops.push(() => fresh.close())
-    expect((await fresh.probe([entryOf(meta)])).get("chrome:browse:login")?.status).toBe("gone")
+    // A relay that does not answer says nothing about the session: stopped, never gone.
+    expect((await fresh.probe([entryOf(meta)])).get("chrome:browse:login")?.status).toBe("stopped")
   } finally {
     await Bun.write(tokenFile, `${token}\n`)
   }
@@ -120,7 +134,7 @@ test("the viewer sees and touches only the handoff's tab, through the browser zo
   stops.push(() => relay.server.stop(true))
   const adapter = makeChromeAdapter()
   stops.push(() => adapter.close())
-  const entry = entryOf({ kind: "chrome", cdp: relay.cdp, browse: "login", targetID: "TAB1" })
+  const entry = handoffEntry({ kind: "chrome", cdp: relay.cdp, browse: "login", targetID: "TAB1" })
   const viewer = watch(adapter, entry)
   await viewer.until(() => viewer.frames.length > 0 && viewer.states.at(-1)?.viewport !== undefined)
   // Alexandre's Chrome at 125 %: frames are 1400 × 771 DIP, the page 1120 × 617 CSS px.
@@ -186,12 +200,41 @@ test("the viewer sees and touches only the handoff's tab, through the browser zo
   expect(relay.sent.filter((item) => item.method === "Target.attachToTarget")).toHaveLength(1)
 })
 
+test("the viewer of a browse session without a handoff sees its tabs and, in control, navigates; a handoff locks it in place", async () => {
+  const relay = fakeBrowser({ token })
+  stops.push(() => relay.server.stop(true))
+  const adapter = makeChromeAdapter()
+  stops.push(() => adapter.close())
+  const entry = entryOf({ kind: "chrome", cdp: relay.cdp, browse: "login", targetID: "TAB1" })
+  const viewer = watch(adapter, entry)
+  stops.push(() => viewer.stop())
+  await viewer.until(() => viewer.frames.length > 0 && viewer.states.at(-1)?.viewport !== undefined)
+  // Its own tabs, never another session's (the relay scopes the connection).
+  expect(viewer.states.at(-1)?.tabs.map((tab) => tab.id)).toEqual(["TAB1", "TAB2"])
+  await adapter.input!(entry, { type: "navigate", action: "url", url: "127.0.0.1:5191/ajuda" })
+  expect(relay.sent.filter((item) => item.method === "Page.navigate").map((item) => item.params.url)).toEqual([
+    "http://127.0.0.1:5191/ajuda",
+  ])
+  await adapter.input!(entry, { type: "navigate", action: "tab", target: "TAB2" })
+  await viewer.until(() => viewer.states.at(-1)?.targetID === "TAB2")
+  // A handoff starts on TAB1: the stream goes there, shows only it and refuses navigation; when it ends, the tabs come
+  // back (the hub calls `update` with the entry's new handoff and locks).
+  const locked = handoffEntry({ kind: "chrome", cdp: relay.cdp, browse: "login", targetID: "TAB1" })
+  await adapter.update!(locked)
+  await viewer.until(() => viewer.states.at(-1)?.targetID === "TAB1" && viewer.states.at(-1)?.tabs.length === 1)
+  await expect(adapter.input!(locked, { type: "navigate", action: "reload" })).rejects.toThrow("not_allowed")
+  await adapter.update!(entry)
+  await viewer.until(() => viewer.states.at(-1)?.tabs.length === 2)
+  expect(viewer.states.flatMap((state) => state.tabs.map((tab) => tab.id))).not.toContain("OTHER")
+  expect(JSON.stringify(viewer.states)).not.toContain(token)
+})
+
 test("an unknown handoff tab is not replaced by another; forget closes the connection; errors hide the token", async () => {
   const relay = fakeBrowser({ token })
   stops.push(() => relay.server.stop(true))
   const adapter = makeChromeAdapter()
   stops.push(() => adapter.close())
-  const missing = entryOf({ kind: "chrome", cdp: relay.cdp, browse: "login", targetID: "CLOSED" })
+  const missing = handoffEntry({ kind: "chrome", cdp: relay.cdp, browse: "login", targetID: "CLOSED" })
   await expect(adapter.snapshot(missing)).rejects.toThrow("A aba do handoff não está aberta.")
   const entry = entryOf({ kind: "chrome", cdp: relay.cdp, browse: "login", targetID: "TAB1" })
   expect((await adapter.snapshot(entry)).mime).toBe("image/jpeg")

@@ -211,8 +211,8 @@ export function createHub(options: HubOptions) {
     writing = setTimeout(() => {
       writing = undefined
       const temporary = `${file}.${process.pid}.tmp`
-      // A handoff's resource lives only as long as its handoff waits, which never outlasts this hub's server.
-      const kept = [...entries.values()].filter((entry) => !entry.handoff)
+      // A browse handoff never outlasts this hub's server: its locks and machine stay in memory.
+      const kept = [...entries.values()].map(({ handoff: _, capabilities: __, machine: ___, ...entry }) => entry)
       void Bun.write(temporary, JSON.stringify(kept), { mode: 0o600 })
         .then(() => fs.rename(temporary, file))
         .catch((error) => console.error("resources hub: could not persist the registry", error))
@@ -270,12 +270,17 @@ export function createHub(options: HubOptions) {
             })),
           }
         : {}),
-      ...(entry.capabilities ? { capabilities: entry.capabilities } : {}),
+      ...(capabilitiesOf(entry) ? { capabilities: capabilitiesOf(entry) } : {}),
       ...(entry.handoff ? { handoff: entry.handoff } : {}),
+      ...(entry.machine ? { machine: entry.machine } : {}),
     }
   }
 
-  const upsert = (input: Upsert) => {
+  /** A browse session's resource: the handoff's locks while one waits, else `browseCapabilities`. */
+  const capabilitiesOf = (entry: Entry) =>
+    entry.capabilities ?? (browseOf(entry) ? Resources.browseCapabilities : undefined)
+
+  const upsert = (input: Upsert, machineID?: string) => {
     const at = now()
     const existing = registered(input.kind, input.meta)
     const base = idFor(input.meta)
@@ -299,10 +304,19 @@ export function createHub(options: HubOptions) {
         ? { capabilities: input.capabilities ?? existing?.capabilities }
         : {}),
       ...((input.handoff ?? existing?.handoff) ? { handoff: input.handoff ?? existing?.handoff } : {}),
+      ...((machineID ?? existing?.machine) ? { machine: machineID ?? existing?.machine } : {}),
     }
     entries.set(id, entry)
     changed(id)
     void probe([entry.kind])
+    // A stream that follows another tab, or without the handoff's locks, switches without ending.
+    if (
+      existing &&
+      lives.has(id) &&
+      (chromeOf(existing)?.targetID !== chromeOf(entry)?.targetID ||
+        JSON.stringify(capabilitiesOf(existing)) !== JSON.stringify(capabilitiesOf(entry)))
+    )
+      void options.adapters[entry.kind].update?.(entry).catch(() => undefined)
     return view(entry)
   }
 
@@ -334,8 +348,13 @@ export function createHub(options: HubOptions) {
   const register = async (input: Upsert) => {
     const adapter = options.adapters[input.kind]
     if (input.handoff) return handoff(input, input.handoff)
-    const meta = adapter.identify ? await adapter.identify(input.meta).catch(() => input.meta) : input.meta
-    return upsert({ ...input, meta })
+    // A browse session's tab is the probe's to choose (`upsert` probes at once): an agent's call never moves the viewer
+    // off a waiting handoff's tab.
+    const browse = input.meta.kind === "chrome" && input.meta.browse !== undefined
+    const meta = adapter.identify && !browse ? await adapter.identify(input.meta).catch(() => input.meta) : input.meta
+    // A browse session's resource says where its Chrome runs, for "Abrir no Chrome".
+    const machineID = meta.kind === "chrome" && browse ? await machine(meta.cdp).catch(() => undefined) : undefined
+    return upsert({ ...input, meta }, machineID)
   }
 
   /**
@@ -349,8 +368,12 @@ export function createHub(options: HubOptions) {
     if (meta.kind !== "chrome" || !meta.targetID) throw new Error("The handoff's tab was not found")
     const { machine: _, ...rest } = handoff
     const id = await machine(meta.cdp).catch(() => undefined)
-    return upsert({ ...input, meta, handoff: { ...rest, ...(id ? { machine: id } : {}) } })
+    const existing = registered(input.kind, meta)
+    // The handoff's message is the purpose while it waits; the session's own comes back when it ends.
+    if (existing && !existing.handoff) purposes.set(existing.id, existing.purpose)
+    return upsert({ ...input, meta, handoff: { ...rest, ...(id ? { machine: id } : {}) } }, id)
   }
+  const purposes = new Map<string, string | undefined>()
 
   /** Closes a shell command on every resource it named: the resource stops counting as in use for it. */
   const end = (call: string) => {
@@ -380,14 +403,22 @@ export function createHub(options: HubOptions) {
   }
 
   /**
-   * Ends a browse handoff's resource (`browse-handoff-remoto.md`, Lifecycle): Alexandre's control stops at once, without
-   * a hand-back notice; every viewer gets `end { reason }` and is closed; the entry goes. No `changed` event: the
-   * plugin announces the handoff's end first and then the resources' (`announce`).
+   * Ends a browse handoff on its resource (`browse-handoff-remoto.md`, Lifecycle): Alexandre's control stops at once,
+   * without a hand-back notice; every viewer gets `end { reason, kept }` and is closed. A browse session's resource stays
+   * (rev. 2026-11-09: `kept: true`), without its handoff and locks; any other goes. No `changed` event: the plugin
+   * announces the handoff's end first and then the resources' (`announce`).
    */
   const finish = async (id: string, reason: string) => {
     const entry = entries.get(id)
-    if (!entry) return false
-    entries.delete(id)
+    const kept = entry !== undefined && browseOf(entry) !== undefined
+    // A browse session's resource without a waiting handoff has nothing to end.
+    if (!entry || (kept && !entry.handoff)) return false
+    if (kept) {
+      const { handoff: _, capabilities: __, purpose: ___, ...rest } = entry
+      const purpose = purposes.get(id)
+      purposes.delete(id)
+      entries.set(id, { ...rest, ...(purpose ? { purpose } : {}), updatedAt: now() })
+    } else entries.delete(id)
     snapshots.delete(id)
     locks.delete(id)
     await queues.get(id)?.reset()
@@ -398,22 +429,26 @@ export function createHub(options: HubOptions) {
       clearInterval(live.ticker)
       clearTimeout(live.linger)
       live.viewers.forEach((viewer) => {
-        viewer.text({ type: "end", reason })
+        viewer.text({ type: "end", reason, ...(kept ? { kept: true } : {}) })
         viewer.close()
       })
       live.controller.abort()
     }
+    // The next connection opens without the handoff's locks.
     void options.adapters[entry.kind].forget?.(entry).catch(() => undefined)
     persist()
     return true
   }
 
-  /** `custom.resources/focus`: only resources whose capabilities offer it, through their adapter. */
+  /**
+   * `custom.resources/focus`: only resources whose capabilities offer it, through their adapter: a browse session's tab
+   * (rev. 2026-11-09: also while no handoff waits).
+   */
   const focus = async (id: string) => {
     const entry = entries.get(id)
     if (!entry) return "not_found" as const
     const adapter = options.adapters[entry.kind]
-    if (entry.capabilities?.focus !== true || !entry.handoff || !adapter.focus) return "unsupported" as const
+    if (capabilitiesOf(entry)?.focus !== true || !browseOf(entry) || !adapter.focus) return "unsupported" as const
     await adapter.focus(entry)
     return "ok" as const
   }
@@ -519,6 +554,14 @@ export function createHub(options: HubOptions) {
         }),
       ),
     )
+    // A browse session's resource lasts as long as the session: once the relay no longer lists it, it goes at once.
+    const ended = results.flatMap((result) =>
+      [...result.entries()].flatMap(([id, found]) => {
+        const entry = entries.get(id)
+        return entry && found.status === "gone" && browseOf(entry) ? [id] : []
+      }),
+    )
+    ended.forEach((id) => remove(id))
     const updated = results.flatMap((result) =>
       [...result.entries()].flatMap(([id, found]) => {
         const entry = entries.get(id)
@@ -526,6 +569,13 @@ export function createHub(options: HubOptions) {
         const meta = found.meta ? (found.exact ? found.meta : mergeMeta(entry.meta, found.meta)) : entry.meta
         if (found.status === entry.status && JSON.stringify(meta) === JSON.stringify(entry.meta)) return []
         entries.set(id, { ...entry, status: found.status, meta, updatedAt: at })
+        // The session moved to another tab: a live viewer follows it.
+        if (
+          found.status === "running" &&
+          browseOf(entry) &&
+          chromeOf(entry)?.targetID !== (meta as Resources.ChromeMeta).targetID
+        )
+          void options.adapters[entry.kind].update?.(entries.get(id)!).catch(() => undefined)
         // A stream follows the device it was opened on: stop it when the resource stops or moved to another one.
         if (found.status !== "running" || moved(entry.meta, meta)) {
           lives.get(id)?.controller.abort()
@@ -1211,6 +1261,15 @@ export function names(entry: Pick<Entry, "id" | "meta" | "status">, meta: Resour
   const avd = identity(entry)
   if (avd !== undefined && meta.avd !== undefined) return avd === meta.avd
   return avd === undefined && meta.serial !== undefined && entry.meta.serial === meta.serial
+}
+
+/** The browse session a resource is (`chrome:browse:<session>`), if any. */
+export function browseOf(entry: Pick<Entry, "meta">) {
+  return entry.meta.kind === "chrome" ? entry.meta.browse : undefined
+}
+
+function chromeOf(entry: Pick<Entry, "meta">) {
+  return entry.meta.kind === "chrome" ? entry.meta : undefined
 }
 
 function moved(before: Resources.Meta, after: Resources.Meta) {

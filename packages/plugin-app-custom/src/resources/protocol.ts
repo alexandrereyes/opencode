@@ -149,7 +149,11 @@ export type ServerMessage =
   | { readonly type: "control"; readonly holder: "user" | null; readonly expiresAt?: number; readonly mine: boolean }
   | { readonly type: "meta"; readonly value: Record<string, unknown> }
   | { readonly type: "error"; readonly message: string }
-  | { readonly type: "end"; readonly reason: string }
+  /**
+   * The stream ended and the socket closes. `kept: true` (rev. 2026-11-09): only a browse handoff ended, its resource
+   * stays and a new ticket opens it again.
+   */
+  | { readonly type: "end"; readonly reason: string; readonly kept?: boolean }
 
 export const frameHeaderBytes = 10
 export const frameVersion = 1
