@@ -1060,6 +1060,9 @@ export function describe(name: string, input: Readonly<Record<string, unknown>>)
     const value = input[key]
     return typeof value === "string" && value.trim() ? value : undefined
   }
+  // What the agent said the call is for (`docs/tool-descriptions.md`) says more than the call itself.
+  const described = ["shell", "grep", "execute"].includes(name) ? text("description") : undefined
+  if (described) return collapse(described)
   const file = (value: string | undefined) => (value ? path.basename(value.trim()) : undefined)
   switch (name) {
     case "edit":
