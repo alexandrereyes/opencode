@@ -2,29 +2,45 @@ import { expect, test } from "bun:test"
 import { Effect, Exit, Scope } from "effect"
 import { makeBrowseResources } from "../src/resources/browse"
 import type { Lock, Upsert } from "../src/resources/hub/hub"
+import { HubError } from "../src/resources/supervisor"
 
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
 const S = "ses_agent"
 
 /** The plugin's side of a browse session's resource, over a fake hub and relay. */
 async function setup(
-  options: { readonly locks?: Lock[]; readonly found?: string; readonly candidates?: string[] } = {},
+  options: {
+    readonly locks?: Lock[]
+    readonly found?: string
+    readonly candidates?: string[]
+    /** Replaces the hub's answers (a hub that is down, hangs or refuses). */
+    readonly hub?: "down" | "hangs" | "remote unreachable"
+  } = {},
 ) {
   const scope = await run(Scope.make())
   const upserts: Upsert[] = []
   const removed: string[] = []
   const asked: { candidates: readonly string[] }[] = []
+  const broken = async () => {
+    if (options.hub === "down") throw new HubError("hub", "Resources hub unavailable")
+    if (options.hub === "hangs") await new Promise(() => undefined)
+  }
   const browse = makeBrowseResources({
     hub: {
       upsert: async (input) => {
         upserts.push(input)
+        await broken()
         return {} as never
       },
       remove: async (id) => {
         removed.push(id)
+        await broken()
         return {}
       },
-      locks: async () => options.locks ?? [],
+      locks: async () => {
+        await broken()
+        return options.hub === "remote unreachable" ? undefined : (options.locks ?? [])
+      },
     },
     current: { candidates: () => options.candidates ?? ["mcp-1a2b3c4d"] },
     find: (candidates) =>
@@ -37,6 +53,7 @@ async function setup(
     now: () => 1_000,
     endpoint: "http://127.0.0.1:19988",
     graceMs: 30,
+    timeouts: { locks: 50, write: 50 },
   })
   return { browse, upserts, removed, asked, close: () => run(Scope.close(scope, Exit.void)) }
 }
@@ -172,4 +189,34 @@ test("while Alexandre controls a session the agents' calls on it are refused; ot
   await Bun.sleep(80)
   expect(upserts.map((item) => item.meta.kind === "chrome" && item.meta.browse)).toEqual(["outra"])
   await close()
+})
+
+test("a hub that is down, hangs or cannot be reached never refuses or holds the agent's browse calls", async () => {
+  for (const hub of ["down", "hangs", "remote unreachable"] as const) {
+    const { browse, upserts, removed, close } = await setup({ hub, found: "mcp-1a2b3c4d" })
+    const started = Date.now()
+    // Every step of a call's life goes through: the lock check, the registration while it runs, its end, a delete.
+    for (const [id, tool, input] of [
+      ["c1", "browse_execute", { code: "1", session: "loja" }],
+      ["c2", "browse_execute", { code: "1" }],
+      ["c3", "browse_session_reset", { id: "loja" }],
+    ] as const) {
+      expect(Exit.isSuccess(await Effect.runPromiseExit(browse.before(call(id, tool, input))))).toBe(true)
+      await Bun.sleep(80)
+      const ended = browse.after({
+        ...call(id, tool, input),
+        status: "completed",
+        result: { output: { session: "loja" } },
+      })
+      expect(Exit.isSuccess(await Effect.runPromiseExit(ended))).toBe(true)
+    }
+    const deleted = browse.after({ ...call("d", "browse_session_delete", { id: "loja" }), status: "completed" })
+    expect(Exit.isSuccess(await Effect.runPromiseExit(deleted))).toBe(true)
+    // Each wait is cut short: three calls with their grace periods, not the hub's own timeouts.
+    expect(Date.now() - started).toBeLessThan(1_500)
+    // The writes were attempted all the same (a hub that comes back gets them).
+    expect(upserts.length).toBeGreaterThanOrEqual(3)
+    expect(removed).toEqual(["chrome:browse:loja"])
+    await close()
+  }
 })
