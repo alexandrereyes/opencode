@@ -9,25 +9,29 @@
  * - `cancelled`: the agent's session is interrupted while the handoff waits;
  * - `keys`: browser shortcuts sent as `key` inputs (Cmd+L and a typed URL, Cmd+T, Cmd+[, Cmd+], Alt+←, Cmd+R,
  *   Backspace outside a field, Cmd+W) reach the page only: the tab keeps its URL, the session its tabs and the page its
- *   focus, with history both ways so going back or forward would show; then Continue finishes it.
+ *   focus, with history both ways so going back or forward would show; then Continue finishes it;
+ * - `bare`: `completed` with a call that names no browse session (agents rarely do since browse 0.0.16): the plugin
+ *   finds the agent's current one (browse's `mcp-…` for its OpenCode session, created by the call without an allowlist)
+ *   and the Resolver works the same; the session goes at the end. With `--session`, the agent first makes that one
+ *   current (`session_use`), and the plugin must follow it.
  *
  * Each checks the end in the contract's order (stream `end`, `browser-handoffs.changed` with `ended`,
  * `resources.changed`) and that the resource is gone. Positions on the page are read through the relay (its token is
- * read here and never printed). The browse session must exist with `--allow-origin <fixture>`.
+ * read here and never printed). Except for `bare`, the browse session must exist with `--allow-origin <fixture>`.
  *
  *   bun packages/plugin-app-custom/script/browse-handoff-check.ts --server-url http://127.0.0.1:4196 --home <sandbox> \
- *     --session <browse session> --scenario completed|timeout|cancelled|keys [--fixture http://127.0.0.1:5191]
+ *     [--session <browse session>] --scenario completed|timeout|cancelled|keys|bare [--fixture http://127.0.0.1:5191]
  *
  * `--app <state.json>`: the apps act instead of this script's own viewer. Once the handoff waits it writes the agent's
  * session, the resource and the page's positions (normalized to the viewport) to that file and waits for the end:
  * `completed` when the app taps Continue, `timeout` after `--timeout-ms` (default 90 s here), `cancelled` and `failed`
- * (the tab closes) 10 s after the app takes control, and `nosession` (a browse call without `session`: no
- * resource, so no Resolver) is interrupted once `<state.json>.done` exists. The end is then checked from the events.
+ * (the tab closes) 10 s after the app takes control. The end is then checked from the events.
  */
 import { readFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
+import { callerSession } from "../src/browser-handoff/current"
 import { machineID, parsePlatformUUID } from "../src/resources/machine"
 
 const args = parseArgs({
@@ -46,13 +50,19 @@ const args = parseArgs({
 }).values
 const server = args["server-url"]!
 if (/:(4096|4178|4179)\b/.test(server)) throw new Error("Never against production")
-const scenario = args.scenario as "completed" | "timeout" | "cancelled" | "keys" | "failed" | "nosession"
-const expected = scenario === "keys" ? "completed" : scenario === "nosession" ? "cancelled" : scenario
+const scenario = args.scenario as "completed" | "timeout" | "cancelled" | "keys" | "failed" | "bare"
+const expected = scenario === "keys" || scenario === "bare" ? "completed" : scenario
+// `bare` logs in like `completed`.
+const login = scenario === "completed" || scenario === "bare"
 const app = args.app
-if (!app && (scenario === "failed" || scenario === "nosession")) throw new Error(`--scenario ${scenario} needs --app`)
+if (!app && scenario === "failed") throw new Error(`--scenario ${scenario} needs --app`)
+if (scenario !== "bare" && !args.session) throw new Error(`--scenario ${scenario} needs --session`)
+// `bare --session`: the agent makes that session current first.
+const use = scenario === "bare" ? args.session : undefined
 const timeoutMs = Number(args["timeout-ms"] ?? (app ? 90_000 : 20_000))
-const browse = args.session!
-const resourceID = `chrome:browse:${browse}`
+// `bare`: known once the agent's session exists.
+let browse = args.session!
+let resourceID = `chrome:browse:${browse}`
 const started = Date.now()
 const log = (...values: unknown[]) => console.log(`+${((Date.now() - started) / 1000).toFixed(1)}s`, ...values)
 const results: Record<string, unknown> = { scenario }
@@ -125,6 +135,11 @@ const sessionID = (
   })
 ).data.id
 log("agent session", sessionID)
+if (scenario === "bare") {
+  browse = use ?? callerSession(sessionID)
+  resourceID = `chrome:browse:${browse}`
+  log("browse session", browse)
+}
 const message = "Entre com o login de teste e clique em Continue"
 const visit = (route: string) => `await page.goto(${JSON.stringify(`${args.fixture}${route}`)}, { waitUntil: "load" })`
 const code = [
@@ -141,17 +156,23 @@ const code = [
 ].join("\n")
 await api(`/api/session/${sessionID}/prompt`, {
   text: [
-    "Chame exatamente uma vez, pelo execute do Code Mode, tools.browse.execute com estes argumentos, sem mudar nada,",
+    ...(use
+      ? [
+          `Num único execute do Code Mode, chame primeiro tools.browse.session_use({ id: ${JSON.stringify(use)} }) e,`,
+          "em seguida, tools.browse.execute com estes argumentos, sem mudar nada (sem `session`),",
+        ]
+      : [
+          "Chame exatamente uma vez, pelo execute do Code Mode, tools.browse.execute com estes argumentos, sem mudar nada,",
+        ]),
     "e espere o resultado; depois responda apenas com o resultado ou o erro, numa linha.",
     "```json",
-    // `nosession`: the call names no browse session (the current one acts), so the handoff gets no resource.
-    JSON.stringify(scenario === "nosession" ? { code } : { session: browse, code }),
+    // `bare`: the call names no browse session; the agent's current one acts.
+    JSON.stringify(scenario === "bare" ? { code } : { session: browse, code }),
     "```",
   ].join("\n"),
 })
 
 type Handoff = { id: string; sessionID: string; message: string; resourceID?: string }
-if (scenario === "nosession") await appWithoutSession()
 const handoff = await until(async () => {
   const { data } = await rpc<{ data: Handoff[] }>("custom.browser-handoffs/list", { sessionID })
   return data.find((item) => item.resourceID)
@@ -238,7 +259,7 @@ check(
   errors,
 )
 
-if (scenario === "completed") {
+if (login) {
   const points = await positions(["email", "password", "continue"])
   await tap(points.email!)
   await until(
@@ -394,7 +415,7 @@ await until(
   120_000,
 ).catch(() => undefined)
 const fixture = (await (await fetch(`${args.fixture}/last`)).json()) as { email: string; passwordLength: number }
-if (scenario === "completed")
+if (login)
   check(
     "the page got the typed login",
     fixture.email === args.email && fixture.passwordLength === args.password!.length,
@@ -435,6 +456,7 @@ check(
 ws.close()
 await fetch(`${server}/api/session/${sessionID}`, { method: "DELETE", headers: { authorization: auth } })
 await Bun.$`rm -rf ${repo}`.quiet()
+await forgetBareSession()
 console.log(JSON.stringify(results, null, 2))
 process.exit(Object.values(results).every((value) => value === "ok" || value === scenario) ? 0 : 1)
 
@@ -574,30 +596,6 @@ async function appActs(): Promise<never> {
   return finish()
 }
 
-/** `--app --scenario nosession`: a waiting handoff without a resource, ended by interrupting once the app looked. */
-async function appWithoutSession(): Promise<never> {
-  const waiting = await until(async () => {
-    const { data } = await rpc<{ data: { id: string; resourceID?: string }[] }>("custom.browser-handoffs/list", {
-      sessionID,
-    })
-    return data[0]
-  }, "the waiting handoff")
-  check("no resourceID without a browse session", waiting.resourceID === undefined, waiting.resourceID)
-  await Bun.write(app!, JSON.stringify({ scenario, sessionID, handoffID: waiting.id }, null, 2))
-  log("state for the app written; waiting for", `${app}.done`)
-  await until(async () => ((await Bun.file(`${app}.done`).exists()) ? true : undefined), "the app's check", 600_000)
-  await api(`/api/session/${sessionID}/interrupt`, {})
-  await until(
-    async () => {
-      const { data } = await rpc<{ data: unknown[] }>("custom.browser-handoffs/list", { sessionID })
-      return data.length === 0 ? true : undefined
-    },
-    "the handoff to end",
-    60_000,
-  )
-  return finish()
-}
-
 /** `--app`: the agent finished, the page and the logs, then the cleanup. */
 async function finish(): Promise<never> {
   await until(
@@ -607,7 +605,7 @@ async function finish(): Promise<never> {
     120_000,
   ).catch(() => undefined)
   const page = (await (await fetch(`${args.fixture}/last`)).json()) as { email: string; passwordLength: number }
-  if (scenario === "completed")
+  if (login)
     check(
       "the page got the typed login",
       page.email === args.email && page.passwordLength === args.password!.length,
@@ -651,8 +649,16 @@ async function finish(): Promise<never> {
   await until(async () => ((await Bun.file(`${app}.done`).exists()) ? true : undefined), "the app to finish", 600_000)
   await fetch(`${server}/api/session/${sessionID}`, { method: "DELETE", headers: { authorization: auth } })
   await Bun.$`rm -rf ${repo}`.quiet()
+  await forgetBareSession()
   console.log(JSON.stringify(results, null, 2))
   process.exit(Object.values(results).every((value) => value === "ok" || value === scenario) ? 0 : 1)
+}
+
+/** `bare`: the browse session the call created goes, with its tab and its journal. */
+async function forgetBareSession() {
+  if (scenario !== "bare" || use) return
+  await Bun.$`browse session delete ${browse}`.quiet().nothrow()
+  await Bun.$`rm -rf ${path.join(os.homedir(), ".local/state/browse/sessions", browse)}`.quiet().nothrow()
 }
 
 /** `--app --scenario failed`: closes the handoff's tab through the relay, as Alexandre closing it would. */
