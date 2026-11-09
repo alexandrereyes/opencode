@@ -6,7 +6,7 @@ import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
-import { settings } from "./custom-release"
+import { scripts, settings } from "./custom-release"
 
 const source = path.resolve(import.meta.dirname, "../../..")
 const args = parseArgs({
@@ -179,6 +179,13 @@ async function up() {
       XDG_STATE_HOME: path.join(home, "xdg/state"),
       XDG_CACHE_HOME: path.join(home, "xdg/cache"),
       OPENCODE_CUSTOM_LAUNCHD: "1",
+    }
+    // The same MyCredentials secrets as production, through the same private channel: never in environment.json.
+    const secrets = scripts(home, manual).privateEnv
+    if (secrets) {
+      await privateFile(path.join(home, "private-env"), secrets)
+      await chmod(path.join(home, "private-env"), 0o700)
+      Object.assign(runtime, { OPENCODE_PRIVATE_ENV_COMMAND: JSON.stringify([path.join(home, "private-env")]) })
     }
     await privateFile(path.join(home, "environment.json"), JSON.stringify(runtime))
     console.log("Building the custom plugin and the upstream web app (service worker disabled)…")

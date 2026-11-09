@@ -24,6 +24,7 @@ import { State } from "./state.js"
 import { Bus } from "./bus.js"
 import { IntegrationConnection } from "./integration/connection.js"
 import { AppProcess } from "@opencode/util/process"
+import { PrivateEnv } from "@opencode/util/private-env"
 import { ChildProcess } from "effect/process"
 import { Form } from "./form.js"
 
@@ -417,7 +418,7 @@ const layer = Layer.effect(
         .toReversed()
       const env = (entry?.methods ?? [])
         .filter((method) => method.type === "env")
-        .flatMap((method) => method.names.filter((name) => process.env[name]))
+        .flatMap((method) => method.names.filter((name) => PrivateEnv.get(name) ?? process.env[name]))
         .map((name) => ({ type: "env" as const, name }))
       return [...credentials, ...env]
     }
@@ -742,7 +743,7 @@ const layer = Layer.effect(
         }),
         resolve: Effect.fn("Integration.connection.resolve")(function* (connection) {
           if (connection.type === "env") {
-            const key = process.env[connection.name]
+            const key = PrivateEnv.get(connection.name) ?? process.env[connection.name]
             return key ? Credential.Key.make({ type: "key", key }) : undefined
           }
           const credential = yield* credentials.get(connection.id)

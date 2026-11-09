@@ -6,6 +6,7 @@ import { Credential } from "@opencode/core/credential"
 import { AppNodeBuilder } from "@opencode/core/effect/app-node-builder"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { LayerNode } from "@opencode/util/effect/layer-node"
+import { PrivateEnv } from "@opencode/util/private-env"
 import { Bus } from "@opencode/core/bus"
 import { Integration } from "@opencode/core/integration"
 import { State } from "@opencode/core/state"
@@ -686,6 +687,22 @@ describe("Integration", () => {
         }),
     )
   })
+
+  it.effect("connects through an env method whose variable lives only in the private environment", () =>
+    Effect.gen(function* () {
+      const integrationID = Integration.ID.make("acme-sealed")
+      const env = { [PrivateEnv.variable]: JSON.stringify(["/bin/sh", "-c", "printf 'INTEGRATION_TEST_SEALED_KEY\\0sealed\\0'"]) }
+      expect(PrivateEnv.load(env)).toEqual({ status: "loaded", names: ["INTEGRATION_TEST_SEALED_KEY"] })
+      expect(process.env.INTEGRATION_TEST_SEALED_KEY).toBeUndefined()
+      const integrations = yield* Integration.Service
+      yield* integrations.transform((editor) =>
+        editor.method.update({ integrationID, method: { type: "env", names: ["INTEGRATION_TEST_SEALED_KEY"] } }),
+      )
+      const active = yield* integrations.connection.active(integrationID)
+      expect(active).toEqual({ type: "env", name: "INTEGRATION_TEST_SEALED_KEY" })
+      expect(active && (yield* integrations.connection.resolve(active))).toEqual({ type: "key", key: "sealed" })
+    }),
+  )
 })
 
 describe("AuthorizationError", () => {

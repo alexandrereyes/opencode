@@ -10,6 +10,7 @@ import { hasPersistentPtyConnectTicketURL } from "@opencode/protocol/groups/pers
 import { hasMcpClientTicketURL } from "@opencode/protocol/groups/mcp"
 import { isPairingConnectURL } from "@opencode/protocol/groups/server"
 import { Global } from "@opencode/util/global"
+import { PrivateEnv } from "@opencode/util/private-env"
 import { Cause, Context, Effect, Exit, Latch, Layer, Option, Ref, Scope } from "effect"
 import { HttpMiddleware, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { NetAddress } from "effect/net"
@@ -54,6 +55,10 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
 ) {
   const password = options.password
   if (!password) return yield* Effect.fail(new Error("Missing server password"))
+  // Before anything can spawn or read configuration: secrets the launcher keeps out of every child's environment.
+  const secrets = PrivateEnv.load()
+  if (secrets.status === "loaded") yield* Effect.logInfo("private environment loaded", { names: secrets.names })
+  if (secrets.status === "failed") yield* Effect.logWarning("private environment unavailable", { reason: secrets.reason })
   const hostname = options.hostname ?? "127.0.0.1"
   const port = Option.fromNullishOr(options.port)
   const shutdown = yield* Latch.make()

@@ -258,16 +258,66 @@ export async function settings(home: string) {
   }
 }
 
-/** `manual.json` `mycred`: the server receives the bindings of this MyCredentials policy, read from the Keychain. */
+/**
+ * `manual.json` `mycred`: secrets the server reads from MyCredentials with the Keychain key of `keychain`, one
+ * `variables` entry (`NAME: "path"`) each. They reach the server through `bin/private-env`, never its environment.
+ */
 function vault(input: unknown) {
   if (input === undefined) return undefined
-  const keychain = typeof input === "object" && input !== null && "keychain" in input ? input.keychain : undefined
-  const helper = typeof input === "object" && input !== null && "helper" in input ? input.helper : undefined
+  const field = (key: string) =>
+    typeof input === "object" && input !== null && key in input ? (input as Record<string, unknown>)[key] : undefined
+  const keychain = field("keychain")
+  const helper = field("helper")
+  const variables = field("variables")
   if (typeof keychain !== "string" || !/^[a-z0-9][a-z0-9._-]*$/.test(keychain))
     throw new Error("manual.json mycred.keychain must be a MyCredentials policy name")
   if (helper !== undefined && (typeof helper !== "string" || !path.isAbsolute(helper)))
     throw new Error("manual.json mycred.helper must be an absolute path")
-  return { keychain, helper: helper ?? path.join(os.homedir(), ".local/bin/mycred") }
+  if (typeof variables !== "object" || variables === null || Array.isArray(variables))
+    throw new Error("manual.json mycred.variables must map variable names to MyCredentials paths")
+  const entries = Object.entries(variables)
+  if (
+    entries.length === 0 ||
+    entries.some(
+      ([name, credential]) =>
+        !/^[A-Z_][A-Z0-9_]*$/.test(name) ||
+        typeof credential !== "string" ||
+        !/^[a-z0-9][A-Za-z0-9._@-]*(\/[A-Za-z0-9._@-]+)+$/.test(credential),
+    )
+  )
+    throw new Error("manual.json mycred.variables must map variable names to MyCredentials paths")
+  return {
+    keychain,
+    helper: helper ?? path.join(os.homedir(), ".local/bin/mycred"),
+    variables: Object.fromEntries(entries.map(([name, credential]) => [name, String(credential)])),
+  }
+}
+
+/**
+ * `bin/private-env` prints `NAME\0value\0` for each `mycred.variables` entry; the server runs it once at startup
+ * (`OPENCODE_PRIVATE_ENV_COMMAND`, `@opencode/util/private-env`) and keeps the values in memory, so no agent shell,
+ * MCP server or other child inherits them, and `ps` cannot read them from the server's environment. An unreachable
+ * vault (WARP down) or a refused key stops the fetch; the server starts with what it got.
+ */
+function privateEnv(secrets: NonNullable<ReturnType<typeof vault>>) {
+  const fetches = Object.entries(secrets.variables)
+    .map(([name, credential]) => `fetch ${name} ${quote(credential)} || case $? in 69 | 77 | 78) exit 0 ;; esac`)
+    .join("\n")
+  return `#!/bin/sh
+set -u
+helper=${quote(secrets.helper)}
+fetch() {
+  if value=$("$helper" get --keychain ${quote(secrets.keychain)} --quiet --timeout 10 "$2"); then
+    printf '%s\\0%s\\0' "$1" "$value"
+    return 0
+  else
+    status=$?
+  fi
+  echo "private-env: MyCredentials $2 unavailable (exit $status); the server starts without $1" >&2
+  return "$status"
+}
+${fetches}
+`
 }
 
 export async function health(home: string, port: number) {
@@ -371,28 +421,20 @@ export function scripts(home: string, config: Awaited<ReturnType<typeof settings
   })
     .map(([key, value]) => `export ${key}=${quote(value)}`)
     .join("\n")
-  const serve = `"$release/bin/opencode" serve --service --hostname 127.0.0.1 --port ${config.port}`
-  const vault = config.mycred
-  // The vault answers through WARP; when it cannot, the server starts without the policy's variables
-  // (their integrations fail) instead of not starting at all.
-  const start = vault
-    ? `helper=${quote(vault.helper)}
-if "$helper" check --keychain ${quote(vault.keychain)} --quiet --timeout 15 >/dev/null 2>&1; then
-  exec "$helper" run --keychain ${quote(vault.keychain)} --quiet --timeout 15 -- ${serve}
-fi
-echo "serve: MyCredentials policy ${vault.keychain} unavailable; starting without its variables" >&2
-exec ${serve}`
-    : `exec ${serve}`
+  const secrets = config.mycred
+    ? `\nexport OPENCODE_PRIVATE_ENV_COMMAND=${quote(JSON.stringify([`${home}/bin/private-env`]))}`
+    : ""
   return {
     server: `#!/bin/sh
 set -eu
-${environment}
+${environment}${secrets}
 release=$(cd ${quote(`${home}/current`)} && pwd -P)
 export OPENCODE_CONFIG_CONTENT="$(cat "$release/server-config.json")"
 cd ${quote(home)}
-${start}
+exec "$release/bin/opencode" serve --service --hostname 127.0.0.1 --port ${config.port}
 `,
     tui: launcher(home, config.port, environment),
+    privateEnv: config.mycred ? privateEnv(config.mycred) : undefined,
   }
 }
 
@@ -1119,6 +1161,10 @@ export async function activate(
   await Bun.write(`${home}/bin/opencode2`, wrappers.tui)
   await chmod(`${home}/bin/serve`, 0o700)
   await chmod(`${home}/bin/opencode2`, 0o700)
+  if (wrappers.privateEnv) {
+    await Bun.write(`${home}/bin/private-env`, wrappers.privateEnv, { mode: 0o700 })
+    await chmod(`${home}/bin/private-env`, 0o700)
+  } else await rm(`${home}/bin/private-env`, { force: true })
   if (service.install) await service.install()
   else await Bun.write(`${home}/${label}.plist`, plist(home))
   if (previous && previous !== commit) await point(home, "previous", previous)

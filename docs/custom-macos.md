@@ -225,37 +225,47 @@ of XDG. The default remains isolated for development/test runtimes.
 
 #### Secrets from MyCredentials
 
-Server secrets (for example an MCP OAuth `client_secret` referenced as `{env:NAME}` in
-`opencode.json`) never go into `manual.json` or a launcher. Set `mycred` instead:
+Server secrets (an MCP OAuth `client_secret` referenced as `{env:NAME}` in `opencode.json`, an
+integration's env-method key, the plugin's watch token and APNs key) never go into `manual.json`, a
+launcher, a file or the server's environment. List them in `manual.json` `mycred`, one MyCredentials
+path per variable:
 
 ```json
-{ "mycred": { "keychain": "opencode-servidor" } }
+{
+  "mycred": {
+    "keychain": "opencode-skills",
+    "variables": {
+      "GOOGLE_WORKSPACE_MCP_CLIENT_SECRET": "opencode/google-workspace/oauth-client-secret",
+      "OPENCODE_WATCH_ACCESS_JSON": "opencode/watch/cf-access-service-token.json",
+      "OPENCODE_APNS_KEY_P8": "opencode/apns/AuthKey_H9J5YTMHT9.p8",
+      "AI_GATEWAY_API_KEY": "llm/vercel/ai-gateway"
+    }
+  }
+}
 ```
 
-`bin/serve` then starts the server through `mycred run --keychain <policy>`, which reads the policy's
-access key from the Keychain (service `mycredentials`, account = policy), injects its bindings and
-`exec`s the server. `helper` (absolute path) overrides the default `~/.local/bin/mycred`. The policy
-is code in `packages/cli/script/custom-mycredentials.json`, applied with the MyCredentials admin CLI
-(`apply-policies`); its key is generated straight into the Keychain with `mycred store-key --keychain
-opencode-servidor --stdin` (skill `mycredentials`). Before starting, the launcher runs `mycred check`;
-if the vault cannot be reached (WARP down) or the key is refused, it logs `MyCredentials policy …
-unavailable` and starts the server without those variables, so only the integrations that need them
-fail. Like the rest of `manual.json`, the setting takes effect on the next activation that starts the
-service.
+Activation writes `bin/private-env` (0700), which fetches each path with `mycred get --keychain <keychain>`
+and prints `NAME\0value\0`, and `bin/serve` exports only `OPENCODE_PRIVATE_ENV_COMMAND` with its path. The
+server runs the command once at startup (`@opencode/util/private-env`, see "Private environment" in
+`docs/upstream-integrations.md`) and keeps the values in memory: `{env:NAME}` substitution, env-method
+integrations (`AI_GATEWAY_API_KEY` for `vercel`, models and speech) and the plugin read them there. They
+are never in `process.env` nor in the process's initial environment, so agent shells, PTYs, MCP servers,
+LSPs, formatters, the resources hub and every other child start without them, and `ps eww` on the server
+shows none. Only the listed paths are fetched, never the policy's other bindings.
 
-Current bindings of `opencode-servidor`:
+The policy and its key belong to the MyCredentials side: `opencode-skills` is code in
+`~/.agents/mycredentials/opencode-skills.json` and is applied by its owner; this repository only names
+paths it can read. `helper` (absolute path) overrides the default `~/.local/bin/mycred`. A missing
+credential skips only its variable; an unreachable vault (WARP down) or a refused key stops the fetch.
+Either way the server starts, with a `private-env: … unavailable` line in `logs/server.log` and the log
+entry `private environment loaded` naming what it got. Like the rest of `manual.json`, the setting takes
+effect on the next activation that starts the service; a sandbox (`custom-sandbox.ts up`) gets its own
+`private-env` from the same setting.
 
-- `GOOGLE_WORKSPACE_MCP_CLIENT_SECRET`: OAuth client "OpenCode MCP (Workspace)" of Google Cloud project
-  `abacato-v2`, used by the Gmail, Drive, Docs, Sheets and Calendar MCP servers in the global `opencode.json`.
-- `OPENCODE_WATCH_ACCESS_JSON`: the Cloudflare Access service token `opencode-watch` (`{clientId, clientSecret}`)
-  returned to the watch at pairing (`packages/plugin-app-custom/docs/watch.md`).
-- `OPENCODE_APNS_KEY_P8`: the APNs `.p8` key of the Live Activity and session alerts
-  (`packages/plugin-app-custom/docs/live-activity.md`); `OPENCODE_APNS_KEY_ID` stays in `manual.json`.
-
-The plugin prefers these variables and falls back to `~/.config/opencode/watch/cf-access-service-token.json` and
-`OPENCODE_APNS_KEY_PATH` while those files exist, so a server started without the vault still pairs and pushes.
-Once the files are gone, a start without the vault leaves pairing failing with a message that names the variable
-and the file, and the log warns that the APNs key is missing.
+The plugin prefers these values and falls back to `~/.config/opencode/watch/cf-access-service-token.json`
+and `OPENCODE_APNS_KEY_PATH` while those files exist, so a server started without the vault still pairs and
+pushes. Once the files are gone, a start without the vault leaves pairing failing with a message that names
+the variable and the file, and the log warns that the APNs key is missing.
 
 Routine `custom:update` skips the database backup and does not require `sqlite3`.
 It still requires the existing database and password and verifies the authenticated
