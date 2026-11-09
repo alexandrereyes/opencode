@@ -20,8 +20,8 @@
     }
   },
   { "type": "error", "message": "not_allowed" },
-  { "type": "end", "reason": "handoff_completed" },
-  { "type": "end", "reason": "handoff_timeout" },
-  { "type": "end", "reason": "handoff_cancelled" },
-  { "type": "end", "reason": "handoff_failed" }
+  { "type": "end", "reason": "handoff_completed", "kept": true },
+  { "type": "end", "reason": "handoff_timeout", "kept": true },
+  { "type": "end", "reason": "handoff_cancelled", "kept": true },
+  { "type": "end", "reason": "handoff_failed", "kept": true }
 ]

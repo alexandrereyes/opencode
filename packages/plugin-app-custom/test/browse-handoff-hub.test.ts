@@ -25,10 +25,18 @@ function fakeChrome() {
   const inputs: ResourceProtocol.Input[] = []
   const focused: string[] = []
   const forgotten: string[] = []
-  const state = { tab: true as boolean, focusFails: false, inputFails: false }
+  const updated: Entry[] = []
+  const state = { tab: true as boolean, focusFails: false, inputFails: false, gone: new Set<string>() }
   const adapter: Adapter = {
     kind: "chrome",
-    probe: async (entries) => new Map(entries.map((entry) => [entry.id, { status: "running" as const }])),
+    // A browse session the relay no longer lists is `gone`.
+    probe: async (entries) =>
+      new Map(
+        entries.map((entry) => [
+          entry.id,
+          { status: entry.meta.kind === "chrome" && state.gone.has(entry.meta.browse ?? "") ? "gone" : "running" },
+        ]),
+      ),
     snapshot: async () => ({ mime: "image/jpeg", data: new Uint8Array(jpegPixel), width: 1, height: 1 }),
     stream: async (_entry, sink, signal) => {
       sink.hello({ format: "jpeg", width: 1, height: 1 })
@@ -49,8 +57,9 @@ function fakeChrome() {
       focused.push(entry.id)
     },
     forget: async (entry) => void forgotten.push(entry.id),
+    update: async (entry) => void updated.push(entry),
   }
-  return { adapter, inputs, focused, forgotten, state }
+  return { adapter, inputs, focused, forgotten, updated, state }
 }
 
 const servers: { stop: (force?: boolean) => unknown }[] = []
@@ -112,7 +121,7 @@ function socket(url: string) {
   return { ws, messages, next, closed, opened: new Promise((resolve) => (ws.onopen = resolve)) }
 }
 
-test("a handoff's resource has its own ID, label, capabilities, handoff and machine, and is never persisted", async () => {
+test("a handoff's resource has its own ID, label, capabilities, handoff and machine, which are never persisted", async () => {
   const { hub, client, file } = await serve()
   const resource = await client.upsert(register)
   expect(resource).toMatchObject({
@@ -138,13 +147,17 @@ test("a handoff's resource has its own ID, label, capabilities, handoff and mach
   expect(sameResource(register.meta, { kind: "chrome", cdp: register.meta.cdp })).toBe(false)
   expect(idFor({ kind: "chrome", cdp: "http://127.0.0.1:19988", browse: "x" })).toBe("chrome:browse:x")
   expect(label({ meta: { kind: "chrome", browse: "x" } })).toBe("Navegador · x")
-  // A plain resource registered meanwhile is persisted; the handoff's never is.
+  // The browse session's resource is persisted (rev. 2026-11-09: it lasts as long as the session), never its handoff,
+  // locks or machine.
   hub.upsert({ kind: "chrome", meta: { kind: "chrome", session: "default" } })
   const deadline = Date.now() + 5_000
   while (!(await Bun.file(file).exists()) && Date.now() < deadline) await Bun.sleep(20)
   await Bun.sleep(50)
   const stored: Entry[] = await Bun.file(file).json()
-  expect(stored.map((entry) => entry.id)).toEqual(["chrome:default"])
+  expect(stored.map((entry) => entry.id)).toEqual(["chrome:browse:login", "chrome:default"])
+  expect(stored[0]).not.toHaveProperty("handoff")
+  expect(stored[0]).not.toHaveProperty("capabilities")
+  expect(stored[0]).not.toHaveProperty("machine")
   hub.close()
 })
 
@@ -278,7 +291,7 @@ test("typed text never reaches a log, not even when it fails", async () => {
   hub.close()
 })
 
-test("ending a handoff's resource ends its viewers with the reason, releases control quietly and waits to announce", async () => {
+test("ending a handoff ends its viewers with the reason, releases control quietly, keeps the resource and waits to announce", async () => {
   const { hub, server, fake, client } = await serve()
   const resource = await client.upsert(register)
   await client.control(resource.id, "take")
@@ -292,23 +305,31 @@ test("ending a handoff's resource ends its viewers with the reason, releases con
 
   await client.finish(resource.id, Resources.handoffEndReasons.completed)
   for (const viewer of [watching, controlling]) {
-    expect(await viewer.next((message) => message.type === "end")).toEqual({ type: "end", reason: "handoff_completed" })
+    expect(await viewer.next((message) => message.type === "end")).toEqual({
+      type: "end",
+      reason: "handoff_completed",
+      kept: true,
+    })
     await viewer.closed
   }
   // No hand-back notice for the agent, and no resources event until the plugin announces the handoff's end first.
   expect(await hub.claim(0)).toEqual([])
+  // The connection with the handoff's locks goes; the resource stays, as the browse session's, without the handoff,
+  // its locks, its message as purpose and Alexandre's control.
   expect(fake.forgotten).toEqual([resource.id])
-  for (const call of [
-    () => client.get(resource.id),
-    () => client.control(resource.id, "take"),
-    () => client.ticket(resource.id, "view"),
-    () => client.snapshot(resource.id),
-    () => client.focus(resource.id),
-  ])
-    expect(((await call().catch((error: unknown) => error)) as HubError).reason).toBe("not_found")
+  const kept = await client.get(resource.id)
+  expect(kept).toMatchObject({
+    id: resource.id,
+    capabilities: Resources.browseCapabilities,
+    machine: machineID(platform),
+  })
+  expect(kept.handoff).toBeUndefined()
+  expect(kept.purpose).toBeUndefined()
+  expect(kept.control).toBeUndefined()
+  expect((await client.ticket(resource.id, "view")).ticket).toBeTruthy()
   await client.announce([resource.id])
   expect(await hub.claim(0)).toEqual([{ type: "changed", ids: [resource.id] }])
-  // Ending it again finds nothing; an unknown reason is refused.
+  // Ending it again finds no handoff; an unknown reason is refused.
   expect(((await client.finish(resource.id, "handoff_failed").catch((e: unknown) => e)) as HubError).reason).toBe(
     "not_found",
   )
@@ -353,5 +374,99 @@ test("focus: only a handoff's resource, only while it waits, failed when the rel
   registry.reveal("brw_1")
   expect(waiting(resource, registry)).toBe(true)
   expect(waiting({ ...resource, handoff: { ...resource.handoff!, id: "brw_2" } }, registry)).toBe(false)
+  hub.close()
+})
+
+/** rev. 2026-11-09: a browse session's resource while agents use it, with or without a handoff on it. */
+const used = {
+  kind: "chrome" as const,
+  meta: { kind: "chrome" as const, cdp: "http://127.0.0.1:19988", browse: "login" },
+  owner: { sessionID: "ses_child", rootSessionID: "ses_root", agent: "build" },
+  used: true,
+  activity: { call: "call_1", command: "browse execute", running: true },
+}
+
+test("a browse session in use is a resource: free to navigate, focusable on its Mac, controlled like any other", async () => {
+  const { hub, server, fake, client } = await serve()
+  const resource = await client.upsert(used)
+  expect(resource).toMatchObject({
+    id: "chrome:browse:login",
+    label: "Navegador · login",
+    state: "agent",
+    owner: used.owner,
+    capabilities: Resources.browseCapabilities,
+    machine: machineID(platform),
+    activity: [{ command: "browse execute", running: true, sessionID: "ses_child", agent: "build" }],
+  })
+  expect(resource.handoff).toBeUndefined()
+  expect(Schema.decodeUnknownSync(Resources.Resource)(resource)).toBeDefined()
+  // An agent's use never picks the tab (the probe does), so it cannot move a viewer off a handoff's tab.
+  expect(resource.meta).not.toHaveProperty("targetID")
+  await client.focus(resource.id)
+  expect(fake.focused).toEqual([resource.id])
+  // Alexandre takes control: he may navigate and switch tabs, which the capabilities allow.
+  const { token: lock } = await hub.control(resource.id, "take").then((value) => value!)
+  expect((await client.locks())?.map((item) => item.meta)).toEqual([{ ...used.meta }])
+  const viewer = socket(
+    `ws://127.0.0.1:${server.port}/resources/${encodeURIComponent(resource.id)}/stream?ticket=${hub.ticket(resource.id, "control")?.ticket}`,
+  )
+  await viewer.opened
+  viewer.ws.send(
+    JSON.stringify({ type: "input", events: [{ type: "navigate", action: "url", url: "https://x.example" }] }),
+  )
+  const deadline = Date.now() + 5_000
+  while (fake.inputs.length < 1 && Date.now() < deadline) await Bun.sleep(10)
+  expect(fake.inputs).toEqual([{ type: "navigate", action: "url", url: "https://x.example" }])
+  expect(lock).toBeTruthy()
+  viewer.ws.close()
+  hub.close()
+})
+
+test("a handoff on a browse session's resource locks it in place and, when it ends, leaves it as it was", async () => {
+  const { hub, server, fake, client } = await serve()
+  await client.upsert({ ...used, purpose: "Comprar o tênis" })
+  const viewer = socket(
+    `ws://127.0.0.1:${server.port}/resources/${encodeURIComponent("chrome:browse:login")}/stream?ticket=${hub.ticket("chrome:browse:login", "view")?.ticket}`,
+  )
+  await viewer.opened
+  await viewer.next((message) => message.type === "hello")
+  // The handoff starts on the same resource: its tab, its locks and message, and the stream follows without ending.
+  const waiting = await client.upsert(register)
+  expect(waiting).toMatchObject({
+    id: "chrome:browse:login",
+    purpose: "Entre com a senha",
+    capabilities: Resources.handoffCapabilities,
+    meta: { targetID: "TAB1" },
+    handoff: { id: "brw_1" },
+  })
+  expect(fake.updated.at(-1)).toMatchObject({ handoff: { id: "brw_1" }, capabilities: Resources.handoffCapabilities })
+  expect(viewer.messages.some((message) => !(message instanceof Uint8Array) && message.type === "end")).toBe(false)
+  // An agent's call meanwhile keeps the handoff and its locks.
+  expect(await client.upsert({ ...used, activity: { ...used.activity, call: "call_2" } })).toMatchObject({
+    handoff: { id: "brw_1" },
+    capabilities: Resources.handoffCapabilities,
+  })
+  await client.finish("chrome:browse:login", Resources.handoffEndReasons.completed)
+  expect(await viewer.next((message) => message.type === "end")).toEqual({
+    type: "end",
+    reason: "handoff_completed",
+    kept: true,
+  })
+  const after = await client.get("chrome:browse:login")
+  expect(after).toMatchObject({ purpose: "Comprar o tênis", capabilities: Resources.browseCapabilities })
+  expect(after.handoff).toBeUndefined()
+  hub.close()
+})
+
+test("a browse session's resource goes as soon as the relay no longer lists the session", async () => {
+  const { hub, fake, client } = await serve()
+  await client.upsert(used)
+  await client.upsert({ ...used, meta: { ...used.meta, browse: "outra" } })
+  await hub.claim(0)
+  fake.state.gone.add("login")
+  await hub.probe()
+  expect((await client.list()).resources.map((item) => item.id)).toEqual(["chrome:browse:outra"])
+  expect(fake.forgotten).toEqual(["chrome:browse:login"])
+  expect(await hub.claim(0)).toEqual([{ type: "changed", ids: ["chrome:browse:login"] }])
   hub.close()
 })

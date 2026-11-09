@@ -16,10 +16,15 @@ export interface Entry {
   readonly updatedAt: number
   /** The agents' latest shell commands that named it, oldest first (`Resources.limits.activityKept`). */
   readonly activity?: readonly StoredActivity[]
-  /** What the viewer may offer (`Resources.Capabilities`); browse handoffs only. Never persisted. */
+  /**
+   * What the viewer may offer (`Resources.Capabilities`) when it differs from the kind's default: a browse handoff's
+   * locks (`Resources.handoffCapabilities`) while it waits. Never persisted.
+   */
   readonly capabilities?: Resources.Capabilities
-  /** The browse handoff this resource exists for (`browse-handoff-remoto.md`). Never persisted. */
+  /** The browse handoff that waits on this resource's tab (`browse-handoff-remoto.md`). Never persisted. */
   readonly handoff?: Resources.Handoff
+  /** A browse session's machine (`Resources.Resource.machine`), computed by the hub. Never persisted. */
+  readonly machine?: string
 }
 
 /** One agent shell command that named a resource; `call` is its tool call, open until the command ends. */
@@ -103,4 +108,9 @@ export interface Adapter {
   focus?(entry: Entry): Promise<void>
   /** The resource left the registry: close what the adapter keeps open for it. */
   forget?(entry: Entry): Promise<void>
+  /**
+   * The entry's followed target or capabilities changed while it may be streaming (a browse handoff started, or the
+   * session moved to another tab): follow the new target and apply the new locks without ending the stream.
+   */
+  update?(entry: Entry): Promise<void>
 }

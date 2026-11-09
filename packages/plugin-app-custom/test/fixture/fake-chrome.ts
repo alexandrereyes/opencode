@@ -79,6 +79,8 @@ export function fakeBrowser(options: { readonly token?: string }) {
     "Target.getTargetInfo": (params) => ({ targetInfo: info(String(params.targetId)) }),
     "Target.activateTarget": () => ({}),
     "Page.bringToFront": () => ({}),
+    "Page.navigate": () => ({ frameId: "F" }),
+    "Page.reload": () => ({}),
     "Page.enable": () => ({}),
     "Page.stopScreencast": () => ({}),
     "Page.screencastFrameAck": () => ({}),
@@ -209,6 +211,15 @@ export function fakeBrowser(options: { readonly token?: string }) {
 
 export function entryOf(meta: Resources.Meta, id = "chrome:browse:login"): Entry {
   return { id, kind: "chrome", meta, status: "running", discoveredAt: 1, lastUsedAt: 1, updatedAt: 1 }
+}
+
+/** A browse session's resource while a handoff waits on its tab (`handoffCapabilities`). */
+export function handoffEntry(meta: Resources.Meta, id = "chrome:browse:login"): Entry {
+  return {
+    ...entryOf(meta, id),
+    handoff: { id: "brw_1", sessionID: "ses_1", message: "Entre", since: 1 },
+    capabilities: { navigation: false, tabs: false, focus: true },
+  }
 }
 
 /** Streams `entry` into `states` until the returned `stop`. */

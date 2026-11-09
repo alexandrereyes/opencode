@@ -38,11 +38,11 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | `owner`                                   | `{ sessionID, rootSessionID, agent? }`: the session whose tool call used it (a subagent's own session) and the family's root; lists group by root and show "via <subagente>"              |
 | `state`                                   | `user` (Alexandre controls it) › `agent` (a command naming it is running, or ended in the last 90 s) › `live` (running, used in the last 10 min) › `idle` ("Livre") › `stopped` › `gone`  |
 | `control`                                 | `{ holder: "user", since, expiresAt }` while Alexandre holds control                                                                                                                      |
-| `meta`                                    | Per kind, tagged by `kind`: iOS `{ udid, name?, device?, runtime? }`; Android `{ serial?, avd?, consolePort?, grpcPort?, device? }`; Chrome `{ session?, cdp?, targetID?, url?, title? }` |
+| `meta`                                    | Per kind, tagged by `kind`: iOS `{ udid, name?, device?, runtime? }`; Android `{ serial?, avd?, consolePort?, grpcPort?, device? }`; Chrome `{ session?, cdp?, browse?, targetID?, url?, title? }` |
 | `live`                                    | `{ stream, input }`: whether the adapter implements them (without `stream` the hub streams snapshots)                                                                                     |
 | `discoveredAt`, `lastUsedAt`, `updatedAt` | Epoch ms                                                                                                                                                                                  |
 | `activity`                                | Optional (rev. 2026-10-30): the agents' latest shell commands that named it, newest first, at most 5: `{ at, command, sessionID?, agent?, running? }`; see [Activity](#activity)          |
-| `capabilities`, `handoff`                 | Optional (rev. 2026-11-07): what the viewer may offer (`false` = the hub refuses it) and the browse handoff a `chrome:browse:<session>` resource exists for; see [browse-handoff-remoto.md](browse-handoff-remoto.md) |
+| `capabilities`, `handoff`, `machine`      | Optional (rev. 2026-11-07, 2026-11-09): on `chrome:browse:<session>` resources only, what the viewer may offer (`false` = the hub refuses it), the browse handoff waiting on its tab, and the Chrome's machine; see [browse-handoff-remoto.md](browse-handoff-remoto.md) |
 
 Two registrations name the same resource when they share a UDID, a Playwright session or CDP endpoint, or, for
 Android, the same AVD (see [Android identity](#android-identity)); the hub merges them into one entry (metadata
@@ -87,7 +87,9 @@ Admin (`authorization: Bearer <secret>` from `hub.json`; loopback only, never pr
 hub's `simctl`), `POST /admin/events?wait=<ms>` (long poll; each event goes to exactly one caller), `POST /admin/shutdown`.
 Browse handoffs (rev. 2026-11-07, `browse-handoff-remoto.md`): the upsert also takes `capabilities` and `handoff`,
 `POST /admin/resources/<id>/end { reason }` ends one without an event, `POST /admin/announce { ids }` queues its
-`changed`, `POST /admin/resources/<id>/focus` (409 `unsupported`, 502 when the browser refuses).
+`changed`, `POST /admin/resources/<id>/focus` (409 `unsupported`, 502 when the browser refuses). Since rev. 2026-11-09
+the plugin also registers a browse session whenever agents use it (upsert with `meta { cdp, browse }`, no
+`capabilities`): it stays until the relay no longer lists the session or the plugin deletes it, and `end` keeps it.
 
 ### Remote hub (server on Linux)
 
@@ -416,7 +418,9 @@ session; `script/chrome-login-fixture.ts` is the local login page those and the 
 "Assumir controle" (`control take`) gives Alexandre the resource. The plugin's `tool.hook("execute.before")` then
 refuses `shell` commands that name it (UDID or simulator name, adb serial or AVD, `-s=<session>`, CDP port) or
 target it implicitly (`simctl … booted`, `adb` without `-s`, `playwright-cli` without `-s` for the `default`
-session) with "Alexandre está usando … ; aguarde". Every input renews the lock; after 2 minutes without input
+session) with "Alexandre está usando … ; aguarde". For a browse session's resource (rev. 2026-11-09,
+`browse-handoff-remoto.md` section 0) it also refuses the agents' browse MCP calls on that session, and `browse` CLI
+commands that name it. Every input renews the lock; after 2 minutes without input
 (`limits.controlIdleMs`) or on `release`, the hub queues a `released` event and one plugin instance adds a
 `session.synthetic` message (without resuming) to the owner session: "Alexandre interagiu com … Reavalie a tela".
 Only watching never blocks the agent.

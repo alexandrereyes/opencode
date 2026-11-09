@@ -16,7 +16,7 @@
  *   current (`session_use`), and the plugin must follow it.
  *
  * Each checks the end in the contract's order (stream `end`, `browser-handoffs.changed` with `ended`,
- * `resources.changed`) and that the resource is gone. Positions on the page are read through the relay (its token is
+ * `resources.changed`) and that the resource stays, the browse session's again (rev. 2026-11-09). Positions on the page are read through the relay (its token is
  * read here and never printed). Except for `bare`, the browse session must exist with `--allow-origin <fixture>`.
  *
  *   bun packages/plugin-app-custom/script/browse-handoff-check.ts --server-url http://127.0.0.1:4196 --home <sandbox> \
@@ -189,7 +189,7 @@ check("browserResourceID in Sessões", row?.browserResourceID === resourceID, ro
 type Resource = {
   id: string
   label: string
-  capabilities?: object
+  capabilities?: { navigation?: boolean; tabs?: boolean; focus?: boolean }
   handoff?: { id: string; machine?: string }
   meta: Record<string, unknown>
   owner?: { sessionID: string; rootSessionID: string }
@@ -400,11 +400,13 @@ check(
   timeline.slice(-6),
 )
 check("ended outcome", outcome?.outcome === expected && outcome.resourceID === resourceID, outcome)
-const gone = await rpc("custom.resources/get", { id: resourceID }).then(
-  () => "still there",
-  (error: Error & { body?: string }) => error.body ?? error.message,
+// rev. 2026-11-09: the browse session's resource stays, without the handoff and its locks.
+const kept = await rpc<Resource>("custom.resources/get", { id: resourceID }).catch((error: Error) => error.message)
+check(
+  "resource kept without the handoff",
+  typeof kept !== "string" && kept.handoff === undefined && kept.capabilities?.navigation === true,
+  kept,
 )
-check("resource gone (not_found)", gone.includes("not_found"), gone)
 const listed = await rpc<{ data: Handoff[] }>("custom.browser-handoffs/list", { sessionID })
 check("handoff no longer listed", listed.data.length === 0, listed.data)
 
@@ -588,11 +590,13 @@ async function appActs(): Promise<never> {
   ).catch(() => undefined)
   const outcome = (changed.data as { ended?: { outcome: string; resourceID?: string } }).ended
   check("ended outcome", outcome?.outcome === expected && outcome.resourceID === resourceID, outcome)
-  const gone = await rpc("custom.resources/get", { id: resourceID }).then(
-    () => "still there",
-    (error: Error & { body?: string }) => error.body ?? error.message,
+  // rev. 2026-11-09: the browse session's resource stays, without the handoff and its locks.
+  const kept = await rpc<Resource>("custom.resources/get", { id: resourceID }).catch((error: Error) => error.message)
+  check(
+    "resource kept without the handoff",
+    typeof kept !== "string" && kept.handoff === undefined && kept.capabilities?.navigation === true,
+    kept,
   )
-  check("resource gone (not_found)", gone.includes("not_found"), gone)
   return finish()
 }
 

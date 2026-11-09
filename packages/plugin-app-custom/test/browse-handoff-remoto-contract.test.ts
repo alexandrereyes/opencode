@@ -38,10 +38,22 @@ test("the handoff list, its changes, the resource and the stream messages decode
   expect(resource.capabilities).toEqual({ navigation: false, tabs: false, focus: true })
   expect(resource.meta).toMatchObject({ kind: "chrome", browse: "github-login" })
   expect(resource.handoff?.id).toBe(listed.data[0]?.id)
-  const messages = (await fixture("stream-messages")) as { type: string; reason?: string; message?: string }[]
-  expect(messages.filter((item) => item.type === "end").map((item) => item.reason)).toEqual(
-    Object.values(Resources.handoffEndReasons),
-  )
+  expect(resource.machine).toBe(resource.handoff?.machine)
+  // rev. 2026-11-09: the same resource while no handoff waits, Alexandre in control.
+  const session = Schema.decodeUnknownSync(Resources.Resource)(await fixture("resource-session"))
+  expect(session).toMatchObject({ id: resource.id, state: "user", capabilities: Resources.browseCapabilities })
+  expect(session.handoff).toBeUndefined()
+  expect(session.machine).toBe(resource.machine)
+  expect(resource.capabilities).toEqual(Resources.handoffCapabilities)
+  const messages = (await fixture("stream-messages")) as {
+    type: string
+    reason?: string
+    message?: string
+    kept?: boolean
+  }[]
+  const ends = messages.filter((item) => item.type === "end")
+  expect(ends.map((item) => item.reason)).toEqual(Object.values(Resources.handoffEndReasons))
+  expect(ends.every((item) => item.kept === true)).toBe(true)
   expect(messages.find((item) => item.type === "error")?.message).toBe("not_allowed")
   const focus = await fixture("focus")
   expect(Schema.decodeUnknownSync(Resources.FocusInput)(focus.input)).toEqual({ id: resource.id })
