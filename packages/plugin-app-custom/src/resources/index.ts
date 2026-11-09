@@ -4,7 +4,10 @@ import { Tool } from "@opencode/schema/tool"
 import { optional } from "@opencode/schema/schema"
 import { Effect, Option, Schedule, Schema } from "effect"
 import path from "node:path"
-import { sharedRegistry } from "../browser-handoff/registry.js"
+import { sharedCurrentSessions } from "../browser-handoff/current.js"
+import { relayEndpoint, relayFind } from "../browser-handoff/index.js"
+import { limits, sharedRegistry } from "../browser-handoff/registry.js"
+import { makeBrowseResources } from "./browse.js"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
 import { bareSerials, known, parseSimulators, references, resolveSimulators, touchesResources } from "./discovery.js"
 import { blocking, refusal, returned } from "./lock.js"
@@ -74,11 +77,11 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           if (!result.token) return { resource: result.resource }
           return { resource: result.resource, ticket: yield* ticketFor(input.id, "control") }
         }).pipe(Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason }))),
-      // `browse-handoff-remoto.md`, section 4: only a browse handoff's tab, and only while that handoff still waits.
+      // `browse-handoff-remoto.md`, section 4: a browse session's tab; while a handoff is on it, only while it waits.
       focus: (input, context) =>
         call(async () => {
           const resource = await hub.get(input.id)
-          if (resource.capabilities?.focus !== true || !waiting(resource))
+          if (resource.capabilities?.focus !== true || (resource.handoff !== undefined && !waiting(resource)))
             throw new HubError("unsupported", "This resource cannot be focused")
           await hub.focus(input.id)
           return {}
@@ -107,6 +110,20 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       roots.set(sessionID, found)
       return found
     }).pipe(Effect.catchCause(() => Effect.succeed({ root: sessionID, directory: "" })))
+
+  // A browse session's resource: registered while agents use it, refused to them while Alexandre controls it.
+  const browse = makeBrowseResources({
+    hub,
+    current: sharedCurrentSessions(),
+    find: relayFind(),
+    family,
+    scope: yield* Effect.scope,
+    now: () => Date.now(),
+    endpoint: relayEndpoint(),
+    graceMs: limits.graceMs,
+  })
+  yield* ctx.tool.hook("execute.before", browse.before)
+  yield* ctx.tool.hook("execute.after", browse.after)
 
   yield* ctx.tool.hook("execute.before", (event) =>
     Effect.gen(function* () {

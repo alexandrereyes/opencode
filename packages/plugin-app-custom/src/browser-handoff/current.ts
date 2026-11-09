@@ -25,10 +25,23 @@ export type Observed = {
 
 const browseTool = /^browse[._](.+)$/
 
+/** A browse tool's own name (`execute`, `session_new`…) from its effective name (`browse_execute`), or undefined. */
+export const browseName = (tool: string) => browseTool.exec(tool)?.[1]
+
 /** The session a result names: `execute`'s `session` is its id, the others' a summary with one. */
-const named = (output: unknown) => {
+export const named = (output: unknown) => {
   const session = typeof output === "object" && output !== null ? (output as { session?: unknown }).session : undefined
   return typeof session === "string" && session.length > 0 ? session : text(session, "id")
+}
+
+/**
+ * The browse session a call names: `id` (or `session`) for `session_reset`, `session_delete` and `session_use`,
+ * `session` for the others.
+ */
+export function explicitSession(name: string, input: unknown) {
+  if (["session_reset", "session_delete", "session_use"].includes(name))
+    return text(input, "id") ?? text(input, "session")
+  return name === "session_new" ? undefined : text(input, "session")
 }
 
 const text = (value: unknown, key: string) => {
@@ -116,3 +129,7 @@ export function pick(
   const touched = sessions.filter((session) => candidates.includes(session.id) && session.updatedAt >= since)
   return touched.length === 1 ? touched[0]!.id : undefined
 }
+
+let shared: ReturnType<typeof makeCurrentSessions> | undefined
+/** One tracker for the whole server: the handoffs observe the agents' browse calls, the resources read it. */
+export const sharedCurrentSessions = () => (shared ??= makeCurrentSessions())

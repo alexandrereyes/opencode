@@ -4,18 +4,41 @@ import type { Lock } from "./hub/hub.js"
 const kindNames = {
   "ios-simulator": "o simulador iOS",
   "android-emulator": "o emulador Android",
-  chrome: "o Chrome",
+  chrome: "o navegador",
 } as const
 
 /**
  * The locked resource a shell command would touch, if any. A command touches a resource when it names one of its
  * identifiers (UDID, simulator name, adb serial, AVD, `playwright-cli` session, CDP port) or targets it implicitly:
- * `simctl … booted`, `adb` without `-s`/`ANDROID_SERIAL`, or `playwright-cli` without `-s` for the default session.
+ * `simctl … booted`, `adb` without `-s`/`ANDROID_SERIAL`, or `playwright-cli` without `-s` for the default session. A
+ * browse session is touched by a `browse` command that names it (session names are common words elsewhere).
  */
 export function blocking(command: string, locks: readonly Lock[], workdir?: string) {
   return locks.find(
-    (lock) => tokens(lock).some((token) => mentions(command, token)) || implicit(command, lock, workdir),
+    (lock) =>
+      tokens(lock).some((token) => mentions(command, token)) ||
+      implicit(command, lock, workdir) ||
+      (lock.meta.kind === "chrome" &&
+        lock.meta.browse !== undefined &&
+        /(^|[\s;&|(])browse\s/.test(command) &&
+        mentions(command, lock.meta.browse)),
   )
+}
+
+/**
+ * The refusal of an agent's browse call on a session Alexandre controls (`browse.ts`). `guessed`: the call named no
+ * session and the agent may have this one current.
+ */
+export function browseRefusal(session: string, guessed: boolean) {
+  return [
+    `Alexandre está controlando pelo app a aba do navegador da sessão do browse "${session}", então esta chamada do browse foi bloqueada.`,
+    "Aguarde ele devolver o controle (ou 2 minutos sem toque): você receberá um aviso. Não tente contornar a trava por outra sessão, pelo shell ou pela CLI do browse.",
+    ...(guessed
+      ? [
+          `Esta chamada não indicou \`session\`; se ela não era para a sessão "${session}", repita-a passando \`session\` com a sessão certa.`,
+        ]
+      : []),
+  ].join(" ")
 }
 
 export function refusal(lock: Lock) {
@@ -52,6 +75,7 @@ function implicit(command: string, lock: Lock, workdir: string | undefined) {
   // Text checks first: the namespace comparison probes directories, and runs before every shell command.
   return (
     lock.meta.kind === "chrome" &&
+    lock.meta.browse === undefined &&
     (lock.meta.session ?? "default") === "default" &&
     /\bplaywright-cli\b/.test(command) &&
     !/(\s-s[= ]|\s--session[= ]|PLAYWRIGHT_CLI_SESSION=)/.test(command) &&

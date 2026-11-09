@@ -4,7 +4,7 @@ import type { Context } from "../context.js"
 import { Resources } from "../resources/rpc.js"
 import { hubSettings, makeHubClient, type HubClient } from "../resources/supervisor.js"
 import { relaySessions } from "../resources/adapters/chrome.js"
-import { makeCurrentSessions, pick } from "./current.js"
+import { makeCurrentSessions, pick, sharedCurrentSessions } from "./current.js"
 import { detect } from "./detect.js"
 import { limits, sharedRegistry, wire, type Entry, type Registry } from "./registry.js"
 import { BrowserHandoffs } from "./rpc.js"
@@ -125,10 +125,12 @@ export function makeHandoffs(input: {
   readonly graceMs?: number
   readonly resources?: HandoffResources
   readonly find?: FindSession
+  /** What each agent's browse calls left current (`current.ts`); the server's shared tracker in production. */
+  readonly current?: ReturnType<typeof makeCurrentSessions>
 }) {
   const owner = {}
   // What each agent's browse calls left current (`current.ts`), for the calls that name no session.
-  const current = makeCurrentSessions()
+  const current = input.current ?? makeCurrentSessions()
   const graceMs = input.graceMs ?? limits.graceMs
   const resources = input.resources
   // Calls whose resource is being registered, and how those that ended meanwhile ended.
@@ -269,7 +271,7 @@ export function relayEndpoint(env: Record<string, string | undefined> = process.
 }
 
 /** What a browse handoff's resource offers and refuses (`browse-handoff-remoto.md`, section 3). */
-export const capabilities = { navigation: false, tabs: false, focus: true } as const satisfies Resources.Capabilities
+export const capabilities = Resources.handoffCapabilities
 
 /**
  * `FindSession` through browse's relay (`relayEndpoint`, the server's own: browse's MCP server runs here and reaches
@@ -368,6 +370,7 @@ export const registerBrowserHandoffs = Effect.fn("BrowserHandoffs.register")(fun
     now: () => Date.now(),
     resources: hubResources(hub, root),
     find: relayFind(),
+    current: sharedCurrentSessions(),
     announce: (sessionID, ended) =>
       registration.events
         .emit("changed", { sessionID, ...(ended ? { ended } : {}) })

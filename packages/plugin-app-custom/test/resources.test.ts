@@ -9,7 +9,7 @@ import { bareSerials, known, parseSimulators, references, resolveSimulators } fr
 import { createHub, idFor, label, sameResource, shown, type Lock } from "../src/resources/hub/hub"
 import { links } from "../src/resources/index"
 import { sign, verify } from "../src/resources/hub/ticket"
-import { blocking, refusal, returned } from "../src/resources/lock"
+import { blocking, browseRefusal, refusal, returned } from "../src/resources/lock"
 import { ResourceProtocol } from "../src/resources/protocol"
 import { Resources } from "../src/resources/rpc"
 import { hubCommand, makeHubClient } from "../src/resources/supervisor"
@@ -174,6 +174,25 @@ describe("control lock", () => {
     expect(blocking("curl http://127.0.0.1:9333/json", locks)).toBe(browser)
   })
 
+  test("a browse session Alexandre controls: its `browse` commands and its relay, never the word elsewhere", () => {
+    const tab: Lock = {
+      id: "chrome:browse:login",
+      kind: "chrome",
+      label: "Navegador · loja.example",
+      meta: { kind: "chrome", cdp: "http://127.0.0.1:19988", browse: "login" },
+      expiresAt: 0,
+    }
+    expect(blocking("browse execute -s login 'return page.url()'", [tab])).toBe(tab)
+    expect(blocking("curl -s http://127.0.0.1:19988/json/list", [tab])).toBe(tab)
+    expect(blocking("browse execute -s outra 'return 1'", [tab])).toBeUndefined()
+    expect(blocking("grep -rn login src/", [tab])).toBeUndefined()
+    // It is no playwright-cli session: the default one stays free.
+    expect(blocking("playwright-cli snapshot", [tab], "/tmp")).toBeUndefined()
+    expect(browseRefusal("login", false)).toContain('sessão do browse "login"')
+    expect(browseRefusal("login", false)).not.toContain("`session`")
+    expect(browseRefusal("login", true)).toContain("passando `session` com a sessão certa")
+  })
+
   test("lets unrelated commands through", () => {
     expect(blocking("xcrun simctl list devices", locks)).toBeUndefined()
     expect(blocking(`xcrun simctl io ${udid}X screenshot a.png`, locks)).toBeUndefined()
@@ -188,7 +207,7 @@ describe("control lock", () => {
   test("names the resource in refusals and hand-back notices", () => {
     expect(refusal(simulator)).toContain("Alexandre está usando o simulador iOS iPhone 17 · OpenCode Teste; aguarde")
     expect(returned({ kind: "chrome", label: "localhost:5173/login", reason: "returned" })).toContain(
-      "Alexandre interagiu com o Chrome localhost:5173/login e devolveu o controle",
+      "Alexandre interagiu com o navegador localhost:5173/login e devolveu o controle",
     )
     expect(returned({ kind: "chrome", label: "x", reason: "expired" })).toContain("2 minutos sem toque")
   })
