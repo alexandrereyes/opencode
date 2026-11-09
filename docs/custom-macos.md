@@ -223,6 +223,30 @@ Editing the file does not change the running server's environment. Keep `<runtim
 the 4096 proxy reads `<runtime>/config/opencode/service-custom.json` by its fixed path, independent
 of XDG. The default remains isolated for development/test runtimes.
 
+#### Secrets from MyCredentials
+
+Server secrets (for example an MCP OAuth `client_secret` referenced as `{env:NAME}` in
+`opencode.json`) never go into `manual.json` or a launcher. Set `mycred` instead:
+
+```json
+{ "mycred": { "keychain": "opencode-servidor" } }
+```
+
+`bin/serve` then starts the server through `mycred run --keychain <policy>`, which reads the policy's
+access key from the Keychain (service `mycredentials`, account = policy), injects its bindings and
+`exec`s the server. `helper` (absolute path) overrides the default `~/.local/bin/mycred`. The policy
+is code in `packages/cli/script/custom-mycredentials.json`, applied with the MyCredentials admin CLI
+(`apply-policies`); its key is generated straight into the Keychain with `mycred store-key --keychain
+opencode-servidor --stdin` (skill `mycredentials`). Before starting, the launcher runs `mycred check`;
+if the vault cannot be reached (WARP down) or the key is refused, it logs `MyCredentials policy …
+unavailable` and starts the server without those variables, so only the integrations that need them
+fail. Like the rest of `manual.json`, the setting takes effect on the next activation that starts the
+service.
+
+Current bindings of `opencode-servidor`: `GOOGLE_WORKSPACE_MCP_CLIENT_SECRET` (OAuth client
+"OpenCode MCP (Workspace)" of Google Cloud project `abacato-v2`, used by the Gmail, Drive, Docs, Sheets
+and Calendar MCP servers in the global `opencode.json`).
+
 Routine `custom:update` skips the database backup and does not require `sqlite3`.
 It still requires the existing database and password and verifies the authenticated
 health response and exact running version after activation.
