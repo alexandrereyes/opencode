@@ -19175,6 +19175,12 @@
           },
           "auth_server_metadata_url": {
             "type": "string"
+          },
+          "authorization_params": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "additionalProperties": false

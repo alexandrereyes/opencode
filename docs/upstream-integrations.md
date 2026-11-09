@@ -178,6 +178,22 @@ Other customizations:
   (2026-11-05) `run-coordinator.ts` did not change; `execution.ts` and `runner/llm.ts` changed only in #60974 (trace)
   and #61421 (perf). #61880 (retries for `ENOTFOUND`/`EAI_AGAIN` for up to an hour) changes the retry policy, not this
   terminal, and is not applied.
+- MCP OAuth for Google Workspace (2026-11-09, our own change, no upstream PR). Files: `packages/schema/src/mcp.ts`
+  (`oauth.authorization_params`, a string map), `packages/core/src/mcp/oauth.ts`, `core/test/mcp-oauth.test.ts`, and
+  the generated `packages/protocol/openapi.json` and `packages/client/src/promise/generated/types.ts`. **Why:** Google's
+  remote Workspace MCP servers (`gmailmcp`, `drivemcp`, `docsmcp`, `sheetsmcp`, `calendarmcp`.googleapis.com) need
+  two things upstream lacks. (1) Google issues a refresh token only when the authorization request carries
+  `access_type=offline` (and `prompt=consent` to get one again); the SDK has no hook for extra parameters, so every
+  login lasted about an hour. `authorize` now adds `authorization_params` to the URL, never replacing a parameter the
+  flow set (`client_id`, `scope`, `state`…). (2) Those servers answer `initialize` and `tools/list` without a token and
+  reject only tool calls, so the server showed as connected, every call failed and `/mcps`, the web app and the iOS/Mac
+  apps never offered a sign-in (they do only for `needs_auth`). `connectProvider` now fails `tokens()` with
+  `UnauthorizedError` when the config has a pre-registered `oauth.client_id` and no stored credential, so the server
+  reports `needs_auth` before any request; servers without `client_id` keep upstream's behavior. Tests "adds configured
+  authorization parameters without replacing the flow's own" and "reports needs_auth before calling a server with a
+  pre-registered client and no credential" fail without the change. **Exit:** upstream supports extra authorization
+  parameters (or Google sends refresh tokens without them) and marks such anonymous-listing OAuth servers as needing a
+  login; until then, compare `connectProvider` and `authorize` in `mcp/oauth.ts` at each integration.
 - Tests only: custom tests that drive plugin code through Core's fixtures stay in Core, because they need Core's test
   preload and HOME isolation: `core/test/tool-opencode-master-{ensure,ensure-bundle,model}.test.ts`,
   `core/test/tool-opencode-session-read.test.ts`, `core/test/plugin/app-mentions.test.ts`; host tests
@@ -271,6 +287,10 @@ packages/core/src/session/run-coordinator.ts
 packages/core/src/session/execution.ts
 packages/core/test/session-execution.test.ts
 packages/core/test/session-move.test.ts
+# MCP OAuth for Google Workspace (openapi.json and generated types.ts are listed under Skill slash)
+packages/schema/src/mcp.ts
+packages/core/src/mcp/oauth.ts
+packages/core/test/mcp-oauth.test.ts
 # Tests only
 packages/core/test/tool-opencode-master-ensure.test.ts
 packages/core/test/tool-opencode-master-ensure-bundle.test.ts

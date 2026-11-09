@@ -48,6 +48,10 @@ export class OAuthConfig extends Schema.Class<OAuthConfig>("Mcp.OAuthConfig")({
     description:
       "URL of the OAuth or OpenID Connect authorization server metadata document. Set when the MCP server does not publish protected resource metadata that names its authorization server.",
   }),
+  authorization_params: Schema.Record(Schema.String, Schema.String).pipe(optional).annotate({
+    description:
+      'Extra query parameters added to the authorization request, such as { "access_type": "offline", "prompt": "consent" } for Google, which issues a refresh token only when asked. They cannot replace the parameters OpenCode sets for the OAuth flow.',
+  }),
 }) {}
 
 export class RemoteConfig extends Schema.Class<RemoteConfig>("Mcp.RemoteConfig")({
