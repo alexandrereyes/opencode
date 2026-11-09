@@ -8,6 +8,7 @@ import {
   handoffTab,
   listPages,
   makeChromeAdapter,
+  relaySessions,
   relayTokenFile,
   settings,
 } from "../src/resources/adapters/chrome"
@@ -258,4 +259,17 @@ test("a tap Chrome drops tells the viewers that a Chrome dialog covers the page,
     frameId: "TAB1",
     worldName: "opencode-input-check",
   })
+})
+
+test("the relay's sessions reach the plugin with their ids and times only, through the token", async () => {
+  const relay = fakeBrowser({ token })
+  stops.push(() => relay.server.stop(true))
+  expect(await relaySessions(relay.server.port!)).toEqual([
+    { id: "login", updatedAt: Date.parse("2026-11-08T20:00:01.500Z") },
+    { id: "pessoal", updatedAt: Date.parse("2026-11-08T19:00:00.000Z") },
+  ])
+  expect(relay.refused).toEqual([])
+  const other = fakeBrowser({ token: "outro-token-0123456789abcdefghijklmnopqrstuvwxyz" })
+  stops.push(() => other.server.stop(true))
+  await expect(relaySessions(other.server.port!)).rejects.toThrow("401")
 })

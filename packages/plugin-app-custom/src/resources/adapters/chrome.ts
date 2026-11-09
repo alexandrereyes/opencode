@@ -407,15 +407,36 @@ export function relayTokenFile(env: Record<string, string | undefined> = process
   return path.join(root, "relay-token")
 }
 
-/** The relay answers only with its token, and scopes `/json/version`'s WebSocket to the session in the header. */
-async function browseHeaders(browse: string): Promise<Record<string, string>> {
+async function relayAuthorization() {
   const token = (
     await Bun.file(relayTokenFile())
       .text()
       .catch(() => "")
   ).trim()
   if (!token) throw new Error("O token do relay do browse não pôde ser lido.")
-  return { authorization: `Bearer ${token}`, "opencode-browser-session-id": browse }
+  return `Bearer ${token}`
+}
+
+/** The relay answers only with its token, and scopes `/json/version`'s WebSocket to the session in the header. */
+async function browseHeaders(browse: string): Promise<Record<string, string>> {
+  return { authorization: await relayAuthorization(), "opencode-browser-session-id": browse }
+}
+
+/**
+ * The relay's sessions with when each last changed (`updatedAt`: an `execute` starting or ending in it, among others),
+ * and nothing else they hold (`/cli/sessions`). Answers in milliseconds; a session whose time cannot be read is left out.
+ */
+export async function relaySessions(port: number) {
+  const response = await fetch(`http://127.0.0.1:${port}/cli/sessions`, {
+    signal: AbortSignal.timeout(1_500),
+    headers: { authorization: await relayAuthorization() },
+  })
+  if (!response.ok) throw new Error(`browse /cli/sessions answered ${response.status}`)
+  const listed = (await response.json()) as { sessions?: { id?: unknown; updatedAt?: unknown }[] }
+  return (listed.sessions ?? []).flatMap((session) => {
+    const updatedAt = typeof session.updatedAt === "string" ? Date.parse(session.updatedAt) : NaN
+    return typeof session.id === "string" && Number.isFinite(updatedAt) ? [{ id: session.id, updatedAt }] : []
+  })
 }
 
 /** The browse session's own page, as the relay reports it (`/cli/sessions`, read for this session only). */

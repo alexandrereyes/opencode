@@ -3,6 +3,8 @@ import { Effect, Scope, Stream } from "effect"
 import type { Context } from "../context.js"
 import { Resources } from "../resources/rpc.js"
 import { hubSettings, makeHubClient, type HubClient } from "../resources/supervisor.js"
+import { relaySessions } from "../resources/adapters/chrome.js"
+import { makeCurrentSessions, pick } from "./current.js"
 import { detect } from "./detect.js"
 import { limits, sharedRegistry, wire, type Entry, type Registry } from "./registry.js"
 import { BrowserHandoffs } from "./rpc.js"
@@ -16,7 +18,11 @@ export type Before = {
   readonly input: unknown
   readonly agent?: string
 }
-export type After = Before & { readonly status: "completed" | "error"; readonly error?: { readonly message: string } }
+export type After = Before & {
+  readonly status: "completed" | "error"
+  readonly error?: { readonly message: string }
+  readonly result?: { readonly output?: unknown }
+}
 
 /** The server events that end a call without `execute.after`: an interruption skips the hook. */
 export type Ended =
@@ -46,7 +52,7 @@ export const endedTypes = [
 
 /** A waiting handoff as its resource needs it. */
 export type Waiting = Pick<Entry, "id" | "sessionID" | "message" | "since"> & {
-  /** The call's explicit browse `session`. */
+  /** The call's browse session: its explicit `session`, else the one `find` found. */
   readonly browse: string
   readonly agent?: string
 }
@@ -98,10 +104,17 @@ export function endedOutcome(event: Ended): BrowserHandoffs.Outcome {
 }
 
 /**
+ * The browse session a call that names none acts on, among `candidates` (`current.ts`), or `undefined` when it cannot
+ * be told for sure; `since` is when the call began.
+ */
+export type FindSession = (candidates: readonly string[], since: number) => Effect.Effect<string | undefined>
+
+/**
  * One Location's view of browse handoffs (`docs/browser-handoff.md`). `before` records a browse `execute` whose code
- * can hand off and, after `graceMs`, registers its resource (when it names its browse session) and marks it waiting
- * unless it ended; `after` and the events in `endedTypes` remove it. Only the entries this instance recorded are
- * settled and announced here, so every change is announced once. A waiting handoff's end goes out in the contract's
+ * can hand off and, after `graceMs`, registers its resource (on its browse session: the one it names, else the one
+ * `find` tells for sure among the agent's possible current ones) and marks it waiting unless it ended; `after` and the
+ * events in `endedTypes` remove it. Only the entries this instance recorded are settled and announced here, so every
+ * change is announced once. A waiting handoff's end goes out in the contract's
  * order: its resource's viewers end, then `announce` with `ended`, then the resources' change.
  */
 export function makeHandoffs(input: {
@@ -111,8 +124,11 @@ export function makeHandoffs(input: {
   readonly now: () => number
   readonly graceMs?: number
   readonly resources?: HandoffResources
+  readonly find?: FindSession
 }) {
   const owner = {}
+  // What each agent's browse calls left current (`current.ts`), for the calls that name no session.
+  const current = makeCurrentSessions()
   const graceMs = input.graceMs ?? limits.graceMs
   const resources = input.resources
   // Calls whose resource is being registered, and how those that ended meanwhile ended.
@@ -138,13 +154,19 @@ export function makeHandoffs(input: {
       )
     })
 
-  const start = (handoff: Waiting | (Omit<Waiting, "browse"> & { readonly browse?: undefined })) =>
+  const start = (
+    handoff: Omit<Waiting, "browse"> & { readonly browse?: string; readonly candidates?: readonly string[] },
+  ) =>
     Effect.gen(function* () {
       if (!input.registry.has((entry) => entry.id === handoff.id)) return
-      if (handoff.browse !== undefined && resources) {
+      const { candidates, ...waiting } = handoff
+      const browse =
+        waiting.browse ??
+        (candidates && input.find && resources ? yield* input.find(candidates, waiting.since) : undefined)
+      if (browse !== undefined && resources) {
         opening.add(handoff.id)
         const resourceID = yield* resources
-          .open({ ...handoff, browse: handoff.browse })
+          .open({ ...waiting, browse })
           .pipe(Effect.ensuring(Effect.sync(() => opening.delete(handoff.id))))
         const outcome = outcomes.get(handoff.id)
         outcomes.delete(handoff.id)
@@ -175,6 +197,8 @@ export function makeHandoffs(input: {
         input: event.input,
       })
       const browse = browseSession(event.input)
+      // Taken now: a later call of the agent's may change its current session while this one waits.
+      const candidates = browse ? undefined : current.candidates(event.sessionID)
       return Effect.sleep(graceMs).pipe(
         Effect.andThen(
           start({
@@ -182,7 +206,7 @@ export function makeHandoffs(input: {
             sessionID: event.sessionID,
             message,
             since,
-            ...(browse ? { browse } : {}),
+            ...(browse ? { browse } : { candidates }),
             ...(event.agent ? { agent: event.agent } : {}),
           }),
         ),
@@ -195,6 +219,7 @@ export function makeHandoffs(input: {
   // tool part is the fallback when another hook replaced it.
   const after = (event: After) =>
     Effect.suspend(() => {
+      current.observe(event)
       if (detect(event.tool, event.input) === undefined) return Effect.void
       const same = (entry: Entry) => entry.sessionID === event.sessionID && entry.callID === event.id
       const exact = input.registry.has((entry) => entry.owner === owner && entry.input === event.input)
@@ -224,7 +249,7 @@ export function makeHandoffs(input: {
   return { before, after, ended, unload, owner }
 }
 
-/** The call's explicit browse `session` (`session_new` id), the only kind of call that gets a resource. */
+/** The call's explicit browse `session` (`session_new` id); without one, `FindSession` looks for it. */
 export function browseSession(value: unknown) {
   if (typeof value !== "object" || value === null || !("session" in value)) return undefined
   return typeof value.session === "string" && value.session.length > 0 ? value.session : undefined
@@ -245,6 +270,26 @@ export function relayEndpoint(env: Record<string, string | undefined> = process.
 
 /** What a browse handoff's resource offers and refuses (`browse-handoff-remoto.md`, section 3). */
 export const capabilities = { navigation: false, tabs: false, focus: true } as const satisfies Resources.Capabilities
+
+/**
+ * `FindSession` through browse's relay (`relayEndpoint`, the server's own: browse's MCP server runs here and reaches
+ * it there): the one candidate an `execute` touched since the call began (`pick`).
+ */
+export function relayFind(endpoint = relayEndpoint()): FindSession {
+  const port = Number(new URL(endpoint).port)
+  return (candidates, since) =>
+    Effect.tryPromise(() => relaySessions(port)).pipe(
+      Effect.map((sessions) => pick(candidates, sessions, since)),
+      Effect.tap((found) =>
+        found
+          ? Effect.void
+          : Effect.logInfo("Browser handoff without a resource: its browse session is not certain", { candidates }),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Browser handoff: browse sessions could not be read", { cause }).pipe(Effect.as(undefined)),
+      ),
+    )
+}
 
 /** `HandoffResources` over the resources hub. */
 export function hubResources(
@@ -322,6 +367,7 @@ export const registerBrowserHandoffs = Effect.fn("BrowserHandoffs.register")(fun
     scope,
     now: () => Date.now(),
     resources: hubResources(hub, root),
+    find: relayFind(),
     announce: (sessionID, ended) =>
       registration.events
         .emit("changed", { sessionID, ...(ended ? { ended } : {}) })
