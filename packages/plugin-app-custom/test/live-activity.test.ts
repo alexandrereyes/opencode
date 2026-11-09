@@ -244,6 +244,17 @@ test("activity text follows the contract mapping", () => {
     "Rodando bun test --filter oauth && bun run typec",
   )
   expect(activity("grep", { pattern: "TODO" })).toBe("Buscando TODO")
+  // The agent's description of a shell, grep or execute call (docs/tool-descriptions.md) comes first.
+  expect(
+    activity("shell", { command: "python3 -m unittest -q", description: " Reproduzindo  falhas dos testes " }),
+  ).toBe("Reproduzindo falhas dos testes")
+  expect(activity("grep", { pattern: "TODO|FIXME", description: "Localizando os TODOs" })).toBe("Localizando os TODOs")
+  expect(activity("execute", { code: "return 1", description: "Somando os pedidos por cliente" })).toBe(
+    "Somando os pedidos por cliente",
+  )
+  expect(activity("execute", { code: "return 1" })).toBeUndefined()
+  expect(activity("shell", { command: "ls", description: "  " })).toBe("Rodando ls")
+  expect(activity("read", { path: "a.ts", description: "Lendo outra coisa" })).toBe("Lendo a.ts")
   expect(activity("glob", { pattern: "**/*.swift" })).toBe("Buscando **/*.swift")
   expect(activity("webfetch", { url: "https://x" })).toBe("Pesquisando na web")
   expect(activity("websearch", { query: "x" })).toBe("Pesquisando na web")
@@ -269,6 +280,13 @@ test("reasoning, text and unknown tools replace the focus activity; a new execut
   for (const event of tool(ids.live, T, "call_1", "grep", { pattern: "LiveActivity" }))
     await run(tracker.apply(event, T))
   expect(focusActivity()).toBe("Buscando LiveActivity")
+  // A call the agent described shows its description (docs/tool-descriptions.md).
+  for (const event of tool(ids.live, T, "call_d", "shell", {
+    command: "cd loja && python3 -m unittest -q 2>&1 | tail -5",
+    description: "Reproduzindo falhas dos testes",
+  }))
+    await run(tracker.apply(event, T))
+  expect(focusActivity()).toBe("Reproduzindo falhas dos testes")
   for (const event of tool(ids.live, T, "call_2", "mcp_server_tool", {})) await run(tracker.apply(event, T))
   expect(focusActivity()).toBeUndefined()
   await run(tracker.apply({ type: "session.text.started", created: T, data: { sessionID: ids.live } }, T))

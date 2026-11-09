@@ -164,10 +164,11 @@ does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agor
 - **Focus:** among working sessions, keep the current focus while it is still working; otherwise pick the one whose
   execution started most recently. Absent when `counts.working == 0`.
 - **activity** (from the latest step activity of the most recently active **executing** session in the focus
-  family: the focus itself or one of its descendants): edit/write/patch → `Editando <basename>`; read →
-  `Lendo <basename>`; shell → `Rodando <command, first 40 chars>`; grep/glob → `Buscando <pattern>`; webfetch or
-  websearch → `Pesquisando na web`; subagent → `Delegando para <agent>`; reasoning → `Pensando`; text →
-  `Escrevendo resposta`; otherwise omit.
+  family: the focus itself or one of its descendants): shell, grep or execute with the agent's `description`
+  ([tool-descriptions.md](tool-descriptions.md), rev. 2026-11-09) → that description; edit/write/patch →
+  `Editando <basename>`; read → `Lendo <basename>`; shell → `Rodando <command, first 40 chars>`; grep/glob →
+  `Buscando <pattern>`; webfetch or websearch → `Pesquisando na web`; subagent → `Delegando para <agent>`;
+  reasoning → `Pensando`; text → `Escrevendo resposta`; otherwise omit.
 - **progress:** the session's **Progresso** when it shows (rev. 2026-10-30, [progress.md](progress.md)):
   `{ done, total, unit: "todos", current }`, with the upstream web's rules: `done` counts completed items, `total`
   every item (cancelled ones included), `current` the item in progress, else the next pending one, else the last
