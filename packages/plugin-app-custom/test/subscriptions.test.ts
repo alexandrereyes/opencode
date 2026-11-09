@@ -82,6 +82,7 @@ test("normalizes quota metadata without returning account secrets and preserves 
           latestExpiresAt: null,
           nonExpiring: 1,
         },
+        fable: null,
         fiveHourRemaining: 60,
         fiveHourResetAt: "2026-09-10T22:00:00Z",
         remaining: 0,
@@ -99,6 +100,7 @@ test("normalizes quota metadata without returning account secrets and preserves 
         authenticated: false,
         cooldownSeconds: 0,
         bankedResets: null,
+        fable: null,
         fiveHourRemaining: null,
         fiveHourResetAt: null,
         remaining: null,
@@ -115,7 +117,7 @@ test("normalizes quota metadata without returning account secrets and preserves 
   expect(JSON.stringify(result)).not.toContain("private")
 })
 
-test("normalizes the Anthropic pool with tiers, both quota windows and active grants", async () => {
+test("normalizes the Anthropic pool with tiers, both quota windows, active grants and the Fable limit", async () => {
   const server = Bun.serve({
     port: 0,
     fetch(request) {
@@ -145,19 +147,79 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
               planType: "default_claude_max_20x",
               weeklyResetAt: "2026-09-29T11:59:59Z",
               fiveHourResetAt: "2026-09-27T03:09:59Z",
+              fable: {
+                percent: 38,
+                resetAt: "2026-09-30T14:00:00Z",
+                weeklyAllowancePercent: 50,
+                weeklyUsedPercent: 12,
+              },
             },
             usageAgeSeconds: 60,
             inventory: {
               observedAt: "2026-09-26T22:41:17Z",
               available: [],
               grants: [
-                { id: "later", resetsLeft: 2, resetsTotal: 2, endsAt: "2026-11-01T00:00:00Z", paused: false },
+                {
+                  id: "later",
+                  resetsLeft: 2,
+                  resetsTotal: 2,
+                  endsAt: "2026-11-01T00:00:00Z",
+                  paused: false,
+                  kind: "weekly",
+                },
+                {
+                  id: "fable",
+                  resetsLeft: 1,
+                  resetsTotal: 1,
+                  endsAt: "2027-03-09T07:59:00Z",
+                  paused: false,
+                  kind: "fable",
+                },
+                {
+                  id: "fable-used",
+                  resetsLeft: 0,
+                  resetsTotal: 1,
+                  endsAt: "2027-01-01T00:00:00Z",
+                  paused: false,
+                  kind: "fable",
+                },
                 { id: "first", resetsLeft: 1, resetsTotal: 1, endsAt: "2026-10-22T16:00:00Z", paused: false },
                 { id: "open", resetsLeft: 1, resetsTotal: 1, endsAt: null, paused: false },
                 { id: "used", resetsLeft: 0, resetsTotal: 1, endsAt: "2026-10-01T00:00:00Z", paused: false },
                 { id: "paused", resetsLeft: 1, resetsTotal: 1, endsAt: "2026-10-02T00:00:00Z", paused: true },
               ],
               eligible: true,
+            },
+          },
+          {
+            account: {
+              id: "resets-only",
+              email: "resets-only@example.test",
+              subscriptionTier: "default_claude_max_5x",
+              name: null,
+              enabled: true,
+              authenticationState: "Authenticated",
+            },
+            cooldownSeconds: 0,
+            usage: {
+              observedAt: "2026-09-26T22:41:16Z",
+              weeklyPercent: 100,
+              hasCapacity: false,
+              planType: "default_claude_max_5x",
+              weeklyResetAt: "2026-09-29T11:59:59Z",
+            },
+            usageAgeSeconds: 60,
+            inventory: {
+              grants: [
+                {
+                  id: "fable",
+                  resetsLeft: 1,
+                  resetsTotal: 1,
+                  endsAt: "2027-03-09T07:59:00Z",
+                  paused: false,
+                  kind: "fable",
+                },
+              ],
             },
           },
           {
@@ -201,6 +263,18 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
             latestExpiresAt: "2026-11-01T00:00:00Z",
             nonExpiring: 1,
           },
+          fable: {
+            remaining: 62,
+            resetAt: "2026-09-30T14:00:00Z",
+            weeklyShare: 50,
+            weeklyGiveBack: 12,
+            bankedResets: {
+              available: 1,
+              earliestExpiresAt: "2027-03-09T07:59:00Z",
+              latestExpiresAt: "2027-03-09T07:59:00Z",
+              nonExpiring: 0,
+            },
+          },
           fiveHourRemaining: 99,
           fiveHourResetAt: "2026-09-27T03:09:59Z",
           remaining: 31,
@@ -211,6 +285,35 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
           credits: null,
         },
         {
+          id: "resets-only",
+          name: "resets-only@example.test",
+          enabled: true,
+          plan: "max5x",
+          authenticated: true,
+          cooldownSeconds: 0,
+          bankedResets: { available: 0, earliestExpiresAt: null, latestExpiresAt: null, nonExpiring: 0 },
+          fable: {
+            remaining: null,
+            resetAt: null,
+            weeklyShare: null,
+            weeklyGiveBack: null,
+            bankedResets: {
+              available: 1,
+              earliestExpiresAt: "2027-03-09T07:59:00Z",
+              latestExpiresAt: "2027-03-09T07:59:00Z",
+              nonExpiring: 0,
+            },
+          },
+          fiveHourRemaining: null,
+          fiveHourResetAt: null,
+          remaining: 0,
+          resetAt: "2026-09-29T11:59:59Z",
+          observedAt: "2026-09-26T22:41:16Z",
+          stale: false,
+          hasCapacity: false,
+          credits: null,
+        },
+        {
           id: "unknown",
           name: "Unknown",
           enabled: true,
@@ -218,6 +321,7 @@ test("normalizes the Anthropic pool with tiers, both quota windows and active gr
           authenticated: true,
           cooldownSeconds: 0,
           bankedResets: null,
+          fable: null,
           fiveHourRemaining: null,
           fiveHourResetAt: null,
           remaining: null,
@@ -305,13 +409,16 @@ test("writes the automation switch to the provider-specific proxy route", async 
   expect(await Effect.runPromise(withProxy("", writeAutomation({ provider: "codex", enabled: false })))).toBeNull()
 })
 
-test("consumes a banked reset through the provider-specific proxy route and maps failures", async () => {
+test("consumes a banked reset of the requested kind through the provider-specific proxy route and maps failures", async () => {
   const requests: { path: string; method: string }[] = []
   const server = Bun.serve({
     port: 0,
     fetch(request) {
-      const path = new URL(request.url).pathname
+      const url = new URL(request.url)
+      const path = url.pathname + url.search
       requests.push({ path, method: request.method })
+      if (path === "/_admin/anthropic/accounts/fable/banked-resets/consume?kind=fable")
+        return Response.json({ code: "reset", windowsReset: 1, httpStatus: 200, succeeded: true })
       if (path === "/_admin/accounts/one/banked-resets/consume")
         return Response.json({ code: "reset", windowsReset: 2, httpStatus: 200, succeeded: true, token: "private" })
       if (path === "/_admin/anthropic/accounts/one/banked-resets/consume")
@@ -338,6 +445,9 @@ test("consumes a banked reset through the provider-specific proxy route and maps
         consumeReset({ provider: "codex", accountId: "token" }),
         consumeReset({ provider: "codex", accountId: "upstream" }),
         consumeReset({ provider: "codex", accountId: "unknown" }),
+        consumeReset({ provider: "anthropic", accountId: "fable", kind: "fable" }),
+        consumeReset({ provider: "anthropic", accountId: "one", kind: "weekly" }),
+        consumeReset({ provider: "codex", accountId: "one", kind: "fable" }),
       ]),
     ).pipe(Effect.ensuring(Effect.sync(() => server.stop(true)))),
   )
@@ -349,6 +459,10 @@ test("consumes a banked reset through the provider-specific proxy route and maps
     { status: "consume_failed" },
     { status: "consume_failed" },
     { status: "consume_failed" },
+    { status: "ok", result: { code: "reset", windowsReset: 1 } },
+    { status: "consume_failed" },
+    // Codex has no Fable resets: nothing is sent.
+    { status: "no_credit" },
   ])
   expect(requests).toEqual([
     { path: "/_admin/accounts/one/banked-resets/consume", method: "POST" },
@@ -358,6 +472,8 @@ test("consumes a banked reset through the provider-specific proxy route and maps
     { path: "/_admin/accounts/token/banked-resets/consume", method: "POST" },
     { path: "/_admin/accounts/upstream/banked-resets/consume", method: "POST" },
     { path: "/_admin/accounts/unknown/banked-resets/consume", method: "POST" },
+    { path: "/_admin/anthropic/accounts/fable/banked-resets/consume?kind=fable", method: "POST" },
+    { path: "/_admin/anthropic/accounts/one/banked-resets/consume", method: "POST" },
   ])
   expect(await Effect.runPromise(withProxy("", consumeReset({ provider: "codex", accountId: "one" })))).toEqual({
     status: "consume_failed",

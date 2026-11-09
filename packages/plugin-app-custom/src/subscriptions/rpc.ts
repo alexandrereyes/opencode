@@ -11,6 +11,18 @@ export const BankedResets = Schema.Struct({
   nonExpiring: Schema.Number,
 }).annotate({ identifier: "Subscriptions.BankedResets" })
 
+// Anthropic's weekly limit for Fable: a share of the weekly quota, with banked resets of its own. A Fable reset
+// clears this limit and returns to the weekly quota only what Fable used (`weeklyGiveBack`).
+export interface Fable extends Schema.Schema.Type<typeof Fable> {}
+export const Fable = Schema.Struct({
+  // Null when the account holds Fable resets but the proxy has not reported the limit itself.
+  remaining: Schema.NullOr(Schema.Number),
+  resetAt: Schema.NullOr(Schema.String),
+  weeklyShare: Schema.NullOr(Schema.Number),
+  weeklyGiveBack: Schema.NullOr(Schema.Number),
+  bankedResets: Schema.NullOr(BankedResets),
+}).annotate({ identifier: "Subscriptions.Fable" })
+
 export interface Account extends Schema.Schema.Type<typeof Account> {}
 export const Account = Schema.Struct({
   id: Schema.String,
@@ -19,7 +31,9 @@ export const Account = Schema.Struct({
   plan: Schema.NullOr(Schema.String),
   authenticated: Schema.Boolean,
   cooldownSeconds: Schema.Number,
+  // Resets of the weekly quota only; Fable resets are in `fable.bankedResets`.
   bankedResets: Schema.NullOr(BankedResets),
+  fable: Schema.NullOr(Fable),
   fiveHourRemaining: Schema.NullOr(Schema.Number),
   fiveHourResetAt: Schema.NullOr(Schema.String),
   remaining: Schema.NullOr(Schema.Number),
@@ -72,7 +86,12 @@ export const Definition = Rpc.define({
     },
     consumeReset: {
       input: Schema.toStandardSchemaV1(
-        Schema.Struct({ provider: Schema.Literals(["codex", "anthropic"]), accountId: Schema.String }),
+        Schema.Struct({
+          provider: Schema.Literals(["codex", "anthropic"]),
+          accountId: Schema.String,
+          // Omitted means `weekly`, so a client that predates Fable never spends a Fable reset.
+          kind: Schema.optional(Schema.Literals(["weekly", "fable"])),
+        }),
       ),
       output: Schema.toStandardSchemaV1(ResetResult),
       errors: {

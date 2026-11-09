@@ -143,6 +143,7 @@ it.live(
             authenticated: true,
             cooldownSeconds: 0,
             bankedResets: null,
+            fable: null,
             fiveHourRemaining: null,
             fiveHourResetAt: null,
             remaining: 75,

@@ -15,6 +15,17 @@ const Usage = Schema.NullOr(
     planType: Schema.NullOr(Schema.String),
     // Paid ChatGPT credits; proxies before the credit fallback omit it.
     credits: Schema.optional(Schema.NullOr(Schema.Struct({ balance: Schema.NullOr(Schema.Finite) }))),
+    // Anthropic's weekly limit for Fable; Codex and proxies before the Fable launch omit it.
+    fable: Schema.optional(
+      Schema.NullOr(
+        Schema.Struct({
+          percent: Schema.Finite,
+          resetAt: Schema.optional(Schema.NullOr(Schema.String)),
+          weeklyAllowancePercent: Schema.optional(Schema.NullOr(Schema.Finite)),
+          weeklyUsedPercent: Schema.optional(Schema.NullOr(Schema.Finite)),
+        }),
+      ),
+    ),
   }),
 )
 
@@ -72,6 +83,8 @@ const AnthropicStatus = Schema.Struct({
                 resetsLeft: Schema.Finite,
                 endsAt: Schema.optional(Schema.NullOr(Schema.String)),
                 paused: Schema.Boolean,
+                // `fable` marks a Fable reset; proxies before the Fable launch omit it.
+                kind: Schema.optional(Schema.NullOr(Schema.String)),
               }),
             ),
           }),
@@ -164,8 +177,11 @@ const ResetConflict = Schema.Struct({ error: Schema.Literals(["no_credit", "busy
 export const consumeReset = Effect.fn("Subscriptions.consumeReset")(function* (input: {
   provider: "codex" | "anthropic"
   accountId: string
+  kind?: "weekly" | "fable"
 }) {
   const failed = { status: "consume_failed" as const }
+  // Only the Anthropic pool has Fable resets; a Codex reset is never spent in their place.
+  if (input.kind === "fable" && input.provider === "codex") return { status: "no_credit" as const }
   const url = yield* Config.String("OPENCODE_LLM_PROXY_URL").pipe(Config.withDefault(""), Effect.orDie)
   if (!url) return failed
   const prefix = input.provider === "codex" ? "/_admin/accounts/" : "/_admin/anthropic/accounts/"
@@ -173,7 +189,8 @@ export const consumeReset = Effect.fn("Subscriptions.consumeReset")(function* (i
     const client = yield* HttpClient.HttpClient
     const response = yield* client.execute(
       HttpClientRequest.post(
-        `${url.replace(/\/$/, "")}${prefix}${encodeURIComponent(input.accountId)}/banked-resets/consume`,
+        // Without `kind` the proxy spends only a reset of the weekly quota.
+        `${url.replace(/\/$/, "")}${prefix}${encodeURIComponent(input.accountId)}/banked-resets/consume${input.kind === "fable" ? "?kind=fable" : ""}`,
       ),
     )
     if (response.status === 409)
@@ -199,7 +216,7 @@ const readCodex = (base: string) =>
     return {
       status: "ok" as const,
       accounts: data.accounts.map((item) =>
-        account(item, item.usage?.planType ?? item.account.planType, item.bankedResets ?? null),
+        account(item, item.usage?.planType ?? item.account.planType, item.bankedResets ?? null, null),
       ),
       automation: automation(data),
     }
@@ -224,7 +241,10 @@ const readAnthropic = (base: string) =>
         account(
           item,
           anthropicPlan(item.usage?.planType ?? item.account.subscriptionTier),
-          item.inventory ? anthropicBankedResets(item.inventory.grants) : null,
+          item.inventory
+            ? anthropicBankedResets(item.inventory.grants.filter((grant) => grant.kind !== "fable"))
+            : null,
+          anthropicFable(item),
         ),
       ),
       automation: automation(data),
@@ -249,6 +269,7 @@ function account(
   },
   plan: string | null,
   bankedResets: Subscriptions.BankedResets | null,
+  fable: Subscriptions.Fable | null,
 ): Subscriptions.Account {
   return {
     id: item.account.id,
@@ -258,6 +279,7 @@ function account(
     authenticated: item.account.authenticationState === "Authenticated",
     cooldownSeconds: item.cooldownSeconds,
     bankedResets,
+    fable,
     fiveHourRemaining:
       item.usage?.fiveHourPercent == null ? null : Math.max(0, Math.min(100, 100 - item.usage.fiveHourPercent)),
     fiveHourResetAt: item.usage?.fiveHourResetAt ?? null,
@@ -275,6 +297,20 @@ function anthropicPlan(tier: string | null) {
   if (tier?.includes("max_20x")) return "max20x"
   if (tier?.includes("max_5x")) return "max5x"
   return tier
+}
+
+// Null when the proxy reports neither the Fable limit nor a Fable grant, as proxies before the Fable launch do.
+function anthropicFable(item: (typeof AnthropicStatus.Type)["accounts"][number]): Subscriptions.Fable | null {
+  const limit = item.usage?.fable
+  const grants = item.inventory?.grants.filter((grant) => grant.kind === "fable")
+  if (!limit && !grants?.length) return null
+  return {
+    remaining: limit ? Math.max(0, Math.min(100, 100 - limit.percent)) : null,
+    resetAt: limit?.resetAt ?? null,
+    weeklyShare: limit?.weeklyAllowancePercent ?? null,
+    weeklyGiveBack: limit?.weeklyUsedPercent ?? null,
+    bankedResets: grants ? anthropicBankedResets(grants) : null,
+  }
 }
 
 function anthropicBankedResets(
