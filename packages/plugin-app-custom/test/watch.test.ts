@@ -1,6 +1,10 @@
 import { expect } from "bun:test"
-import { Deferred, Effect, Fiber, Logger, PubSub, Schema } from "effect"
+import { Cause, ConfigProvider, Deferred, Effect, Exit, Fiber, Logger, PubSub, Schema } from "effect"
 import { TestClock } from "effect/testing"
+import { mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { accessVariable, readAccess } from "../src/watch/index"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
 import type { LiveActivity } from "../src/live-activity/rpc"
@@ -118,6 +122,36 @@ it.effect("pairing returns a token stored only as a hash; revoke removes the dev
     expect(yield* watch.handlers.devices()).toEqual({ devices: [] })
     expect((yield* call("GET", "/ping")).status).toBe(401)
     expect(Schema.decodeUnknownSync(Watch.Paired)(paired)).toEqual(paired)
+  }),
+)
+
+it.live("the Access token comes from OPENCODE_WATCH_ACCESS_JSON, else the file; errors never carry the content", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "watch-access-")))
+    const file = path.join(directory, "cf-access-service-token.json")
+    const missing = path.join(directory, "missing.json")
+    yield* Effect.promise(() => Bun.write(file, JSON.stringify({ clientId: "file.access", clientSecret: "file-secret" })))
+    const variable = JSON.stringify({ clientId: "env.access", clientSecret: "env-secret" })
+    const read = (env: Record<string, string>, from: string) =>
+      Effect.gen(function* () {
+        const log = logCollector()
+        const exit = yield* readAccess(from).pipe(
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+          log.provide,
+          Effect.exit,
+        )
+        expect(JSON.stringify(log.lines)).not.toMatch(/secret/)
+        return Exit.isSuccess(exit) ? exit.value : String(Cause.squash(exit.cause))
+      })
+    expect(yield* read({ [accessVariable]: variable }, file)).toEqual({ clientId: "env.access", clientSecret: "env-secret" })
+    expect(yield* read({}, file)).toEqual({ clientId: "file.access", clientSecret: "file-secret" })
+    const neither = yield* read({}, missing)
+    expect(neither).toContain(`falta ${accessVariable}`)
+    expect(neither).toContain(missing)
+    const invalid = yield* read({ [accessVariable]: '{"clientId":"env.access","clientSecret":7,"x":"leak-secret"}' }, file)
+    expect(invalid).toContain(`em ${accessVariable} não é um JSON com clientId e clientSecret`)
+    expect(invalid).not.toMatch(/secret"|leak|env\.access/)
+    yield* Effect.promise(() => rm(directory, { recursive: true }))
   }),
 )
 

@@ -284,7 +284,8 @@ gone with it. The two ways out are told apart:
 - Headers: `authorization: bearer <ES256 JWT {iss: teamID, iat}, kid: keyID>` (reuse the JWT for ~50 minutes),
   `apns-push-type: liveactivity`, `apns-topic: br.com.alexandrem.opencode.push-type.liveactivity`,
   `apns-priority: 5|10`, `apns-expiration` = stale-date.
-- Configuration (never committed): `OPENCODE_APNS_KEY_PATH` (`.p8`), `OPENCODE_APNS_KEY_ID`,
+- Configuration (never committed): `OPENCODE_APNS_KEY_P8` (the `.p8` content, from MyCredentials) or
+  `OPENCODE_APNS_KEY_PATH` (the `.p8` file), `OPENCODE_APNS_KEY_ID`,
   `OPENCODE_APNS_TEAM_ID` (default `ERRYZ68LX5`), `OPENCODE_APNS_BUNDLE_ID` (default `br.com.alexandrem.opencode`).
   Missing key or key ID ⇒ `unconfigured`.
 - `410` or `400 BadDeviceToken`/`Unregistered` ⇒ drop that token. Other errors are logged and retried on the next
@@ -517,9 +518,13 @@ the expired activity, or for one registered 7 h 45 min or more ago (`limits.acti
 token re-reports), is no refusal either: only a swipe within the 8 hours sets `dismissed` and holds push-to-start
 until `activeTotal` returns to 0.
 
-**APNs configuration.** Set `OPENCODE_APNS_KEY_PATH` (the `.p8` file) and `OPENCODE_APNS_KEY_ID`; optionally
-`OPENCODE_APNS_TEAM_ID` and `OPENCODE_APNS_BUNDLE_ID`. They are read once when the hub starts; an unreadable key logs a
-warning and keeps pushes off (`unconfigured`). Pushes run in their own fibers with a 10 s request timeout; the HTTP/2
+**APNs configuration.** Set `OPENCODE_APNS_KEY_ID` and the key: `OPENCODE_APNS_KEY_P8`, the `.p8` content injected
+by `mycred run` from the MyCredentials policy `opencode-servidor` (`opencode/apns/AuthKey_<id>.p8`, see `manual.json`
+`mycred` in `docs/custom-macos.md`), wins over `OPENCODE_APNS_KEY_PATH`, the `.p8` file, kept as a fallback while a
+server starts without the vault. Optionally `OPENCODE_APNS_TEAM_ID` and `OPENCODE_APNS_BUNDLE_ID`. They are read once
+when the hub starts. With a key ID, the log says `Live Activity APNs enabled` with the key's `source` (the variable's
+name or the file path), or warns that the key is missing or unreadable and keeps pushes off (`unconfigured`); logs
+never carry the key or the parser's error. Pushes run in their own fibers with a 10 s request timeout; the HTTP/2
 connection per host is unreferenced so it never keeps the process alive. `makeClient` accepts an `origin` override,
 used only by the tests' local HTTP/2 server; `OPENCODE_APNS_ORIGIN` sets it from the environment (with a warning in the
 log) so a sandbox can exercise delivery against a local stand-in without reaching Apple or any device. The same client

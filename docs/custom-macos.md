@@ -243,9 +243,19 @@ unavailable` and starts the server without those variables, so only the integrat
 fail. Like the rest of `manual.json`, the setting takes effect on the next activation that starts the
 service.
 
-Current bindings of `opencode-servidor`: `GOOGLE_WORKSPACE_MCP_CLIENT_SECRET` (OAuth client
-"OpenCode MCP (Workspace)" of Google Cloud project `abacato-v2`, used by the Gmail, Drive, Docs, Sheets
-and Calendar MCP servers in the global `opencode.json`).
+Current bindings of `opencode-servidor`:
+
+- `GOOGLE_WORKSPACE_MCP_CLIENT_SECRET`: OAuth client "OpenCode MCP (Workspace)" of Google Cloud project
+  `abacato-v2`, used by the Gmail, Drive, Docs, Sheets and Calendar MCP servers in the global `opencode.json`.
+- `OPENCODE_WATCH_ACCESS_JSON`: the Cloudflare Access service token `opencode-watch` (`{clientId, clientSecret}`)
+  returned to the watch at pairing (`packages/plugin-app-custom/docs/watch.md`).
+- `OPENCODE_APNS_KEY_P8`: the APNs `.p8` key of the Live Activity and session alerts
+  (`packages/plugin-app-custom/docs/live-activity.md`); `OPENCODE_APNS_KEY_ID` stays in `manual.json`.
+
+The plugin prefers these variables and falls back to `~/.config/opencode/watch/cf-access-service-token.json` and
+`OPENCODE_APNS_KEY_PATH` while those files exist, so a server started without the vault still pairs and pushes.
+Once the files are gone, a start without the vault leaves pairing failing with a message that names the variable
+and the file, and the log warns that the APNs key is missing.
 
 Routine `custom:update` skips the database backup and does not require `sqlite3`.
 It still requires the existing database and password and verifies the authenticated

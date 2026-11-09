@@ -28,7 +28,9 @@ Watch ══UDP (Opus, DTLS/ICE-lite)══▶ OpenAI GPT Live  (media never cro
   (same process-global hub pattern as `custom.live-activity`). It is not the OpenCode API: it exposes only the
   allowlisted routes below, so the public hostname never reaches shell, files or arbitrary sessions.
 - The Cloudflare side already exists (`core-infra/cloudflare-one/watch-mac-cloudflare-manifest.json`). The service
-  token is in `~/.config/opencode/watch/cf-access-service-token.json` (`{clientId, clientSecret}`, 0600). Every watch
+  token (`{clientId, clientSecret}`) comes from `OPENCODE_WATCH_ACCESS_JSON`, injected by `mycred run` from the
+  MyCredentials policy `opencode-servidor` (`opencode/watch/cf-access-service-token.json`), or else from the fallback
+  file `~/.config/opencode/watch/cf-access-service-token.json` (0600). Every watch
   request sends `CF-Access-Client-Id`, `CF-Access-Client-Secret` and a non-default `User-Agent: OpenCodeWatch/<v>`
   (Cloudflare blocks some default agents with error 1010).
 - Before the gateway can bind 4192, the spike relay (tmux `watch-spike-relay`) must be stopped. Development and
@@ -280,8 +282,10 @@ port) and refuses 4192.
 **Pairing and authentication.** `pair` creates `watch_<random>` and a 32-byte base64url token; storage
 (`watch:devices`) keeps its SHA-256, `createdAt`, `lastSeenAt` (written at most once a minute; `devices()` reports
 `createdAt` until the watch first calls the gateway) and the widget token.
-`access` is read from `~/.config/opencode/watch/cf-access-service-token.json` at each `pair` (a missing file fails
-`pair` with `operation_failed`). `revoke` also ends the device's call. Any path outside `/watch/v1/` and any unknown
+`access` is read at each `pair` from `OPENCODE_WATCH_ACCESS_JSON`, else from
+`~/.config/opencode/watch/cf-access-service-token.json`; the log says `Watch Cloudflare Access token read` with its
+`source`. With neither, or with content that is not `{clientId, clientSecret}`, `pair` fails with `operation_failed`
+and a message naming the variable and the file, never their content. `revoke` also ends the device's call. Any path outside `/watch/v1/` and any unknown
 route is `404`; authentication runs before routing inside `/watch/v1/`, so an unpaired caller only ever sees `401`.
 Rate limit: 60 requests in a sliding minute per device; heartbeats never count and nothing counts while the device
 has an active call. Logs carry device IDs, statuses and reasons, never tokens, SDP or transcripts; diagnostics are
