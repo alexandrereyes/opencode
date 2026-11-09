@@ -2364,6 +2364,7 @@ export type ConfigEntry =
                         callback_port?: number
                         redirect_uri?: string
                         auth_server_metadata_url?: string
+                        authorization_params?: { [x: string]: string }
                       }
                     | false
                   disabled?: boolean
@@ -3991,6 +3992,7 @@ export type ExperimentalMcpAddInput = {
               readonly callback_port?: number
               readonly redirect_uri?: string
               readonly auth_server_metadata_url?: string
+              readonly authorization_params?: { readonly [x: string]: string }
             }
           | false
         readonly disabled?: boolean

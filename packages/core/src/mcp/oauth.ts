@@ -123,6 +123,15 @@ export const configuredDiscovery = async (input: {
   }
 }
 
+// Some providers need parameters the MCP authorization flow does not send, such as Google's
+// access_type=offline for a refresh token. Parameters the flow already set are left untouched.
+export const withAuthorizationParams = (url: URL, params: Readonly<Record<string, string>> | undefined) => {
+  if (!params) return url
+  const next = new URL(url)
+  for (const [key, value] of Object.entries(params)) if (!next.searchParams.has(key)) next.searchParams.set(key, value)
+  return next
+}
+
 export interface Store {
   readonly tokens: () => Promise<StoredOAuthTokens | undefined>
   readonly saveTokens: (tokens: StoredOAuthTokens) => Promise<void>
@@ -278,7 +287,19 @@ export const connectProvider = Effect.fnUntraced(function* (input: {
   const credentials = yield* Credential.Service
   const run = Effect.runPromiseWith(yield* Effect.context())
   const found = (yield* credentials.list(input.integrationID)).at(-1)
-  if (!found || found.value.type !== "oauth") return provider({ config: input.config, store: memoryStore() })
+  if (!found || found.value.type !== "oauth") {
+    const anonymous = provider({ config: input.config, store: memoryStore() })
+    // A pre-registered client says the server expects a login. Some servers (Google Workspace) list their
+    // tools anonymously and reject only tool calls, which would otherwise show as connected with every
+    // call failing and no sign-in offered; asking for tokens fails instead, so the server needs_auth.
+    if (!input.config.oauth || !input.config.oauth.client_id) return anonymous
+    return {
+      ...anonymous,
+      tokens: async () => {
+        throw new UnauthorizedError(`MCP server "${input.config.url}" requires a login before it can be used`)
+      },
+    }
+  }
   const id = found.id
   const methodID = found.value.methodID
   const read = async () => {
@@ -459,7 +480,7 @@ export const authorize = (input: {
         url: oauth?.redirect_uri ?? `http://127.0.0.1:${port}${redirectPath}`,
         state,
         open: (url) => {
-          authorizationUrl = url
+          authorizationUrl = withAuthorizationParams(url, oauth?.authorization_params)
           return run(Effect.logInfo("mcp oauth awaiting authorization", fields))
         },
       },

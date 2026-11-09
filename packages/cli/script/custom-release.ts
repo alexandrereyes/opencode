@@ -254,7 +254,20 @@ export async function settings(home: string) {
     database,
     config,
     environment: Object.fromEntries(entries.map(([key, value]) => [key, String(value)])),
+    mycred: vault("mycred" in input ? input.mycred : undefined),
   }
+}
+
+/** `manual.json` `mycred`: the server receives the bindings of this MyCredentials policy, read from the Keychain. */
+function vault(input: unknown) {
+  if (input === undefined) return undefined
+  const keychain = typeof input === "object" && input !== null && "keychain" in input ? input.keychain : undefined
+  const helper = typeof input === "object" && input !== null && "helper" in input ? input.helper : undefined
+  if (typeof keychain !== "string" || !/^[a-z0-9][a-z0-9._-]*$/.test(keychain))
+    throw new Error("manual.json mycred.keychain must be a MyCredentials policy name")
+  if (helper !== undefined && (typeof helper !== "string" || !path.isAbsolute(helper)))
+    throw new Error("manual.json mycred.helper must be an absolute path")
+  return { keychain, helper: helper ?? path.join(os.homedir(), ".local/bin/mycred") }
 }
 
 export async function health(home: string, port: number) {
@@ -358,6 +371,18 @@ export function scripts(home: string, config: Awaited<ReturnType<typeof settings
   })
     .map(([key, value]) => `export ${key}=${quote(value)}`)
     .join("\n")
+  const serve = `"$release/bin/opencode" serve --service --hostname 127.0.0.1 --port ${config.port}`
+  const vault = config.mycred
+  // The vault answers through WARP; when it cannot, the server starts without the policy's variables
+  // (their integrations fail) instead of not starting at all.
+  const start = vault
+    ? `helper=${quote(vault.helper)}
+if "$helper" check --keychain ${quote(vault.keychain)} --quiet --timeout 15 >/dev/null 2>&1; then
+  exec "$helper" run --keychain ${quote(vault.keychain)} --quiet --timeout 15 -- ${serve}
+fi
+echo "serve: MyCredentials policy ${vault.keychain} unavailable; starting without its variables" >&2
+exec ${serve}`
+    : `exec ${serve}`
   return {
     server: `#!/bin/sh
 set -eu
@@ -365,7 +390,7 @@ ${environment}
 release=$(cd ${quote(`${home}/current`)} && pwd -P)
 export OPENCODE_CONFIG_CONTENT="$(cat "$release/server-config.json")"
 cd ${quote(home)}
-exec "$release/bin/opencode" serve --service --hostname 127.0.0.1 --port ${config.port}
+${start}
 `,
     tui: launcher(home, config.port, environment),
   }

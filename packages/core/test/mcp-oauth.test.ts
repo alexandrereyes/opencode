@@ -281,6 +281,31 @@ describe("MCP OAuth", () => {
     expect(registrations).toBe(0)
   })
 
+  test("reports needs_auth before calling a server with a pre-registered client and no credential", async () => {
+    // Google Workspace lists tools anonymously, so without this the server would show as connected.
+    let requests = 0
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests++
+        return new Response(null, { status: 404 })
+      },
+    })
+    const config = remote(`${server.url.origin}/mcp`)
+    const oauthProvider = await connectProvider(config, memoryCredentials([]))
+
+    const exit = await Effect.runPromise(
+      Effect.scoped(McpClient.connect("test", config, import.meta.dir, oauthProvider)).pipe(
+        Effect.provide(hostEnvironmentLayer),
+        Effect.exit,
+      ),
+    ).finally(() => server.stop(true))
+
+    const error = Exit.isFailure(exit) && Cause.squash(exit.cause)
+    expect(error).toBeInstanceOf(McpClient.NeedsAuthError)
+    expect(requests).toBe(0)
+  })
+
   test("drops an invalidated credential only while it still holds the presented token", async () => {
     const url = authServer.url.href
     const rotated = memoryCredentials([credential({ access: "a", refresh: "r1", url })])
@@ -504,6 +529,23 @@ describe("MCP OAuth", () => {
     ).finally(() => server.stop(true))
     expect(url.searchParams.get("scope")).toBe("read offline_access")
     expect(url.searchParams.has("prompt")).toBe(false)
+  })
+
+  test("adds configured authorization parameters without replacing the flow's own", async () => {
+    const { server } = authorizationServer({})
+    const { url } = await Effect.runPromise(
+      Effect.scoped(
+        start(server, {
+          client_id: "client",
+          scope: "read",
+          authorization_params: { access_type: "offline", prompt: "consent", client_id: "other", scope: "all" },
+        }),
+      ),
+    ).finally(() => server.stop(true))
+    expect(url.searchParams.get("access_type")).toBe("offline")
+    expect(url.searchParams.get("prompt")).toBe("consent")
+    expect(url.searchParams.getAll("client_id")).toEqual(["client"])
+    expect(url.searchParams.getAll("scope")).toEqual(["read"])
   })
 
   test("forwards iss from the redirect so issuer-advertising servers can complete", async () => {

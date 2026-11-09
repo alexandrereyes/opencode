@@ -1131,6 +1131,45 @@ test("the launcher pins the resources hub port the 4096 proxy forwards to", asyn
   expect(custom.server).toContain("export OPENCODE_RESOURCES_HUB_PORT='4300'")
 })
 
+test("the server starts through MyCredentials when manual.json names a policy, and without it when the vault fails", async () => {
+  const home = await fixture()
+  await Bun.write(`${home}/manual.json`, JSON.stringify({ mycred: { keychain: "opencode-servidor", helper: `${home}/mycred` } }))
+  const config = await settings(home)
+  await Bun.write(`${home}/serve`, scripts(home, config).server)
+  await Bun.write(`${home}/releases/${first}/server-config.json`, "{}")
+  await Bun.write(`${home}/releases/${first}/bin/opencode`, '#!/bin/sh\nprintf "opencode %s|%s\\n" "${INJECTED-none}" "$*"\n')
+  await chmod(`${home}/releases/${first}/bin/opencode`, 0o755)
+  // Fake helper: `check` exits with $CHECK; `run` injects a variable and executes the program after `--`.
+  await Bun.write(
+    `${home}/mycred`,
+    '#!/bin/sh\nprintf "mycred %s\\n" "$*" >&2\n[ "$1" = check ] && exit "$CHECK"\nwhile [ "$1" != -- ]; do shift; done\nshift\nINJECTED=yes exec "$@"\n',
+  )
+  await chmod(`${home}/mycred`, 0o755)
+  const start = async (check: number) => {
+    const child = Bun.spawn(["/bin/sh", `${home}/serve`], {
+      env: { ...process.env, CHECK: String(check) },
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    return { code, stdout, stderr }
+  }
+  const serve = "serve --service --hostname 127.0.0.1 --port 4178"
+
+  const vault = await start(0)
+  expect(vault.stdout).toBe(`opencode yes|${serve}\n`)
+  expect(vault.stderr).toContain("mycred run --keychain opencode-servidor --quiet --timeout 15 -- ")
+
+  const fallback = await start(69)
+  expect(fallback.code).toBe(0)
+  expect(fallback.stdout).toBe(`opencode none|${serve}\n`)
+  expect(fallback.stderr).toContain("MyCredentials policy opencode-servidor unavailable")
+})
+
 // The Mac runtime reads its LaunchAgent with /usr/bin/plutil; on Linux, installMacProxy (below) covers the proxy.
 test.skipIf(process.platform !== "darwin")(
   "proxy installation only touches the job that runs this runtime's proxy",
