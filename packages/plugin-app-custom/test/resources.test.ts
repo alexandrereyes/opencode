@@ -7,7 +7,7 @@ import { parseRunning } from "../src/resources/adapters/android-emulator"
 import { parse } from "../src/resources/adapters/ios-simulator"
 import { bareSerials, known, parseSimulators, references, resolveSimulators } from "../src/resources/discovery"
 import { createHub, idFor, label, sameResource, shown, type Lock } from "../src/resources/hub/hub"
-import { links } from "../src/resources/index"
+import { links, listSimulators } from "../src/resources/index"
 import { sign, verify } from "../src/resources/hub/ticket"
 import { blocking, browseRefusal, refusal, returned } from "../src/resources/lock"
 import { ResourceProtocol } from "../src/resources/protocol"
@@ -698,6 +698,16 @@ describe("discovery", () => {
     expect(references("playwright-cli click e3", "", "/w/app")).toEqual([
       { kind: "chrome", session: "default", workspace: "/w/app" },
     ])
+  })
+
+  test("a machine without xcrun has no simulators, instead of failing the agent's shell call", async () => {
+    const before = process.env.PATH
+    process.env.PATH = "/nonexistent"
+    try {
+      expect(await listSimulators()).toEqual([])
+    } finally {
+      process.env.PATH = before
+    }
   })
 
   test("ignores listings, teardown, physical devices and unrelated UUIDs", () => {

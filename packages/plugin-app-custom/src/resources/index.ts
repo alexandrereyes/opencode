@@ -349,9 +349,17 @@ export function links(resources: readonly Pick<Resources.Resource, "id" | "kind"
 export const lockUnavailable =
   "Aviso: o hub de recursos no Mac não respondeu, então este comando rodou sem verificar se Alexandre está usando o recurso. Evite novos comandos nesse simulador, emulador ou navegador até o hub voltar, a menos que a tarefa não possa esperar."
 
-async function listSimulators() {
-  const child = Bun.spawn(["xcrun", "simctl", "list", "devices", "-j"], { stdout: "pipe", stderr: "ignore" })
-  const output: unknown = await new Response(child.stdout).json().catch(() => undefined)
+/**
+ * This machine's iOS simulators. Without `xcrun` (a Linux server) `Bun.spawn` throws: no simulators, never a failure,
+ * which would fail the agent's shell call from `execute.after`.
+ */
+export async function listSimulators() {
+  const output: unknown = await Promise.resolve()
+    .then(() => {
+      const child = Bun.spawn(["xcrun", "simctl", "list", "devices", "-j"], { stdout: "pipe", stderr: "ignore" })
+      return new Response(child.stdout).json()
+    })
+    .catch(() => undefined)
   return parseSimulators(output)
 }
 
