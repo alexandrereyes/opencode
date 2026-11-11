@@ -39,6 +39,20 @@ export const Owner = Schema.Struct({
   agent: optional(Schema.String),
 }).annotate({ identifier: "Resources.Owner" })
 
+/**
+ * rev. 2026-11-11: who started an emulator (`emulator -avd`, `android-emulator --detach -avd`), with the session's and
+ * its root's titles as they were then, for "ligado por Frente D (Onboarding)". It goes when the emulator stops.
+ */
+export interface StartedBy extends Schema.Schema.Type<typeof StartedBy> {}
+export const StartedBy = Schema.Struct({
+  sessionID: Schema.String,
+  rootSessionID: Schema.String,
+  agent: optional(Schema.String),
+  title: optional(Schema.String),
+  rootTitle: optional(Schema.String),
+  at: Schema.Number,
+}).annotate({ identifier: "Resources.StartedBy" })
+
 export interface IOSSimulatorMeta extends Schema.Schema.Type<typeof IOSSimulatorMeta> {}
 export const IOSSimulatorMeta = Schema.Struct({
   kind: Schema.Literal("ios-simulator"),
@@ -150,7 +164,13 @@ export const Resource = Schema.Struct({
   label: Schema.String,
   /** Optional purpose given by explicit registration. */
   purpose: optional(Schema.String),
+  /**
+   * The session that used it last, whose family lists it (rev. 2026-11-11: commands that only ask about an emulator,
+   * such as `adb devices` or `adb emu avd name`, do not count); `lastUsedAt` says when.
+   */
   owner: optional(Owner),
+  /** rev. 2026-11-11: see `StartedBy`; absent when no agent command started it (and on older hubs). */
+  startedBy: optional(StartedBy),
   state: State,
   control: optional(Control),
   meta: Meta,
@@ -222,7 +242,8 @@ export const Snapshot = Schema.Struct({
 }).annotate({ identifier: "Resources.Snapshot" })
 
 export const Unavailable = Schema.Struct({
-  reason: Schema.Literals(["not_found", "gone", "unsupported", "hub", "failed"]),
+  /** rev. 2026-11-11: `busy` (`stop` while an agent uses it or Alexandre controls it). */
+  reason: Schema.Literals(["not_found", "gone", "unsupported", "busy", "hub", "failed"]),
 })
 
 export const limits = {
@@ -295,6 +316,17 @@ export const Definition = Rpc.define({
     focus: {
       input: Schema.toStandardSchemaV1(FocusInput),
       output: Schema.toStandardSchemaV1(FocusOutput),
+      errors: error,
+    },
+    /**
+     * rev. 2026-11-11: shuts down an Android emulator of the hub's Mac (`adb emu kill`), whose AVD stays on disk. Only
+     * an emulator known by its AVD that runs there now, proven before the command (another machine's emulator is never
+     * a resource); `unavailable` `unsupported` for any other resource, `gone` when it is not running, `busy` while an
+     * agent uses it (state `agent`) or Alexandre controls it.
+     */
+    stop: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({ id: ID })),
+      output: Schema.toStandardSchemaV1(Schema.Struct({})),
       errors: error,
     },
     /** Removes a resource from the lists; it reappears if an agent uses it again. */

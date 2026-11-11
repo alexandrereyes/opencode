@@ -22,15 +22,127 @@ const quoted = String.raw`("([^"]+)"|'([^']+)'|([^\s;&|)'"]+))`
 
 /**
  * Whether a shell command runs a tool that drives simulators, emulators or Playwright browsers, named or not (also
- * through the Linux machine's `mac` prefix, which runs it on the Mac).
+ * through the Linux machine's `mac` prefix, which runs it on the Mac). Only what runs here counts (`localCommand`).
  */
 export function touchesResources(command: string) {
-  return simulatorTools.test(command) || emulatorTools.test(command) || /\bplaywright-cli\b/.test(command)
+  const local = localCommand(command)
+  return simulatorTools.test(local) || emulatorTools.test(local) || /\bplaywright-cli\b/.test(local)
 }
 
-/** Resources named by a shell command (and, for `simctl create`, its output). Commands that end one are ignored. */
+/**
+ * Resources named by a shell command (and, for `simctl create`, its output). Commands that end one are ignored, and so
+ * are the parts that run on another machine (`localCommand`): an `emulator-5554` there is that machine's emulator.
+ */
 export function references(command: string, output = "", workdir?: string): Reference[] {
-  return dedupe([...simulators(command, output), ...emulators(command), ...browsers(command, workdir)])
+  const local = localCommand(command)
+  return dedupe([...simulators(local, output), ...emulators(local), ...browsers(local, workdir)])
+}
+
+/**
+ * The parts of a shell command that run on this machine. A simple command handed to another machine is dropped with
+ * its quoted arguments and its here-document: `ssh host …` (also `mosh`, `autossh`, `gcloud compute ssh`), `docker`,
+ * `podman` or `nerdctl` `exec`/`run` (also through `compose`), `kubectl`/`oc` `exec`, and `adb` talking to another
+ * machine's server (`-H <host>`, `ANDROID_ADB_SERVER_ADDRESS=<host>`). The Linux machine's `mac` and `orb` prefixes
+ * stay local: they run on the Mac or use its adb server.
+ */
+export function localCommand(command: string) {
+  const kept: string[] = []
+  let index = 0
+  while (index < command.length) {
+    const end = simpleEnd(command, index)
+    const segment = command.slice(index, end)
+    index = end + 1
+    if (!remote(segment)) {
+      kept.push(segment)
+      continue
+    }
+    // A here-document fed to a remote command runs there too.
+    const heredoc = /<<(-?)\s*(['"]?)([A-Za-z_][\w-]*)\2/.exec(segment)
+    if (!heredoc || command[end] !== "\n") continue
+    const delimiter = heredoc[3]!
+    while (index < command.length) {
+      const next = command.indexOf("\n", index)
+      const line = command.slice(index, next === -1 ? command.length : next)
+      index = next === -1 ? command.length : next + 1
+      if ((heredoc[1] ? line.trim() : line) === delimiter) break
+    }
+  }
+  return kept.join("\n")
+}
+
+/** Where the simple command starting at `start` ends: the next unquoted `;`, `&`, `|`, `(`, `)` or newline. */
+function simpleEnd(command: string, start: number) {
+  let quote: string | undefined
+  for (let index = start; index < command.length; index++) {
+    const char = command[index]!
+    if (quote) {
+      if (char === "\\" && quote === '"') index++
+      else if (char === quote) quote = undefined
+      continue
+    }
+    if (char === "\\") index++
+    else if (char === "'" || char === '"' || char === "`") quote = char
+    else if (";&|()\n".includes(char)) return index
+  }
+  return command.length
+}
+
+const loopback = /^(localhost|127\.0\.0\.1|::1|\[::1\])$/
+
+/**
+ * An Android tool where a command starts (also inside `$(…)` and after `do`, `then`, `xargs` or wrappers), with its
+ * arguments up to the next separator: `ls ~/.local/bin/android-emulator` runs no emulator tool.
+ */
+const androidInvocation =
+  /(?:^|[;&|(\n`]|\$\()\s*(?:(?:[A-Za-z_]\w*=\S*|sudo|exec|env|nohup|command|time|do|then|else|xargs|!|timeout\s+\S+)\s+)*(?:\S*\/)?(adb|emulator|android-emulator|agent-device|maestro|serve-emu)(?=\s|$)([^;&|)\n"'`]*)/g
+
+/** Whether a simple command runs on another machine (see `localCommand`). */
+function remote(segment: string) {
+  const words = segment.trim().split(/\s+/).filter(Boolean)
+  // Leading assignments, `sudo`, `exec`, `env`, `nohup`, `command`, `time` and `timeout <duration>` wrap the command.
+  let first = 0
+  for (; first < words.length; first++) {
+    const word = words[first]!
+    const address = /^ANDROID_ADB_SERVER_ADDRESS=['"]?([^'"\s]+)/.exec(word)?.[1]
+    if (address && !loopback.test(address)) return true
+    if (/^[A-Za-z_]\w*=/.test(word) || ["sudo", "exec", "env", "nohup", "command", "time"].includes(word)) continue
+    if (word === "timeout") {
+      first++
+      continue
+    }
+    break
+  }
+  const tool = words[first]?.split("/").pop() ?? ""
+  const args = words.slice(first + 1, first + 7)
+  if (["ssh", "mosh", "autossh"].includes(tool)) return true
+  if (tool === "gcloud") return args.includes("ssh")
+  if (["docker", "podman", "nerdctl"].includes(tool)) return args.some((word) => word === "exec" || word === "run")
+  if (["kubectl", "oc"].includes(tool)) return args.includes("exec")
+  if (tool === "adb") {
+    const host = words.slice(first + 1).findIndex((word) => word === "-H")
+    const value = host === -1 ? undefined : words[first + 2 + host]
+    return value !== undefined && !loopback.test(value.replace(/^['"]|['"]$/g, ""))
+  }
+  return false
+}
+
+/**
+ * Whether a command only asks about Android emulators: every emulator tool it runs here is `adb devices`,
+ * `adb version`, `adb get-state|get-serialno|get-devpath|wait-for-…`, `adb emu avd name|path|id`, `adb shell getprop`
+ * or `emulator -list-avds|-version`. Such a command neither marks an emulator in use nor makes its session the owner.
+ */
+export function onlyAsksAndroid(command: string) {
+  const invocations = [...localCommand(command).matchAll(androidInvocation)]
+  if (invocations.length === 0) return false
+  return invocations.every(([, tool, rest]) => {
+    const args = (rest ?? "").trim()
+    if (tool === "emulator") return /^(-list-avds|-version)\b/.test(args)
+    if (tool !== "adb") return false
+    const command = args.replace(/^(?:(?:-[stHPL])\s+\S+\s+|-[de]\s+)*/, "")
+    return /^(devices|version|get-state|get-serialno|get-devpath|wait-for-\S+|emu\s+avd\s+(name|path|id)|shell\s+getprop)\b/.test(
+      command,
+    )
+  })
 }
 
 function simulators(command: string, output: string): Reference[] {

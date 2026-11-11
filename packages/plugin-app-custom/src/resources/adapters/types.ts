@@ -9,6 +9,8 @@ export interface Entry {
   readonly name?: string
   readonly purpose?: string
   readonly owner?: Resources.Owner
+  /** Who started it (`Resources.StartedBy`), until it stops. */
+  readonly startedBy?: Resources.StartedBy
   readonly meta: Resources.Meta
   readonly status: "running" | "stopped" | "gone"
   readonly discoveredAt: number
@@ -106,6 +108,11 @@ export interface Adapter {
   released?(entry: Entry): Promise<void>
   /** Brings the resource to the front where it runs (`custom.resources/focus`); only for `capabilities.focus`. */
   focus?(entry: Entry): Promise<void>
+  /**
+   * Shuts the resource down on the hub's machine (`custom.resources/stop`), after proving it is the one running there;
+   * throws when it cannot. Only Android emulators have it.
+   */
+  stop?(entry: Entry): Promise<void>
   /** The resource left the registry: close what the adapter keeps open for it. */
   forget?(entry: Entry): Promise<void>
   /**

@@ -15,7 +15,7 @@ const decodeInfo = Schema.decodeUnknownOption(Info)
 
 export class HubError extends Error {
   constructor(
-    readonly reason: "hub" | "not_found" | "failed" | "unsupported",
+    readonly reason: "hub" | "not_found" | "failed" | "unsupported" | "gone" | "busy",
     message: string,
   ) {
     super(message)
@@ -296,6 +296,7 @@ export function makeHubClient(options: HubSettings) {
       })
       if (!response) throw unavailable()
       if (response.status === 404) throw new HubError("not_found", "Resource not found")
+      if (response.status === 409) throw new HubError("gone", "The resource is not running")
       if (!response.ok) throw new HubError("failed", (await response.text()) || "Snapshot failed")
       const width = Number(response.headers.get("x-width") ?? 0)
       const height = Number(response.headers.get("x-height") ?? 0)
@@ -326,6 +327,22 @@ export function makeHubClient(options: HubSettings) {
       if (response.status === 404) throw new HubError("not_found", "Resource not found")
       if (response.status === 409) throw new HubError("unsupported", "This resource cannot be focused")
       if (!response.ok) throw new HubError("failed", (await response.text()) || "Focus failed")
+    },
+    /**
+     * `custom.resources/stop` (rev. 2026-11-11): `unsupported`, `gone` (not running) or `busy` as the hub refuses it.
+     * Never starts the hub: only a running one knows the resource.
+     */
+    stop: async (id: string) => {
+      const response = await request(`${resource(id)}/stop`, { method: "POST", spawn: false, slow: true })
+      if (!response) throw unavailable()
+      if (response.status === 404) throw new HubError("not_found", "Resource not found")
+      if (response.status === 409) {
+        const reason = ((await response.json().catch(() => ({}))) as { reason?: string }).reason
+        if (reason === "busy") throw new HubError("busy", "An agent is using it or Alexandre controls it")
+        if (reason === "gone") throw new HubError("gone", "The emulator is not running")
+        throw new HubError("unsupported", "Only an Android emulator of this Mac can be shut down")
+      }
+      if (!response.ok) throw new HubError("failed", (await response.text()) || "Stop failed")
     },
     /** Ends a shell command on the resources it named. Never starts the hub: only a running one marked it. */
     end: (call: string) =>

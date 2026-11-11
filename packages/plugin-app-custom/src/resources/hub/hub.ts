@@ -38,6 +38,8 @@ export const Upsert = Schema.Struct({
   name: optional(Schema.String),
   purpose: optional(Schema.String),
   owner: optional(Resources.Owner),
+  /** The command that named it started it (rev. 2026-11-11, `Resources.StartedBy`). */
+  startedBy: optional(Resources.StartedBy),
   /** Marks an agent use now (state `agent`). */
   used: optional(Schema.Boolean),
   /**
@@ -88,6 +90,7 @@ const StoredEntry = Schema.Struct({
   name: optional(Schema.String),
   purpose: optional(Schema.String),
   owner: optional(Resources.Owner),
+  startedBy: optional(Resources.StartedBy),
   meta: Resources.Meta,
   status: Schema.Literals(["running", "stopped", "gone"]),
   discoveredAt: Schema.Number,
@@ -252,6 +255,7 @@ export function createHub(options: HubOptions) {
       label: label(entry),
       ...(entry.purpose ? { purpose: entry.purpose } : {}),
       ...(entry.owner ? { owner: entry.owner } : {}),
+      ...(entry.startedBy ? { startedBy: entry.startedBy } : {}),
       state,
       ...(lock ? { control: { holder: "user" as const, since: lock.since, expiresAt: lock.expiresAt } } : {}),
       meta: entry.meta,
@@ -292,6 +296,7 @@ export function createHub(options: HubOptions) {
       ...((input.name ?? existing?.name) ? { name: input.name ?? existing?.name } : {}),
       ...((input.purpose ?? existing?.purpose) ? { purpose: input.purpose ?? existing?.purpose } : {}),
       ...((input.owner ?? existing?.owner) ? { owner: input.owner ?? existing?.owner } : {}),
+      ...((input.startedBy ?? existing?.startedBy) ? { startedBy: input.startedBy ?? existing?.startedBy } : {}),
       meta: existing ? mergeMeta(existing.meta, input.meta) : input.meta,
       status: "running",
       discoveredAt: existing?.discoveredAt ?? at,
@@ -453,6 +458,25 @@ export function createHub(options: HubOptions) {
     return "ok" as const
   }
 
+  /**
+   * `custom.resources/stop`: an Android emulator of this Mac, running, that no agent uses now and Alexandre does not
+   * control; the adapter proves it is that AVD before `emu kill`, and the probe then marks it stopped.
+   */
+  const stop = async (id: string) => {
+    const entry = entries.get(id)
+    if (!entry) return "not_found" as const
+    const adapter = options.adapters[entry.kind]
+    if (!adapter.stop) return "unsupported" as const
+    if (entry.status !== "running") return "gone" as const
+    const state = view(entry).state
+    if (state === "agent" || state === "user") return "busy" as const
+    await adapter.stop(entry)
+    snapshots.delete(id)
+    lives.get(id)?.controller.abort()
+    await probe([entry.kind])
+    return "ok" as const
+  }
+
   const broadcastControl = (id: string) => {
     const lock = locks.get(id)
     lives.get(id)?.viewers.forEach((viewer) =>
@@ -568,7 +592,9 @@ export function createHub(options: HubOptions) {
         if (!entry) return []
         const meta = found.meta ? (found.exact ? found.meta : mergeMeta(entry.meta, found.meta)) : entry.meta
         if (found.status === entry.status && JSON.stringify(meta) === JSON.stringify(entry.meta)) return []
-        entries.set(id, { ...entry, status: found.status, meta, updatedAt: at })
+        // Who started it says nothing once it stopped: the next start (by anyone) is another run.
+        const { startedBy: _, ...rest } = entry
+        entries.set(id, { ...(found.status === "running" ? entry : rest), status: found.status, meta, updatedAt: at })
         // The session moved to another tab: a live viewer follows it.
         if (
           found.status === "running" &&
@@ -641,6 +667,11 @@ export function createHub(options: HubOptions) {
   const subscribe = (id: string, viewer: Viewer) => {
     const entry = entries.get(id)
     if (!entry) return viewer.close()
+    // Only a running resource is watched: a stopped emulator's serial may be another AVD's by now.
+    if (entry.status !== "running") {
+      viewer.text({ type: "end", reason: "stopped" })
+      return viewer.close()
+    }
     const existing = lives.get(id)
     const live: Live = existing ?? {
       controller: new AbortController(),
@@ -994,6 +1025,16 @@ export function createHub(options: HubOptions) {
       if (result.value === "unsupported") return Response.json({ reason: "unsupported" }, { status: 409 })
       return Response.json({})
     }
+    if (action === "stop" && request.method === "POST") {
+      const result = await stop(decoded).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+      )
+      if ("error" in result) return new Response(result.error, { status: 502 })
+      if (result.value === "not_found") return status(404)
+      if (result.value !== "ok") return Response.json({ reason: result.value }, { status: 409 })
+      return Response.json({})
+    }
     if (action === "control" && request.method === "POST") {
       const input = decodeControl(await request.json().catch(() => undefined))
       if (Option.isNone(input)) return status(400)
@@ -1004,6 +1045,8 @@ export function createHub(options: HubOptions) {
   }
 
   const image = async (id: string, url: URL) => {
+    const current = entries.get(id)
+    if (current && current.status !== "running") return Response.json({ reason: "gone" }, { status: 409 })
     const width = Number(url.searchParams.get("maxWidth") ?? 0)
     const maxWidth =
       Number.isInteger(width) && width >= 64 ? Math.min(width, Resources.limits.snapshotMaxWidth) : undefined
@@ -1197,6 +1240,7 @@ export function createHub(options: HubOptions) {
     end,
     finish,
     focus,
+    stop,
     control,
     ticket,
     probe,

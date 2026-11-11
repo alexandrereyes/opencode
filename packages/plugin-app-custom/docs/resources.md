@@ -35,7 +35,8 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | `kind`                                    | `ios-simulator`, `android-emulator`, `chrome` (clients must tolerate unknown kinds)                                                                                                       |
 | `label`                                   | Display name derived from `meta` (`iPhone 17 · OpenCode Salto Turno`, `Pixel 9 · abacato v2`, `localhost:5173/login`) unless registration named it                                        |
 | `purpose`                                 | Optional, from explicit registration                                                                                                                                                      |
-| `owner`                                   | `{ sessionID, rootSessionID, agent? }`: the session whose tool call used it (a subagent's own session) and the family's root; lists group by root and show "via <subagente>"              |
+| `owner`                                   | `{ sessionID, rootSessionID, agent? }`: the session whose tool call used it last (a subagent's own session) and the family's root; lists group by root and show "via <subagente>". Since rev. 2026-11-11 commands that only ask about an emulator do not count (see [Discovery](#discovery)); `lastUsedAt` says when |
+| `startedBy`                               | Optional (rev. 2026-11-11): `{ sessionID, rootSessionID, agent?, title?, rootTitle?, at }`, the session whose completed command started the emulator (`emulator -avd`, `android-emulator --detach -avd`) and its and its root's titles then; dropped when it stops |
 | `state`                                   | `user` (Alexandre controls it) › `agent` (a command naming it is running, or ended in the last 90 s) › `live` (running, used in the last 10 min) › `idle` ("Livre") › `stopped` › `gone`  |
 | `control`                                 | `{ holder: "user", since, expiresAt }` while Alexandre holds control                                                                                                                      |
 | `meta`                                    | Per kind, tagged by `kind`: iOS `{ udid, name?, device?, runtime? }`; Android `{ serial?, avd?, consolePort?, grpcPort?, device? }`; Chrome `{ session?, cdp?, browse?, targetID?, url?, title? }` |
@@ -50,7 +51,8 @@ merged, latest owner wins).
 
 ## RPC `custom.resources`
 
-All methods fail with `unavailable` `{ reason: "not_found" | "gone" | "unsupported" | "hub" | "failed" }`.
+All methods fail with `unavailable` `{ reason: "not_found" | "gone" | "unsupported" | "busy" | "hub" | "failed" }`
+(`busy` since rev. 2026-11-11, from `stop`). `snapshot` fails with `gone` for a resource that is not running.
 
 | Method     | Input                                            | Output                                                                                             |
 | ---------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
@@ -59,6 +61,7 @@ All methods fail with `unavailable` `{ reason: "not_found" | "gone" | "unsupport
 | `snapshot` | `{ id, maxWidth? }`                              | `{ mime, data (base64), takenAt, width?, height? }`; cached 1.5 s; thumbnails use `maxWidth` ≈ 240 |
 | `ticket`   | `{ id }`                                         | view `Ticket`                                                                                      |
 | `control`  | `{ id, action: "take" \| "renew" \| "release" }` | `{ resource, ticket? }`; `take`/`renew` return a control ticket                                    |
+| `stop`     | `{ id }`                                         | `{}` (rev. 2026-11-11); shuts down an Android emulator of the hub's Mac, see [Stop](#stop)          |
 | `dismiss`  | `{ id }`                                         | `{}`; removes it from the lists until an agent uses it again                                       |
 
 Event `rpc.custom.resources.changed` `{ ids }`: reload `list` (the ids are a hint).
@@ -83,7 +86,8 @@ Admin (`authorization: Bearer <secret>` from `hub.json`; loopback only, never pr
 `GET|PUT /admin/resources` (PUT = upsert `{ kind, meta, name?, purpose?, owner?, used?, activity? }`, with
 `activity` = `{ call, command, running }`), `POST /admin/calls/<call>/end` (ends that tool call on every resource),
 `GET|DELETE /admin/resources/<id>`, `POST /admin/resources/<id>/control`, `GET /admin/resources/<id>/snapshot`,
-`POST /admin/tickets`, `GET /admin/locks`, `GET /admin/simulators` (`{ simulators: [{ udid, name, booted }] }` from the
+`POST /admin/tickets`, `GET /admin/locks`, `POST /admin/resources/<id>/stop` (rev. 2026-11-11; 409
+`{ reason: "unsupported" | "gone" | "busy" }`, 502 when the adapter refuses), `GET /admin/simulators` (`{ simulators: [{ udid, name, booted }] }` from the
 hub's `simctl`), `POST /admin/events?wait=<ms>` (long poll; each event goes to exactly one caller), `POST /admin/shutdown`.
 Browse handoffs (rev. 2026-11-07, `browse-handoff-remoto.md`): the upsert also takes `capabilities` and `handoff`,
 `POST /admin/resources/<id>/end { reason }` ends one without an event, `POST /admin/announce { ids }` queues its
@@ -413,6 +417,20 @@ Checks: `bun test test/resources-chrome.test.ts` drives a real headless Chrome u
 frame-rate cap, touch motion, sharp still and emulation survival, idle refreshes and `released`; `script/chrome-resource-check.ts --session <s> --out <dir>` measures a real `playwright-cli`
 session; `script/chrome-login-fixture.ts` is the local login page those and the iOS UI test use.
 
+Only a running resource is captured or streamed (rev. 2026-11-11): a snapshot of one that is `stopped` or `gone`
+answers 409 `{ reason: "gone" }`, and its stream sends `end { reason: "stopped" }` and closes. A serial-only Android
+entry would otherwise show whichever emulator holds that console port now.
+
+### Stop
+
+`custom.resources/stop` (rev. 2026-11-11) shuts down an Android emulator so Alexandre can free a forgotten one from the
+app; its AVD stays on disk. The hub accepts only an entry whose adapter has `stop` (Android), that is `running`, that no
+agent uses (state `agent`) and that Alexandre does not control (`user`). The adapter then refuses an entry known only
+by serial and proves, with the running emulators' ini files or the console's `emu avd name`, that the serial runs the
+entry's AVD now (`verify`, as for input), before `adb -s <serial> emu kill`; it waits up to 15 s for the emulator to
+leave the running list, and the hub probes at once, so the answer arrives with the resource `stopped`. Another
+machine's emulator is never a resource here ([Discovery](#discovery)), so it cannot be stopped.
+
 ## Control lock
 
 "Assumir controle" (`control take`) gives Alexandre the resource. The plugin's `tool.hook("execute.before")` then
@@ -434,8 +452,19 @@ its family's root:
 | Kind    | Recognized                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | iOS     | Simulator UDIDs with `simctl`/`xcodebuild`/`agent-device`/`axe`/`idb`/`serve-sim`/`maestro`; device names after `simctl <boot\|spawn\|launch\|install\|io\|openurl\|…>`, `--device`, `-destination 'platform=iOS Simulator,name=…'`; the UDID printed by `simctl create`. Names resolve through `simctl list` (the only booted simulator with that name, else the only one; ambiguous names register nothing). `booted`, `delete`, `erase` and `shutdown` register nothing |
-| Android | `emulator-NNNN` serials with `adb`/`emulator`/`android-emulator`/`agent-device`/`maestro`; `-avd NAME` or `@NAME` after `emulator`/`android-emulator`. Physical serials are ignored                                                                                                                                                                                                                                                                                        |
+| Android | `emulator-NNNN` serials with `adb`/`emulator`/`android-emulator`/`agent-device`/`maestro`; `-avd NAME` or `@NAME` after `emulator`/`android-emulator` (a completed command with them records `startedBy`). Physical serials are ignored                                                                                                                                                                                                                                         |
 | Chrome  | `playwright-cli` commands with their session (`-s=`, `--session`, `PLAYWRIGHT_CLI_SESSION`; `default` otherwise, kept per workspace) and a CDP port (`--remote-debugging-port`, `--cdp=http://127.0.0.1:N`); `list`, `close`, `close-all`, `kill-all`, `install`, `delete-data` register nothing                                                                                                                                                                           |
+
+Only what runs on this Mac counts (rev. 2026-11-11, `localCommand`): a simple command handed to another machine is
+dropped with its quoted arguments and here-document before matching, for discovery, activity and the control lock:
+`ssh` (also `mosh`, `autossh`, `gcloud compute ssh`), `docker`/`podman`/`nerdctl` `exec`/`run` (also through
+`compose`), `kubectl`/`oc` `exec`, and `adb` with another machine's server (`-H <host>`,
+`ANDROID_ADB_SERVER_ADDRESS`). `ssh brs@host-6 'docker exec … adb -s emulator-5554 …'` is host-6's emulator, not this
+Mac's `emulator-5554`. The Linux machine's `mac` and `orb` prefixes stay local. A command that only asks about Android
+emulators (`onlyAsksAndroid`: every emulator tool it runs is `adb devices`, `adb version`, `adb get-state|get-serialno|
+get-devpath|wait-for-…`, `adb emu avd name|path|id`, `adb shell getprop` or `emulator -list-avds|-version`) registers
+nothing: it neither marks one in use nor makes its session the owner, so checking which AVD holds a port does not take
+someone else's emulator over.
 
 Chrome needs nothing else: the `shell` `create.before` hook (see Chrome above) makes every `playwright-cli` browser
 open with a loopback CDP port, and the adapter finds it from the session's daemon, so `meta.cdp` arrives with the
@@ -447,7 +476,10 @@ Subagents' resources keep their own session as `owner.sessionID` and the family 
 lists show them under the subagent ("via <agente>"). Reconciliation is the hub's `probe` every 5 s: dead resources
 become `stopped` or `gone` (ended entries are dropped after 24 h, stopped ones after 7 days). The optional
 `resource_label` tool only names a resource already used (`ref` = UDID, simulator name, serial, AVD or Playwright
-session) or records its purpose.
+session) or records its purpose. A serial is a console port the next AVD takes over (rev. 2026-11-11, `labelTarget`):
+by serial it names only an entry known by that serial alone while an emulator answers there, and it is refused,
+naming the AVD to use instead, when an AVD with its own entry holds the port now; renaming that AVD would label
+someone else's emulator after one on another machine that shares the serial.
 
 ## Activity
 
