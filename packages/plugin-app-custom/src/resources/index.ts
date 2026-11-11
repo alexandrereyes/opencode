@@ -9,10 +9,19 @@ import { relayEndpoint, relayFind } from "../browser-handoff/index.js"
 import { limits, sharedRegistry } from "../browser-handoff/registry.js"
 import { makeBrowseResources } from "./browse.js"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
-import { bareSerials, known, parseSimulators, references, resolveSimulators, touchesResources } from "./discovery.js"
+import {
+  bareSerials,
+  known,
+  localCommand,
+  parseSimulators,
+  references,
+  resolveSimulators,
+  touchesResources,
+} from "./discovery.js"
 import { blocking, refusal, returned } from "./lock.js"
 import { Resources } from "./rpc.js"
 import { HubError, hubSettings, makeHubClient, stateDirectory, type HubClient } from "./supervisor.js"
+import { labelTarget, usage, type Caller } from "./usage.js"
 
 /**
  * Session resources: simulators, emulators and browsers that agents use on the Mac, shown and controlled from the
@@ -86,6 +95,11 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           await hub.focus(input.id)
           return {}
         }).pipe(Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason }))),
+      stop: (input, context) =>
+        call(() => hub.stop(input.id)).pipe(
+          Effect.as({}),
+          Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
+        ),
       dismiss: (input, context) =>
         call(() => hub.remove(input.id)).pipe(
           Effect.as({}),
@@ -96,20 +110,34 @@ export const registerResources = Effect.fn("Resources.register")(function* (
 
   // Discovery: every shell command that names a simulator, emulator or Playwright browser registers it for the
   // session family, and its result gains an `opencode-resource:` link (once per session) and `metadata.resources`.
-  const roots = new Map<string, { root: string; directory: string }>()
+  const roots = new Map<string, Family>()
   const announced = new Set<string>()
   // Calls that touched resources while a remote hub could not say whether Alexandre holds them.
   const unchecked = new Set<string>()
-  const family = (sessionID: string): Effect.Effect<{ root: string; directory: string }> =>
+  const family = (sessionID: string): Effect.Effect<Family> =>
     Effect.gen(function* () {
       const cached = roots.get(sessionID)
       if (cached) return cached
       const session = yield* ctx.session.get({ sessionID: Session.ID.make(sessionID) })
       const parent = session.parentID ? yield* family(session.parentID) : undefined
-      const found = { root: parent?.root ?? sessionID, directory: session.location.directory }
+      const found: Family = {
+        root: parent?.root ?? sessionID,
+        directory: session.location.directory,
+        ...(session.title ? { title: session.title } : {}),
+        ...((parent ? parent.rootTitle : session.title)
+          ? { rootTitle: parent ? parent.rootTitle : session.title }
+          : {}),
+      }
       roots.set(sessionID, found)
       return found
     }).pipe(Effect.catchCause(() => Effect.succeed({ root: sessionID, directory: "" })))
+  const caller = (event: { readonly sessionID: string; readonly agent?: string }, owner: Family): Caller => ({
+    sessionID: event.sessionID,
+    rootSessionID: owner.root,
+    ...(event.agent ? { agent: event.agent } : {}),
+    ...(owner.title ? { title: owner.title } : {}),
+    ...(owner.rootTitle ? { rootTitle: owner.rootTitle } : {}),
+  })
 
   // A browse session's resource: registered while agents use it, refused to them while Alexandre controls it.
   const browse = makeBrowseResources({
@@ -134,7 +162,8 @@ export const registerResources = Effect.fn("Resources.register")(function* (
         unchecked.add(event.id)
         yield* Effect.logWarning("resources hub unreachable; command runs without its lock check", { call: event.id })
       }
-      const lock = blocking(command, locks ?? [], shellWorkdir(event.input))
+      // A command run on another machine (ssh, docker exec) cannot touch this Mac's resources.
+      const lock = blocking(localCommand(command), locks ?? [], shellWorkdir(event.input))
       if (lock) return yield* new Tool.Error({ message: refusal(lock) })
       // In use from the start: a long command (a test run, a recording) keeps its resources `agent` until it ends, and
       // the history shows it while it runs. Only resources the hub already knows; the result registers new ones.
@@ -150,16 +179,20 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       )
       yield* Effect.forEach(
         registered,
-        (resource) =>
-          call(() =>
+        (resource) => {
+          // A command that only asks about an emulator neither uses it nor takes it over.
+          const use = usage(command, resource.meta, caller(event, owner), Date.now(), false)
+          if (!use) return Effect.void
+          return call(() =>
             hub.upsert({
               kind: resource.kind,
               meta: resource.meta,
-              owner: { sessionID: event.sessionID, rootSessionID: owner.root, agent: event.agent },
+              ...use,
               used: true,
               activity: { call: event.id, command, running: true },
             }),
-          ).pipe(Effect.ignore),
+          ).pipe(Effect.ignore)
+        },
         { discard: true },
       )
     }),
@@ -187,13 +220,16 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       const simulators = found.some((item) => item.kind === "ios-simulator")
         ? yield* Effect.promise(() => (hub.remote ? hub.simulators().catch(() => listSimulators()) : listSimulators()))
         : []
-      const metas = resolveSimulators(found, simulators)
-      const registered = yield* Effect.forEach(metas, (meta) =>
+      const metas = resolveSimulators(found, simulators).flatMap((meta) => {
+        const use = usage(command, meta, caller(event, owner), Date.now(), true)
+        return use ? [{ meta, use }] : []
+      })
+      const registered = yield* Effect.forEach(metas, ({ meta, use }) =>
         call(() =>
           hub.upsert({
             kind: meta.kind,
             meta,
-            owner: { sessionID: event.sessionID, rootSessionID: owner.root, agent: event.agent },
+            ...use,
             used: true,
             activity: { call: event.id, command, running: false },
           }),
@@ -219,16 +255,16 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       editor.add({
         name: "resource_label",
         description:
-          "Name a simulator, Android emulator or Playwright browser you already used in a shell command, or say what it is for, as Alexandre sees it in the app. ref is its UDID, simulator name, adb serial, AVD name or playwright-cli session.",
+          "Name a simulator, Android emulator or Playwright browser of this Mac you already used in a shell command, or say what it is for, as Alexandre sees it in the app. ref is its UDID, simulator name, AVD name (prefer it to the adb serial, which another AVD may hold now) or playwright-cli session. Emulators on other machines (ssh, docker exec) are not resources here.",
         input: standard(LabelInput),
         output: standard(Resources.Resource),
         options: { codemode: false },
         execute: (input) =>
           call(async () => {
-            const target = (await hub.list()).resources.find((resource) => names(resource.meta).includes(input.ref))
-            if (!target) throw new HubError("not_found", "")
+            const found = labelTarget((await hub.list()).resources, input.ref)
+            if ("refusal" in found) throw new HubError("not_found", found.refusal)
+            const { resource: target, bare } = found
             // A serial is resolved by the hub against the emulator there now (it may be another AVD's by now).
-            const bare = target.meta.kind === "android-emulator" && target.meta.serial === input.ref
             return hub.upsert({
               kind: target.kind,
               meta: bare ? { kind: "android-emulator", serial: input.ref } : target.meta,
@@ -243,10 +279,7 @@ export const registerResources = Effect.fn("Resources.register")(function* (
             Effect.mapError(
               (error) =>
                 new Tool.Error({
-                  message:
-                    error.reason === "not_found"
-                      ? `No known resource is called ${input.ref}; use it in a shell command first.`
-                      : error.message,
+                  message: error.message,
                 }),
             ),
           ),
@@ -316,12 +349,6 @@ const LabelInput = Schema.Struct({
   purpose: optional(Schema.String.check(Schema.isMaxLength(200))),
 })
 
-function names(meta: Resources.Meta) {
-  if (meta.kind === "ios-simulator") return [meta.udid, meta.name]
-  if (meta.kind === "android-emulator") return [meta.serial, meta.avd]
-  return [meta.session, meta.cdp]
-}
-
 function standard<A>(schema: Schema.Codec<A, unknown>) {
   return {
     "~standard": {
@@ -329,6 +356,13 @@ function standard<A>(schema: Schema.Codec<A, unknown>) {
       ...Schema.toStandardJSONSchemaV1(schema)["~standard"],
     },
   }
+}
+
+interface Family {
+  readonly root: string
+  readonly directory: string
+  readonly title?: string
+  readonly rootTitle?: string
 }
 
 export function shellWorkdir(input: unknown) {

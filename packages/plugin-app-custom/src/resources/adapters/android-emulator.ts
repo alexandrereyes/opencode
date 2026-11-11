@@ -215,6 +215,30 @@ export function createAdapter(io: AndroidSystem) {
         })
     },
 
+    /**
+     * `emu kill` on the emulator console of this Mac, only once the serial is proven to run the entry's AVD now: an
+     * entry known only by serial is refused (whose emulator answers there is not its to say), and so is a serial that
+     * another AVD holds. Waits until the emulator leaves the running list (or `stopWaitMs`), so the probe that follows
+     * reports it stopped.
+     */
+    async stop(entry) {
+      const target = requireTarget(entry)
+      if (!target.avd) throw new Error("Only an emulator known by its AVD can be shut down")
+      await verify(target)
+      devices
+        .get(target.serial)
+        ?.then((device) => device.connection.close())
+        .catch(() => undefined)
+      devices.delete(target.serial)
+      await io.text([adb(), "-s", target.serial, "emu", "kill"], { timeout: 10_000 })
+      const deadline = Date.now() + stopWaitMs
+      while (Date.now() < deadline) {
+        const running = await io.emulators().catch(() => [])
+        if (!running.some((item) => item.avd === target.avd || item.serial === target.serial)) return
+        await Bun.sleep(500)
+      }
+    },
+
     async input(entry, event) {
       const target = requireTarget(entry)
       const serial = target.serial
@@ -376,6 +400,8 @@ export const profiles = {
 } as const
 const settleMs = 300
 const rotationPollMs = 1_500
+/** How long `stop` waits for a killed emulator to leave the running list. */
+const stopWaitMs = 15_000
 /** Android `Surface.ROTATION_*` as the viewers' informative `meta.orientation`. */
 const orientations = ["portrait", "landscape_left", "portrait_upside_down", "landscape_right"]
 /** How long a paste may take inside the app before the previous clipboard text goes back. */
