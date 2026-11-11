@@ -327,6 +327,13 @@ describe("hub", () => {
     await hub.register({ kind: "android-emulator", meta, owner: caller, startedBy, used: true })
     await hub.probe()
     expect((await stop("android-emulator:nada")).status).toBe(404)
+    // Offered on an emulator known by its AVD (the app shows "Desligar" only then), never on a serial-only one.
+    expect(hub.view(hub.entries.get(pcApps)!).capabilities).toEqual({ stop: true })
+    hub.entries.set(
+      "android-emulator:emulator-5590",
+      entry("android-emulator:emulator-5590", { kind: "android-emulator", serial: "emulator-5590" }),
+    )
+    expect(hub.view(hub.entries.get("android-emulator:emulator-5590")!).capabilities).toBeUndefined()
     // In use by an agent a moment ago.
     const busy = await stop(pcApps)
     expect(busy.status).toBe(409)

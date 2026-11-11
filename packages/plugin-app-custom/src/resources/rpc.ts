@@ -137,6 +137,11 @@ export const Capabilities = Schema.Struct({
    * `true`: absent means the resource has no such action.
    */
   focus: optional(Schema.Boolean),
+  /**
+   * rev. 2026-11-11: `stop` (shut the emulator down, `custom.resources/stop`). Like `focus`, offered only when `true`:
+   * Android emulators known by their AVD. The hub still refuses it while one is not running or is in use.
+   */
+  stop: optional(Schema.Boolean),
 }).annotate({ identifier: "Resources.Capabilities" })
 
 /** rev. 2026-11-07: the browse handoff a `chrome:browse:<session>` resource waits on (`browse-handoff-remoto.md`). */

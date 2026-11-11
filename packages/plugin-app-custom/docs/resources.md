@@ -423,7 +423,8 @@ entry would otherwise show whichever emulator holds that console port now.
 
 ### Stop
 
-`custom.resources/stop` (rev. 2026-11-11) shuts down an Android emulator so Alexandre can free a forgotten one from the
+`custom.resources/stop` (rev. 2026-11-11, offered as `capabilities.stop: true` on Android emulators known by their AVD,
+so apps show "Desligar" only on servers that have it) shuts down an Android emulator so Alexandre can free a forgotten one from the
 app; its AVD stays on disk. The hub accepts only an entry whose adapter has `stop` (Android), that is `running`, that no
 agent uses (state `agent`) and that Alexandre does not control (`user`). The adapter then refuses an entry known only
 by serial and proves, with the running emulators' ini files or the console's `emu avd name`, that the serial runs the

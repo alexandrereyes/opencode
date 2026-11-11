@@ -280,9 +280,17 @@ export function createHub(options: HubOptions) {
     }
   }
 
-  /** A browse session's resource: the handoff's locks while one waits, else `browseCapabilities`. */
-  const capabilitiesOf = (entry: Entry) =>
-    entry.capabilities ?? (browseOf(entry) ? Resources.browseCapabilities : undefined)
+  /**
+   * A browse session's resource: the handoff's locks while one waits, else `browseCapabilities`. An Android emulator
+   * known by its AVD can be shut down (`stop`).
+   */
+  const capabilitiesOf = (entry: Entry): Resources.Capabilities | undefined =>
+    entry.capabilities ??
+    (browseOf(entry)
+      ? Resources.browseCapabilities
+      : entry.meta.kind === "android-emulator" && identity(entry) !== undefined && options.adapters[entry.kind].stop
+        ? { stop: true }
+        : undefined)
 
   const upsert = (input: Upsert, machineID?: string) => {
     const at = now()
