@@ -66,11 +66,65 @@ export interface HubSettings {
    * A hub another machine runs (the Mac's LaunchAgent for a server on Linux): its `hub.json` as this machine reads it
    * and the host that reaches its loopback port. The plugin never starts, stops or inspects that hub's process.
    */
-  readonly remote?: { readonly info: string; readonly host: string; readonly command?: readonly string[] }
+  readonly remote?: {
+    readonly info: string
+    readonly host: string
+    readonly command?: readonly string[]
+    /** A Unix socket that carries the hub's HTTP and WebSocket (the Mac's hub on a Linux server); `host` is unused. */
+    readonly socket?: string
+  }
   readonly paths?: PathMap
   /** Deadline, in milliseconds, of ordinary administrative requests (`adminTimeout` by default). */
   readonly timeout?: number
+  /** Deadline, in milliseconds, of slow requests: snapshots, control, `simctl` (`slowTimeout` by default). */
+  readonly slowTimeout?: number
+  /**
+   * After a request finds the hub unreachable, later requests fail at once (no `hub.json` read, no connection) for
+   * `initial` ms, doubling up to `max` while it stays unreachable. For a hub that may be away for hours (a sleeping
+   * Mac), so neither shells nor lists keep paying its deadlines. A slow request that outlasts its deadline counts only
+   * if the hub's health check then fails too, and a `probe` request may try the hub once per `initial` meanwhile.
+   */
+  readonly backoff?: { readonly initial: number; readonly max: number }
 }
+
+/** `HubSettings.backoff` of the Mac's hub. */
+const macBackoff = { initial: 2_000, max: 30_000 } as const
+
+/**
+ * The Mac's own hub for a Linux server (`resources.md`, "Mac hub"): `OPENCODE_RESOURCES_HUB_MAC_SOCKET`, the Unix
+ * socket the Mac publishes it on, and `OPENCODE_RESOURCES_HUB_MAC_INFO_COMMAND`, a JSON argv whose stdout is its
+ * `hub.json`. Without both there is no Mac hub; when only one is usable, `problem` says so (naming the variables, never
+ * their values) and the server runs as if neither were set: a typo must not take the whole plugin down.
+ */
+export function macHubSettings(env: Record<string, string | undefined> = process.env): {
+  readonly settings?: HubSettings
+  readonly problem?: string
+} {
+  const socket = env.OPENCODE_RESOURCES_HUB_MAC_SOCKET
+  const raw = env.OPENCODE_RESOURCES_HUB_MAC_INFO_COMMAND
+  if (!socket && !raw) return {}
+  const command = raw ? Option.getOrUndefined(decodeArgv(raw)) : undefined
+  if (!socket)
+    return {
+      problem:
+        "OPENCODE_RESOURCES_HUB_MAC_INFO_COMMAND is set without OPENCODE_RESOURCES_HUB_MAC_SOCKET; the Mac's resources hub stays off",
+    }
+  if (!command)
+    return {
+      problem: `OPENCODE_RESOURCES_HUB_MAC_SOCKET is set but OPENCODE_RESOURCES_HUB_MAC_INFO_COMMAND is ${raw ? "not a JSON array of strings" : "missing"}; the Mac's resources hub stays off`,
+    }
+  return {
+    settings: {
+      state: stateDirectory(env),
+      remote: { info: socket, host: "localhost", socket, command },
+      backoff: macBackoff,
+    },
+  }
+}
+
+const argvSchema = Schema.fromJsonString(Schema.Array(Schema.String).check(Schema.isMinLength(1)))
+const argv = Schema.decodeUnknownSync(argvSchema)
+const decodeArgv = Schema.decodeUnknownOption(argvSchema)
 
 /**
  * Every shell command waits for `locks()`: a hub that accepts connections but never answers must not hold them.
@@ -87,9 +141,7 @@ const slowTimeout = 15_000
 export function hubSettings(env: Record<string, string | undefined> = process.env): HubSettings {
   const info = env.OPENCODE_RESOURCES_HUB_REMOTE_INFO
   const command = env.OPENCODE_RESOURCES_HUB_REMOTE_INFO_COMMAND
-    ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String).check(Schema.isMinLength(1))))(
-        env.OPENCODE_RESOURCES_HUB_REMOTE_INFO_COMMAND,
-      )
+    ? argv(env.OPENCODE_RESOURCES_HUB_REMOTE_INFO_COMMAND)
     : undefined
   return {
     state: stateDirectory(env),
@@ -115,12 +167,23 @@ export function hubSettings(env: Record<string, string | undefined> = process.en
 export function makeHubClient(options: HubSettings) {
   const remote = options.remote
   const file = remote?.info ?? path.join(options.state, "hub.json")
-  const origin = (info: Info) => `http://${remote?.host ?? "127.0.0.1"}:${info.port}`
+  const socket = remote?.socket
+  const origin = (info: Info) => (socket ? "http://localhost" : `http://${remote?.host ?? "127.0.0.1"}:${info.port}`)
   const toHub = options.paths?.toHub ?? ((value: string) => value)
   const fromHub = options.paths?.fromHub ?? ((value: string) => value)
-  type Init = RequestInit & { readonly spawn?: boolean; readonly slow?: boolean }
+  /** `probe`: may try a hub in its backoff (`HubSettings.backoff`). */
+  type Init = RequestInit & { readonly spawn?: boolean; readonly slow?: boolean; readonly probe?: boolean }
   let cached: Info | undefined
   let starting: Promise<Info | undefined> | undefined
+  /** `HubSettings.backoff`: until when requests fail at once, the wait after the next failure, the last probe. */
+  let down: { until: number; delay: number; probed: number } | undefined
+  const listeners = new Set<() => void>()
+  /** Sets `down`; when the hub went away or came back, tells the listeners (`listen`) once. */
+  const mark = (next: typeof down) => {
+    const turned = (down === undefined) !== (next === undefined)
+    down = next
+    if (turned) listeners.forEach((listener) => listener())
+  }
 
   const read = async () => {
     if (!remote?.command)
@@ -149,6 +212,7 @@ export function makeHubClient(options: HubSettings) {
     fetch(`${origin(info)}/admin/health`, {
       headers: { authorization: `Bearer ${info.secret}` },
       signal: AbortSignal.timeout(1_500),
+      ...(socket ? { unix: socket } : {}),
     })
       .then(async (response) => {
         if (!response.ok) return "down" as const
@@ -207,34 +271,65 @@ export function makeHubClient(options: HubSettings) {
   }
 
   const request = async (route: string, init: Init = {}) => {
+    // The hub answers, but this slow operation (a capture, control, `simctl`) outlasted its deadline.
+    let busy = false
     const attempt = async (retry: boolean): Promise<Response | undefined> => {
       const info = await ensure(init.spawn ?? true)
       if (!info) return undefined
-      const { spawn: _, slow, ...rest } = init
+      const { spawn: _, slow, probe: __, ...rest } = init
       let timedOut = false
       const response = await fetch(`${origin(info)}${route}`, {
         ...rest,
-        signal: init.signal ?? AbortSignal.timeout(slow ? slowTimeout : (options.timeout ?? adminTimeout)),
+        signal:
+          init.signal ??
+          AbortSignal.timeout(slow ? (options.slowTimeout ?? slowTimeout) : (options.timeout ?? adminTimeout)),
         headers: { ...init.headers, authorization: `Bearer ${info.secret}`, "content-type": "application/json" },
+        ...(socket ? { unix: socket } : {}),
       }).catch((error: unknown) => {
         timedOut = error instanceof Error && error.name === "TimeoutError"
         return undefined
       })
       if (response && response.status !== 401) return response
+      // Only a hub with a backoff tells a slow operation from an absent hub: one emulator slow to capture must not
+      // hide every resource of its hub.
+      if (timedOut && slow && options.backoff && (await healthy(info)) === "ok") {
+        busy = true
+        return undefined
+      }
       // The next request checks the hub's health again (with its own short deadline) before trusting it.
       cached = undefined
       // A hub that hangs is not retried at once: the caller would wait twice.
       return retry && !timedOut ? attempt(false) : undefined
     }
-    return attempt(true)
+    const backoff = options.backoff
+    if (!backoff) return attempt(true)
+    const now = Date.now()
+    if (down && now < down.until) {
+      // An explicit request from the app may find the hub back before the wait ends; a failed one leaves it as it was.
+      if (!init.probe || now - down.probed < backoff.initial) return undefined
+      down.probed = now
+      const response = await attempt(true)
+      if (response || busy) mark(undefined)
+      return response
+    }
+    const response = await attempt(true)
+    if (response || busy) {
+      mark(undefined)
+      return response
+    }
+    const delay = down ? Math.min(down.delay * 2, backoff.max) : backoff.initial
+    mark({ until: Date.now() + delay, delay, probed: 0 })
+    return response
   }
 
   const unavailable = () =>
     new HubError(
       "hub",
-      remote
-        ? `The resources hub at ${remote.host} (${remote.info}) is not reachable`
-        : "The resources hub is not running",
+      socket
+        ? `The Mac's resources hub (${socket}) is not reachable`
+        : remote
+          ? `The resources hub at ${remote.host} (${remote.info}) is not reachable`
+          : "The resources hub is not running",
     )
 
   // The hub keeps working directories as its own machine sees them; this side works with local ones.
@@ -258,13 +353,24 @@ export function makeHubClient(options: HubSettings) {
   const resource = (id: string) => `/admin/resources/${encodeURIComponent(id)}`
 
   return {
+    /**
+     * Calls `listener` whenever a hub with a backoff (`HubSettings.backoff`) is found away or back, once per change;
+     * returns the unsubscribe. Other hubs never call it.
+     */
+    listen: (listener: () => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
     /** Whether the hub runs on another machine (`HubSettings.remote`). */
     remote: remote !== undefined,
     /** The hub's loopback port as it announces it; clients on its machine connect there. */
     port: async () => (await ensure(true))?.port,
-    /** `spawn: false` reads only a hub already running (no hub, no resources). */
-    list: (spawn = true) =>
-      json<{ resources: Resources.Resource[] }>("/admin/resources", { spawn }).then((result) => ({
+    /**
+     * `spawn: false` reads only a hub already running (no hub, no resources). `probe` tries a hub in its backoff (at
+     * most once per `HubSettings.backoff.initial`), for lists Alexandre asks for.
+     */
+    list: (spawn = true, probe = false) =>
+      json<{ resources: Resources.Resource[] }>("/admin/resources", { spawn, probe }).then((result) => ({
         resources: result.resources.map(local),
       })),
     get: (id: string) => json<Resources.Resource>(resource(id)).then(local),

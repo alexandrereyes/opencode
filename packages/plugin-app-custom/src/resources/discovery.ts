@@ -25,8 +25,101 @@ const quoted = String.raw`("([^"]+)"|'([^']+)'|([^\s;&|)'"]+))`
  * through the Linux machine's `mac` prefix, which runs it on the Mac). Only what runs here counts (`localCommand`).
  */
 export function touchesResources(command: string) {
+  return touches(command, ["ios-simulator", "android-emulator", "chrome"])
+}
+
+/** `touchesResources` for some kinds only. */
+export function touches(command: string, kinds: readonly Resources.Kind[]) {
   const local = localCommand(command)
-  return simulatorTools.test(local) || emulatorTools.test(local) || /\bplaywright-cli\b/.test(local)
+  return (
+    (kinds.includes("ios-simulator") && simulatorTools.test(local)) ||
+    (kinds.includes("android-emulator") && emulatorTools.test(local)) ||
+    (kinds.includes("chrome") && /\bplaywright-cli\b/.test(local))
+  )
+}
+
+/**
+ * A command's parts per machine, for a server whose Mac has its own hub (`OPENCODE_RESOURCES_HUB_MAC_SOCKET`):
+ * `mac` holds what runs on the Mac through the `mac` prefix, without the prefix and its options (`mac -C dir adb …` is
+ * `adb …`), the script of `mac sh|bash|zsh -c '…'` instead of the shell, and the here-documents fed to them; `here`
+ * holds what runs on this machine. Parts handed to another machine (`localCommand`) are in neither.
+ */
+export function machineParts(command: string) {
+  const here: string[] = []
+  const mac: string[] = []
+  // The here-documents opened on the current line; their bodies follow it, in order, each going where its command runs.
+  const pending: { readonly delimiter: string; readonly indented: boolean; readonly target?: string[] }[] = []
+  let index = 0
+  while (index < command.length) {
+    const end = simpleEnd(command, index)
+    const segment = command.slice(index, end)
+    index = end + 1
+    const onMac = macCommand(segment)
+    const target = onMac === undefined ? (remote(segment) ? undefined : here) : remote(onMac) ? undefined : mac
+    if (target === here) here.push(segment)
+    if (target === mac && onMac !== undefined) mac.push(shellScript(onMac) ?? onMac)
+    pending.push(
+      ...[...segment.matchAll(heredocs)].map((match) => ({ delimiter: match[3]!, indented: match[1] === "-", target })),
+    )
+    if (command[end] !== "\n" && end < command.length) continue
+    for (const document of pending.splice(0)) {
+      while (index < command.length) {
+        const next = command.indexOf("\n", index)
+        const line = command.slice(index, next === -1 ? command.length : next)
+        index = next === -1 ? command.length : next + 1
+        if ((document.indented ? line.trim() : line) === document.delimiter) break
+        document.target?.push(line)
+      }
+    }
+  }
+  return { here: here.join("\n"), mac: mac.join("\n") }
+}
+
+/** `<<WORD`, `<<-WORD`, `<<'WORD'`; not a `<<<` here-string. */
+const heredocs = /(?<!<)<<(-?)\s*(['"]?)([A-Za-z_][\w-]*)\2/g
+
+/** The command a `mac …` simple command runs on the Mac (after `mac` and its options), else `undefined`. */
+function macCommand(segment: string) {
+  const words = [...segment.matchAll(/\S+/g)]
+  const first = commandWord(words.map((match) => match[0]))
+  if (words[first]?.[0].split("/").pop() !== "mac") return undefined
+  let next = first + 1
+  while (next < words.length) {
+    const word = words[next]![0]
+    if (["-t", "--tty", "-T", "--no-tty"].includes(word) || word.startsWith("--cwd=")) next++
+    else if (word === "-C" || word === "--cwd") next += 2
+    else if (word === "--") {
+      next++
+      break
+    } else break
+  }
+  const start = words[next]?.index
+  return start === undefined ? "" : segment.slice(start)
+}
+
+/** The script of `sh|bash|zsh [-l…] -c '…'`, which runs as its own commands. */
+function shellScript(command: string) {
+  const match =
+    /^\s*(?:\S*\/)?(?:sh|bash|zsh)\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*c\s+(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/.exec(command)
+  return match ? (match[1] ?? match[2] ?? "") : undefined
+}
+
+/**
+ * Index of the command word: leading assignments, `sudo`, `exec`, `env`, `nohup`, `command`, `time` and
+ * `timeout <duration>` wrap it.
+ */
+function commandWord(words: readonly string[]) {
+  let first = 0
+  for (; first < words.length; first++) {
+    const word = words[first]!
+    if (/^[A-Za-z_]\w*=/.test(word) || ["sudo", "exec", "env", "nohup", "command", "time"].includes(word)) continue
+    if (word === "timeout") {
+      first++
+      continue
+    }
+    break
+  }
+  return first
 }
 
 /**
@@ -99,19 +192,12 @@ const androidInvocation =
 /** Whether a simple command runs on another machine (see `localCommand`). */
 function remote(segment: string) {
   const words = segment.trim().split(/\s+/).filter(Boolean)
-  // Leading assignments, `sudo`, `exec`, `env`, `nohup`, `command`, `time` and `timeout <duration>` wrap the command.
-  let first = 0
-  for (; first < words.length; first++) {
-    const word = words[first]!
+  const first = commandWord(words)
+  const remoteServer = words.slice(0, first).some((word) => {
     const address = /^ANDROID_ADB_SERVER_ADDRESS=['"]?([^'"\s]+)/.exec(word)?.[1]
-    if (address && !loopback.test(address)) return true
-    if (/^[A-Za-z_]\w*=/.test(word) || ["sudo", "exec", "env", "nohup", "command", "time"].includes(word)) continue
-    if (word === "timeout") {
-      first++
-      continue
-    }
-    break
-  }
+    return address !== undefined && !loopback.test(address)
+  })
+  if (remoteServer) return true
   const tool = words[first]?.split("/").pop() ?? ""
   const args = words.slice(first + 1, first + 7)
   if (["ssh", "mosh", "autossh"].includes(tool)) return true

@@ -2,25 +2,18 @@ import { Plugin } from "@opencode/plugin/effect"
 import { Session } from "@opencode/schema/session"
 import { Tool } from "@opencode/schema/tool"
 import { optional } from "@opencode/schema/schema"
-import { Effect, Option, Schedule, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import path from "node:path"
 import { sharedCurrentSessions } from "../browser-handoff/current.js"
 import { relayEndpoint, relayFind } from "../browser-handoff/index.js"
 import { limits, sharedRegistry } from "../browser-handoff/registry.js"
 import { makeBrowseResources } from "./browse.js"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
-import {
-  bareSerials,
-  known,
-  localCommand,
-  parseSimulators,
-  references,
-  resolveSimulators,
-  touchesResources,
-} from "./discovery.js"
-import { blocking, refusal, returned } from "./lock.js"
+import { bareSerials, known, parseSimulators, resolveSimulators } from "./discovery.js"
+import { commandLock, makeHubs, routes, sharedMacHub, type Hubs } from "./hubs.js"
+import { refusal, returned } from "./lock.js"
 import { Resources } from "./rpc.js"
-import { HubError, hubSettings, makeHubClient, stateDirectory, type HubClient } from "./supervisor.js"
+import { HubError, hubSettings, makeHubClient, stateDirectory } from "./supervisor.js"
 import { labelTarget, usage, type Caller } from "./usage.js"
 
 /**
@@ -31,8 +24,9 @@ import { labelTarget, usage, type Caller } from "./usage.js"
  */
 export const registerResources = Effect.fn("Resources.register")(function* (
   ctx: Omit<Plugin.Context, "storage">,
-  hub: HubClient = makeHubClient(hubSettings()),
+  given?: Hubs,
 ) {
+  const hubs = given ?? (yield* defaultHubs())
   // Chrome: agent shells open `playwright-cli` browsers with a loopback CDP port that the adapter attaches to.
   const playwrightConfig = path.join(stateDirectory(), "playwright-cli.json")
   yield* ctx.shell.hook("create.before", (input) => Effect.sync(() => shellEnvironment(input.env, playwrightConfig)))
@@ -46,21 +40,13 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           ? error
           : new HubError("failed", error instanceof Error ? error.message : String(error)),
     })
-  const ticketFor = (id: string, capability: Resources.Capability) =>
-    call(async () => {
-      const [ticket, port] = await Promise.all([hub.ticket(id, capability), hub.port()])
-      return {
-        ticket: ticket.ticket,
-        expiresAt: ticket.expiresAt,
-        path: `/resources/${encodeURIComponent(id)}`,
-        loopbackPort: port ?? 0,
-      }
-    })
+  const ticketFor = (id: string, capability: Resources.Capability) => call(() => hubs.ticket(id, capability))
 
   const registration = yield* ctx.rpc
     .register(Resources.Definition, {
       list: (input, context) =>
-        call(() => hub.list()).pipe(
+        // Alexandre asked for it: a Mac hub in its backoff may be back.
+        call(() => hubs.list({ probe: true })).pipe(
           Effect.map((result) => ({
             resources: input.sessionID
               ? result.resources.filter((resource) => resource.owner?.rootSessionID === input.sessionID)
@@ -69,11 +55,11 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
         ),
       get: (input, context) =>
-        call(() => hub.get(input.id)).pipe(
+        call(() => hubs.get(input.id)).pipe(
           Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
         ),
       snapshot: (input, context) =>
-        call(() => hub.snapshot(input.id, input.maxWidth)).pipe(
+        call(() => hubs.owner(input.id).snapshot(input.id, input.maxWidth)).pipe(
           Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
         ),
       ticket: (input, context) =>
@@ -82,13 +68,14 @@ export const registerResources = Effect.fn("Resources.register")(function* (
         ),
       control: (input, context) =>
         Effect.gen(function* () {
-          const result = yield* call(() => hub.control(input.id, input.action))
+          const result = yield* call(() => hubs.control(input.id, input.action))
           if (!result.token) return { resource: result.resource }
           return { resource: result.resource, ticket: yield* ticketFor(input.id, "control") }
         }).pipe(Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason }))),
       // `browse-handoff-remoto.md`, section 4: a browse session's tab; while a handoff is on it, only while it waits.
       focus: (input, context) =>
         call(async () => {
+          const hub = hubs.owner(input.id)
           const resource = await hub.get(input.id)
           if (resource.capabilities?.focus !== true || (resource.handoff !== undefined && !waiting(resource)))
             throw new HubError("unsupported", "This resource cannot be focused")
@@ -96,12 +83,12 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           return {}
         }).pipe(Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason }))),
       stop: (input, context) =>
-        call(() => hub.stop(input.id)).pipe(
+        call(() => hubs.stop(input.id)).pipe(
           Effect.as({}),
           Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
         ),
       dismiss: (input, context) =>
-        call(() => hub.remove(input.id)).pipe(
+        call(() => hubs.owner(input.id).remove(input.id)).pipe(
           Effect.as({}),
           Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
         ),
@@ -139,9 +126,10 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     ...(owner.rootTitle ? { rootTitle: owner.rootTitle } : {}),
   })
 
-  // A browse session's resource: registered while agents use it, refused to them while Alexandre controls it.
+  // A browse session's resource (this machine's browser): registered while agents use it, refused to them while
+  // Alexandre controls it.
   const browse = makeBrowseResources({
-    hub,
+    hub: hubs.local,
     current: sharedCurrentSessions(),
     find: relayFind(),
     family,
@@ -157,42 +145,53 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     Effect.gen(function* () {
       const command = shellCommand(event.tool, event.input)
       if (!command) return
-      const locks = yield* Effect.promise(() => hub.locks())
-      if (locks === undefined && touchesResources(command)) {
+      const workdir = shellWorkdir(event.input)
+      // Each part of the command is matched on the hub of the machine it runs on (one part and hub without the Mac's).
+      const all = hubs.scopes(command)
+      const checked = yield* Effect.promise(() => commandLock(hubs, all, workdir))
+      if (checked.unchecked) {
         unchecked.add(event.id)
         yield* Effect.logWarning("resources hub unreachable; command runs without its lock check", { call: event.id })
       }
-      // A command run on another machine (ssh, docker exec) cannot touch this Mac's resources.
-      const lock = blocking(localCommand(command), locks ?? [], shellWorkdir(event.input))
-      if (lock) return yield* new Tool.Error({ message: refusal(lock) })
+      if (checked.lock) return yield* new Tool.Error({ message: refusal(checked.lock) })
       // In use from the start: a long command (a test run, a recording) keeps its resources `agent` until it ends, and
       // the history shows it while it runs. Only resources the hub already knows; the result registers new ones.
-      if (references(command).length === 0) return
+      if (routes(all).length === 0) return
       const owner = yield* family(event.sessionID)
-      const found = references(command, "", shellWorkdir(event.input) ?? (owner.directory || undefined))
-      const registered = yield* call(() => hub.list(false)).pipe(
-        Effect.map((result) => [
-          ...known(found, result.resources).map((resource) => ({ kind: resource.kind, meta: resource.meta })),
-          ...bareSerials(found, result.resources).map((meta) => ({ kind: meta.kind, meta })),
-        ]),
-        Effect.orElseSucceed(() => []),
-      )
       yield* Effect.forEach(
-        registered,
-        (resource) => {
-          // A command that only asks about an emulator neither uses it nor takes it over.
-          const use = usage(command, resource.meta, caller(event, owner), Date.now(), false)
-          if (!use) return Effect.void
-          return call(() =>
-            hub.upsert({
-              kind: resource.kind,
-              meta: resource.meta,
-              ...use,
-              used: true,
-              activity: { call: event.id, command, running: true },
-            }),
-          ).pipe(Effect.ignore)
-        },
+        routes(all, "", workdir ?? (owner.directory || undefined)),
+        (route) =>
+          Effect.gen(function* () {
+            const hub = hubs.of(route.machine)
+            const registered = yield* call(() => hub.list(false)).pipe(
+              Effect.map((result) => [
+                ...known(route.references, result.resources).map((resource) => ({
+                  kind: resource.kind,
+                  meta: resource.meta,
+                })),
+                ...bareSerials(route.references, result.resources).map((meta) => ({ kind: meta.kind, meta })),
+              ]),
+              Effect.orElseSucceed(() => []),
+            )
+            yield* Effect.forEach(
+              registered,
+              (resource) => {
+                // A command that only asks about an emulator neither uses it nor takes it over.
+                const use = usage(route.command, resource.meta, caller(event, owner), Date.now(), false)
+                if (!use) return Effect.void
+                return call(() =>
+                  hub.upsert({
+                    kind: resource.kind,
+                    meta: resource.meta,
+                    ...use,
+                    used: true,
+                    activity: { call: event.id, command, running: true },
+                  }),
+                ).pipe(Effect.ignore)
+              },
+              { discard: true },
+            )
+          }),
         { discard: true },
       )
     }),
@@ -202,8 +201,12 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     Effect.gen(function* () {
       const command = shellCommand(event.tool, event.input)
       if (!command) return
+      const workdir = shellWorkdir(event.input)
+      const all = hubs.scopes(command)
       // Whatever the outcome, the command no longer holds the resources it named.
-      if (references(command).length > 0) yield* Effect.promise(() => hub.end(event.id))
+      yield* Effect.forEach(routes(all), (route) => Effect.promise(() => hubs.of(route.machine).end(event.id)), {
+        discard: true,
+      })
       const warn = unchecked.delete(event.id)
       if (event.status !== "completed") return
       const content = [
@@ -215,26 +218,38 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       if (warn) event.result = { ...event.result, content }
       const output = content.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n")
       const owner = yield* family(event.sessionID)
-      const found = references(command, output, shellWorkdir(event.input) ?? (owner.directory || undefined))
-      if (found.length === 0) return
-      const simulators = found.some((item) => item.kind === "ios-simulator")
-        ? yield* Effect.promise(() => (hub.remote ? hub.simulators().catch(() => listSimulators()) : listSimulators()))
-        : []
-      const metas = resolveSimulators(found, simulators).flatMap((meta) => {
-        const use = usage(command, meta, caller(event, owner), Date.now(), true)
-        return use ? [{ meta, use }] : []
-      })
-      const registered = yield* Effect.forEach(metas, ({ meta, use }) =>
-        call(() =>
-          hub.upsert({
-            kind: meta.kind,
-            meta,
-            ...use,
-            used: true,
-            activity: { call: event.id, command, running: false },
+      const registered = yield* Effect.forEach(
+        routes(all, output, workdir ?? (owner.directory || undefined)),
+        (route) =>
+          Effect.gen(function* () {
+            const hub = hubs.of(route.machine)
+            // Simulator names resolve on the hub's machine; this one may have no `xcrun` at all.
+            const simulators = route.references.some((item) => item.kind === "ios-simulator")
+              ? yield* Effect.promise(() =>
+                  route.machine === "mac"
+                    ? hub.simulators().catch(() => [])
+                    : hub.remote
+                      ? hub.simulators().catch(() => listSimulators())
+                      : listSimulators(),
+                )
+              : []
+            const metas = resolveSimulators(route.references, simulators).flatMap((meta) => {
+              const use = usage(route.command, meta, caller(event, owner), Date.now(), true)
+              return use ? [{ meta, use }] : []
+            })
+            return yield* Effect.forEach(metas, ({ meta, use }) =>
+              call(() =>
+                hub.upsert({
+                  kind: meta.kind,
+                  meta,
+                  ...use,
+                  used: true,
+                  activity: { call: event.id, command, running: false },
+                }),
+              ).pipe(Effect.option),
+            )
           }),
-        ).pipe(Effect.option),
-      ).pipe(Effect.map((results) => results.flatMap((result) => (Option.isSome(result) ? [result.value] : []))))
+      ).pipe(Effect.map((results) => results.flat().flatMap((result) => (Option.isSome(result) ? [result.value] : []))))
       if (registered.length === 0) return
       const fresh = registered.filter((resource) => !announced.has(`${event.sessionID}:${resource.id}`))
       fresh.forEach((resource) => announced.add(`${event.sessionID}:${resource.id}`))
@@ -254,18 +269,19 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     .transform((editor) =>
       editor.add({
         name: "resource_label",
-        description:
-          "Name a simulator, Android emulator or Playwright browser of this Mac you already used in a shell command, or say what it is for, as Alexandre sees it in the app. ref is its UDID, simulator name, AVD name (prefer it to the adb serial, which another AVD may hold now) or playwright-cli session. Emulators on other machines (ssh, docker exec) are not resources here.",
+        description: hubs.mac
+          ? "Name an iOS simulator or Android emulator of the Mac (used through `mac …`) or a Playwright browser of this machine that you already used in a shell command, or say what it is for, as Alexandre sees it in the app. ref is its UDID, simulator name, AVD name (prefer it to the adb serial, which another AVD may hold now) or playwright-cli session. Emulators reached otherwise (adb without `mac`, ssh, docker exec) are not resources here."
+          : "Name a simulator, Android emulator or Playwright browser of this Mac you already used in a shell command, or say what it is for, as Alexandre sees it in the app. ref is its UDID, simulator name, AVD name (prefer it to the adb serial, which another AVD may hold now) or playwright-cli session. Emulators on other machines (ssh, docker exec) are not resources here.",
         input: standard(LabelInput),
         output: standard(Resources.Resource),
         options: { codemode: false },
         execute: (input) =>
           call(async () => {
-            const found = labelTarget((await hub.list()).resources, input.ref)
+            const found = labelTarget((await hubs.list()).resources, input.ref, hubs.mac !== undefined)
             if ("refusal" in found) throw new HubError("not_found", found.refusal)
             const { resource: target, bare } = found
             // A serial is resolved by the hub against the emulator there now (it may be another AVD's by now).
-            return hub.upsert({
+            return hubs.owner(target.id).upsert({
               kind: target.kind,
               meta: bare ? { kind: "android-emulator", serial: input.ref } : target.meta,
               ...(input.name ? { name: input.name } : {}),
@@ -287,31 +303,27 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     )
     .pipe(Effect.orDie)
 
-  // Each hub event reaches exactly one plugin instance, which relays it.
-  yield* Effect.promise(() => hub.events(25_000)).pipe(
-    Effect.flatMap((events) =>
-      Effect.forEach(
-        events,
-        (event) => {
-          if (event.type === "changed")
-            return registration.events.emit("changed", { ids: [...event.ids] }).pipe(Effect.ignore)
-          if (!event.owner) return Effect.void
-          return ctx.session
-            .synthetic({ sessionID: Session.ID.make(event.owner.sessionID), text: returned(event), resume: false })
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("failed to tell the session about returned control", { id: event.id, cause }),
-              ),
-            )
-        },
-        { discard: true },
-      ).pipe(Effect.as(events.length)),
-    ),
-    // Without a hub the long poll returns at once; wait before asking again.
-    Effect.flatMap((count) => (count === 0 ? Effect.sleep("2 seconds") : Effect.void)),
-    Effect.repeat(Schedule.forever),
-    Effect.forkScoped({ startImmediately: true }),
-  )
+  // Each hub event reaches exactly one plugin instance, which relays it; the Mac's hub going away or coming back
+  // reaches each instance once (`hubs.relay`).
+  yield* hubs.relay((event) => {
+    if (event.type === "changed")
+      return registration.events.emit("changed", { ids: [...event.ids] }).pipe(Effect.ignore)
+    if (!event.owner) return Effect.void
+    return ctx.session
+      .synthetic({ sessionID: Session.ID.make(event.owner.sessionID), text: returned(event), resume: false })
+      .pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to tell the session about returned control", { id: event.id, cause }),
+        ),
+      )
+  })
+})
+
+/** This machine's hub and, when configured, the Mac's (`resources.md`, "Mac hub"); a misconfiguration only warns. */
+const defaultHubs = Effect.fn("Resources.hubs")(function* () {
+  const mac = sharedMacHub()
+  if (mac.problem) yield* Effect.logWarning(mac.problem)
+  return makeHubs(makeHubClient(hubSettings()), mac.client)
 })
 
 /** Whether a resource's browse handoff still waits (the hub may still list it for a moment after it ended). */

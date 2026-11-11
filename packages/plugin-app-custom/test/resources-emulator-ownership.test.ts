@@ -156,6 +156,11 @@ describe("resource_label by serial", () => {
     expect("refusal" in found && found.refusal).toContain("another machine")
     // By its AVD it is named as before.
     expect(labelTarget([knight, stale], "Abacato_cosmic_knight")).toEqual({ resource: knight, bare: false })
+    // A server elsewhere with the Mac's hub: the Mac's emulators are the ones used through `mac`, not "this Mac".
+    const there = labelTarget([knight, stale], "emulator-5554", true)
+    expect("refusal" in there && there.refusal).toContain("ref Abacato_cosmic_knight")
+    expect("refusal" in there && there.refusal).toContain("used through `mac`")
+    expect("refusal" in there && there.refusal).not.toContain("this Mac")
   })
 
   test("refuses a serial no emulator answers on, and names one known only by a running serial", () => {
