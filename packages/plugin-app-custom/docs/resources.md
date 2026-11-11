@@ -19,7 +19,7 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | Piece      | Where                                                               | Role                                                                                          |
 | ---------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | Contract   | `src/resources/rpc.ts`, `src/resources/protocol.ts`                 | Resource shape, RPC, stream/input wire protocol                                               |
-| Plugin     | `src/resources/index.ts`, `lock.ts`, `supervisor.ts`                | `custom.resources` RPC, control lock in `execute.before`, relays hub events, starts the hub   |
+| Plugin     | `src/resources/index.ts`, `lock.ts`, `supervisor.ts`, `hubs.ts`     | `custom.resources` RPC, control lock in `execute.before`, relays hub events, starts the hub   |
 | Hub        | `src/resources/hub/`                                                | Separate Bun process: registry, locks, tickets, probes, shared streams, input                 |
 | Adapters   | `src/resources/adapters/<kind>.ts`                                  | One per kind: liveness, snapshot, stream, input                                               |
 | iOS mirror | MyAgents `OpenCodeKit/Sources/OpenCodeKit/SessionResources.swift`   | Codable contract, RPC calls, hub URLs                                                         |
@@ -68,7 +68,9 @@ Event `rpc.custom.resources.changed` `{ ids }`: reload `list` (the ids are a hin
 
 `Ticket` = `{ ticket, expiresAt, path, loopbackPort }`. Redeem it within 60 s; an open connection outlives it.
 URL: the server origin + `path` + `/snapshot|/stream|/input` + `?ticket=…`. When the server itself is on loopback
-(simulator tests against a sandbox) use `http://127.0.0.1:<loopbackPort>` instead, since no proxy is in front.
+(simulator tests against a sandbox) use `http://127.0.0.1:<loopbackPort>` instead, since no proxy is in front; `0`
+means there is no such port (since rev. 2026-11-11, tickets of the [Mac hub](#mac-hub-server-in-the-container), whose
+`path` is `/resources/mac/<encoded id>`). Clients use `path` as given.
 
 ## Hub routes
 
@@ -114,6 +116,9 @@ hub's own `port` as `loopbackPort`, simulator names resolve through `GET /admin/
 a warning (`lockUnavailable`) instead of silently skipping the lock. Commands the agent prefixes with `mac` (which
 runs them on the Mac) are detected like local ones.
 
+This is the OrbStack layout: one hub, on the Mac. A server in a container that keeps its own hub and adds the Mac's
+uses the [Mac hub](#mac-hub-server-in-the-container) instead.
+
 OrbStack servers should configure `REMOTE_INFO_COMMAND`: opening the Mac file from Linux traverses virtio-fs and
 has caused whole-VM hangs. The command performs the read on macOS and sends the bytes through the existing bridge.
 Publication of the Mac proxy and hub also sends bytes through stdin to `custom-mac-host.py`, which performs all
@@ -123,6 +128,78 @@ Every shell command waits for `GET /admin/locks`, so administrative requests hav
 15 s for snapshots, control and `/admin/simulators`; the event long poll keeps its own). A hub that accepts
 connections but never answers counts as not answering: it is not retried at once, and the next request checks its
 health again.
+
+### Mac hub (server in the container)
+
+Rev. 2026-11-11. The server on host-6 runs in a Linux container. Its own hub stays local (a child of the server, port
+`OPENCODE_RESOURCES_HUB_PORT=4179`) for this machine's browsers (`playwright-cli`, browse), and a second hub, the
+Mac's, serves the Mac's iOS simulators and Android emulators, which agents drive through the `mac` bridge
+(`mac xcrun simctl …`, `mac adb -s emulator-5556 …`). Same binary and protocol; nothing changes for apps.
+
+```text
+iPhone ─▶ proxy ─┬─▶ server (+ plugin) ──loopback──────────────▶ local hub 4179  (/resources/<id>)
+                 ├─▶ local hub 4179                                 chrome
+                 └─▶ /resources/mac/* minus /mac ─▶ /run/mac-bridge/resources-hub.sock ─▶ Mac hub 4181
+plugin ──HTTP over the Unix socket, bearer secret──▶ Mac hub /admin/*   ios-simulator, android-emulator
+```
+
+| Variable                                  | Meaning                                                                                                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OPENCODE_RESOURCES_HUB_MAC_SOCKET`       | Unix socket carrying the Mac hub's HTTP and WebSocket (`/run/mac-bridge/resources-hub.sock`); turns it on                                                                                  |
+| `OPENCODE_RESOURCES_HUB_MAC_INFO_COMMAND` | Needed with the socket: JSON argv whose stdout is the Mac hub's `hub.json`, e.g. `["mac","/bin/cat","/Users/alexandremartins/.local/share/opencode-resources-hub-linux/state/hub.json"]` |
+
+Without `OPENCODE_RESOURCES_HUB_MAC_SOCKET` nothing changes (native Mac, OrbStack remote mode, sandboxes, which drop
+every `OPENCODE_RESOURCES_HUB_*`). Only one of the two, or a command that is not a JSON array of strings, behaves the
+same and logs one warning naming the variable (never values): a typo in the deployment does not take the plugin down.
+With both (`hubs.ts`, over two `makeHubClient`s):
+
+- **The Mac hub is only read**, like a remote hub: never started, stopped or inspected; `hub.json` is read again
+  (running the command) only after a request fails or is refused. Its secret never leaves the plugin.
+- **Who holds what.** A resource's kind says its hub: `ios-simulator` and `android-emulator` are the Mac's, `chrome`
+  this machine's. `get`, `snapshot`, `ticket`, `control`, `stop`, `dismiss`, `focus` and `resource_label` go there;
+  browse resources and the browser handoff (`browser-handoff/`, its own client) stay on the local hub.
+- **List.** The union of the local hub's `chrome` and the Mac hub's simulators and emulators (each hub contributes
+  only its kinds: the local one keeps its older simulator and emulator entries for up to 7 days), newest use first.
+  A Mac hub that has not answered after 1 s (`macListWait`; it answers in tens of ms) is left out of that list.
+- **Tickets** of the Mac hub have `path: /resources/mac/<encoded id>` and `loopbackPort: 0`; the container's proxy
+  strips `/mac` and hands the request to the socket. The local hub's keep `/resources/<id>`.
+- **Commands per machine** (`machineParts` in `discovery.ts`). A shell command splits into what runs here and what
+  runs on the Mac: a simple command `mac [-t|-T] [-C dir|--cwd dir] [--] CMD …` runs `CMD …` there,
+  `mac sh|bash|zsh [-l] -c '…'` its script, and a here-document goes where its command runs
+  (`mac bash <<'EOF' … EOF`, also when the line goes on with `| tee log`). Inside either part, `ssh`, `docker exec` and the rest (`localCommand`) still go
+  elsewhere. Then discovery, activity, `onlyAsksAndroid`, `startedBy` (the AVDs a part starts) and the lock read each
+  part against its own hub: the Mac part names the Mac's simulators and emulators (its Chrome is not served here),
+  the local part names this machine's browsers, and a simulator UDID or name in the local part is the Mac's too.
+  `adb`, `emulator` or `agent-device` without `mac` reach the container's Android sidecar, which is not a resource:
+  they register nothing and no Mac lock refuses them, so a lock on the Mac's `emulator-5554` never refuses a local
+  `adb -s emulator-5554`, nor the other way round.
+- **The Mac may sleep.** The local hub is read before every shell command, as before; the Mac hub only when the
+  command may touch the Mac (a `mac` part with a simulator, emulator or Playwright tool, or a simulator named here).
+  When the Mac hub does not answer (tunnel down, Mac asleep: the request hits the 3 s deadline, or the socket refuses
+  at once), every request fails at once for 2 s, doubling up to 30 s while it stays away (`HubSettings.backoff`), so
+  neither lists nor shells keep paying its deadline or running the `hub.json` command. A command that touches the Mac
+  then runs with the `lockUnavailable` warning, as with a remote hub. A slow request (a capture, control, `simctl`,
+  15 s) that outlasts its deadline counts as the hub being away only when the hub's `/admin/health` (1.5 s) then fails
+  too: one emulator slow to capture does not hide the others. A `list` the app asks for (`probe`) tries the hub even
+  during the wait, at most once per 2 s and still within the 1 s list limit, so opening Recursos after the Mac wakes
+  shows its resources at once; a failed probe leaves the wait as it was. Its event long poll runs on its own (one per
+  plugin instance, as for the local hub), so neither hub's events wait for the other's. That poll goes through the same
+  backoff: while the hub is away it fails at once every 2 s, and the first one after each wait ends tries the hub, so
+  the hub is found back at most about 30 s after it returns even when nobody asks.
+- **Away and back are changes.** When requests find the Mac hub away (its resources leave the list) or back (they
+  return), each plugin instance emits one `changed` (`ids: []`), once per change, so an open Recursos tab reloads
+  instead of showing dead cards or missing the Mac's. The list that follows is answered from the same state and
+  announces nothing more.
+- **Stop.** The Mac's emulators are shared with the Mac's own server and its hub, whose agents this hub cannot see:
+  one that looks free here may be in use there. So `stop` (and `capabilities.stop`) applies only to an emulator one of
+  this server's agents started (`startedBy` present: this hub serves only this server); others answer `unsupported`.
+  The residual risk: an emulator a container agent started that a Mac agent also uses can still be shut down from
+  the app.
+- **Control is per hub.** Taking control through this server locks the emulator against this server's agents only;
+  agents of the Mac's own server keep sending input to it. Each hub also streams the device on its own (two captures
+  when both are watched).
+- **Protocol.** The Mac hub runs the Mac's installed release, so its `protocol` must match this plugin's; a different
+  one makes it unavailable here (it is never shut down from here).
 
 ### Stream protocol (`protocol.ts`)
 
@@ -430,7 +507,8 @@ agent uses (state `agent`) and that Alexandre does not control (`user`). The ada
 by serial and proves, with the running emulators' ini files or the console's `emu avd name`, that the serial runs the
 entry's AVD now (`verify`, as for input), before `adb -s <serial> emu kill`; it waits up to 15 s for the emulator to
 leave the running list, and the hub probes at once, so the answer arrives with the resource `stopped`. Another
-machine's emulator is never a resource here ([Discovery](#discovery)), so it cannot be stopped.
+machine's emulator is never a resource here ([Discovery](#discovery)), so it cannot be stopped. Through a
+[Mac hub](#mac-hub-server-in-the-container), only emulators this server's agents started can be.
 
 ## Control lock
 
@@ -461,7 +539,8 @@ dropped with its quoted arguments and here-document before matching, for discove
 `ssh` (also `mosh`, `autossh`, `gcloud compute ssh`), `docker`/`podman`/`nerdctl` `exec`/`run` (also through
 `compose`), `kubectl`/`oc` `exec`, and `adb` with another machine's server (`-H <host>`,
 `ANDROID_ADB_SERVER_ADDRESS`). `ssh brs@host-6 'docker exec … adb -s emulator-5554 …'` is host-6's emulator, not this
-Mac's `emulator-5554`. The Linux machine's `mac` and `orb` prefixes stay local. A command that only asks about Android
+Mac's `emulator-5554`. The Linux machine's `mac` and `orb` prefixes stay local (with a
+[Mac hub](#mac-hub-server-in-the-container), the `mac` part goes to it instead). A command that only asks about Android
 emulators (`onlyAsksAndroid`: every emulator tool it runs is `adb devices`, `adb version`, `adb get-state|get-serialno|
 get-devpath|wait-for-…`, `adb emu avd name|path|id`, `adb shell getprop` or `emulator -list-avds|-version`) registers
 nothing: it neither marks one in use nor makes its session the owner, so checking which AVD holds a port does not take

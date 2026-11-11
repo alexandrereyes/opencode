@@ -573,6 +573,38 @@ Simulators, emulators and Chrome stay on the Mac, so the hub does too, as the La
 - **Sandboxes never use it.** A Linux `custom-sandbox.ts` runs its own hub on the Mac (below, "Isolated source
   development"). Tests reach a sandbox hub through `custom-sandbox.ts hub`, never through this `hub.json`.
 
+#### Second resources hub on the Mac (server in the host-6 container)
+
+The production server now runs in a Docker container on host-6, where Chrome runs too, so its hub stays local (a
+child of the server on `OPENCODE_RESOURCES_HUB_PORT=4179`, as on the Mac) and the Mac adds a hub of its own for
+simulators and emulators (`packages/plugin-app-custom/docs/resources.md`, "Mac hub"). That deployment is not the
+systemd runtime above: the container, its proxy and its environment live in `core-infra`
+(`opencode-docker/docker-compose.fork.yml`, service `opencode-svc`; the Mac side in `opencode-docker/mac-bridge`).
+This repository only defines the contract:
+
+- **Server environment**, in the `opencode-svc` service of that compose file (not `manual.json`):
+  `OPENCODE_RESOURCES_HUB_MAC_SOCKET=/run/mac-bridge/resources-hub.sock` and
+  `OPENCODE_RESOURCES_HUB_MAC_INFO_COMMAND=["mac","/bin/cat","/Users/alexandremartins/.local/share/opencode-resources-hub-linux/state/hub.json"]`;
+  no `REMOTE_*` variables. Without the socket variable the plugin behaves as before. Only one of the two, or a command
+  that is not a JSON array of strings, logs one warning naming the variable (`Resources.hubs`) and leaves the Mac hub
+  off; the plugin still loads.
+- **Hub LaunchAgent on the Mac**, `local.opencode.resources-hub-linux`: the Mac runtime's `bin/bun` runs
+  `~/.local/share/opencode-custom-v2/current/plugin/index.js --opencode-resources-hub` (with that release's
+  `serve-sim`) with `OPENCODE_RESOURCES_HUB_PORT=4181` and `OPENCODE_RESOURCES_HUB_STATE` =
+  `~/.local/share/opencode-resources-hub-linux/state` (`hub.json`, `resources.json`). It serves only the container's
+  server.
+- **Tunnel LaunchAgent on the Mac**, `com.alexandrem.mac-bridge-resources-hub` (a copy of the `mac` bridge's tunnel):
+  `ssh -R /srv/mac-bridge/resources-hub.sock:127.0.0.1:4181`, which the container sees as the Unix socket
+  `/run/mac-bridge/resources-hub.sock`. The container's proxy sends `/resources/mac/*` there with `/mac` removed, and
+  every other `/resources/*` to the local hub.
+- **Release and protocol.** The hub follows the release installed on the Mac (`current`), updated by `custom:update`
+  on the Mac, not by the container's; the hub publication above (`resourcesHubLabel`, `local.opencode.resources-hub`)
+  never touches it. When its `protocol` (`/admin/health`) differs from the container's plugin, the plugin treats it as
+  unavailable (it never restarts or shuts it down): the Mac's simulators and emulators disappear from the app until
+  both run releases with the same protocol.
+- **A sleeping Mac** only hides its simulators and emulators from the app; shells that do not use `mac` never wait for
+  it, and commands that do run with the "hub did not answer" warning while it is away.
+
 ### Isolated source development
 
 Compact artifact verification is available from `packages/cli`:
