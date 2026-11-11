@@ -322,8 +322,8 @@ export function body(input: BodyInput) {
     aps: {
       timestamp,
       event: input.event,
-      // Below voice (100), including push-to-start and background updates. Match OpenCodeKit.LiveActivityRelevance.
-      "relevance-score": 50,
+      // Orders this app's activities (one per server) by importance; below voice (100) and dictation (75).
+      "relevance-score": relevance(input.state),
       "content-state": input.state,
       "stale-date": timestamp + (isParked(input.state) ? limits.parkedStaleMs : limits.staleMs) / 1000,
       ...(input.attributes ? { "attributes-type": "AgentsActivityAttributes", attributes: input.attributes } : {}),
@@ -377,6 +377,21 @@ export function fit(input: BodyInput) {
 export function push(token: string, environment: LiveActivity.Environment, priority: 5 | 10, input: BodyInput): Push {
   const payload = body({ ...input, state: fit(input) })
   return { token, environment, priority, expiration: payload.aps["stale-date"], body: payload }
+}
+
+/**
+ * The activity's `relevance-score` (rev. 2026-11-10): iOS shows the highest first on the Lock Screen and in the
+ * Dynamic Island, so with one activity per server the one that needs Alexandre comes first. The same scale on every
+ * server, from the state the card shows; the app computes it the same way (`OpenCodeKit.AgentsState.relevance`).
+ */
+export const relevanceScores = { attention: 70, unread: 60, working: 50, idle: 40 } as const
+
+export function relevance(state: LiveActivity.AgentsState) {
+  const counts = state.counts
+  if (counts.question + counts.permission + (counts.browser ?? 0) + counts.failed > 0) return relevanceScores.attention
+  if ((counts.unread ?? 0) > 0) return relevanceScores.unread
+  if (counts.working > 0) return relevanceScores.working
+  return relevanceScores.idle
 }
 
 /** Nothing works: the activity shows the calm state until iOS ends it or the user dismisses it (rev. 2026-11-08). */

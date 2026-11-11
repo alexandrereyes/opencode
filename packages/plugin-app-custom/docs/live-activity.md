@@ -60,7 +60,7 @@ the complication's drawing or push budget.
 AgentsState {
   v: 1
   updatedAt: number                 // epoch ms when the backend computed this state
-  host: string                      // machine display name, e.g. "MacBook Pro" (macOS ComputerName), ≤ 40 chars
+  host: string                      // server display name: OPENCODE_HOST_NAME, else macOS ComputerName, ≤ 40 chars
   counts: {
     working: number                 // top-level sessions executing with no pending request
     question: number                // sessions with ≥1 pending question (form) request
@@ -188,12 +188,12 @@ does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agor
 
 Same plugin RPC mechanism as `custom.device` (iOS calls it with `rpc("custom.live-activity", "<method>", ...)`).
 
-| Method       | Input                                                                                       | Output                                                                         |
-| ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `register`   | `{ deviceID, serverKey, environment: "sandbox" \| "production", theme, pushToStartToken? }` | `{ push: "configured" \| "unconfigured" }`                                     |
-| `activity`   | `{ deviceID, activityID, pushToken }`                                                       | `{}`                                                                           |
-| `ended`      | `{ deviceID, activityID, reason: "ended" \| "dismissed" }`                                  | `{}`                                                                           |
-| `unregister` | `{ deviceID }`                                                                              | `{}`                                                                           |
+| Method       | Input                                                                                       | Output                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `register`   | `{ deviceID, serverKey, environment: "sandbox" \| "production", theme, pushToStartToken? }` | `{ push: "configured" \| "unconfigured" }`                                         |
+| `activity`   | `{ deviceID, activityID, pushToken }`                                                       | `{}`                                                                               |
+| `ended`      | `{ deviceID, activityID, reason: "ended" \| "dismissed" }`                                  | `{}`                                                                               |
+| `unregister` | `{ deviceID }`                                                                              | `{}`                                                                               |
 | `snapshot`   | `{}`                                                                                        | `{ state: AgentsState \| null }` (`null` only from servers before rev. 2026-11-08) |
 
 Event **`changed`**: `{ state: AgentsState | null }`, emitted when the state changes (not for the state at the hub's
@@ -294,7 +294,13 @@ gone with it. The two ways out are told apart:
   [`push-idle.json`](live-activity/push-idle.json) (the parked update; rev. 2026-11-08, it replaced `push-end.json`).
   `push-start` carries `attributes-type`, `attributes` and
   `input-push-token: 1`, so iOS issues an update token for the new activity, which the app reports with `activity`.
-- Every body includes `aps.relevance-score: 50`, matching `OpenCodeKit.LiveActivityRelevance.agents`.
+- Every body includes `aps.relevance-score` from its own state (rev. 2026-11-10; it was a fixed 50), so with one
+  activity per server iOS shows the most important first on the Lock Screen and in the Dynamic Island: **70** while
+  something needs Alexandre (`question + permission + browser + failed > 0`), else **60** with an unread answer, else
+  **50** while something works, else **40** (idle, "Tudo em dia"). The same scale on every server; the app computes it
+  the same way for its local updates (`OpenCodeKit.AgentsState.relevance`), and voice (100) and dictation (75) stay
+  above. Equal scores keep the first started on top; priority-5 updates may arrive late (iOS budget), so the order
+  follows them with the same delay.
   Voice uses 100 on every local start/update, including network recovery. This orders this app's activities
   on the iPhone Lock Screen and in the Dynamic Island without ending/restarting agents or losing its token.
   Relevance is independent of APNs delivery priority (5/10), urgency, counters and progress.
@@ -407,17 +413,17 @@ attention rows and expanded-island rows link to their own session. Deep links ar
 
 All in [`live-activity/`](live-activity/), generated for 2026-10-27 09:41 BRT (`updatedAt` 1793104860000).
 
-| File                                                     | Shows                                                                                               |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `attributes.json`                                        | `AgentsActivityAttributes` with the `openchamber-dark` theme                                        |
-| `state-one-question.json`                                | Focus with progress + one pending question (approved mock A)                                        |
-| `state-two-questions.json`                               | Focus + two pending questions (list layout)                                                         |
-| `state-mixed.json`                                       | Question + permission + 2 failed (minimal shows `!2` in `error`)                                    |
-| `state-working.json`                                     | Only working sessions, no attention (minimal shows the ring)                                        |
-| `state-failed-only.json`                                 | No focus, one failed session (minimal `!1`)                                                         |
-| `state-progress.json`                                    | Two working sessions with a Progresso (`unit: "todos"`, `current`) and one unread (rev. 2026-10-30) |
-| `state-browser.json`                                     | A subagent of the focus waits on a browse handoff: row, attention and need of kind `browser` (rev. 2026-11-07) |
-| `push-start.json` / `push-update.json` / `push-idle.json` | Complete APNs bodies (`push-idle.json`: the parked update, 8-hour `stale-date`, rev. 2026-11-08) |
+| File                                                      | Shows                                                                                                          |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `attributes.json`                                         | `AgentsActivityAttributes` with the `openchamber-dark` theme                                                   |
+| `state-one-question.json`                                 | Focus with progress + one pending question (approved mock A)                                                   |
+| `state-two-questions.json`                                | Focus + two pending questions (list layout)                                                                    |
+| `state-mixed.json`                                        | Question + permission + 2 failed (minimal shows `!2` in `error`)                                               |
+| `state-working.json`                                      | Only working sessions, no attention (minimal shows the ring)                                                   |
+| `state-failed-only.json`                                  | No focus, one failed session (minimal `!1`)                                                                    |
+| `state-progress.json`                                     | Two working sessions with a Progresso (`unit: "todos"`, `current`) and one unread (rev. 2026-10-30)            |
+| `state-browser.json`                                      | A subagent of the focus waits on a browse handoff: row, attention and need of kind `browser` (rev. 2026-11-07) |
+| `push-start.json` / `push-update.json` / `push-idle.json` | Complete APNs bodies (`push-idle.json`: the parked update, 8-hour `stale-date`, rev. 2026-11-08)               |
 
 ## Change control
 
@@ -489,7 +495,8 @@ latest user message. The activity text stays empty until the next step event. Th
 session runs or a client calls an RPC.
 
 **Field sources.** `title`: the session title (`Sem título` when empty). `project`: basename of the Location
-directory joined with the session `subpath`. `host`: macOS `ComputerName` (`scutil`), else the host name. Pending
+directory joined with the session `subpath`. `host`: `OPENCODE_HOST_NAME` when the deployment sets it (trimmed, ≤ 40 chars; rev. 2026-11-10, host-6's container
+reported its ID), else macOS `ComputerName` (`scutil`), else the host name. Pending
 questions are forms with `metadata.kind` `question` or `websearch.provider`; `text` is the first field's description
 (the question), else its title, else the form title. Permission `text` is `<action> · <resources joined by space>`.
 Requests owned by subagent children count for their top-level session. `since` is the request's `created`: the time
