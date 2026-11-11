@@ -4,8 +4,15 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import type { Adapter } from "../src/resources/adapters/types"
-import { onlyAsksAndroid, type Reference } from "../src/resources/discovery"
-import { createHub, protocol, type HubEvent } from "../src/resources/hub/hub"
+import {
+  localCommand,
+  machineParts,
+  onlyAsksAndroid,
+  touchesResources,
+  type Reference,
+} from "../src/resources/discovery"
+import { createHub, protocol, type HubEvent, type Lock } from "../src/resources/hub/hub"
+import { blocking } from "../src/resources/lock"
 import { commandLock, makeHubs, routes, scopes, type Machine } from "../src/resources/hubs"
 import { HubError, macHubSettings, makeHubClient, type HubSettings } from "../src/resources/supervisor"
 import { startedAVDs } from "../src/resources/usage"
@@ -19,8 +26,38 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })))
 })
 
+/** The documentation that failed a shell call on 11/11: its example lines are text, not commands. */
+const readme =
+  "cat > docs/README.md <<'EOF'\n# Validar\n\n```sh\nmac xcrun simctl io <UDID ligado> screenshot /tmp/x.png\nmac adb -s emulator-5556 shell ls\n```\nEOF"
+/** The script that registered a browser that never existed. */
+const python = "python3 - <<'EOF'\nprint('ref is its playwright-cli session. Emulators on other machines')\nEOF"
+const tap = "adb -s emulator-5554 shell input tap 1 1"
+
 describe("a command's parts per machine", () => {
   const table: [string, string, boolean, { machine: Machine; references: Reference[] }[]][] = [
+    ["documentation written by cat is data", readme, false, []],
+    ["documentation written by cat is data, also with the Mac's hub", readme, true, []],
+    ["a script given to python is data", python, false, []],
+    ["a here-string given to python is data", `python3 <<< "# ${tap}"`, false, []],
+    ["a shell given a script operand reads data", `bash deploy.sh <<'EOF'\n${tap}\nEOF`, false, []],
+    [
+      "a shell reading a here-document runs it",
+      `bash <<'EOF'\n${tap}\nEOF`,
+      false,
+      [{ machine: "local", references: [{ kind: "android-emulator", serial: "emulator-5554" }] }],
+    ],
+    [
+      "cat piped straight into a shell on the Mac runs it there",
+      `cat <<'EOF' | mac bash\n${tap}\nEOF`,
+      true,
+      [{ machine: "mac", references: [{ kind: "android-emulator", serial: "emulator-5554" }] }],
+    ],
+    [
+      "two here-documents on a line: data for cat (<<- ends on a tabbed delimiter), then a script for the shell",
+      `cat > notes.md <<-'A'; bash <<'B'\n\tadb -s emulator-5558 shell ls\n\tA\n${tap}\nB`,
+      false,
+      [{ machine: "local", references: [{ kind: "android-emulator", serial: "emulator-5554" }] }],
+    ],
     [
       "without the Mac's hub, `mac` stays local, as on OrbStack",
       "mac adb -s emulator-5554 shell ls",
@@ -85,6 +122,23 @@ describe("a command's parts per machine", () => {
     expect(onlyAsksAndroid(route!.command)).toBe(true)
     const [started] = routes(scopes("emulator -avd Sidecar & mac android-emulator --detach -avd Mac_AVD", true))
     expect(startedAVDs(started!.command)).toEqual(["Mac_AVD"])
+  })
+
+  test("a here-document that is data touches nothing, is never refused and is no use; one run by a shell is", () => {
+    expect(touchesResources(readme)).toBe(false)
+    expect(touchesResources(python)).toBe(false)
+    expect(onlyAsksAndroid(`adb devices; cat > notes.md <<'EOF'\nadb -s emulator-5554 install app.apk\nEOF`)).toBe(true)
+    expect(startedAVDs("cat > notes.md <<'EOF'\nemulator -avd Pixel_9\nEOF")).toEqual([])
+    const lock: Lock = {
+      id: "android-emulator:Pixel_9",
+      kind: "android-emulator",
+      label: "Pixel 9",
+      meta: { kind: "android-emulator", serial: "emulator-5554", avd: "Pixel_9" },
+      expiresAt: 0,
+    }
+    expect(blocking(localCommand(`cat > notes.md <<'EOF'\n${tap}\nEOF`), [lock])).toBeUndefined()
+    expect(blocking(localCommand(`bash <<'EOF'\n${tap}\nEOF`), [lock])).toBe(lock)
+    expect(blocking(machineParts("mac bash <<'EOF'\nadb shell input tap 1 1\nEOF").mac, [lock])).toBe(lock)
   })
 })
 

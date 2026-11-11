@@ -41,42 +41,156 @@ export function touches(command: string, kinds: readonly Resources.Kind[]) {
 /**
  * A command's parts per machine, for a server whose Mac has its own hub (`OPENCODE_RESOURCES_HUB_MAC_SOCKET`):
  * `mac` holds what runs on the Mac through the `mac` prefix, without the prefix and its options (`mac -C dir adb …` is
- * `adb …`), the script of `mac sh|bash|zsh -c '…'` instead of the shell, and the here-documents fed to them; `here`
- * holds what runs on this machine. Parts handed to another machine (`localCommand`) are in neither.
+ * `adb …`), the script of `mac sh|bash|zsh -c '…'` instead of the shell, and the here-documents a shell there runs as
+ * its script; `here` holds what runs on this machine. Parts handed to another machine (`localCommand`) are in neither,
+ * and so is every here-document that is data (`script`).
  */
 export function machineParts(command: string) {
   const here: string[] = []
   const mac: string[] = []
-  // The here-documents opened on the current line; their bodies follow it, in order, each going where its command runs.
-  const pending: { readonly delimiter: string; readonly indented: boolean; readonly target?: string[] }[] = []
+  const list = simpleCommands(command)
+  list.forEach((item, index) => {
+    const target = machineOf(item.text)
+    const onMac = macCommand(item.text)
+    if (target === "here") here.push(bare(item.text))
+    if (target === "mac" && onMac !== undefined) mac.push(shellScript(onMac) ?? bare(onMac))
+    const shell = script(list, index)
+    if (!shell) return
+    const body = item.documents.map((document) => document.join("\n")).join("\n")
+    const runs = machineOf(shell.text)
+    if (runs === "mac") mac.push(localCommand(body))
+    if (runs !== "here") return
+    const parts = machineParts(body)
+    here.push(parts.here)
+    mac.push(parts.mac)
+  })
+  return { here: here.join("\n"), mac: mac.join("\n") }
+}
+
+/** Where a simple command runs: here, on the Mac through `mac`, or elsewhere (`undefined`, see `localCommand`). */
+function machineOf(text: string) {
+  const onMac = macCommand(text)
+  if (onMac === undefined) return remote(text) ? undefined : ("here" as const)
+  return remote(onMac) ? undefined : ("mac" as const)
+}
+
+/**
+ * A command's simple commands in order, each with the separator that ends it and the bodies of the here-documents it
+ * opens. Bodies follow the line that opens them, in order (`cat <<A; bash <<B` reads A's body, then B's), and never
+ * count as simple commands of their own. A `<<` inside quotes opens nothing; `<<<` is a here-string.
+ */
+function simpleCommands(command: string) {
+  const list: { readonly text: string; readonly separator: string; readonly documents: string[][] }[] = []
+  const pending: { readonly delimiter: string; readonly indented: boolean; readonly lines: string[] }[] = []
   let index = 0
   while (index < command.length) {
     const end = simpleEnd(command, index)
-    const segment = command.slice(index, end)
+    const text = command.slice(index, end)
     index = end + 1
-    const onMac = macCommand(segment)
-    const target = onMac === undefined ? (remote(segment) ? undefined : here) : remote(onMac) ? undefined : mac
-    if (target === here) here.push(segment)
-    if (target === mac && onMac !== undefined) mac.push(shellScript(onMac) ?? onMac)
-    pending.push(
-      ...[...segment.matchAll(heredocs)].map((match) => ({ delimiter: match[3]!, indented: match[1] === "-", target })),
-    )
+    const opened = [...unquoted(text).matchAll(heredocs)].map((match) => ({
+      delimiter: match[3]!,
+      indented: match[1] === "-",
+      lines: [] as string[],
+    }))
+    pending.push(...opened)
+    list.push({ text, separator: command[end] ?? "", documents: opened.map((document) => document.lines) })
     if (command[end] !== "\n" && end < command.length) continue
     for (const document of pending.splice(0)) {
       while (index < command.length) {
         const next = command.indexOf("\n", index)
         const line = command.slice(index, next === -1 ? command.length : next)
         index = next === -1 ? command.length : next + 1
-        if ((document.indented ? line.trim() : line) === document.delimiter) break
-        document.target?.push(line)
+        if ((document.indented ? line.replace(/^\t+/, "") : line) === document.delimiter) break
+        document.lines.push(line)
       }
     }
   }
-  return { here: here.join("\n"), mac: mac.join("\n") }
+  return list
 }
 
-/** `<<WORD`, `<<-WORD`, `<<'WORD'`; not a `<<<` here-string. */
-const heredocs = /(?<!<)<<(-?)\s*(['"]?)([A-Za-z_][\w-]*)\2/g
+/** `<<WORD`, `<<-WORD`, `<<'WORD'`, `<< "WORD"`; not a `<<<` here-string. */
+const heredocs = /(?<!<)<<(-?)\s*(['"]?)([A-Za-z_][\w-]*)\2(?![\w-])/g
+const hereStrings = /<<<\s*(?:'[^']*'|"(?:[^"\\]|\\.)*"|\S+)/g
+const shells = ["sh", "bash", "zsh", "dash", "ksh"]
+
+/**
+ * The simple command that runs the here-documents of `list[index]` as a script, or `undefined` when they are data. They
+ * are a script only for a shell reading its commands from standard input: `sh`, `bash`, `zsh`, `dash` or `ksh`
+ * (through `mac`, wrappers such as `sudo`, `env`, `nohup`, `time` or `timeout N`, assignments or a path) with no
+ * script operand and no `-c` (`bash`, `bash -s arg`, `bash -l -`, `mac bash`; not `bash run.sh` or `bash -c '…'`,
+ * whose standard input is data), or for a plain `cat` piped straight into such a shell (`cat <<EOF | bash`). Every
+ * other reader (`cat > file`, `tee`, `python3 -`, `node`, `psql`, `git commit -F -`, `curl --data @-`, a shell behind
+ * a filter) gets data: it names no resource, whatever it says. Command substitutions in a data here-document with an
+ * unquoted delimiter do run, but are not looked for: text must not turn into resources, and a lock is not meant to be
+ * bypassed that way. A here-string (`<<<`) is data unless a shell reads it.
+ */
+function script(list: ReturnType<typeof simpleCommands>, index: number) {
+  const item = list[index]!
+  if (item.documents.length === 0) return undefined
+  if (readsScript(item.text)) return item
+  const next = list[index + 1]
+  return item.separator === "|" && next && plainCat(item.text) && readsScript(next.text) ? next : undefined
+}
+
+/** Whether a simple command is a shell that reads its script from standard input (see `script`). */
+function readsScript(text: string): boolean {
+  const onMac = macCommand(text)
+  if (onMac !== undefined) return readsScript(onMac)
+  const words = beforeRedirections(text)
+  const first = wrappedCommand(words)
+  if (!shells.includes(words[first]?.split("/").pop() ?? "")) return false
+  const operands = words.slice(first + 1)
+  for (let index = 0; index < operands.length; index++) {
+    const word = operands[index]!
+    if (word === "-s" || /^-[A-Za-z]*s[A-Za-z]*$/.test(word)) return !/^-[A-Za-z]*c/.test(word)
+    if (/^[-+][A-Za-z]*c[A-Za-z]*$/.test(word)) return false
+    if (word === "-") return true
+    if (word === "--") return operands.length === index + 1
+    if (word === "-o" || word === "+o") index++
+    else if (!/^[-+]/.test(word)) return false
+  }
+  return true
+}
+
+/** Whether a simple command is `cat` alone (or `cat -`), copying standard input through. */
+function plainCat(text: string) {
+  const words = beforeRedirections(text)
+  const first = wrappedCommand(words)
+  return words[first]?.split("/").pop() === "cat" && words.slice(first + 1).every((word) => word === "-")
+}
+
+/** The words of a simple command before its first redirection (`<<EOF`, `> file`, `2>&1`). */
+function beforeRedirections(text: string) {
+  const cut = /^[^<>]*/.exec(unquoted(text))![0].replace(/\s\d+$/, "")
+  return cut.trim().split(/\s+/).filter(Boolean)
+}
+
+/** Like `commandWord`, also past the wrappers' own options (`env -i bash`, `sudo -E bash`). */
+function wrappedCommand(words: readonly string[]) {
+  let index = 0
+  let wrapped = false
+  for (; index < words.length; index++) {
+    const word = words[index]!
+    if (/^[A-Za-z_]\w*=/.test(word) || ["sudo", "exec", "env", "nohup", "command", "time"].includes(word))
+      wrapped = true
+    else if (word === "timeout") {
+      wrapped = true
+      index++
+    } else if (!wrapped || !word.startsWith("-")) break
+  }
+  return index
+}
+
+/** The text with its quoted strings emptied, except a here-document's quoted delimiter (`<<'EOF'`). */
+function unquoted(text: string) {
+  return text.replace(/(?<!<<-?\s*)('[^']*'|"(?:[^"\\]|\\.)*")/g, "''")
+}
+
+/** A simple command without its here-document operators, and without its here-string unless a shell reads it. */
+function bare(text: string) {
+  const kept = text.replace(heredocs, "")
+  return readsScript(text) ? kept : kept.replace(hereStrings, "")
+}
 
 /** The command a `mac …` simple command runs on the Mac (after `mac` and its options), else `undefined`. */
 function macCommand(segment: string) {
@@ -136,31 +250,22 @@ export function references(command: string, output = "", workdir?: string): Refe
  * its quoted arguments and its here-document: `ssh host …` (also `mosh`, `autossh`, `gcloud compute ssh`), `docker`,
  * `podman` or `nerdctl` `exec`/`run` (also through `compose`), `kubectl`/`oc` `exec`, and `adb` talking to another
  * machine's server (`-H <host>`, `ANDROID_ADB_SERVER_ADDRESS=<host>`). The Linux machine's `mac` and `orb` prefixes
- * stay local: they run on the Mac or use its adb server.
+ * stay local: they run on the Mac or use its adb server. A here-document counts only as the script of a shell that
+ * runs here (`script`); one given to any other command is data and is dropped, like a here-string such a command reads.
  */
-export function localCommand(command: string) {
-  const kept: string[] = []
-  let index = 0
-  while (index < command.length) {
-    const end = simpleEnd(command, index)
-    const segment = command.slice(index, end)
-    index = end + 1
-    if (!remote(segment)) {
-      kept.push(segment)
-      continue
-    }
-    // A here-document fed to a remote command runs there too.
-    const heredoc = /<<(-?)\s*(['"]?)([A-Za-z_][\w-]*)\2/.exec(segment)
-    if (!heredoc || command[end] !== "\n") continue
-    const delimiter = heredoc[3]!
-    while (index < command.length) {
-      const next = command.indexOf("\n", index)
-      const line = command.slice(index, next === -1 ? command.length : next)
-      index = next === -1 ? command.length : next + 1
-      if ((heredoc[1] ? line.trim() : line) === delimiter) break
-    }
-  }
-  return kept.join("\n")
+export function localCommand(command: string): string {
+  const list = simpleCommands(command)
+  return list
+    .flatMap((item, index) => {
+      if (remote(item.text)) return []
+      const shell = script(list, index)
+      const body =
+        shell && !remote(shell.text)
+          ? [localCommand(item.documents.map((document) => document.join("\n")).join("\n"))]
+          : []
+      return [bare(item.text), ...body]
+    })
+    .join("\n")
 }
 
 /** Where the simple command starting at `start` ends: the next unquoted `;`, `&`, `|`, `(`, `)` or newline. */
