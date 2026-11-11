@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { Effect, Schema } from "effect"
-import { body, fit, limits as pushLimits } from "../src/live-activity/lifecycle"
+import { body, fit, limits as pushLimits, relevance, relevanceScores } from "../src/live-activity/lifecycle"
+import { hostName } from "../src/live-activity/index"
 import { LiveActivity } from "../src/live-activity/rpc"
 import { clip, describe as activity, eventTypes, limits, makeTracker } from "../src/live-activity/tracker"
 import {
@@ -55,6 +56,38 @@ test("the attributes fixture is a valid theme and the push fixtures decode their
   expect(() => Schema.decodeUnknownSync(LiveActivity.Theme)({ ...theme, accent: "#fff" })).toThrow()
   const { error: _, ...partial } = theme
   expect(() => Schema.decodeUnknownSync(LiveActivity.Theme)(partial)).toThrow()
+})
+
+test("relevance orders the activities: what needs Alexandre, then unread, then working, then idle", async () => {
+  const base = (await fixture("push-idle")).aps["content-state"] as LiveActivity.AgentsState
+  const zero = { working: 0, question: 0, permission: 0, failed: 0, idle: 0, unread: 0 }
+  const score = (counts: Partial<LiveActivity.AgentsState["counts"]>) =>
+    relevance({ ...base, counts: { ...zero, ...counts } })
+  for (const counts of [{ question: 1 }, { permission: 1 }, { browser: 1 }, { failed: 1 }])
+    expect(score({ ...counts, working: 3, unread: 2 })).toBe(70)
+  expect(score({ unread: 1, working: 3 })).toBe(60)
+  expect(score({ working: 1, idle: 4 })).toBe(50)
+  expect(score({ idle: 4 })).toBe(40)
+  // An older state without the optional counts is idle, not attention.
+  const { unread: _, ...old } = zero
+  expect(relevance({ ...base, counts: old })).toBe(relevanceScores.idle)
+  // Below dictation (75) and voice (100), as OpenCodeKit.LiveActivityRelevance keeps them.
+  expect(Math.max(...Object.values(relevanceScores))).toBeLessThan(75)
+  // Every push body carries the score of its own state.
+  const state = { ...base, counts: { ...zero, question: 1 } }
+  expect(body({ event: "update", state, now: T }).aps["relevance-score"]).toBe(70)
+  for (const name of ["push-start", "push-update", "push-idle"]) {
+    const push = await fixture(name)
+    expect(push.aps["relevance-score"]).toBe(relevance(push.aps["content-state"]))
+  }
+})
+
+test("the card's host is OPENCODE_HOST_NAME when the deployment sets it", async () => {
+  expect(await Effect.runPromise(hostName("  Linux BRS "))).toBe("Linux BRS")
+  expect(await Effect.runPromise(hostName("x".repeat(60)))).toHaveLength(40)
+  const fallback = await Effect.runPromise(hostName(""))
+  expect(fallback.trim().length).toBeGreaterThan(0)
+  expect(await Effect.runPromise(hostName(undefined))).toBe(fallback)
 })
 
 test("status precedence: question beats permission, failed beats working, and child requests count for the root", async () => {

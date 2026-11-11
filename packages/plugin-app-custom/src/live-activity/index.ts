@@ -274,7 +274,13 @@ function visible(state: LiveActivity.AgentsState, now: number, surface: "activit
   return surface === "watch" ? state : fit({ event: "update", state, now })
 }
 
-/** macOS ComputerName (e.g. "MacBook Pro"), falling back to the host name. */
+/**
+ * The card's `host`: `OPENCODE_HOST_NAME` when the deployment names the server (rev. 2026-11-10: a container's host
+ * name is its ID, `3d30be133570`), else macOS ComputerName (e.g. "MacBook Pro"), else the host name.
+ */
+export const hostName = (configured = process.env.OPENCODE_HOST_NAME) =>
+  configured?.trim() ? Effect.succeed(configured.trim().slice(0, 40)) : computerName
+
 const computerName = Effect.tryPromise(async () => {
   const child = Bun.spawn(["/usr/sbin/scutil", "--get", "ComputerName"], {
     stdin: "ignore",
@@ -297,7 +303,7 @@ declare global {
  */
 export function sharedHub() {
   globalThis.opencodeCustomLiveActivityHub ??= makeHub({
-    host: computerName,
+    host: hostName(),
     apns: load(),
     handoffs: sharedRegistry(),
   })
