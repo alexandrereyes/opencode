@@ -165,8 +165,9 @@ With both (`hubs.ts`, over two `makeHubClient`s):
   strips `/mac` and hands the request to the socket. The local hub's keep `/resources/<id>`.
 - **Commands per machine** (`machineParts` in `discovery.ts`). A shell command splits into what runs here and what
   runs on the Mac: a simple command `mac [-t|-T] [-C dir|--cwd dir] [--] CMD …` runs `CMD …` there,
-  `mac sh|bash|zsh [-l] -c '…'` its script, and a here-document goes where its command runs
-  (`mac bash <<'EOF' … EOF`, also when the line goes on with `| tee log`). Inside either part, `ssh`, `docker exec` and the rest (`localCommand`) still go
+  `mac sh|bash|zsh [-l] -c '…'` its script, and a here-document a shell reads goes where that shell runs
+  (`mac bash <<'EOF' … EOF`, also when the line goes on with `| tee log`; any other here-document is data, see
+  [Discovery](#discovery)). Inside either part, `ssh`, `docker exec` and the rest (`localCommand`) still go
   elsewhere. Then discovery, activity, `onlyAsksAndroid`, `startedBy` (the AVDs a part starts) and the lock read each
   part against its own hub: the Mac part names the Mac's simulators and emulators (its Chrome is not served here),
   the local part names this machine's browsers, and a simulator UDID or name in the local part is the Mac's too.
@@ -545,6 +546,21 @@ emulators (`onlyAsksAndroid`: every emulator tool it runs is `adb devices`, `adb
 get-devpath|wait-for-…`, `adb emu avd name|path|id`, `adb shell getprop` or `emulator -list-avds|-version`) registers
 nothing: it neither marks one in use nor makes its session the owner, so checking which AVD holds a port does not take
 someone else's emulator over.
+
+A here-document is a script only for a shell (rev. 2026-11-11, `script` in `discovery.ts`): its body counts, for
+discovery, activity, `startedBy`, `onlyAsksAndroid` and the control lock alike, when the command that opens it is
+`sh`, `bash`, `zsh`, `dash` or `ksh` reading its commands from standard input (through `mac`, `sudo`, `env`, `nohup`,
+`time`, `timeout N`, assignments or a path; `bash`, `bash -s arg`, `bash -`, but not `bash run.sh` or `bash -c '…'`),
+or a plain `cat` piped straight into such a shell (`cat <<EOF | bash`). Every other reader gets data that names
+nothing, whatever it says: `cat > README.md <<'EOF'` with example commands, `python3 - <<'EOF'`, `tee`, `psql`,
+`git commit -F -`, a shell behind a filter (`cat <<EOF | sed … | bash`). The same holds for a here-string (`<<<`) and,
+with or without a [Mac hub](#mac-hub-server-in-the-container), for the body of `ssh host bash <<EOF` (another
+machine) and of `mac bash <<EOF` (the Mac). Several here-documents on one line are read in order, each for its own
+command; `<<-` ends on a tab-indented delimiter, as in the shell; a `<<` inside quotes opens nothing. Command
+substitutions in a data here-document with an unquoted delimiter do run, but are not looked for: text never turns
+into a resource. Before this, the documentation such a command wrote could register an emulator, take a lock or, on
+a server without `xcrun`, fail the shell call while resolving a simulator name; that resolution now finds no
+simulators instead.
 
 Chrome needs nothing else: the `shell` `create.before` hook (see Chrome above) makes every `playwright-cli` browser
 open with a loopback CDP port, and the adapter finds it from the session's daemon, so `meta.cdp` arrives with the
