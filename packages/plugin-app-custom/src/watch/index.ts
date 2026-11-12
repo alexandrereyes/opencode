@@ -66,7 +66,8 @@ export function sharedGateway() {
       Effect.orElseSucceed(() => defaultPort),
     ),
     access: Effect.suspend(() => readAccess()),
-    apns: load(),
+    // The Live Activity hub reports the APNs configuration at startup; the gateway's own load stays quiet.
+    apns: load(false),
     widgetBundleID: Config.String("OPENCODE_APNS_BUNDLE_ID").pipe(
       Config.withDefault(defaults.bundleID),
       Effect.orElseSucceed(() => defaults.bundleID),

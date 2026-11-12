@@ -530,8 +530,10 @@ into the server's private environment from MyCredentials (`opencode/apns/AuthKey
 in `docs/custom-macos.md`; never in `process.env`, so no child inherits it), wins over `OPENCODE_APNS_KEY_PATH`, the `.p8` file, kept as a fallback while a
 server starts without the vault. Optionally `OPENCODE_APNS_TEAM_ID` and `OPENCODE_APNS_BUNDLE_ID`. They are read once
 when the hub starts. With a key ID, the log says `Live Activity APNs enabled` with the key's `source` (the variable's
-name or the file path), or warns that the key is missing or unreadable and keeps pushes off (`unconfigured`); logs
-never carry the key or the parser's error. Pushes run in their own fibers with a 10 s request timeout; the HTTP/2
+name or the file path), or warns that the key is missing or unreadable and keeps pushes off (`unconfigured`). The
+key without `OPENCODE_APNS_KEY_ID` warns too (rev. 2026-11-12: host-6 had the key alone and pushed nothing, silently);
+with neither, nothing is logged. The hub says it once at startup (the watch gateway loads the same credentials
+quietly). Logs never carry the key or the parser's error. Pushes run in their own fibers with a 10 s request timeout; the HTTP/2
 connection per host is unreferenced so it never keeps the process alive. `makeClient` accepts an `origin` override,
 used only by the tests' local HTTP/2 server; `OPENCODE_APNS_ORIGIN` sets it from the environment (with a warning in the
 log) so a sandbox can exercise delivery against a local stand-in without reaching Apple or any device. The same client

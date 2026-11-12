@@ -192,11 +192,11 @@ it.live("credentials come from the environment; a missing key or key ID means un
     const missing = path.join(directory, "missing.p8")
     const notAKey = "-----BEGIN PRIVATE KEY-----\nnot-a-key-c0ffee\n-----END PRIVATE KEY-----\n"
     // Each case runs with its own log, which must never carry key material.
-    const withEnv = (env: Record<string, string>) =>
+    const withEnv = (env: Record<string, string>, report = true) =>
       Effect.gen(function* () {
         const lines: string[] = []
         const logger = Logger.make((entry) => lines.push(JSON.stringify(entry.message)))
-        const client = yield* load().pipe(
+        const client = yield* load(report).pipe(
           Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
           Effect.provideService(Logger.CurrentLoggers, new Set([logger])),
         )
@@ -208,10 +208,12 @@ it.live("credentials come from the environment; a missing key or key ID means un
     const id = { OPENCODE_APNS_KEY_ID: "KEY1234567" }
     const cases: [Record<string, string>, boolean, string | undefined][] = [
       [{}, false, undefined],
-      [{ OPENCODE_APNS_KEY_PATH: file }, false, undefined],
+      // The key without its ID (host-6, rev. 2026-11-12) says so at startup instead of staying silent.
+      [{ OPENCODE_APNS_KEY_PATH: file }, false, "OPENCODE_APNS_KEY_ID is missing"],
+      [{ OPENCODE_APNS_KEY_P8: pem }, false, "OPENCODE_APNS_KEY_ID is missing"],
       [{ ...id, OPENCODE_APNS_KEY_P8: pem, OPENCODE_APNS_KEY_PATH: missing }, true, "OPENCODE_APNS_KEY_P8"],
       [{ ...id, OPENCODE_APNS_KEY_PATH: file }, true, file],
-      [{ ...id }, false, "pushes stay off"],
+      [{ ...id }, false, "OPENCODE_APNS_KEY_P8 (manual.json mycred, MyCredentials) and OPENCODE_APNS_KEY_PATH are missing"],
       [{ ...id, OPENCODE_APNS_KEY_PATH: missing }, false, missing],
       [{ ...id, OPENCODE_APNS_KEY_P8: notAKey, OPENCODE_APNS_KEY_PATH: file }, false, "unreadable"],
     ]
@@ -220,6 +222,13 @@ it.live("credentials come from the environment; a missing key or key ID means un
       expect({ env: Object.keys(env), configured: result.configured }).toEqual({ env: Object.keys(env), configured })
       if (logged) expect(result.log).toContain(logged)
     }
+    // Nothing configured stays quiet: a server without pushes on purpose logs nothing.
+    expect((yield* withEnv({})).log).toBe("")
+    expect((yield* withEnv({ ...id, OPENCODE_APNS_KEY_PATH: file })).log).toContain("Live Activity APNs enabled")
+    // The watch gateway's own load stays quiet, so the startup says each of these once.
+    expect((yield* withEnv({ OPENCODE_APNS_KEY_PATH: file }, false)).log).toBe("")
+    const quiet = yield* withEnv({ ...id, OPENCODE_APNS_KEY_PATH: file }, false)
+    expect(quiet).toEqual({ configured: true, log: "" })
     yield* Effect.promise(() => rm(directory, { recursive: true }))
   }),
 )
