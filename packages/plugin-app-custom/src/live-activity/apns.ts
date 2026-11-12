@@ -52,8 +52,15 @@ export const keyVariable = "OPENCODE_APNS_KEY_P8"
  * APNs credentials from the environment, or `undefined` (push `unconfigured`) when the key or its ID is missing.
  * The key's content in `OPENCODE_APNS_KEY_P8` wins over the file in `OPENCODE_APNS_KEY_PATH`, kept as a fallback
  * while servers still start without the vault. Logs name the source, never the key or the parser's error.
+ *
+ * Half a configuration warns (rev. 2026-11-12: host-6 had the key without its ID and pushed nothing, silently).
+ * `report` is off for the second caller of the same process (the watch gateway), so the startup says it once.
  */
-export const load = Effect.fn("LiveActivity.Apns.load")(function* () {
+export const load = (report = true) => loadApns(report)
+
+const loadApns = Effect.fn("LiveActivity.Apns.load")(function* (report: boolean) {
+  const warn = (message: string, annotations?: Record<string, unknown>) =>
+    report ? Effect.logWarning(message, annotations) : Effect.void
   const keyContent = privateEnv(keyVariable) ?? (yield* Config.String(keyVariable).pipe(Config.withDefault("")))
   const keyPath = yield* Config.String("OPENCODE_APNS_KEY_PATH").pipe(Config.withDefault(""))
   const keyID = yield* Config.String("OPENCODE_APNS_KEY_ID").pipe(Config.withDefault(""))
@@ -61,10 +68,17 @@ export const load = Effect.fn("LiveActivity.Apns.load")(function* () {
   const bundleID = yield* Config.String("OPENCODE_APNS_BUNDLE_ID").pipe(Config.withDefault(defaults.bundleID))
   // Tests only: a local stand-in for Apple's hosts, so a sandbox can exercise delivery without reaching any device.
   const origin = yield* Config.String("OPENCODE_APNS_ORIGIN").pipe(Config.withDefault(""))
-  if (!keyID) return undefined
+  if (!keyID) {
+    if (keyContent || keyPath)
+      yield* warn(
+        "Live Activity APNs key is set but OPENCODE_APNS_KEY_ID is missing; pushes stay off (no Live Activity updates or session alerts)",
+        { source: keyContent ? keyVariable : "OPENCODE_APNS_KEY_PATH" },
+      )
+    return undefined
+  }
   if (!keyContent && !keyPath) {
-    yield* Effect.logWarning(
-      `Live Activity APNs key is not configured: set ${keyVariable} (manual.json mycred, MyCredentials) or OPENCODE_APNS_KEY_PATH; pushes stay off`,
+    yield* warn(
+      `Live Activity APNs key is not configured: OPENCODE_APNS_KEY_ID is set but ${keyVariable} (manual.json mycred, MyCredentials) and OPENCODE_APNS_KEY_PATH are missing; pushes stay off`,
     )
     return undefined
   }
@@ -72,13 +86,13 @@ export const load = Effect.fn("LiveActivity.Apns.load")(function* () {
   const key = yield* (keyContent ? Effect.succeed(keyContent) : Effect.tryPromise(() => Bun.file(keyPath).text())).pipe(
     Effect.flatMap((pem) => Effect.try(() => createPrivateKey(pem))),
     Effect.tapError(() =>
-      Effect.logWarning("Live Activity APNs key is unreadable or not a private key; pushes stay off", { source }),
+      warn("Live Activity APNs key is unreadable or not a private key; pushes stay off", { source }),
     ),
     Effect.option,
   )
   if (Option.isNone(key)) return undefined
-  if (origin) yield* Effect.logWarning("APNs requests go to a test origin instead of Apple", { origin })
-  yield* Effect.logInfo("Live Activity APNs enabled", { source, keyID })
+  if (origin) yield* warn("APNs requests go to a test origin instead of Apple", { origin })
+  if (report) yield* Effect.logInfo("Live Activity APNs enabled", { source, keyID })
   return makeClient({ key: key.value, keyID, teamID, bundleID, ...(origin ? { origin: () => origin } : {}) })
 }, Effect.orDie)
 
