@@ -32,6 +32,7 @@ import { registerBrowserHandoffs } from "./browser-handoff/index.js"
 import { registerBrowseGuard } from "./browse-guard/index.js"
 import { registerToolDescriptions } from "./tool-descriptions/index.js"
 import { registerHost } from "./host/index.js"
+import { registerInstance } from "./instance/index.js"
 
 import { registerFamily } from "./session-family/index.js"
 
@@ -69,6 +70,7 @@ export default Plugin.define({
       yield* registerBrowseGuard(ctx)
       yield* registerToolDescriptions(ctx)
       yield* registerHost(ctx)
+      yield* registerInstance(ctx)
       yield* registerLiveActivity(ctx)
       yield* registerWatch(ctx)
     }),
