@@ -1,6 +1,6 @@
 export * as Generate from "./generate.js"
 
-import { AIError, Decision, DecisionClient, Image, ImageClient, LLM, LLMClient, LLMEvent, Media } from "@opencode/ai/effect"
+import { ai, AIError, DecisionClient, ImageClient, LLMClient, LLMEvent, Media } from "@opencode/ai/effect"
 import type { DecisionRequest, DecisionResult, ImageRequest, ImageResult } from "@opencode/schema/generate"
 import { Money } from "@opencode/schema/money"
 import { SessionID } from "@opencode/schema/session-id"
@@ -120,11 +120,11 @@ export const layer = Layer.effect(
       const resolved = yield* chatModel(input)
       const response = yield* llm
         .generate(
-          LLM.request({
+          ai.request({
             model: resolved.model,
             prompt: input.prompt,
             // Gateways require session attribution even for a stateless call; no Session is stored.
-            http: { headers: { "x-opencode-session": SessionID.create() } },
+            headers: { "x-opencode-session": SessionID.create() },
           }),
         )
         .pipe(
@@ -140,23 +140,17 @@ export const layer = Layer.effect(
           Effect.map((resolved) =>
             llm
               .stream(
-                LLM.request({
+                ai.request({
                   model: resolved.model,
                   prompt: input.prompt,
-                  http: { headers: { "x-opencode-session": SessionID.create() } },
+                  headers: { "x-opencode-session": SessionID.create() },
                 }),
               )
               .pipe(
-              Stream.mapError((error) => providerError(resolved.ref, error)),
-              Stream.mapEffect((event) =>
-                LLMEvent.is.providerError(event)
-                  ? Effect.fail(
-                      new ProviderRequestError({ providerID: resolved.ref.providerID, reason: "provider", message: event.message }),
-                    )
-                  : Effect.succeed(LLMEvent.is.textDelta(event) ? event.text : ""),
+                Stream.mapError((error) => providerError(resolved.ref, error)),
+                Stream.map((event) => (LLMEvent.is.textDelta(event) ? event.text : "")),
+                Stream.filter((text) => text.length > 0),
               ),
-              Stream.filter((text) => text.length > 0),
-            ),
           ),
         ),
       )
@@ -185,8 +179,8 @@ export const layer = Layer.effect(
         .resolveImage(input.model)
         .pipe(Effect.mapError((error) => resolutionError(input.model, "image", error)))
       if (!model) return yield* missing(input.model, "image")
-      // `Image.generate` turns an invalid request into a typed error; building it with `Image.request` would throw.
-      const response = yield* Image.generate({
+      // `ai.image.generate` turns an invalid request into a typed error; building it with `ai.image.request` would throw.
+      const response = yield* ai.image.generate({
         model,
         prompt: input.prompt,
         images: input.images?.map((file) => Media.base64(file.data, file.mime)),
@@ -224,7 +218,7 @@ export const layer = Layer.effect(
         .resolveDecision(input.model)
         .pipe(Effect.mapError((error) => resolutionError(input.model, "decision", error)))
       if (!model) return yield* missing(input.model, "decision")
-      const response = yield* Decision.generate({
+      const response = yield* ai.decision.generate({
         model,
         input: input.input.map((part) =>
           part.type === "file"

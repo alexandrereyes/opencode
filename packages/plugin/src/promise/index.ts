@@ -4,6 +4,7 @@ export { MCP } from "../mcp.js"
 export * as Plugin from "./plugin.js"
 
 export { Agent } from "@opencode/schema/agent"
+export { Artifact } from "@opencode/schema/artifact"
 export { Command } from "@opencode/schema/command"
 export { Connection } from "@opencode/schema/connection"
 export { Credential } from "@opencode/schema/credential"

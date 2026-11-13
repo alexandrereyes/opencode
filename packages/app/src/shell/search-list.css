@@ -115,10 +115,6 @@
   letter-spacing: -0.04px;
 }
 
-[data-component="dialog-v2"]:has(.mcp-dialog) [data-slot="dialog-container"] {
-  width: min(calc(100vw - 24px), 480px);
-}
-
 .mcp-dialog [data-slot="search-list-row"] {
   gap: 16px;
 }
@@ -128,7 +124,15 @@
   min-width: 0;
   flex: 1;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+}
+
+.mcp-dialog-status {
+  display: flex;
+  width: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
 }
 
 .mcp-dialog-name {
@@ -189,21 +193,6 @@
   white-space: nowrap;
 }
 
-/* A quiet ghost action in the switch's place, small enough to weigh about as much as a switch. */
-.mcp-status-action[data-component="button-v2"][data-size="small"] {
-  height: 20px;
-  padding-inline: 5px;
-  font-size: 11px;
-  font-weight: 440;
-  line-height: 16px;
-  letter-spacing: 0.05px;
-}
-
-/* At the row's end, the label lines up with the switches above and below it. */
-.mcp-status-action[data-component="button-v2"]:last-child {
-  margin-inline-end: -5px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .mcp-status-dot[data-status="pending"] {
     animation: none;
@@ -234,6 +223,56 @@
 .mcp-error-heading [data-slot="dialog-description"] {
   grid-column: 1 / -1;
   grid-row: 2;
+}
+
+.fork-dialog [data-slot="search-list-search"] {
+  padding: 6px 6px 9px;
+
+  &::after {
+    bottom: 0;
+    border-color: var(--v2-border-border-muted);
+  }
+
+  [data-slot="text-input-v2-value"] {
+    gap: 8px;
+  }
+
+  [data-slot="text-input-v2-leading-icon"] {
+    padding-inline-start: 8px;
+  }
+}
+
+.fork-dialog-section {
+  display: flex;
+  min-height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  padding: 4px 14px;
+  color: var(--v2-text-text-muted);
+  font-size: 13px;
+  font-weight: 440;
+  line-height: var(--line-height-compact);
+  letter-spacing: -0.04px;
+
+  [data-slot="dialog-description"] {
+    margin: 0;
+  }
+}
+
+.fork-dialog .search-list-results,
+.fork-dialog [data-slot="search-list-section"] {
+  gap: 2px;
+  padding-top: 0;
+}
+
+.fork-dialog [data-slot="search-list-row"] {
+  height: 28px;
+  gap: 12px;
+  padding-inline: 8px;
+}
+
+.fork-dialog .search-list-trailing {
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 639px), (hover: none) {

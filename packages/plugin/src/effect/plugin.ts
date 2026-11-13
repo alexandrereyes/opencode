@@ -5,6 +5,7 @@ import type { Effect, Scope, Stream } from "effect"
 import type { PluginOptions } from "../options.js"
 import type { App } from "../app.js"
 import type { AgentDomain } from "./agent.js"
+import type { ExperimentalArtifactDomain } from "./artifact.js"
 import type { AISDKDomain } from "./aisdk.js"
 import type { CommandDomain } from "./command.js"
 import type { EventDomain } from "./event.js"
@@ -46,6 +47,7 @@ export interface Context {
         readonly model?: Model.Ref
       }) => Stream.Stream<string, { readonly _tag: string; readonly message: string }>
     }
+    readonly artifact: ExperimentalArtifactDomain
   }
   readonly integration: IntegrationDomain
   readonly job: JobDomain

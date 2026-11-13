@@ -24,9 +24,19 @@ import { Money } from "@opencode/schema/money"
 import { Provider } from "@opencode/schema/provider"
 import { ReadOutput } from "../../plugin-app-custom/src/sessions/read"
 import { testEffect } from "./lib/effect"
-import { codeModeListings, executeTool, toolIdentity, waitForCodeModeTool } from "./lib/tool"
+import { codeModeListings, executeTool, toolIdentity } from "./lib/tool"
 import { tmpdirScoped } from "./fixture/tmpdir"
 import { PluginTestLayer } from "./plugin/fixture"
+
+function waitForCodeModeTool(registry: Tool.Interface, path: string, remaining = 1000): Effect.Effect<void, Error> {
+  return Effect.gen(function* () {
+    const toolSet = yield* registry.snapshot()
+    if (toolSet.codeModeCatalog && codeModeListings(toolSet.codeModeCatalog).some((tool) => tool.path === path)) return
+    if (remaining === 0) return yield* Effect.fail(new Error(`Timed out waiting for Code Mode tool: ${path}`))
+    yield* Effect.promise(() => Bun.sleep(1))
+    return yield* waitForCodeModeTool(registry, path, remaining - 1)
+  })
+}
 
 const CodeModeOutput = Schema.Struct({ output: Schema.String })
 const decodeReadOutput = (value: unknown) =>
@@ -89,7 +99,7 @@ describe.each(["source", "bundle"])("custom session read tool (%s)", (distributi
       const expectedIDs = (yield* sessions.messages({ sessionID: referenced.id, order: "desc", limit: 2 })).map(
         (message) => message.id,
       )
-      const host = yield* PluginHost.make(plugins)
+      const host = yield* PluginHost.make(plugins, "test")
       expect(
         (yield* host.message.list({ sessionID: referenced.id, limit: 2 })).data.map((message) => message.id),
       ).toEqual(expectedIDs)

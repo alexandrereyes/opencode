@@ -27,7 +27,7 @@ testEffect(PluginTestLayer).live(
       const plugins = yield* Plugin.Service
       const rpc = yield* Rpc.Service
       const location = yield* Location.Service
-      const ctx = yield* PluginHost.make(plugins)
+      const ctx = yield* PluginHost.make(plugins, "test")
       const claims: string[] = []
       // Managed chats allocate under the user's data directory; this Location stands in for each allocation.
       yield* ctx.rpc

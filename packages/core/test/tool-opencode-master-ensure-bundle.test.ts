@@ -57,7 +57,7 @@ describe.each(["source", "bundle"])("Mestra ensure through the custom plugin (%s
       if ("pending" in custom || "blocked" in custom) throw new Error("Custom plugin was not loaded")
       yield* plugins.activate([custom])
       const rpc = yield* Rpc.Service
-      const host = yield* PluginHost.make(plugins)
+      const host = yield* PluginHost.make(plugins, "test")
 
       yield* rpc.call("custom.preferences", "mutate", { type: "master.set", server: "local", sessionID: deleted })
       const [ensured, second] = (yield* Effect.all(

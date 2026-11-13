@@ -66,7 +66,7 @@ for (const failure of ["defect", "interrupt"] as const) {
         const locations = yield* LocationServiceMap.Service
         const ref = Location.Ref.make({ directory: AbsolutePath.make(healthy.path) })
         const services = yield* locations.contextEffect(ref)
-        const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(Effect.provide(services))
+        const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }, "test").pipe(Effect.provide(services))
         const forms = Context.get(services, Form.Service)
         yield* forms
           .ask({

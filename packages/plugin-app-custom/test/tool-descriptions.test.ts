@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
-import { Effect, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { CodeModeTool } from "@opencode/core/codemode/tool"
+import { Permission } from "@opencode/core/permission"
 import { definition, execute } from "@opencode/core/tool/runtime"
 import { GrepTool } from "@opencode/core/tool/plugin/grep"
 import { ShellTool } from "@opencode/core/tool/plugin/shell"
@@ -20,7 +21,11 @@ const tools = {
   grep: echo("grep", GrepTool.Input),
   // Code Mode's own tool, whose input the core builds; its runtime is not under test here.
   execute: {
-    ...CodeModeTool.create({ tools: new Map() }, () => Effect.die("unused")),
+    ...CodeModeTool.create(
+      { tools: new Map() },
+      () => Effect.die("unused"),
+      Effect.runSync(Permission.Service.pipe(Effect.provide(Layer.mock(Permission.Service, {})))),
+    ),
     output: undefined,
     execute: echo("execute", Schema.Struct({ code: Schema.String })).execute,
   },

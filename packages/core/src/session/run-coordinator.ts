@@ -7,6 +7,8 @@ import type { Promotable } from "./inbox.js"
 export interface Coordinator<Key, E, Reason = never> {
   /** Snapshots keys with an execution owned by this coordinator. */
   readonly active: Effect.Effect<ReadonlySet<Key>>
+  /** Snapshots keys genuinely draining: owned and not stopping. Settlement windows are excluded. */
+  readonly draining: Effect.Effect<ReadonlySet<Key>>
   /** Checks ownership for one key, including cleanup and terminal settlement. */
   readonly isActive: (key: Key) => Effect.Effect<boolean>
   /** Starts an execution while idle, or joins the active execution and returns its exit. */
@@ -20,6 +22,8 @@ export interface Coordinator<Key, E, Reason = never> {
    * interrupted.
    */
   readonly interrupt: (key: Key, reason?: Reason) => Effect.Effect<boolean>
+  /** Why the key's execution is being stopped, once `interrupt` stopped it; undefined for teardown or when running. */
+  readonly interruption: (key: Key) => Reason | undefined
   /** Resolves once no execution is active for the key. Returns immediately when already idle and never starts work. */
   readonly awaitIdle: (key: Key) => Effect.Effect<void>
 }
@@ -96,23 +100,28 @@ export const make = <Key, E, Reason = never>(options: {
       // The leading yield lets `owner` be assigned before the drain can settle, and keeps
       // failing self-waking executions from growing the stack across successor starts.
       // Drains start one tick after wake; callers observe progress through events or run.
-      const busy = Effect.uninterruptible(options.started?.(key) ?? Effect.void).pipe(
-        Effect.andThen(loop(key, execution, force)),
-        Effect.onExit((exit) =>
-          Effect.sync(() => {
-            execution.owner = undefined
-          }).pipe(Effect.andThen(options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void)),
-        ),
-      )
+      // An interruption before `started` still settles, as upstream: only the idle skip does not.
+      let skipped = false
       execution.owner = fork(
         Effect.yieldNow.pipe(
           Effect.andThen(force || !options.idle ? Effect.succeed(false) : options.idle(key, scope)),
           Effect.flatMap((idle) =>
             idle
               ? Effect.sync(() => {
-                  execution.owner = undefined
+                  skipped = true
                 })
-              : busy,
+              : Effect.uninterruptible(options.started?.(key) ?? Effect.void).pipe(
+                  Effect.andThen(loop(key, execution, force)),
+                ),
+          ),
+          Effect.onExit((exit) =>
+            Effect.sync(() => {
+              execution.owner = undefined
+            }).pipe(
+              Effect.andThen(
+                skipped ? Effect.void : (options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void),
+              ),
+            ),
           ),
           Effect.onExit((exit) => Effect.sync(() => settle(key, execution, exit))),
           Effect.exit,
@@ -186,5 +195,25 @@ export const make = <Key, E, Reason = never>(options: {
         return Deferred.await(execution.done).pipe(Effect.ignoreCause, Effect.andThen(awaitIdle(key)))
       })
 
-    return { active: Effect.sync(() => new Set(executions.keys())), isActive, run, wake, interrupt, awaitIdle }
+    const interruption = (key: Key) => executions.get(key)?.interruptionReason
+
+    const draining = Effect.sync(
+      () =>
+        new Set(
+          [...executions.entries()].flatMap(([key, execution]) =>
+            execution.owner !== undefined && !execution.stopping ? [key] : [],
+          ),
+        ),
+    )
+
+    return {
+      active: Effect.sync(() => new Set(executions.keys())),
+      draining,
+      isActive,
+      run,
+      wake,
+      interrupt,
+      interruption,
+      awaitIdle,
+    }
   })

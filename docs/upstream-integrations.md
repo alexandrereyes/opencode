@@ -34,13 +34,15 @@ resolved as dropped.
 ## Customizations in upstream code
 
 Every custom change that remains in upstream-owned packages after the plugin offload of 2026-10-30 (branch
-`plugin-offload` from `2bf5bb098`), against the integrated upstream revision `79349e840` (2.2.1). Each was kept because
+`plugin-offload` from `2bf5bb098`), against the integrated upstream revision `73abe63ac` (2.3.0). Each was kept because
 the custom plugin (`packages/plugin-app-custom`) cannot provide it through upstream's plugin API without losing behavior
 or guarantees; the plugin never calls the server's own HTTP API as a workaround.
 
 ### Overlap
 
-Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD`:
+Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD` at the offload (against `73abe63ac` after the
+2026-11-13 integration: 31 files, +565, −28 in the first set and 53 files, +1053, −46 in the second, which now include
+the later customizations listed below):
 
 - `packages/{core,server,protocol,schema,plugin,client,tui}/src`, `packages/cli/src` and `packages/cli/script`: **43 →
   23 modified files, +698 → +442 lines, −30 → −19 lines**.
@@ -101,7 +103,7 @@ Plugin context extensions. Files: `packages/core/src/plugin/host.ts`;
 `packages/plugin/src/{job,mcp,message,request}.ts`,
 `packages/plugin/src/{effect,promise}/{job,message,request,mcp,plugin,session,index}.ts` and `promise/adapter.ts`; test
 hosts `packages/core/test/plugin/{host,fixture}.ts` and `packages/core/test/fixture/policy.ts`; docs in
-`services/www/.../build/plugins/{server,effect}.mdx` and `packages/plugin/src/{,effect/}README.md`. Upstream's plugin
+`services/site/.../build/plugins/{server,effect}.mdx` and `packages/plugin/src/{,effect/}README.md`. Upstream's plugin
 context has no equivalent for any of them; each is an upstream proposal candidate, and leaves when upstream ships it.
 
 - `session.active` and `session.view`: upstream's HTTP operations of the same name, exposed to plugins. Consumers:
@@ -136,8 +138,8 @@ context has no equivalent for any of them; each is an upstream proposal candidat
 - `experimental.generate.textStream`, with `Generate.textStream` in `packages/core/src/generate.ts` (the model
   resolution of `text` shared as `chatModel`; tests in `core/test/generate.test.ts`, stubs in
   `core/test/tool-image-generate.test.ts`, `server/test/{generate,schema-error}.test.ts` and the test hosts): the stateless `text` generation as its deltas arrive,
-  in process only (no HTTP route or Client type), not retried, a `provider-error` event failing as
-  `ProviderRequestError`. Upstream's `generate.text` returns only at the end, so a plugin cannot tell a slow reply
+  in process only (no HTTP route or Client type), not retried, a failed stream failing as
+  `ProviderRequestError` (upstream removed the `provider-error` event in #60812; provider failures fail the stream). Upstream's `generate.text` returns only at the end, so a plugin cannot tell a slow reply
   that keeps streaming from a stalled one. Consumer: `custom.dictation` (5 s inactivity limit,
   `packages/plugin-app-custom/docs/dictation-review.md`). Exit: upstream ships a streamed stateless generation.
 
@@ -151,7 +153,13 @@ Other customizations:
 - `Plugin.awaitActivation` in `packages/server/src/handlers/mcp.ts` (#54191, see `docs/upstream-overrides.md`) and in
   `shell.create` of `packages/server/src/handlers/shell.ts` (plugin `shell` hooks on a cold Location, see
   `packages/plugin-app-custom/docs/resources.md`); tests `server/test/{mcp,shell}.test.ts`. Exit: upstream merges
-  #54191 and awaits activation in `shell.create`.
+  #54191 and awaits activation in `shell.create`. Upstream closed #54191 unmerged on 2026-11-09 and its `AGENTS.md`
+  ("Plugin Loading") now forbids such waits in handlers, so the exit became: the native apps recover from a partial
+  first answer through `mcp.status.changed`, and the plugin's `shell` hooks no longer need the first shell of a cold
+  Location (see `docs/upstream-overrides.md`). `rpc.call` in `packages/server/src/handlers/rpc.ts` keeps the same wait,
+  which upstream removed in #63040: the native apps call the custom plugin's RPCs on Locations the server has just
+  opened, and without it nine `plugin-app-custom` server tests fail with `RPC is unavailable: custom.<name>`. Exit: the
+  apps wait for `plugin.updated` (or retry) before their first RPC on a Location.
 - Compatibility skill watcher reconciliation in `packages/core/src/config/plugin/compatibility.ts` and
   `core/test/config/skill.test.ts`. Exit: its entry in `docs/upstream-overrides.md`.
 - A wake with nothing to promote starts no execution (2026-11-05, our own fix, no upstream PR or issue; related but
@@ -176,7 +184,13 @@ Other customizations:
   tests above against upstream's code; drop the patch only when upstream proves the same behavior (no terminal after a
   redundant wake, failure kept), not because the merge is clean. Between `79349e840` and upstream `dev` `893e8dc43f`
   (2026-11-05) `run-coordinator.ts` did not change; `execution.ts` and `runner/llm.ts` changed only in #60974 (trace)
-  and #61421 (perf). #61880 (retries for `ENOTFOUND`/`EAI_AGAIN` for up to an hour) changes the retry policy, not this
+  and #61421 (perf). At `73abe63ac` (2.3.0) upstream's `start`/`settle` are unchanged (it only adds `draining` and
+  `interruption`) and the first two tests still fail on upstream's `run-coordinator.ts` and `execution.ts`, so the
+  patch stays. Upstream's subagent reports (#63209) run in `settled`, so the patch now skips `settled` only for the
+  idle wake: an interruption before `started` settles as upstream (`subagent-report.test.ts`, "reports a
+  creation-tick cancellation exactly once"). Five empty-inbox wakes of `core/test/subagent-report.test.ts` that stand
+  in for a notified child use an explicit resume, as in `session-move.test.ts`; in production such a wake follows an
+  admitted inbox item. #61880 (retries for `ENOTFOUND`/`EAI_AGAIN` for up to an hour) changes the retry policy, not this
   terminal, and is not applied.
 - Private environment (2026-11-09, our own change, no upstream PR). Files: `packages/util/src/private-env.ts` (new,
   with `private-env.test.ts`), `packages/server/src/process.ts` (one `PrivateEnv.load()` at the top of
@@ -203,7 +217,7 @@ Other customizations:
   login lasted about an hour. `authorize` now adds `authorization_params` to the URL, never replacing a parameter the
   flow set (`client_id`, `scope`, `state`…). (2) Those servers answer `initialize` and `tools/list` without a token and
   reject only tool calls, so the server showed as connected, every call failed and `/mcps`, the web app and the iOS/Mac
-  apps never offered a sign-in (they do only for `needs_auth`). `connectProvider` now fails `tokens()` with
+  apps never offered a sign-in (they do only for `needs_auth`). `connectProvider` now fails `token()` (upstream's `AuthProvider` since #62827; `tokens()` before) with
   `UnauthorizedError` when the config has a pre-registered `oauth.client_id` and no stored credential, so the server
   reports `needs_auth` before any request; servers without `client_id` keep upstream's behavior. Tests "adds configured
   authorization parameters without replacing the flow's own" and "reports needs_auth before calling a server with a
@@ -260,8 +274,8 @@ packages/core/test/plugin/fixture.ts
 packages/core/test/fixture/policy.ts
 packages/plugin/src/README.md
 packages/plugin/src/effect/README.md
-services/www/src/docs/content/build/plugins/effect.mdx
-services/www/src/docs/content/build/plugins/server.mdx
+services/site/src/docs/content/build/plugins/effect.mdx
+services/site/src/docs/content/build/plugins/server.mdx
 # generate.textStream
 packages/core/src/generate.ts
 packages/core/test/generate.test.ts
@@ -292,6 +306,7 @@ packages/protocol/openapi.json
 packages/client/src/promise/generated/types.ts
 # Plugin.awaitActivation
 packages/server/src/handlers/mcp.ts
+packages/server/src/handlers/rpc.ts
 packages/server/src/handlers/shell.ts
 packages/server/test/mcp.test.ts
 packages/server/test/shell.test.ts
@@ -303,6 +318,7 @@ packages/core/src/session/run-coordinator.ts
 packages/core/src/session/execution.ts
 packages/core/test/session-execution.test.ts
 packages/core/test/session-move.test.ts
+packages/core/test/subagent-report.test.ts
 # Private environment
 packages/util/src/private-env.ts
 packages/util/src/private-env.test.ts
@@ -375,6 +391,70 @@ The upstream-owned files that name the default branch (`AGENTS.md`,
 `services/update`) switch to `dev` with the first integration from `dev`. In the
 `AGENTS.md` conflict, keep the custom branch guidance and replace `v2` and
 `origin/v2` with `dev` and `upstream/dev`.
+
+## V2 integration — 2026-11-13
+
+### Baselines
+
+- Custom parent: `60af2f8144`.
+- Integrated upstream: `73abe63ac23224d88e739e7028882e547ef65a79` (`upstream/dev`, source of the published 2.3.0
+  `latest` release; 1,076 commits after `79349e840`). `upstream/dev` was 34 commits ahead (`083e3114a5`) when the merge
+  started; those are not integrated.
+- Local integration branch: `merge-upstream-230`.
+- Runtime: Bun 1.4.4, unchanged.
+
+The upstream-owned `packages/app`, `packages/ui`, `packages/session-ui`, `packages/gui-plugins`, `packages/stories`,
+`packages/tui`, `packages/sdk` and `packages/ai` trees match the integrated upstream revision exactly. The 74,102
+objects of the target that the `blob:none` clone lacked were fetched in one batch before merging.
+
+### Integration points
+
+- Conflicts: `package.json` (upstream's patches plus the `@expo/serve-sim` patch), `bun.lock` (upstream's, then
+  `bun install`), `core/src/{generate,job,mcp/oauth,plugin/host,plugin/skill}.ts`, `plugin/src/effect/plugin.ts`,
+  `plugin/src/promise/adapter.ts`, `core/test/{mcp-oauth.test,plugin/fixture}.ts`.
+- `core/src/mcp/oauth.ts`: upstream rewrote `connectProvider` (#62827, #63012: one selected credential, an
+  `AuthProvider` with `token`/`onUnauthorized`, shared refresh). The custom pre-registered-client rule is ported onto
+  it: with `oauth.client_id` and no OAuth credential, `token()` throws `UnauthorizedError`, so the server reports
+  `needs_auth` before any request. `withAuthorizationParams` is unchanged. The custom test is rewritten on upstream's
+  harness; the four upstream tests of the old provider that the conflict held are dropped, as upstream did.
+- `core/src/generate.ts`: `textStream` builds its request with `ai.request` and no longer maps the removed
+  `provider-error` event (#60812); its test is removed, and "does not retry a streamed call" covers the failure.
+- `core/src/job.ts`: the custom `backgrounded` sits next to upstream's subagent report methods. Upstream's
+  `backgroundJobs` (`JobList`, #60698) lists similar data and is a candidate to replace `backgrounded`; not done here.
+- `core/src/plugin/host.ts`: `permission.get` uses upstream's `sessionPermission`; `permission.reply` keeps the
+  session's Location. `mcp.callTool` fills `server` and `tool` from its input, since upstream's result dropped them.
+- `plugin/src/promise/adapter.ts`: the unload abort runs before the cleanup, which now runs only when it is a function
+  (upstream).
+- `server/src/handlers/rpc.ts`: `rpc.call` keeps `Plugin.awaitActivation`, removed upstream (#63040); see
+  "Plugin.awaitActivation" above.
+- `core/src/session/run-coordinator.ts`: see "A wake with nothing to promote starts no execution" above.
+- Custom tests follow upstream signatures: `PluginHost.make(plugin, pluginID)`, `CodeModeTool.create(…, permission)`,
+  the `Mcp.Interface` event members and `McpPool` for `Mcp.layer()`; `waitForCodeModeTool`, removed upstream, is local
+  to `tool-opencode-session-read.test.ts`.
+- Upstream moved the docs from `services/www` to `services/site`; the custom plugin sections moved with the files.
+- Behavior that arrives with the merge and that the native apps may notice: subagents always run in the background
+  (#63382), fewer endpoints wait for plugins (#62796, #63040), `/api/*` refuses disallowed origins and serves files as
+  sandboxed downloads (#62422).
+
+### Validation
+
+- `bun install --frozen-lockfile`, `bun typecheck` in Schema, Util, Protocol, Plugin, Core, Server, Client, CLI, SDK, TUI
+  and the custom plugin, `check:generated` in `packages/protocol` and root `bun run check` pass.
+- Suites per package in a clean environment (`env -i` with `HOME`, `TMPDIR`, `LC_ALL=C`, `PATH`, an empty
+  `AZURE_CONFIG_DIR`): Schema 95, Util 147, Protocol 14, Client 262, Plugin 39, SDK 40, CLI 475 (nine skipped) and
+  CodeMode 1,641 pass; Core 7,473 pass, 26 skipped, 11 failures, all GitLab OAuth (port 8080 held by OrbStack).
+- Server and the custom plugin need an empty `HOME` in this revision: with the real one, tests that boot a server pick
+  up the user's OpenCode Console login and the network guard fails them (`test attempted network request: GET
+  https://opencode.ai/console/api/v2/config`; 51 Server failures, and `session-move.test.ts` "applies a move
+  immediately when the source directory no longer exists" in Core when run alone, also with upstream's
+  `run-coordinator.ts` and `execution.ts`). With an empty `HOME`: Server 132 pass (one skipped); custom plugin 546 pass,
+  three skipped, four failures not caused by the merge: the two real-Chrome cases of `resources-chrome.test.ts` pass
+  with the real `HOME` (13 pass), `server-snippets.test.ts` passes alone, and `resources.test.ts` "a machine without
+  xcrun has no simulators" fails under `env -i` because `Bun.spawn` keeps the initial `PATH` (plugin source and test
+  are untouched by the merge; not rerun on the parent).
+- Caused by the merge and fixed in it: five `SubagentReport settlement` cases (the idle-wake patch) and nine custom
+  plugin RPC cases (`rpc.call` no longer waited for plugins).
+- Not done: a compiled artifact, the smoke script and a check on an isolated sandbox with the native apps.
 
 ## V2 integration — 2026-10-29
 

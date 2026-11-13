@@ -27,7 +27,7 @@ testEffect(PluginTestLayer).live(
       const plugins = yield* Plugin.Service
       const rpc = yield* Rpc.Service
       const hooks = yield* PluginHooks.Service
-      const ctx = yield* PluginHost.make(plugins)
+      const ctx = yield* PluginHost.make(plugins, "test")
       const info = rpc.call("custom.master", "info", {})
       // The custom plugin's context, composed as its entry point does.
       yield* registerMaster({ ...ctx, storage: atomic(ctx.storage), request: timed(ctx.request) })

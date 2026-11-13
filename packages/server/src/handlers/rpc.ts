@@ -8,6 +8,7 @@ import { Api } from "../api"
 export const RpcHandler = HttpApiBuilder.group(Api, "server.rpc", (handlers) =>
   handlers.handle("rpc.call", ({ params, payload }) =>
     Effect.gen(function* () {
+      // Custom: the native apps call plugin RPCs on cold Locations; upstream answers not-found until plugins load.
       yield* Plugin.awaitActivation
       const rpc = yield* Rpc.Service
       const output = yield* rpc.call(params.rpcID, params.method, payload.input)

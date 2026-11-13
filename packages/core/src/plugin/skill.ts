@@ -30,7 +30,7 @@ export const Plugin = define({
           id: Skill.ID.make("opencode"),
           name: Skill.Name.make("OpenCode"),
           description: OpencodeDescription,
-          path: AbsolutePath.make("/builtin/opencode.md"),
+          path: AbsolutePath.make("skill://opencode/SKILL.md"),
           content: OpencodeContent,
         }),
       )
@@ -40,7 +40,7 @@ export const Plugin = define({
           name: Skill.Name.make("Report"),
           description: REPORT_DESCRIPTION,
           slash: true,
-          path: AbsolutePath.make("/builtin/report.md"),
+          path: AbsolutePath.make("skill://report/SKILL.md"),
           content: reportContent,
         }),
       )

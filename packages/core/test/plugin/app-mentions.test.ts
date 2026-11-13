@@ -3,13 +3,16 @@ import { describe, expect } from "bun:test"
 import AppMentionsPlugin from "../../../plugin-app-custom/src/index"
 import { AppMentions } from "../../../plugin-app-custom/src/rpc"
 import { Mcp } from "@opencode/core/mcp/index"
+import { McpPool } from "@opencode/core/mcp/pool"
 import { ConfigMCP } from "@opencode/schema/config/mcp"
 import { PluginHost } from "@opencode/core/plugin/host"
 import { Rpc } from "@opencode/core/rpc"
 import { Plugin } from "@opencode/plugin"
 import { fromPromise } from "@opencode/plugin/promise/adapter"
-import { Effect, Fiber, Latch, Ref } from "effect"
+import { Effect, Fiber, Latch, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
+import { CrossSpawnSpawner } from "@opencode/util/cross-spawn-spawner"
+import { LayerNode } from "@opencode/util/effect/layer-node"
 import { testEffect } from "../lib/effect"
 import { hostEnvironmentLayer } from "../fixture/environment"
 import { PluginTestLayer } from "./fixture"
@@ -68,10 +71,15 @@ const mcp = (options?: {
     resourceCatalog: () => Effect.succeed(Mcp.ResourceCatalog.make({ resources: [], templates: [] })),
     resources: () => Effect.succeed(Mcp.ResourceCatalog.make({ resources: [], templates: [] })),
     readResource: () => Effect.undefined,
+    awaitStartup: () => Effect.void,
+    events: () => Effect.die("unused mcp.events"),
+    subscribe: () => Effect.die("unused mcp.subscribe"),
+    unsubscribe: () => Effect.die("unused mcp.unsubscribe"),
+    subscriptions: () => Effect.succeed([]),
   })
 
 const call = Effect.fn(function* (service: Mcp.Interface, input: { enabled?: string[] } = {}) {
-  const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(
+  const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }, "test").pipe(
     Effect.provideService(Mcp.Service, service),
   )
   yield* AppMentionsPlugin.effect(host)
@@ -94,7 +102,11 @@ const withFixtureMcp = <A, E, R>(run: (service: Mcp.Interface) => Effect.Effect<
     )
     yield* service.callTool({ server: "codex-computer-use", name: "list_apps" })
     return yield* run(service)
-  }).pipe(Effect.provide(Mcp.layer()), Effect.provide(hostEnvironmentLayer))
+  }).pipe(
+    Effect.provide(Mcp.layer()),
+    Effect.provide(McpPool.layer.pipe(Layer.provide(LayerNode.compile(CrossSpawnSpawner.node)))),
+    Effect.provide(hostEnvironmentLayer),
+  )
 
 describe("app mentions plugin integration", () => {
   it.live("runs the real plugin through PluginHost, RPC, and a fixture MCP server", () =>
@@ -231,7 +243,7 @@ describe("app mentions plugin integration", () => {
   it.effect("interrupts Effect MCP calls", () =>
     Effect.gen(function* () {
       const interrupted = yield* Ref.make(false)
-      const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(
+      const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }, "test").pipe(
         Effect.provideService(
           Mcp.Service,
           mcp({ callTool: () => Effect.never.pipe(Effect.ensuring(Ref.set(interrupted, true))) }),
@@ -247,7 +259,7 @@ describe("app mentions plugin integration", () => {
 
   it.effect("exposes generic structured MCP results and plugin-owned errors", () =>
     Effect.gen(function* () {
-      const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(
+      const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }, "test").pipe(
         Effect.provideService(
           Mcp.Service,
           mcp({
@@ -269,7 +281,7 @@ describe("app mentions plugin integration", () => {
         structured: { count: 2 },
       })
 
-      const failure = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(
+      const failure = yield* PluginHost.make({ list: () => Effect.succeed([]) }, "test").pipe(
         Effect.provideService(
           Mcp.Service,
           mcp({ callTool: () => Effect.fail(new Mcp.NotFoundError({ server: Mcp.ServerName.make("missing") })) }),
@@ -289,7 +301,7 @@ describe("app mentions plugin integration", () => {
   it.effect("propagates Promise AbortSignals through the adapter", () =>
     Effect.gen(function* () {
       const interrupted = yield* Ref.make(false)
-      const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(
+      const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }, "test").pipe(
         Effect.provideService(
           Mcp.Service,
           mcp({ callTool: () => Effect.never.pipe(Effect.ensuring(Ref.set(interrupted, true))) }),
@@ -319,7 +331,7 @@ describe("app mentions plugin integration", () => {
       const started = yield* Latch.make()
       const interrupted = yield* Ref.make(false)
       const cleaned = yield* Ref.make(false)
-      const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(
+      const host = yield* PluginHost.make({ list: () => Effect.succeed([]) }, "test").pipe(
         Effect.provideService(
           Mcp.Service,
           mcp({

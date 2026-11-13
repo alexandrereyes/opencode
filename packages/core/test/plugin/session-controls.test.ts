@@ -36,7 +36,7 @@ testEffect(PluginTestLayer).live(
       const coordinator = yield* SessionRunCoordinator.make<Session.ID, never>({
         drain: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
       })
-      const ctx = yield* PluginHost.make(plugins).pipe(
+      const ctx = yield* PluginHost.make(plugins, "test").pipe(
         Effect.provideService(Session.Service, { ...sessions, active: coordinator.active }),
       )
       const session = yield* ctx.session.create({ title: "Active boundary" })
@@ -56,7 +56,7 @@ testEffect(PluginTestLayer).live("plugin update archives and unarchives a sessio
   Effect.gen(function* () {
     const plugins = yield* Plugin.Service
     const sessions = yield* Session.Service
-    const ctx = yield* PluginHost.make(plugins)
+    const ctx = yield* PluginHost.make(plugins, "test")
     const session = yield* ctx.session.create({ title: "Archive through update" })
 
     yield* ctx.session.update({ sessionID: session.id, archived: true })
@@ -95,7 +95,7 @@ testEffect(Layer.empty).live(
         const remoteServices = yield* locations.contextEffect(
           Location.Ref.make({ directory: AbsolutePath.make(remote.path) }),
         )
-        const ctx = yield* PluginHost.make({ list: () => Effect.succeed([]) }).pipe(Effect.provide(localServices))
+        const ctx = yield* PluginHost.make({ list: () => Effect.succeed([]) }, "test").pipe(Effect.provide(localServices))
         const target = yield* ctx.session.create({
           location: { directory: AbsolutePath.make(remote.path) },
           permissions: [{ action: "reply-test", resource: "*", effect: "ask" }],
