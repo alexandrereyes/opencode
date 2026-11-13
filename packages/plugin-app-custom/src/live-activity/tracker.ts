@@ -294,6 +294,11 @@ export type Derived = {
   readonly dashboard: Pick<LiveActivity.AgentsState, "attention" | "sessions" | "needs">
   /** Every attention item, failed session and unread answer, untruncated: the urgency keys of activity updates. */
   readonly marks: ReadonlyMap<string, Mark>
+  /**
+   * The time each row of `state.sessions` was ordered by inside its status: asked (requests), ended (failed), latest
+   * activity (working) or unread since. Another server's rows interleave by it (`docs/unified-summary.md`).
+   */
+  readonly order: ReadonlyMap<string, number>
   /** When the state changes by itself next (an idle or failed row expiring). */
   readonly wakeAt?: number
   /** Top-level session → its oldest pending request of the attention kind (subagents included); watch-only. */
@@ -989,6 +994,20 @@ export function makeTracker(ctx: TrackerContext) {
         needs: needs.slice(0, limits.needs),
       },
       dashboard: { attention, sessions: sessionRows, needs },
+      order: new Map(
+        ordered
+          .slice(0, limits.rows)
+          .map((row) => [
+            row.entry.id,
+            row.status === "failed"
+              ? (row.entry.ended?.at ?? 0)
+              : row.status === "working"
+                ? row.rollup.activityAt
+                : row.status === "idle"
+                  ? unreadAt(row.entry)
+                  : (row.oldest?.since ?? 0),
+          ]),
+      ),
       marks,
       ...(expiries.length > 0 ? { wakeAt: Math.min(...expiries) } : {}),
       // The watch answers questions and permissions only; a handoff is done in the browser.

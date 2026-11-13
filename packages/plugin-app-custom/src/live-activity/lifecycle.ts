@@ -45,6 +45,8 @@ const Device = Schema.Struct({
   expired: optional(Schema.String),
   /** The last activity ended without the user refusing it: push-to-start may start a new one while work goes on. */
   rearm: optional(Schema.Boolean),
+  /** The "Todos" scope's activity (`docs/unified-summary.md`): written with the joined state where there is one. */
+  scope: optional(Schema.Literal("all")),
 })
 export type Device = typeof Device.Type
 const Devices = Schema.Array(Device)
@@ -92,6 +94,7 @@ export function makeRegistry(storage: Storage) {
             dismissed: previous?.dismissed ?? false,
             ...(previous?.startPushedAt === undefined ? {} : { startPushedAt: previous.startPushedAt }),
             ...(previous?.activity ? { activity: previous.activity } : {}),
+            ...(input.scope === "all" ? { scope: "all" as const } : {}),
           },
         ]
       }),
@@ -130,10 +133,10 @@ export function makeRegistry(storage: Storage) {
         const { rearm: _, ...rest } = device
         return { ...rest, startPushedAt: now }
       }),
-    rearm: (now: number) =>
+    rearm: (now: number, only: (device: Device) => boolean = () => true) =>
       change(now, (devices) =>
-        devices.some((device) => device.dismissed)
-          ? devices.map((device) => ({ ...device, dismissed: false }))
+        devices.some((device) => device.dismissed && only(device))
+          ? devices.map((device) => (only(device) ? { ...device, dismissed: false } : device))
           : devices,
       ),
     /**
@@ -165,7 +168,17 @@ export type Registry = ReturnType<typeof makeRegistry>
  * Start, update and end decisions for every registered device. `evaluate` runs whenever the state may have changed or
  * a deadline it returned passes; it returns the pushes to deliver separately so APNs never delays the caller.
  */
-export function makeLifecycle(input: { readonly registry: Registry; readonly send: Client["send"] }) {
+export function makeLifecycle(input: {
+  readonly registry: Registry
+  readonly send: Client["send"]
+  /**
+   * The devices this lifecycle writes to; all of them when omitted. A server that joins its peers' summaries runs two:
+   * one over the "Todos" scope's devices with the joined state, one over the others with its own
+   * (`docs/unified-summary.md`).
+   */
+  readonly only?: (device: Device) => boolean
+}) {
+  const only = input.only ?? (() => true)
   /** `parked`: the last push carried a parked state, with its long `stale-date`. */
   const activities = new Map<
     string,
@@ -174,13 +187,16 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
   // Push-to-start needs a rise of activeTotal from 0 observed after the device's last start push or activity.
   const seen = { zeroAt: -Infinity, activity: new Map<string, number>(), retry: new Set<string>() }
 
-  const evaluate = Effect.fn("LiveActivity.evaluate")(function* (derived: Derived, now: number) {
+  const evaluate = Effect.fn("LiveActivity.evaluate")(function* (
+    derived: Pick<Derived, "state"> & { readonly marks: ReadonlyMap<string, unknown> },
+    now: number,
+  ) {
     const state = derived.state
     // Nothing works (rev. 2026-11-08): the activity stays, parked, with no heartbeat and no routine update.
     const parked = isParked(state)
     if (state.activeTotal === 0) {
       seen.zeroAt = now
-      yield* input.registry.rearm(now)
+      yield* input.registry.rearm(now, only)
     }
     const key = stateKey(state)
     const marks = new Set(derived.marks.keys())
@@ -212,7 +228,7 @@ export function makeLifecycle(input: { readonly registry: Registry; readonly sen
         }),
         Effect.flatMap(after),
       )
-    for (const listed of yield* input.registry.list(now)) {
+    for (const listed of (yield* input.registry.list(now)).filter(only)) {
       let device = listed
       // ActivityKit has ended it (8 hours): a new one may start at once while work goes on.
       if (device.activity && now - device.activity.registeredAt >= limits.lifeMs) {

@@ -3,6 +3,11 @@
 One iOS Live Activity (Lock Screen + Dynamic Island) per connected server that summarizes the agent sessions running
 on that server. It only informs: there are **no buttons and no Live Activity intents**. Tapping opens the app.
 
+**One per scope (rev. 2026-11-13).** With the apps' "Todos" scope there is a single activity for every server, written
+by the hub with the servers' states joined: [unified-summary.md](unified-summary.md) says how the app registers it
+(`scope: "all"`, on the hub only), the fields a joined state adds (`servers`, each row's `server`) and the link between
+servers. "One per server" below is the scope of one server, and what every server does without that configuration.
+
 This document is the contract between the backend (`packages/plugin-app-custom/src/live-activity`) and the iOS app
 (MyAgents repository, `~/Dev/MyAgents`). Both sides implement exactly what is written here. The example payloads in
 [`live-activity/`](live-activity/) are normative fixtures: the backend tests must produce them (modulo IDs and times)
@@ -191,10 +196,14 @@ Same plugin RPC mechanism as `custom.device` (iOS calls it with `rpc("custom.liv
 | Method       | Input                                                                                       | Output                                                                             |
 | ------------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `register`   | `{ deviceID, serverKey, environment: "sandbox" \| "production", theme, pushToStartToken? }` | `{ push: "configured" \| "unconfigured" }`                                         |
+| …            | rev. 2026-11-13: optional `scope: "all"` ([unified-summary.md](unified-summary.md))         | optional `scope: "all"`, the confirmation                                          |
 | `activity`   | `{ deviceID, activityID, pushToken }`                                                       | `{}`                                                                               |
 | `ended`      | `{ deviceID, activityID, reason: "ended" \| "dismissed" }`                                  | `{}`                                                                               |
 | `unregister` | `{ deviceID }`                                                                              | `{}`                                                                               |
 | `snapshot`   | `{}`                                                                                        | `{ state: AgentsState \| null }` (`null` only from servers before rev. 2026-11-08) |
+
+`snapshot` and `changed` also carry `unified`, the joined state, from a server that reads its peers (rev.
+2026-11-13, [unified-summary.md](unified-summary.md)); it is absent everywhere else.
 
 Event **`changed`**: `{ state: AgentsState | null }`, emitted when the state changes (not for the state at the hub's
 start, which `snapshot` gives), coalesced to at most one per second. Wire type `rpc.custom.live-activity.changed`. Exactly one delivery per change to a connected app, even with
@@ -434,6 +443,13 @@ implement the contract as written.
 
 Code: `src/live-activity/` (`rpc.ts` contract schemas, `tracker.ts` state, `lifecycle.ts` registrations and push
 decisions, `apns.ts` HTTP/2 client, `index.ts` hub and plugin wiring). Tests: `test/live-activity*.test.ts`.
+
+**Joined state (rev. 2026-11-13, [unified-summary.md](unified-summary.md)).** `unified.ts` holds the link's `Summary`
+and the pure `join`; `link.ts` publishes this server's summary on a Unix socket (`OPENCODE_SUMMARY_SOCKET`) and reads
+the peers' (`OPENCODE_SUMMARY_PEERS`). With peers, the hub's loop joins on every pass and runs a second lifecycle:
+one over the registrations with `scope: "all"` and the joined state, one over the others with the server's own, each
+with its own push-to-start, parked, dismissal and budget memory (`makeLifecycle`'s `only`). The tracker's `order`
+gives the rows' times the join interleaves by. Without either variable none of this runs.
 
 **One aggregator per process.** Every Location runs its own plugin instance, and `ctx.event.subscribe()` inside a
 plugin is not Location-filtered: each instance sees every server event. The plugin loader also evaluates the plugin

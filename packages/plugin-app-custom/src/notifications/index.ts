@@ -113,6 +113,8 @@ export function makeNotifier(input: {
     now: number,
     /** The Live Activity state as pushed (`null` while it has nothing to show, so it cannot carry an alert). */
     card: LiveActivity.AgentsState | null = null,
+    /** The joined state, for the devices whose activity is the "Todos" scope's (`docs/unified-summary.md`). */
+    unified?: LiveActivity.AgentsState,
   ) {
     const priming = state.primedAt === undefined
     const primedAt = state.primedAt ?? now
@@ -204,14 +206,15 @@ export function makeNotifier(input: {
         const fallback = device ? notify(device, alert) : Effect.void
         const live = activities.find((item) => item.device.deviceID === deviceID)
         // A success never alerts through the activity, which only shows work and attention.
-        if (alert.kind === "finished" || !live || !card || !input.activities) return fallback
+        const shown = live?.device.scope === "all" && unified ? unified : card
+        if (alert.kind === "finished" || !live || !shown || !input.activities) return fallback
         const registry = input.activities
         const token = live.activity.pushToken
         return input
           .send(
             push(token, live.device.environment, 10, {
               event: "update",
-              state: card,
+              state: shown,
               now,
               alert: { title: alert.ref.title, body: text(alert) },
             }),

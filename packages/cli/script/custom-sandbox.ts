@@ -17,6 +17,10 @@ const args = parseArgs({
     home: { type: "string" },
     // The watch gateway of a sandbox never takes production's 4192; 0 lets the OS pick a free port.
     "watch-port": { type: "string", default: "0" },
+    // The link between servers (plugin `docs/unified-summary.md`), only when a test asks for it: the Unix socket this
+    // sandbox publishes its summary on, and the peers' sockets (comma separated) it joins into the "Todos" activity.
+    "summary-socket": { type: "string" },
+    "summary-peers": { type: "string" },
   },
 })
 const action = args.positionals[0] ?? "status"
@@ -156,6 +160,9 @@ async function up() {
           .filter((name) => name.startsWith("OPENCODE_RESOURCES_HUB_"))
           .map((name) => [name, undefined]),
       ),
+      // Never production's link: a sandbox must neither publish on production's socket nor read production's peers.
+      OPENCODE_SUMMARY_SOCKET: args.values["summary-socket"],
+      OPENCODE_SUMMARY_PEERS: args.values["summary-peers"],
       ...(hub
         ? {
             OPENCODE_RESOURCES_HUB_REMOTE_INFO: `${hub.state}/hub.json`,

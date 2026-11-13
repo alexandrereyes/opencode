@@ -120,6 +120,10 @@ One alert per question, permission or failure and device (rev. 2026-10-30), pref
 - A bell **success** always goes as a notification: the activity only shows work and attention.
 - The lifecycle's own updates (state changes, heartbeats) never carry an `alert`, and the watch complication's
   widget pushes (`content-changed`) are silent.
+- **Single "Todos" activity (rev. 2026-11-13, [unified-summary.md](unified-summary.md)):** the rule is per server and
+  unchanged. The hub alerts its own sessions through the card, with the joined state. Another server has no activity
+  registered for the device in that scope, so its alerts are the notification above; the hub never alerts for
+  another server's sessions, so each event still buzzes once.
 
 ## App behavior
 

@@ -57,6 +57,8 @@ const SessionRef = {
   title: Schema.String,
   project: Schema.String,
   directory: Schema.String,
+  /** Joined state only (`docs/unified-summary.md`): the `instanceID` of the server the session lives on. */
+  server: optional(Schema.String),
 }
 
 export interface Focus extends Schema.Schema.Type<typeof Focus> {}
@@ -124,6 +126,17 @@ export const Counts = Schema.Struct({
   browser: optional(Schema.Int),
 }).annotate({ identifier: "LiveActivity.Counts" })
 
+/** One server of a joined state (`docs/unified-summary.md`); the first is the one that wrote it. */
+export interface Server extends Schema.Schema.Type<typeof Server> {}
+export const Server = Schema.Struct({
+  instanceID: Schema.String,
+  name: Schema.String,
+  /** The badge's initials, by the apps' rule (`ServerSwitcher.initials`). */
+  short: Schema.String,
+  /** Present (`true`) while the writer has no fresh summary of this server; its sessions are not in the state. */
+  offline: optional(Schema.Boolean),
+}).annotate({ identifier: "LiveActivity.Server" })
+
 export interface AgentsState extends Schema.Schema.Type<typeof AgentsState> {}
 export const AgentsState = Schema.Struct({
   v: Schema.Literal(1),
@@ -137,6 +150,8 @@ export const AgentsState = Schema.Struct({
   sessions: Schema.Array(Row),
   /** rev. 2026-10-29; optional so older builds and backends keep decoding. */
   needs: optional(Schema.Array(Need)),
+  /** Joined state only (`docs/unified-summary.md`): every server it covers, the writer first. */
+  servers: optional(Schema.Array(Server)),
 }).annotate({ identifier: "LiveActivity.AgentsState" })
 
 const DeviceID = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100))
@@ -154,6 +169,11 @@ export const RegisterInput = Schema.Struct({
   environment: Environment,
   theme: Theme,
   pushToStartToken: optional(Schema.NullOr(Token)),
+  /**
+   * `all` (`docs/unified-summary.md`): this device's activity is the one of the "Todos" scope, written with the joined
+   * state by a server that reads its peers' summaries. Absent: this server's own state, as always.
+   */
+  scope: optional(Schema.Literal("all")),
 }).annotate({ identifier: "LiveActivity.RegisterInput" })
 
 export interface ActivityInput extends Schema.Schema.Type<typeof ActivityInput> {}
@@ -174,14 +194,17 @@ export const Push = Schema.Literals(["configured", "unconfigured"]).annotate({ i
 export type Push = typeof Push.Type
 
 const Empty = Schema.Struct({})
-export const StateOutput = Schema.Struct({ state: Schema.NullOr(AgentsState) })
+/** `unified`: the joined state, only from a server that reads its peers' summaries (`docs/unified-summary.md`). */
+export const StateOutput = Schema.Struct({ state: Schema.NullOr(AgentsState), unified: optional(AgentsState) })
+/** `scope: "all"` confirms that this registration gets the joined state; absent, it gets this server's own. */
+export const RegisterOutput = Schema.Struct({ push: Push, scope: optional(Schema.Literal("all")) })
 
 export const Definition = Rpc.define({
   id: "custom.live-activity",
   methods: {
     register: {
       input: Schema.toStandardSchemaV1(RegisterInput),
-      output: Schema.toStandardSchemaV1(Schema.Struct({ push: Push })),
+      output: Schema.toStandardSchemaV1(RegisterOutput),
     },
     activity: {
       input: Schema.toStandardSchemaV1(ActivityInput),

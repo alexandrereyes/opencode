@@ -1,0 +1,109 @@
+{
+  "v": 1,
+  "updatedAt": 1793104860000,
+  "host": "Linux BRS · Mac de Alexandre offline",
+  "counts": {
+    "working": 2,
+    "question": 1,
+    "permission": 0,
+    "failed": 0,
+    "idle": 0,
+    "unread": 1
+  },
+  "activeTotal": 3,
+  "focus": {
+    "sessionID": "ses_01JZSWARMMIGRATION00000011",
+    "title": "Migrar o AbacatoV3 para o Swarm",
+    "project": "abacato-v3",
+    "directory": "/srv/dev/abacato-v3",
+    "startedAt": 1793104136000,
+    "activity": "Rodando docker stack deploy",
+    "server": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21"
+  },
+  "attention": [
+    {
+      "sessionID": "ses_01JZRELEASEPROD0000000013",
+      "title": "Publicar a versão 3.2",
+      "project": "abacato-v3",
+      "directory": "/srv/dev/abacato-v3",
+      "kind": "question",
+      "since": 1793104740000,
+      "text": "Publicar em produção agora?",
+      "server": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21"
+    }
+  ],
+  "attentionTotal": 1,
+  "sessions": [
+    {
+      "sessionID": "ses_01JZRELEASEPROD0000000013",
+      "title": "Publicar a versão 3.2",
+      "project": "abacato-v3",
+      "directory": "/srv/dev/abacato-v3",
+      "status": "question",
+      "server": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21"
+    },
+    {
+      "sessionID": "ses_01JZSWARMMIGRATION00000011",
+      "title": "Migrar o AbacatoV3 para o Swarm",
+      "project": "abacato-v3",
+      "directory": "/srv/dev/abacato-v3",
+      "status": "working",
+      "server": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21"
+    },
+    {
+      "sessionID": "ses_01JZBACKUPROUTINE000000012",
+      "title": "Rotina de backup do Postgres",
+      "project": "core-infra",
+      "directory": "/srv/dev/core-infra",
+      "status": "working",
+      "progress": {
+        "done": 1,
+        "total": 4,
+        "unit": "todos",
+        "current": "Testar a restauração"
+      },
+      "server": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21"
+    },
+    {
+      "sessionID": "ses_01JZLOGSREVIEW00000000014",
+      "title": "Revisar os logs do Traefik",
+      "project": "core-infra",
+      "directory": "/srv/dev/core-infra",
+      "status": "idle",
+      "server": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21"
+    }
+  ],
+  "needs": [
+    {
+      "sessionID": "ses_01JZRELEASEPROD0000000013",
+      "title": "Publicar a versão 3.2",
+      "project": "abacato-v3",
+      "directory": "/srv/dev/abacato-v3",
+      "kind": "question",
+      "since": 1793104740000,
+      "server": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21"
+    },
+    {
+      "sessionID": "ses_01JZLOGSREVIEW00000000014",
+      "title": "Revisar os logs do Traefik",
+      "project": "core-infra",
+      "directory": "/srv/dev/core-infra",
+      "kind": "unread",
+      "since": 1793104260000,
+      "server": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21"
+    }
+  ],
+  "servers": [
+    {
+      "instanceID": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21",
+      "name": "Linux BRS",
+      "short": "LB"
+    },
+    {
+      "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+      "name": "Mac de Alexandre",
+      "short": "MA",
+      "offline": true
+    }
+  ]
+}

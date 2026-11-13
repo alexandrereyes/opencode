@@ -2,7 +2,9 @@ import type { Context } from "../context.js"
 import { Cause, Clock, Deferred, Effect, Exit, Queue, Scope, Semaphore, Stream } from "effect"
 import os from "node:os"
 import { load, type Client } from "./apns.js"
-import { fit, makeLifecycle, makeRegistry, stateKey, type Lifecycle, type Storage } from "./lifecycle.js"
+import { identity } from "../instance/index.js"
+import { fit, makeLifecycle, makeRegistry, stateKey, type Device, type Lifecycle, type Storage } from "./lifecycle.js"
+import { linkSettings, makePeers, serveSummary, type LinkSettings, type Peers, type Read } from "./link.js"
 import { marksFrom } from "../sessions/inventory.js"
 import { makeNotificationRegistry, makeNotifier, type Notifier } from "../notifications/index.js"
 import { Notifications } from "../notifications/rpc.js"
@@ -10,7 +12,8 @@ import { Preferences } from "../preferences/rpc.js"
 import { tool } from "../progress/todos.js"
 import { sharedRegistry, type Registry } from "../browser-handoff/registry.js"
 import { LiveActivity } from "./rpc.js"
-import { eventTypes, makeTracker, type Event, type Tracker, type TrackerContext } from "./tracker.js"
+import { eventTypes, makeTracker, type Derived, type Event, type Tracker, type TrackerContext } from "./tracker.js"
+import { join as joinSummaries, summary } from "./unified.js"
 
 const preferencesUpdated: Event = { type: "preferences.updated" }
 const tracked = <A extends { readonly type: string }>(event: A): event is Extract<A, Event> =>
@@ -25,7 +28,11 @@ export type Member = {
     readonly storage: Storage
     readonly events: Stream.Stream<Event, unknown>
   }
-  readonly emit: (state: LiveActivity.AgentsState | null) => Effect.Effect<void, unknown>
+  /** `unified`: the joined state, only on a server that reads its peers' summaries (`docs/unified-summary.md`). */
+  readonly emit: (
+    state: LiveActivity.AgentsState | null,
+    unified?: LiveActivity.AgentsState,
+  ) => Effect.Effect<void, unknown>
   /** Its Location directory and whether `todowrite` is in that Location's tools (`experimental.todo`). */
   readonly todo?: { readonly directory: string; readonly enabled: Effect.Effect<boolean> }
 }
@@ -35,16 +42,28 @@ export type HubOptions = {
   readonly apns: Effect.Effect<Client | undefined>
   /** Browse handoffs waiting on Alexandre (`docs/browser-handoff.md`). */
   readonly handoffs?: Pick<Registry, "waiting" | "listen">
+  /**
+   * The link between servers (`docs/unified-summary.md`): the socket this one publishes its own summary on, and the
+   * peers whose summaries it joins into the "Todos" activity. Without it, one Live Activity per server, as always.
+   */
+  readonly link?: LinkSettings & { readonly read?: Read }
 }
 
 type Running = {
   readonly scope: Scope.Closeable
-  readonly ready: Deferred.Deferred<{ readonly host: string; readonly push: LiveActivity.Push }>
+  readonly ready: Deferred.Deferred<Ready>
   readonly signal: Queue.Queue<void>
   readonly tracker: Tracker
   readonly registry: ReturnType<typeof makeRegistry>
   readonly notifications: ReturnType<typeof makeNotificationRegistry>
+  /** Present on a server that joins its peers' summaries: it writes the "Todos" scope's activities. */
+  readonly peers?: Peers
 }
+
+type Ready = { readonly host: string; readonly push: LiveActivity.Push; readonly instanceID: string }
+
+/** The devices of the "Todos" scope, which get the joined state where there is one. */
+const everywhere = (device: Device) => device.scope === "all"
 
 /**
  * Every Location runs its own plugin instance in this process, and each receives every server event. The hub keeps
@@ -59,10 +78,11 @@ export function makeHub(options: HubOptions) {
 
   const start = Effect.fn("LiveActivity.start")(function* (member: Member) {
     const scope = yield* Scope.make()
+    const signal = yield* Queue.sliding<void>(1)
     const running: Running = {
       scope,
-      ready: yield* Deferred.make<{ readonly host: string; readonly push: LiveActivity.Push }>(),
-      signal: yield* Queue.sliding<void>(1),
+      ready: yield* Deferred.make<Ready>(),
+      signal,
       // A session's Location answers for its own config; one with no loaded instance cannot be executing.
       tracker: makeTracker({
         ...member.ctx,
@@ -72,6 +92,16 @@ export function makeHub(options: HubOptions) {
       }),
       registry: makeRegistry(member.ctx.storage),
       notifications: makeNotificationRegistry(member.ctx.storage),
+      ...(options.link && options.link.peers.length > 0
+        ? {
+            peers: makePeers({
+              sockets: options.link.peers,
+              storage: member.ctx.storage,
+              ...(options.link.read ? { read: options.link.read } : {}),
+              changed: () => Queue.offerUnsafe(signal, undefined),
+            }),
+          }
+        : {}),
     }
     runtime.current = running
     // A handoff starting to wait or ending changes the state without a server event of its own.
@@ -100,13 +130,33 @@ export function makeHub(options: HubOptions) {
         .rebuild(yield* Clock.currentTimeMillis)
         .pipe(Effect.catchCause((cause) => Effect.logWarning("Live Activity rebuild failed", { cause })))
       const push: LiveActivity.Push = client ? "configured" : "unconfigured"
-      yield* Deferred.succeed(running.ready, { host, push })
+      const instanceID = options.link?.serve || running.peers ? (yield* identity(member.ctx.storage)).instanceID : ""
+      yield* Deferred.succeed(running.ready, { host, push, instanceID })
+      // Always this server's own state, never the joined one: two servers reading each other cannot loop.
+      if (options.link?.serve)
+        yield* serveSummary({
+          socket: options.link.serve,
+          read: () => summary({ instanceID, name: host }, running.tracker.derive(Date.now(), host)),
+        }).pipe(
+          Scope.provide(scope),
+          Effect.catchCause((cause) => Effect.logWarning("Unified summary could not be served", { cause })),
+          Effect.forkIn(scope, { startImmediately: true }),
+        )
+      if (running.peers) yield* running.peers.run.pipe(Effect.forkIn(scope, { startImmediately: true }))
       yield* loop(
         running,
-        host,
+        { host, push, instanceID },
         client
           ? {
-              lifecycle: makeLifecycle({ registry: running.registry, send: client.send }),
+              // With peers, the "Todos" scope's devices follow the joined state and the others this server's own.
+              lifecycle: makeLifecycle({
+                registry: running.registry,
+                send: client.send,
+                ...(running.peers ? { only: (device: Device) => !everywhere(device) } : {}),
+              }),
+              ...(running.peers
+                ? { unified: makeLifecycle({ registry: running.registry, send: client.send, only: everywhere }) }
+                : {}),
               notifier: makeNotifier({
                 registry: running.notifications,
                 activities: running.registry,
@@ -118,11 +168,23 @@ export function makeHub(options: HubOptions) {
     }).pipe(Effect.forkIn(scope, { startImmediately: true }))
   })
 
+  /** This server's state joined with its peers' fresh summaries; nothing on a server that reads no peer. */
+  const joined = (running: Running, ready: Ready, derived: Derived, now: number) => {
+    if (!running.peers) return undefined
+    const read = running.peers.current(now)
+    const result = joinSummaries({
+      self: summary({ instanceID: ready.instanceID, name: ready.host }, derived),
+      peers: read.peers,
+    })
+    return { ...result, card: fit({ event: "update", state: result.state, now }), wakeAt: read.wakeAt }
+  }
+
   const loop = (
     running: Running,
-    host: string,
-    push: { readonly lifecycle: Lifecycle; readonly notifier: Notifier } | undefined,
+    ready: Ready,
+    push: { readonly lifecycle: Lifecycle; readonly unified?: Lifecycle; readonly notifier: Notifier } | undefined,
   ) => {
+    const host = ready.host
     // The app learns the boot state through `snapshot`; `changed` reports differences from then on (the first pass
     // only records it: since rev. 2026-11-08 an idle boot state is a state too, not `null`).
     const emitted = { key: undefined as string | undefined, at: -Infinity }
@@ -132,14 +194,17 @@ export function makeHub(options: HubOptions) {
       running.tracker.prune(now)
       const derived = running.tracker.derive(now, host)
       const state = visible(derived.state, now)
-      const key = state ? stateKey(state) : "null"
+      const all = joined(running, ready, derived, now)
+      const key = (state ? stateKey(state) : "null") + (all ? stateKey(all.card) : "")
       emitted.key ??= key
       const wakes = derived.wakeAt === undefined ? [] : [derived.wakeAt]
+      // A peer that stops answering leaves the joined state when its last summary turns stale.
+      if (all?.wakeAt !== undefined) wakes.push(all.wakeAt)
       if (key !== emitted.key && now - emitted.at < emitMs) wakes.push(emitted.at + emitMs)
       if (key !== emitted.key && now - emitted.at >= emitMs) {
         emitted.key = key
         emitted.at = now
-        yield* (members[0]?.emit(state) ?? Effect.void).pipe(
+        yield* (members[0]?.emit(state, all?.card) ?? Effect.void).pipe(
           Effect.catchCause((cause) => Effect.logWarning("Live Activity changed event failed", { cause })),
         )
       }
@@ -150,7 +215,15 @@ export function makeHub(options: HubOptions) {
           Effect.catchCause((cause) => Effect.logWarning("Live Activity push delivery failed", { cause })),
           Effect.forkIn(running.scope),
         )
-        const alerts = yield* push.notifier.evaluate(derived, now, state)
+        if (push.unified && all) {
+          const plan = yield* push.unified.evaluate(all, now)
+          if (plan.wakeAt !== undefined) wakes.push(plan.wakeAt)
+          yield* plan.deliver.pipe(
+            Effect.catchCause((cause) => Effect.logWarning("Unified Live Activity push delivery failed", { cause })),
+            Effect.forkIn(running.scope),
+          )
+        }
+        const alerts = yield* push.notifier.evaluate(derived, now, state, all?.card)
         if (alerts.wakeAt !== undefined) wakes.push(alerts.wakeAt)
         yield* alerts.deliver.pipe(
           Effect.catchCause((cause) => Effect.logWarning("Session notification delivery failed", { cause })),
@@ -186,9 +259,11 @@ export function makeHub(options: HubOptions) {
     const ready = yield* Deferred.await(running.ready)
     const now = yield* Clock.currentTimeMillis
     const derived = running.tracker.derive(now, ready.host)
+    const all = joined(running, ready, derived, now)
     return {
       state: visible({ ...derived.state, ...derived.dashboard }, now, "watch"),
       live: visible(derived.state, now),
+      ...(all ? { unified: all.card } : {}),
       host: ready.host,
       requests: derived.requests,
     }
@@ -207,7 +282,11 @@ export function makeHub(options: HubOptions) {
       change((running, now) =>
         running.registry.register(input, now).pipe(
           Effect.andThen(Deferred.await(running.ready)),
-          Effect.map((ready) => ({ push: ready.push })),
+          // Confirmed only where the joined state exists; elsewhere the registration gets this server's own.
+          Effect.map((ready) => ({
+            push: ready.push,
+            ...(input.scope === "all" && running.peers ? { scope: "all" as const } : {}),
+          })),
         ),
       ),
     activity: (input: LiveActivity.ActivityInput) =>
@@ -216,7 +295,10 @@ export function makeHub(options: HubOptions) {
       change((running, now) => running.registry.ended(input, now).pipe(Effect.as({}))),
     unregister: (input: { readonly deviceID: string }) =>
       change((running, now) => running.registry.unregister(input.deviceID, now).pipe(Effect.as({}))),
-    snapshot: () => view.pipe(Effect.map((result) => ({ state: result.live }))),
+    snapshot: () =>
+      view.pipe(
+        Effect.map((result) => ({ state: result.live, ...(result.unified ? { unified: result.unified } : {}) })),
+      ),
   }
 
   const notifications = {
@@ -306,6 +388,7 @@ export function sharedHub() {
     host: hostName(),
     apns: load(),
     handoffs: sharedRegistry(),
+    link: linkSettings(),
   })
   return globalThis.opencodeCustomLiveActivityHub
 }
@@ -341,7 +424,7 @@ export const registerLiveActivity = Effect.fn("LiveActivity.register")(function*
         Stream.filter((event) => event !== undefined),
       ),
     },
-    emit: (state) => registration.events.emit("changed", { state }),
+    emit: (state, unified) => registration.events.emit("changed", { state, ...(unified ? { unified } : {}) }),
     todo: {
       directory: ctx.location.directory,
       enabled: ctx.tool.list().pipe(Effect.map((tools) => tools.some((item) => item.id === tool))),
