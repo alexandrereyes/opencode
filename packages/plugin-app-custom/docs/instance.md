@@ -31,7 +31,8 @@ The native apps (`MyAgents`) show the sessions of several servers together. Each
 
 Over HTTP, as every plugin RPC: `POST /api/rpc/custom.instance/get` with the body `{"input":{}}`; the answer comes
 as `{"output":{…}}`. The identity is the server's, the same from every Location. A server whose plugin predates this
-module answers `rpc.method_not_found`, which the apps treat as a server without identity or declared hub.
+module answers `rpc.unavailable` (the core's answer for an RPC ID nobody registered; `rpc.method_not_found` is for an
+unknown method of a registered one), which the apps treat as a server without identity or declared hub.
 
 ## Deployment
 
