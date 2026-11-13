@@ -7,7 +7,8 @@ import path from "node:path"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
 import { makeHub, type Member } from "../src/live-activity/index"
-import { body as rawBody, limits as pushLimits, push } from "../src/live-activity/lifecycle"
+import { body as rawBody, devicesKey, limits as pushLimits, push } from "../src/live-activity/lifecycle"
+import { devicesKey as notificationDevicesKey } from "../src/notifications/index"
 import {
   hubPassword,
   httpSend,
@@ -282,7 +283,7 @@ function publishing(initial: Summary) {
     calls.push({ at: clock.now, method, input })
     return Promise.resolve(answer.current)
   }
-  const publisher = makePublisher({ read: (now) => ((clock.now = now), local.current), send })
+  const publisher = makePublisher({ read: (now) => Effect.sync(() => ((clock.now = now), local.current)), send })
   const advance = (ms: number) =>
     Effect.gen(function* () {
       yield* TestClock.adjust(ms)
@@ -378,7 +379,7 @@ test("the call is the hub's RPC with the client's Basic credential; a wrong pass
   const target = `http://127.0.0.1:${server.port}`
   try {
     const send = httpSend(target, () => Promise.resolve("s3nha-do-hub"))
-    expect(await send("publish", mac)).toEqual({ ok: true })
+    expect(await send("publish", mac)).toEqual({ ok: true, output: { protocol: 1 } })
     expect(seen[0]).toEqual({
       path: "/api/rpc/custom.summary/publish",
       authorization: `Basic ${Buffer.from("opencode:s3nha-do-hub").toString("base64")}`,
@@ -488,6 +489,70 @@ function serverWith(name: string, link?: { hub: boolean; target?: string; send?:
   const publish = (input: unknown) => outcome(hub.summaries.publish(input as Record<string, unknown>, context))
   return { server, shared, pushes, emitted, hub, join, to, publish }
 }
+
+/** The HTTP call replaced by the hub's handlers in memory, on the test's clock. */
+function linkTo(hubServer: ReturnType<typeof serverWith>, clock: Clock.Clock, sent: unknown[] = []): Send {
+  return (method, input) => {
+    if (method === "publish") sent.push(input)
+    const call: Effect.Effect<unknown, unknown> =
+      method === "publish"
+        ? hubServer.hub.summaries.publish(input as Record<string, unknown>, context)
+        : hubServer.hub.summaries.leave(input as { protocol: number; instanceID: string }, context)
+    return Effect.runPromise(
+      call.pipe(
+        Effect.map((output): Sent => ({ ok: true, output })),
+        Effect.catch((error) => Effect.succeed<Sent>({ ok: false, reason: (error as { type: string }).type })),
+        Effect.provideService(Clock.Clock, clock),
+      ),
+    )
+  }
+}
+
+for (const [what, order, expected] of [
+  ["registered on the hub's Todos scope after this server", ["mac", "todos"], { mac: [], hub: ["iphone-todos"] }],
+  ["registered on this server after the hub's Todos scope", ["todos", "mac"], { mac: ["iphone-todos"], hub: [] }],
+  // An app from before the scopes registers on every server, with no scope: both stay.
+  ["registered on both servers without a scope", ["mac", "hub"], { mac: ["iphone-todos"], hub: ["iphone-todos"] }],
+] satisfies [string, string[], { mac: string[]; hub: string[] }][])
+  it.effect(`a device ${what} keeps only its newest registration, and its notifications everywhere`, () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(T)
+      const hubServer = serverWith("Linux BRS", { hub: true })
+      yield* hubServer.join(yield* Queue.unbounded<Event>())
+      const macServer = serverWith("Mac de Alexandre", {
+        hub: false,
+        target: "http://hub.invalid",
+        send: linkTo(hubServer, yield* Clock.Clock),
+      })
+      const queue = yield* Queue.unbounded<Event>()
+      yield* macServer.join(queue)
+      yield* macServer.hub.notifications.register({
+        deviceID: everywhere.deviceID,
+        serverKey: "mac",
+        environment: "sandbox",
+        token: "cc33",
+      })
+      const { scope: _, ...local } = { ...everywhere, serverKey: "mac" }
+      for (const where of order) {
+        // The servers cannot reach each other's registrations but through the summary: no unregister is called.
+        if (where === "mac") yield* macServer.hub.handlers.register(local)
+        if (where === "todos") yield* hubServer.hub.handlers.register(everywhere)
+        if (where === "hub") yield* hubServer.hub.handlers.register(local)
+        yield* TestClock.adjust(minute)
+        yield* settled5
+      }
+      // A registration on the hub tells the other server nothing by itself: it learns with its next summary, here
+      // one sent because a session started.
+      yield* Queue.offerAll(queue, [created(ids.live, T), execution("started", ids.live, T)])
+      yield* settled5
+      yield* TestClock.adjust(limits.minMs)
+      yield* settled5
+      const devices = (server: ReturnType<typeof serverWith>) =>
+        ((server.shared.values.get(devicesKey) ?? []) as { deviceID: string }[]).map((device) => device.deviceID)
+      expect({ mac: devices(macServer), hub: devices(hubServer) }).toEqual(expected)
+      expect(macServer.shared.values.get(notificationDevicesKey)).toHaveLength(1)
+    }),
+  )
 
 it.effect(
   "only the hub accepts summaries, and only this protocol's: the rest is refused by name and joins nothing",
@@ -645,17 +710,7 @@ it.effect(
       yield* linuxServer.publish(linux)
       const sent: unknown[] = []
       // The sender is itself a hub here, holding another server's summary: it must still send only its own.
-      const send: Send = (method, input) => {
-        if (method === "publish") sent.push(input)
-        return Effect.runPromise(
-          outcome(
-            method === "publish"
-              ? linuxServer.hub.summaries.publish(input as Record<string, unknown>, context)
-              : linuxServer.hub.summaries.leave(input as { protocol: number; instanceID: string }, context),
-          ).pipe(Effect.provideService(Clock.Clock, clock)),
-        ).then((result): Sent => ("ok" in result ? { ok: true } : { ok: false, reason: result.error }))
-      }
-      const clock = yield* Clock.Clock
+      const send = linkTo(linuxServer, yield* Clock.Clock, sent)
       const macServer = serverWith("Mac de Alexandre", { hub: true, target: "http://hub.invalid", send })
       const queue = yield* Queue.unbounded<Event>()
       const scope = yield* Scope.make()

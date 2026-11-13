@@ -66,12 +66,22 @@ The app is in the foreground when the scope changes. In this order:
 1. `register` on the new scope's writer (with `scope: "all"` when it is "Todos").
 2. Start the new activity locally with the new scope's `serverKey`, call `activity` there with its push token.
 3. End the previous scope's activity with immediate dismissal (the ordered swap of "Manual recreation" in
-   live-activity.md), and on the **previous writer**, when it is another server, call `unregister` so it stops writing
-   and never sends a push-to-start. When both scopes are written by the same server (Todos ↔ the hub's own scope), no
-   `unregister`: the registration of step 1 replaced the old one, and `ended` for the old activity changes nothing.
-4. If the previous writer cannot be reached, retry `unregister` when it comes back. Until then it may still send a
-   push-to-start when its own work rises: the duplicate rule (keep the activity of the current scope, end the others
-   at once, report `ended`) already runs on that background wake.
+   live-activity.md), then tell its server, which depends on who wrote it:
+   - **Another server wrote it** (Todos ↔ the Mac's scope, or one server's scope ↔ another's): call **`unregister`
+     on that server, never `ended`** (rev. 2026-11-14). `ended` keeps the registration and rearms its push-to-start
+     (it is how the backend learns that iOS ended an activity and a new one may start), so that server would start a
+     card of its own with its next work. `unregister` removes the device's whole Live Activity registration there:
+     the activity token, the push-to-start token and every memory of dismissal or rearming; nothing is pushed to the
+     device's activities from that server until it registers there again. It does not touch `custom.notifications`,
+     a separate registration that stays valid on that server, so its alerts now go out as plain notifications.
+   - **The same server writes both** (Todos ↔ the hub's own scope): nothing more. The `register` of step 1 replaced
+     the registration and the `activity` of step 2 the activity; an `ended` for the old activity is harmless there
+     (it names an activity other than the registered one, which changes nothing) but is not needed.
+4. The same rule for a duplicate the app finds later (an activity of a scope that is not the current one, on a
+   background wake after a push-to-start for instance): end it at once and `unregister` on its server when that is
+   not the current scope's writer; `ended` only for an extra activity of the current scope's own writer.
+5. If the previous writer cannot be reached, retry `unregister` when it comes back. The servers also settle most of
+   this between themselves ("Stale registrations" below), so the retry is a second line, not the only one.
 
 ### Reading the state in the foreground
 
@@ -215,10 +225,10 @@ the plugin, through the hub's normal API. Nothing else is involved: no tunnel, n
 
 ### RPC `custom.summary` (on the hub; called by servers, never by the apps)
 
-| Method    | Input                      | Output            | Errors                                                              |
-| --------- | -------------------------- | ----------------- | ------------------------------------------------------------------- |
-| `publish` | `Summary`                  | `{ protocol: 1 }` | `not_hub`, `protocol_mismatch` (`data.expected`), `invalid_summary` |
-| `leave`   | `{ protocol, instanceID }` | `{}`              | `not_hub`                                                           |
+| Method    | Input                      | Output                                    | Errors                                                              |
+| --------- | -------------------------- | ----------------------------------------- | ------------------------------------------------------------------- |
+| `publish` | `Summary`                  | `{ protocol: 1, devices?: Registered[] }` | `not_hub`, `protocol_mismatch` (`data.expected`), `invalid_summary` |
+| `leave`   | `{ protocol, instanceID }` | `{}`                                      | `not_hub`                                                           |
 
 Over HTTP, as every plugin RPC: `POST <hub>/api/rpc/custom.summary/publish` with the body `{"input": <Summary>}`.
 
@@ -231,7 +241,9 @@ Summary {                            // unified-summary/summary-mac.json
   order: Record<sessionID, number>   // epoch ms each `state.sessions` row is ordered by inside its status:
                                      // asked (requests), ended (failed), latest activity (working), unread since
   marks: string[]                    // every `<status>:<sessionID>` that needs Alexandre, untruncated (urgency keys)
+  devices?: Registered[]             // rev. 2026-11-14: every Live Activity registration the sender holds
 }
+Registered { deviceID: string, registeredAt: number }   // epoch ms of the device's last `register` on that server
 ```
 
 - **Only the hub accepts.** A server without `OPENCODE_HUB=1` answers `not_hub` (HTTP 400) to both methods.
@@ -253,6 +265,34 @@ Summary {                            // unified-summary/summary-mac.json
   The plugin API gives a plugin neither the server's password nor its address, so the plugin reads the file the
   server itself reads. No new secret is created or copied anywhere, and the password is never logged (a refusal is
   logged as `unauthorized`).
+
+### Stale registrations (rev. 2026-11-14)
+
+When the scope changes while the previous writer is unreachable, the app cannot `unregister` there. That server would
+keep a registration and the token of an activity the app already ended: back up with the app closed, it would send
+its alerts through that dead activity (lost when APNs still accepts the token) and could start a card of its own by
+push-to-start. The two servers settle it with the summary, with no call from the app:
+
+- A device is in one scope at a time and calls `register` only on that scope's writer (on every launch and
+  foreground), so **between the hub's "Todos" registration of a device and another server's own registration of the
+  same `deviceID`, the one with the newer `registeredAt` is where the device is; the older one is dropped**, exactly
+  as `unregister` would (the Live Activity registration only; `custom.notifications` stays).
+- **Went to "Todos":** `publish` answers with `devices`, the hub's registrations with `scope: "all"`. The sender drops
+  each of its own registrations whose `deviceID` is there with a **strictly newer** `registeredAt`.
+- **Left "Todos" for that server:** the summary carries `devices`, every registration the sender holds. The hub drops
+  each of its `scope: "all"` registrations whose `deviceID` is there with a strictly newer `registeredAt` (and does
+  not list it in its answer).
+- Only a `scope: "all"` registration takes part, on the hub's side. Registrations without a scope on both servers
+  are never compared: that is an app from before the scopes, which keeps one activity per server.
+- A new registration makes its server send a summary at once (parked too), so the hub hears of "left Todos" within a
+  second when reachable. The other direction is learned with the sender's **next** summary: at once when it comes
+  back up (the case that matters), otherwise with its next change or renewal.
+
+Limits: the times are each server's own clock, so a switch there and back inside the two clocks' difference could be
+judged wrong (the app's next `register`, on its next foreground, corrects it). A switch between two scopes of
+servers neither of which is "Todos" (the Mac's scope to the hub's own) is not covered: only the app's `unregister`
+retry clears the old one. A server that is up but parked, which the app alone could not reach, learns of "went to
+Todos" only with its next summary.
 
 ### When a server sends
 
@@ -358,7 +398,8 @@ off for the apps ([instance.md](instance.md)).
   waits), the order inside failed/working/unread, the same session ID on two servers, a summary of the hub itself,
   the 4 KB fitting; the hub's side (a working summary expiring after 60 seconds and returning, a parked one never
   expiring, `leave`, the restart restoring the settled part, storage written only when it changes, 30 days); the
-  sender (start, change, renewal only while working, at most one per second, the hub away and back with the 2/5/15
+  stale registrations (the newest of a "Todos" and a server's own wins, in both directions; registrations without a
+  scope are left alone; notifications stay); the sender (start, change, renewal only while working, at most one per second, the hub away and back with the 2/5/15
   waits, `leave` only after a delivery); the HTTP call (route, Basic credential, wrong password, refusal, absent
   hub) and where the password comes from; the RPC (a server that is not the hub, another protocol, an invalid body);
   and the hub with a fake APNs: the "Todos" activity gets both servers, loses and regains the other's work, alerts

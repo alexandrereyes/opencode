@@ -1,4 +1,5 @@
 import { Rpc } from "@opencode/plugin/rpc"
+import { optional } from "@opencode/schema/schema"
 import { Schema } from "effect"
 import { LiveActivity } from "./rpc.js"
 import { clip, limits, type Derived } from "./tracker.js"
@@ -12,6 +13,15 @@ export const protocol = 1 as const
  * What a server sends to the one that writes the "Todos" activity: always its **own** state, never a joined one, so
  * servers sending to each other cannot loop.
  */
+/**
+ * A device's Live Activity registration on one server and when it last called `register` there. A device is in one
+ * scope at a time and only refreshes the registration of that scope's writer, so between the hub's "Todos"
+ * registration and another server's own, the newer one is where the device is and the older one is stale.
+ */
+export const Registered = Schema.Struct({ deviceID: Schema.String, registeredAt: Schema.Number })
+export type Registered = typeof Registered.Type
+export const decodeRegistered = Schema.decodeUnknownOption(Schema.Array(Registered))
+
 export interface Summary extends Schema.Schema.Type<typeof Summary> {}
 export const Summary = Schema.Struct({
   protocol: Schema.Literal(protocol),
@@ -23,6 +33,8 @@ export const Summary = Schema.Struct({
   order: Schema.Record(Schema.String, Schema.Number),
   /** Every urgency key of the server (`Derived.marks`), untruncated. */
   marks: Schema.Array(Schema.String),
+  /** Sent only: every Live Activity registration the sender holds. The hub never keeps it with the summary. */
+  devices: optional(Schema.Array(Registered)),
 }).annotate({ identifier: "LiveActivity.Summary" })
 
 export const decodeSummary = Schema.decodeUnknownOption(Summary)
@@ -51,7 +63,10 @@ export const Definition = Rpc.define({
   methods: {
     publish: {
       input: Schema.toStandardSchemaV1(Schema.Record(Schema.String, Schema.Unknown)),
-      output: Schema.toStandardSchemaV1(Schema.Struct({ protocol: Schema.Literal(protocol) })),
+      /** `devices`: the hub's registrations with `scope: "all"`. */
+      output: Schema.toStandardSchemaV1(
+        Schema.Struct({ protocol: Schema.Literal(protocol), devices: optional(Schema.Array(Registered)) }),
+      ),
       errors: {
         not_hub: Schema.toStandardSchemaV1(Schema.Struct({})),
         protocol_mismatch: Schema.toStandardSchemaV1(Schema.Struct({ expected: Schema.Number })),

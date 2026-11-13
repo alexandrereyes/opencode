@@ -6,7 +6,8 @@ on that server. It only informs: there are **no buttons and no Live Activity int
 **One per scope (rev. 2026-11-13).** With the apps' "Todos" scope there is a single activity for every server, written
 by the hub with the servers' states joined: [unified-summary.md](unified-summary.md) says how the app registers it
 (`scope: "all"`, on the hub only), the fields a joined state adds (`servers`, each row's `server`) and the link between
-servers. "One per server" below is the scope of one server, and what every server does without that configuration.
+servers. An activity that belongs to another server than the current scope's writer is told to that server
+with `unregister`, never `ended` (which rearms push-to-start there): see "Changing scope" in that document. "One per server" below is the scope of one server, and what every server does without that configuration.
 
 This document is the contract between the backend (`packages/plugin-app-custom/src/live-activity`) and the iOS app
 (MyAgents repository, `~/Dev/MyAgents`). Both sides implement exactly what is written here. The example payloads in

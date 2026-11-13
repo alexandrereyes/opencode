@@ -23,7 +23,14 @@ import { tool } from "../progress/todos.js"
 import { sharedRegistry, type Registry } from "../browser-handoff/registry.js"
 import { LiveActivity } from "./rpc.js"
 import { eventTypes, makeTracker, type Derived, type Event, type Tracker, type TrackerContext } from "./tracker.js"
-import { Definition as SummaryRpc, decodeSummary, join as joinSummaries, protocol, summary } from "./unified.js"
+import {
+  Definition as SummaryRpc,
+  decodeRegistered,
+  decodeSummary,
+  join as joinSummaries,
+  protocol,
+  summary,
+} from "./unified.js"
 
 const preferencesUpdated: Event = { type: "preferences.updated" }
 const tracked = <A extends { readonly type: string }>(event: A): event is Extract<A, Event> =>
@@ -144,8 +151,23 @@ export function makeHub(options: HubOptions) {
       // Always this server's own state, never the joined one: servers sending to each other cannot loop.
       if (options.link?.target) {
         const publisher = makePublisher({
-          read: (now) => summary({ instanceID, name: host }, running.tracker.derive(now, host)),
+          // With every Live Activity registration held here, so the hub drops a "Todos" one this server superseded.
+          read: (now) =>
+            running.registry.list(now).pipe(
+              Effect.map((devices) => ({
+                ...summary({ instanceID, name: host }, running.tracker.derive(now, host)),
+                ...(devices.length > 0
+                  ? {
+                      devices: devices.map((device) => ({
+                        deviceID: device.deviceID,
+                        registeredAt: device.registeredAt,
+                      })),
+                    }
+                  : {}),
+              })),
+            ),
           send: options.link.send ?? httpSend(options.link.target),
+          reply: (output) => superseded(running, output),
         })
         running.publisher = publisher
         yield* Scope.addFinalizer(scope, publisher.leave)
@@ -176,6 +198,31 @@ export function makeHub(options: HubOptions) {
           : undefined,
       )
     }).pipe(Effect.forkIn(scope, { startImmediately: true }))
+  })
+
+  /**
+   * The hub answered a summary with its "Todos" registrations. A device registered there after it last registered
+   * here moved to that scope while this server could not be told: its registration here (activity and push-to-start
+   * tokens) is stale and goes, so this server neither writes to a card the app ended nor starts one of its own.
+   * `custom.notifications` is another registry and stays.
+   */
+  const superseded = Effect.fnUntraced(function* (running: Running, output: unknown) {
+    const theirs =
+      typeof output === "object" && output !== null && "devices" in output
+        ? Option.getOrElse(decodeRegistered(output.devices), () => [])
+        : []
+    if (theirs.length === 0) return
+    const now = yield* Clock.currentTimeMillis
+    const mine = yield* running.registry.list(now)
+    const stale = mine.filter((device) =>
+      theirs.some((item) => item.deviceID === device.deviceID && item.registeredAt > device.registeredAt),
+    )
+    for (const device of stale) yield* running.registry.unregister(device.deviceID, now)
+    if (stale.length === 0) return
+    yield* Effect.logInfo("Live Activity registrations moved to the hub's Todos scope were dropped", {
+      devices: stale.length,
+    })
+    yield* Queue.offer(running.signal, undefined)
   })
 
   /** This server's state joined with its peers' fresh summaries; nothing on a server that reads no peer. */
@@ -288,6 +335,8 @@ export function makeHub(options: HubOptions) {
       const running = yield* current
       const result = yield* run(running, yield* Clock.currentTimeMillis)
       yield* Queue.offer(running.signal, undefined)
+      // The registrations travel with the summary: a new one is told to the hub at once.
+      running.publisher?.changed()
       return result
     })
 
@@ -334,8 +383,29 @@ export function makeHub(options: HubOptions) {
         const decoded = decodeSummary(input)
         if (Option.isNone(decoded))
           return yield* Effect.fail(context.error("invalid_summary", "The summary does not decode", {}))
-        yield* running.peers.accept(decoded.value)
-        return { protocol }
+        const { devices: theirs, ...received } = decoded.value
+        const now = yield* Clock.currentTimeMillis
+        // The mirror of `superseded`: a device that registered on the sender after its "Todos" registration here
+        // left that scope while this hub could not be told.
+        const mine = (yield* running.registry.list(now)).filter(everywhere)
+        const stale = mine.filter((device) =>
+          (theirs ?? []).some((item) => item.deviceID === device.deviceID && item.registeredAt > device.registeredAt),
+        )
+        for (const device of stale) yield* running.registry.unregister(device.deviceID, now)
+        if (stale.length > 0) {
+          yield* Effect.logInfo("Todos registrations moved to another server's scope were dropped", {
+            devices: stale.length,
+          })
+          yield* Queue.offer(running.signal, undefined)
+        }
+        yield* running.peers.accept(received)
+        const kept = mine.filter((device) => !stale.includes(device))
+        return {
+          protocol,
+          ...(kept.length > 0
+            ? { devices: kept.map((device) => ({ deviceID: device.deviceID, registeredAt: device.registeredAt })) }
+            : {}),
+        }
       }),
     leave: (
       input: { readonly protocol: number; readonly instanceID: string },

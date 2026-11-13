@@ -71,7 +71,7 @@ export async function hubPassword(env: Readonly<Record<string, string | undefine
   return undefined
 }
 
-export type Sent = { readonly ok: true } | { readonly ok: false; readonly reason: string }
+export type Sent = { readonly ok: true; readonly output?: unknown } | { readonly ok: false; readonly reason: string }
 
 /** One call of the hub's `custom.summary`; never throws. */
 export type Send = (method: "publish" | "leave", input: unknown) => Promise<Sent>
@@ -91,7 +91,13 @@ export function httpSend(target: string, password: () => Promise<string | undefi
         body: JSON.stringify({ input }),
         signal: AbortSignal.timeout(limits.requestMs),
       })
-      if (response.ok) return { ok: true }
+      if (response.ok) {
+        const body: unknown = await response.json().catch(() => undefined)
+        return {
+          ok: true,
+          ...(typeof body === "object" && body !== null && "output" in body ? { output: body.output } : {}),
+        }
+      }
       if (response.status === 401) return { ok: false, reason: "unauthorized (the hub refused the password)" }
       const body: unknown = await response.json().catch(() => undefined)
       const type = typeof body === "object" && body !== null && "type" in body ? String(body.type) : undefined
@@ -109,7 +115,12 @@ export function httpSend(target: string, password: () => Promise<string | undefi
  * A failed send is tried again after a short growing wait until it gets through. It runs in its own fiber and never
  * holds the hub's loop.
  */
-export function makePublisher(input: { readonly read: (now: number) => Summary; readonly send: Send }) {
+export function makePublisher(input: {
+  readonly read: (now: number) => Effect.Effect<Summary>
+  readonly send: Send
+  /** The hub's answer to a delivered summary. */
+  readonly reply?: (output: unknown) => Effect.Effect<void>
+}) {
   const signal = Effect.runSync(Queue.sliding<void>(1))
   const memo = {
     sent: undefined as string | undefined,
@@ -122,7 +133,7 @@ export function makePublisher(input: { readonly read: (now: number) => Summary; 
 
   const step = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
-    const summary = input.read(now)
+    const summary = yield* input.read(now)
     const working = summary.state.counts.working > 0
     const key = summaryKey(summary)
     const due = key !== memo.sent || (working && now - memo.sentAt >= limits.heartbeatMs)
@@ -142,6 +153,7 @@ export function makePublisher(input: { readonly read: (now: number) => Summary; 
       memo.failures = 0
       memo.reason = undefined
       memo.delivered = summary
+      if (input.reply) yield* input.reply(result.output)
       return
     }
     // Said once per kind of failure, not on every attempt while the hub is away.
