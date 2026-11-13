@@ -3,7 +3,7 @@
 The apps show the sessions of several servers together, under a scope the user picks: **Todos** or one server. The
 Live Activity follows that scope: **one activity per scope, one on screen**. In the "Todos" scope it summarizes the
 sessions of every server and is written by one server, the **hub** (`custom.instance` `hub: true`, the Linux BRS),
-which reads the other servers' summaries over a private link and joins them with its own.
+to which the other servers send their summaries, and which joins them with its own.
 
 This document is the contract between the backend (`src/live-activity/unified.ts`, `link.ts`, the hub in `index.ts`)
 and the iOS app, and between two servers on the link. It extends [live-activity.md](live-activity.md); everything not
@@ -11,9 +11,9 @@ said here (the state's fields, the lifecycle, APNs, rendering) is as written the
 [`unified-summary/`](unified-summary/) are normative fixtures: the backend tests produce them and the iOS tests must
 decode and render them.
 
-**Nothing changes without the configuration below.** A server with neither variable set behaves exactly as before:
-its own Live Activity, no new field in any payload. Every new field is optional; older apps ignore them and older
-servers ignore the new input.
+**Nothing changes without the configuration below.** A server that is neither the hub nor pointed at one behaves
+exactly as before: its own Live Activity, no new field in any payload. Every new field is optional; older apps ignore
+them and older servers ignore the new input.
 
 ## Who writes which activity
 
@@ -54,8 +54,7 @@ register output { push: "configured" | "unconfigured", scope?: "all" }
 - **One server's scope:** call `register` on that server **without `scope`** (never send another value: only `"all"`
   is accepted), with that server's `serverKey`, as today.
 - **The output's `scope: "all"` is the confirmation** that this registration gets the joined state. It is absent when
-  the server reads no peer (not configured as the writer, or a server from before this contract, which ignores the
-  input field): the registration then gets that server's own state and the app should treat the activity as that
+  the server is not the hub (or is a server from before this contract, which ignores the input field): the registration then gets that server's own state and the app should treat the activity as that
   server's, not as "Todos".
 - A device has **one registration per server** (keyed by `deviceID`), so re-registering with or without `scope`
   switches what that server pushes to the device's activity from then on.
@@ -83,7 +82,7 @@ The app is in the foreground when the scope changes. In this order:
 ```
 
 - `state`: the server's own state, unchanged.
-- `unified`: the joined state, present **only from a server that reads its peers** (the hub). In the "Todos" scope the
+- `unified`: the joined state, present **only from the hub**. In the "Todos" scope the
   app starts and updates the local activity from `unified`; in a server's scope, from `state`. `changed` is emitted
   when either changes.
 
@@ -99,7 +98,8 @@ Server {
   instanceID: string        // the server's `custom.instance` instanceID
   name: string              // its `custom.instance` name ("Linux BRS", "Mac de Alexandre")
   short: string             // the badge's initials by the apps' rule (ServerSwitcher.initials): "LB", "MA"
-  offline?: true            // the hub has no fresh summary of it; none of its sessions are in the state
+  offline?: true            // the server is away (below): its work in progress is not in the state; what waited
+                            // there (requests, failures, unread answers) is, as last known
 }
 SessionRef += {
   server?: string           // the instanceID of the server the session lives on
@@ -113,38 +113,47 @@ SessionRef += {
 - `host` of a joined state is ready-made copy for builds that do not read `servers`: the online servers' names joined
   by `+`, then `· <name> offline` for each offline one, clipped to 40 characters: `Linux BRS + Mac de Alexandre`,
   `Linux BRS · Mac de Alexandre offline`. A newer build lays out the header from `servers` instead.
-- A server appears in `servers` once the hub has read it at least once (the hub remembers it across restarts).
-  A configured peer that never answered is not listed.
+- A server appears in `servers` once it has sent the hub a summary (the hub remembers it across restarts and forgets
+  it after 30 days of silence). The hub alone, before any other server sent one, is the only entry.
 
 ### How the joined state is computed
 
-A pure function (`join` in `src/live-activity/unified.ts`) over the hub's own state and each peer's latest summary:
+A pure function (`join` in `src/live-activity/unified.ts`) over the hub's own state and each other server's latest
+summary:
 
 - `counts.*`, `activeTotal`, `attentionTotal`: sums. `counts.browser` only when the sum is above zero.
 - `attention`: every server's items, oldest `since` first; cut to 3.
 - `needs`: question, permission, browser (oldest `since` first), failed, unread (most recent first); cut to 3.
 - `sessions`: question, permission, browser (oldest first), failed (most recent first), working (the focus first, then
   most recent activity), unread (most recent first); cut to 4. The times come from each server's `order` (below).
-- `focus`: the hub's own focus while it has one, else the first peer's. Another server's focus is an ordinary working
+- `focus`: the hub's own focus while it has one, else the first other server's. Another server's focus is an ordinary working
   row.
-- Ties: the hub first, then the peers in configuration order, then `sessionID`.
+- Ties: the hub first, then the other servers in the order the hub first heard from them, then `sessionID`.
 - Then the same rules as any state: the 4096-byte fitting (`fit`, same trimming order; `servers` and `server` are
   never trimmed), `relevance-score`, `stale-date`, parked when `counts.working == 0`, urgency (priority 10) when the
   set of things that need Alexandre changes **on any server**, the 10-second coalescing, the heartbeat, push-to-start
   when the joined `activeTotal` rises from 0, dismissal and expiry. All of them are evaluated on the joined state for
   the "Todos" devices and on the server's own state for the others, independently.
-- **Offline:** a peer whose last summary is older than 60 seconds leaves the state (counts and rows) and stays in
-  `servers` with `offline: true`. Its sessions leaving or returning change the set of things that need Alexandre, so
-  that update is urgent.
+- **Offline (`servers[].offline`).** A server is away when it stopped renewing a summary that had work in progress
+  (60 seconds without one, "Link" below) or said it was stopping. Its **work in progress leaves** the state (working
+  rows, the focus, `counts.working`, its share of `activeTotal`), because nothing says it still runs. **What waited
+  there stays, as last known**: its pending questions and permissions, failures and unread answers, in the counts and
+  in the rows. They are still true, and they are answered when the server is back.
+- A server going offline or coming back is **urgent** like a change in what needs Alexandre: the update goes out at
+  once with priority 10, also on a parked card.
+- **A parked server is never marked offline by silence.** With nothing working, a server sends nothing until its
+  state changes, so the hub cannot tell a parked Mac that sleeps from one that is awake: its last summary stays in
+  force, which is what it would say if asked. Rows of a server the app cannot reach right now can therefore be on the
+  card without `offline`; the app's own connection state to that server is what says whether it can be opened.
 
 Fixtures, for 2026-10-27 09:41 BRT (`updatedAt` 1793104860000):
 
-| File                                                                 | Shows                                                                                     |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| [`summary-linux.json`](unified-summary/summary-linux.json)           | The hub's own summary: 2 working, 1 question, 1 unread                                    |
-| [`summary-mac.json`](unified-summary/summary-mac.json)               | The Mac's summary (`live-activity/state-mixed.json` plus `order` and `marks`)             |
-| [`state-joined.json`](unified-summary/state-joined.json)             | `join` of the two: counts added, the Mac's older question before the hub's, rows cut to 4 |
-| [`state-peer-offline.json`](unified-summary/state-peer-offline.json) | The same hub with the Mac away: only its sessions, `Linux BRS · Mac de Alexandre offline` |
+| File                                                                 | Shows                                                                                                                                                     |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`summary-linux.json`](unified-summary/summary-linux.json)           | The hub's own summary: 2 working, 1 question, 1 unread                                                                                                    |
+| [`summary-mac.json`](unified-summary/summary-mac.json)               | The Mac's summary (`live-activity/state-mixed.json` plus `order` and `marks`)                                                                             |
+| [`state-joined.json`](unified-summary/state-joined.json)             | `join` of the two: counts added, the Mac's older question before the hub's, rows cut to 4                                                                 |
+| [`state-peer-offline.json`](unified-summary/state-peer-offline.json) | The same with the Mac away: its working session and focus gone, its question, permission and failures still there, `Linux BRS · Mac de Alexandre offline` |
 
 The joined state, abridged (`state-joined.json` has it whole):
 
@@ -195,128 +204,165 @@ The joined state, abridged (`state-joined.json` has it whole):
 }
 ```
 
-With the Mac away, `servers[1]` gains `"offline": true`, `host` reads `Linux BRS · Mac de Alexandre offline` and no
-row or count of the Mac remains.
+With the Mac away, `servers[1]` gains `"offline": true`, `host` reads `Linux BRS · Mac de Alexandre offline`,
+`counts.working` drops to 2 and `activeTotal` to 5; the Mac's question, permission and failures stay.
 
 ## Link (server to server), protocol 1
 
-The hub cannot reach the other server over HTTP; the other server publishes its summary on a **Unix socket**, and the
-deployment carries that socket to the hub (in production, a reverse SSH tunnel of the `mac-bridge`).
+The hub cannot reach the other servers, but they reach it as any client does (the Mac's app already talks to
+`http://opencode-svc` over the private network). So each other server **sends** its summary to the hub, from inside
+the plugin, through the hub's normal API. Nothing else is involved: no tunnel, no socket, no extra process.
 
-- **Served:** plain HTTP on the socket, one route: `GET /summary` → `200` with the JSON below (`503` is reserved for
-  a server with no state to give; today the socket only opens once the Live Activity hub is ready). Any other path or
-  method → `404`. Read-only: nothing on the link changes anything.
-- **Body** (`Summary`, [`summary-mac.json`](unified-summary/summary-mac.json)):
+### RPC `custom.summary` (on the hub; called by servers, never by the apps)
 
-  ```ts
-  Summary {
-    protocol: 1
-    instanceID: string                 // the server's custom.instance instanceID
-    name: string                       // its custom.instance name
-    state: AgentsState                 // its OWN state before the 4 KB fitting, lists already cut (3/4/3)
-    order: Record<sessionID, number>   // epoch ms each `state.sessions` row is ordered by inside its status:
-                                       // asked (requests), ended (failed), latest activity (working), unread since
-    marks: string[]                    // every `<status>:<sessionID>` that needs Alexandre, untruncated (urgency keys)
-  }
-  ```
+| Method    | Input                      | Output            | Errors                                                              |
+| --------- | -------------------------- | ----------------- | ------------------------------------------------------------------- |
+| `publish` | `Summary`                  | `{ protocol: 1 }` | `not_hub`, `protocol_mismatch` (`data.expected`), `invalid_summary` |
+| `leave`   | `{ protocol, instanceID }` | `{}`              | `not_hub`                                                           |
 
-- **Never the joined state.** A server always publishes its own state, also when it reads peers itself, so two
-  servers pointed at each other cannot loop. A peer whose `instanceID` is the reader's own (its own socket listed as a
-  peer) is ignored.
-- **Authentication:** none in the protocol; the socket's permissions are the boundary. The server creates it `0600`
-  in a `0700` folder, so only its own user opens it. Whoever carries it elsewhere decides who reads it there (see
-  "Deployment"). No secret, no token.
-- **Reading:** the hub requests every peer each 5 seconds with a 3-second deadline and keeps the last good answer for
-  60 seconds.
-- **Degradation, all the same to the app:** a missing socket, a refused connection, a deadline, a non-200 answer, a
-  body with another `protocol`, or a body that does not decode as this version's `Summary` (for example a newer
-  server sending a status this one does not know) is a failed read. After 60 seconds without a good read the peer's
-  part leaves and it is `offline`; **servers on incompatible versions therefore show the hub's sessions alone** until
-  both are updated. The log says why once per kind of failure (`Unified summary peer is not readable`, with
-  `reason`), and `Unified summary peer is back` when it returns.
-- **Version:** `protocol` changes only for an incompatible change of `Summary`. New optional fields do not change it.
+Over HTTP, as every plugin RPC: `POST <hub>/api/rpc/custom.summary/publish` with the body `{"input": <Summary>}`.
+
+```ts
+Summary {                            // unified-summary/summary-mac.json
+  protocol: 1
+  instanceID: string                 // the sender's custom.instance instanceID
+  name: string                       // its custom.instance name
+  state: AgentsState                 // its OWN state before the 4 KB fitting, lists already cut (3/4/3)
+  order: Record<sessionID, number>   // epoch ms each `state.sessions` row is ordered by inside its status:
+                                     // asked (requests), ended (failed), latest activity (working), unread since
+  marks: string[]                    // every `<status>:<sessionID>` that needs Alexandre, untruncated (urgency keys)
+}
+```
+
+- **Only the hub accepts.** A server without `OPENCODE_HUB=1` answers `not_hub` (HTTP 400) to both methods.
+- **Version.** A `protocol` other than the hub's is refused with `protocol_mismatch`; a body of this protocol that
+  does not decode (for example a newer server sending a status the hub does not know) with `invalid_summary`. Nothing
+  is stored, and **the hub goes on with its own sessions** (plus whatever that server last sent validly, by the
+  rules below) until both are updated. `protocol` changes only for an incompatible change of `Summary`; new optional
+  fields do not change it.
+- **Never the joined state.** A server always sends its own state, also when it is a hub itself, so servers pointed
+  at each other cannot loop. A summary whose `instanceID` is the hub's own is ignored in the join.
+- **Authentication:** the hub's normal one, HTTP Basic, user `opencode` and the hub's server password: the call is a
+  client call like the apps'. The sender takes the password from where it already is, in this order:
+  1. `OPENCODE_SUMMARY_HUB_PASSWORD` in the server's **private environment** (`manual.json` `mycred`, see
+     `docs/custom-macos.md`), for a hub whose password differs; the plain environment is accepted too, for tests;
+  2. otherwise **this server's own password**, which production's two servers share
+     (`core-infra/opencode-docker/FORK.md`): `password` of `service-custom.json` in `OPENCODE_CONFIG_DIR`, the
+     managed service's own credential file, else `<OPENCODE_CUSTOM_HOME>/password` (a source server or sandbox).
+
+  The plugin API gives a plugin neither the server's password nor its address, so the plugin reads the file the
+  server itself reads. No new secret is created or copied anywhere, and the password is never logged (a refusal is
+  logged as `unauthorized`).
+
+### When a server sends
+
+Driven by changes, with as little renewal as possible (`makePublisher`, `src/live-activity/link.ts`):
+
+- **At once when its Live Activity hub starts**, and **whenever its own state changes** (the same events that drive
+  `changed`), at most once per second.
+- **Renewal every 15 seconds only while something works there** (`counts.working > 0`). No event says that a working
+  server fell asleep or died, and without renewal its sessions would stay "working" on the card for ever. 15 seconds
+  lets three renewals in a row be lost before the hub's 60 seconds run out, and costs four small requests a minute
+  only during work. It is the same idea as the activity's `stale-date` (15 minutes working, 8 hours parked).
+- **Parked (nothing working): nothing is sent** until the state changes. A parked summary stays true while the
+  server sleeps.
+- **A send that fails is tried again** after 2, then 5, then every 15 seconds, until it gets through; so a hub that
+  comes back gets the current summary within 15 seconds. This applies parked too: a change that could not be
+  delivered is never dropped. The log says it once per kind of failure (`Unified summary could not be sent to the
+hub; retrying`, with `reason`: `unreachable`, `unauthorized …`, `protocol_mismatch (HTTP 400)`, …) and once when it
+  gets through again.
+- **`leave` when the server stops** (the plugin's scope closing), best effort with a 2-second deadline, only if the
+  hub ever received a summary. A crash or a sleep sends nothing.
+- Sending runs in its own fiber with a 5-second request deadline: it never holds the Live Activity loop, sessions or
+  pushes.
+
+### What the hub keeps
+
+- The latest summary of each `instanceID`, with the time it arrived.
+- **Working summary** (`counts.working > 0`): in force for **60 seconds** after it arrived. Not renewed by then, the
+  server is `offline` and only its settled part remains (see "Offline" above). The next summary from it puts it back.
+- **Parked summary:** in force until replaced. It never expires by time.
+- **`leave`:** offline at once, same treatment.
+- **Across a hub restart:** the settled part of each summary is kept in plugin storage (`unified:peers`), written
+  only when it changes (not on renewals, not while only the work moves) and forgotten after 30 days without news. A
+  parked server has no reason to send again, so without this a hub restart would lose its unread answers and pending
+  requests until its next change. After a restart a server shows as last known, not offline; if it was working, its
+  next renewal (within 15 seconds) brings the work back.
+
+### Known limits (decided, not accidents)
+
+- **A parked server that sleeps is not shown as offline**, and what waits there stays on the card. This is true
+  information, but Alexandre cannot act on it until the Mac wakes: a pending question or permission of the Mac shows
+  as `1 pergunta`, and tapping it reaches a server that does not answer. The same holds for a parked Mac that
+  crashes or loses power (no `leave`). The app knows by its own connection whether that server answers and should
+  say so on the row or when opening it; the card cannot.
+- **The Live Activity hub of a server exists only while some Location is loaded** (a session running or a client's
+  RPC, see live-activity.md "Startup"). A server restarted with no client connected sends nothing until then: after
+  its `leave` it stays offline on the card, with what waited there, until its first Location loads. When its last
+  Location unloads while the server stays up, it also says `leave`.
+- **During active work the sender may post once per second** (each change of the focus's activity text is a
+  change), as `changed` does to a connected app. The hub still pushes at most once per 10 seconds.
 
 ## Configuration
 
-| Variable                  | On                                             | Value                                              | Effect                                                                         |
-| ------------------------- | ---------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `OPENCODE_SUMMARY_SOCKET` | every server that is **not** the hub (the Mac) | absolute path of a Unix socket, at most ~100 bytes | Publishes this server's summary there (`GET /summary`)                         |
-| `OPENCODE_SUMMARY_PEERS`  | the hub (Linux BRS)                            | comma-separated socket paths, one per other server | Reads them, joins them: accepts `scope: "all"`, answers `unified`              |
-| `OPENCODE_HUB`            | the hub                                        | `1`                                                | Unchanged ([instance.md](instance.md)): tells the apps which server is the hub |
+| Variable                        | On                                              | Value                                         | Effect                                                                                                                     |
+| ------------------------------- | ----------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `OPENCODE_HUB`                  | the hub (Linux BRS)                             | `1`                                           | Already there ([instance.md](instance.md)). Now also: accepts `custom.summary`, confirms `scope: "all"`, answers `unified` |
+| `OPENCODE_SUMMARY_HUB`          | every other server (the Mac)                    | the hub's address, e.g. `http://opencode-svc` | Sends this server's summary there                                                                                          |
+| `OPENCODE_SUMMARY_HUB_PASSWORD` | the same servers, optional, private environment | the hub's password                            | Only when it differs from the sender's own                                                                                 |
 
-- Read once, when the Live Activity hub starts (with the first Location: a session running or a client's RPC).
-  A server restarted with nobody connected publishes its socket only then, and shows as offline until then.
-- The socket's folder is created `0700` when missing. A stale socket file from a dead process is replaced. A socket
-  that **answers** belongs to another running server and is left alone (logged as a warning, nothing is published):
-  a sandbox started with production's environment cannot take production's socket. `custom-sandbox.ts` also drops
-  both variables and only sets them from `--summary-socket` / `--summary-peers`.
-- The plugin does not check that `OPENCODE_SUMMARY_PEERS` is set only on the server that declares `OPENCODE_HUB=1`.
-  Set both on the same single server.
+- Read once, when the Live Activity hub starts. Without `OPENCODE_SUMMARY_HUB` nothing is sent.
+- A hub with no other server sending is complete by itself: `unified` is its own state with `servers` listing only
+  it.
+- `custom-sandbox.ts up` drops production's `OPENCODE_SUMMARY_HUB` and `OPENCODE_SUMMARY_HUB_PASSWORD`, so a sandbox
+  never sends its sessions to production's hub; a test sets `--summary-hub <url>` on the sandbox that sends. A source
+  server started by hand (`custom-server.ts`) with production's environment **would** send to production's hub and
+  appear there as one more server: unset the variable for such runs.
 
 ## Deployment (written only; nothing of this is applied)
 
-Production today: the Linux BRS (`opencode_opencode-svc`, host-6, `OPENCODE_HUB=1`, APNs on) and the Mac. The Mac
-already opens reverse SSH tunnels to host-6 (`~/Dev/core-infra/opencode-docker/mac-bridge`), which publish Unix
-sockets in `/srv/mac-bridge`, mounted read-only in the container as `/run/mac-bridge`. The summary is a third socket
-of that kind.
+Production today: the Linux BRS (`opencode_opencode-svc`, host-6, `OPENCODE_HUB=1` already in the compose, APNs on)
+and the Mac, which reaches the Linux at `http://opencode-svc` over the private network (the address the Mac app
+uses) and has the same server password. **No `mac-bridge` change, no LaunchAgent, no compose line, no vault or policy
+change.**
 
-```text
-Mac server (plugin)  listens on  ~/.local/share/opencode-custom-v2/run/summary.sock   (0600, OPENCODE_SUMMARY_SOCKET)
-Mac LaunchAgent com.alexandrem.mac-bridge-summary
-  └─ ssh -N -R /srv/mac-bridge/summary.sock:/Users/alexandremartins/.local/share/opencode-custom-v2/run/summary.sock mac-bridge@host-6
-       host-6: /srv/mac-bridge/summary.sock (0660, mac-bridge:1000) → /run/mac-bridge/summary.sock in the container
-Linux server (plugin) reads  /run/mac-bridge/summary.sock   (OPENCODE_SUMMARY_PEERS)
-```
+| Server    | What changes                                                                                                                                                                                                                                         |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linux BRS | Only the image: a fork build with this plugin. `OPENCODE_HUB=1` is already set, so it starts accepting summaries and answering `unified` as soon as it runs this version                                                                             |
+| Mac       | A release with this plugin (`custom:update`) and one line in `~/.local/share/opencode-custom-v2/manual.json` `environment`: `"OPENCODE_SUMMARY_HUB": "http://opencode-svc"`. It takes effect on the activation that starts the service               |
+| Secrets   | None, while the two passwords are equal. If they ever differ: the hub's password in the vault, listed in the Mac's `manual.json` `mycred` as `OPENCODE_SUMMARY_HUB_PASSWORD`, with the policy allowing that path (the owner's change, not made here) |
 
-What would have to be done, in `core-infra` unless noted:
+**Order: Linux first, then the Mac.** Each side is inert without the other, so the reverse is also safe, only
+noisier:
 
-1. **`mac-bridge/mac/install`**: a third tunnel job next to the two existing ones, from the same template
-   (`com.alexandrem.mac-bridge-tunnel.plist.in`): label `com.alexandrem.mac-bridge-summary`, forward
-   `/srv/mac-bridge/summary.sock:<the Mac socket path above>` (a socket-to-socket `-R`; the two existing ones forward
-   to a TCP port), log `~/Library/Logs/mac-bridge/summary.log`; `status`/`uninstall` and the tests
-   (`tests/test_mac_bridge.py`) learn the fourth LaunchAgent. A separate job on purpose, like the resources hub's:
-   with `ExitOnForwardFailure=yes`, a problem with this socket never takes the `mac` command's tunnel down. The
-   tunnel stays up while the Mac's server is restarting: `ssh` opens the Mac-side socket per connection.
-2. **host-6 `60-mac-bridge.conf`: no change.** `AllowStreamLocalForwarding remote` already lets the `mac-bridge`
-   account publish any Unix socket in `/srv/mac-bridge`, `StreamLocalBindMask 0117` gives it `0660`, and
-   `StreamLocalBindUnlink yes` replaces a stale one (the README's "Host-6: nada muda" for the second socket holds for
-   a third). `host/setup-host` only needs `summary.sock` added to the sockets it shows and removes.
-3. **Linux compose (`docker-compose.fork.yml`)**: one environment line,
-   `OPENCODE_SUMMARY_PEERS: /run/mac-bridge/summary.sock`; the bind of `/srv/mac-bridge` already exists. It needs an
-   image of the fork with this plugin version.
-4. **Mac (`~/.local/share/opencode-custom-v2/manual.json`, `environment`)**:
-   `"OPENCODE_SUMMARY_SOCKET": "/Users/alexandremartins/.local/share/opencode-custom-v2/run/summary.sock"`. It takes
-   effect on the next activation that starts the service (`custom:update` to a release with this plugin).
-5. **Secrets: none.** No vault entry and no policy change. The link adds no credential: on the Mac only Alexandre's
-   user opens the socket; in the container any UID-1000 process does, and such a process already has a shell on the
-   Mac through `mac`, which reads far more than session titles.
-
-**Order.** The two sides are independent and each is inert without the other, so either order is safe:
-
-1. Mac first: `custom:update` with the variable in `manual.json`, then the LaunchAgent (`mac/install install`).
-   Check on the Mac: `curl -s --unix-socket ~/.local/share/opencode-custom-v2/run/summary.sock http://summary/summary | jq .protocol`
-   → `1`. Nobody reads it yet; the Mac's own Live Activity is unchanged.
-2. Linux next: new image plus the compose line (a deploy with no sessions running, as usual). Check in the container:
-   `curl -s --unix-socket /run/mac-bridge/summary.sock http://summary/summary | jq .name`, and the log has no
-   `Unified summary peer is not readable`.
+1. Linux: deploy the new image (with no sessions running, as usual). Check: `custom.live-activity/snapshot` answers
+   with `unified` whose `servers` lists only `Linux BRS`; `custom.summary/publish` with `{"input":{"protocol":0}}`
+   answers 400 `protocol_mismatch`.
+2. Mac: add the variable, `custom:update`. Check in the Mac's log: `Unified summary is sent to the hub` and no
+   `could not be sent`; on the Linux, `snapshot` `unified.servers` now lists the Mac.
 3. Only then an app build that registers with `scope: "all"`. An older app keeps one activity per server throughout.
 
-If Linux goes first instead, it logs the peer as not readable once and writes its own sessions alone (no server is
-listed as offline, as the Mac was never read) until the Mac side is up.
+If the Mac goes first, it logs once that the hub refused (`rpc.unavailable (HTTP 400)`: no such RPC there yet) and
+retries every 15 seconds, which succeeds by itself once the Linux is updated.
 
-**Rollback.** Remove `OPENCODE_SUMMARY_PEERS` from the compose and redeploy: the hub stops confirming `scope: "all"`
-and pushes its own state to every registration, old or new (a stored `scope` is ignored without peers). On the Mac,
-remove the variable (next activation) and `launchctl bootout gui/$(id -u)/com.alexandrem.mac-bridge-summary`. Stored
-registrations need no cleanup. To cut the link at once without touching either server, the `bootout` alone is enough:
-the hub shows the Mac as offline 60 seconds later.
+**Rollback.** On the Mac, remove `OPENCODE_SUMMARY_HUB` from `manual.json` and activate: it stops sending; if it was
+working, the hub shows it offline 60 seconds later, and what waited there stays listed until forgotten (30 days) or
+until the key `unified:peers` is cleared on the hub. On the Linux, going back to the previous image removes the RPC
+and `unified`; registrations stored with `scope` are then served the server's own state, and the Mac (if still
+sending) logs the refusal once and keeps retrying harmlessly. Removing `OPENCODE_HUB=1` instead also turns the hub
+off for the apps ([instance.md](instance.md)).
 
 ## Tests
 
-- `test/unified-summary.test.ts`: `join` over the fixtures (sums, order, cuts, the offline peer), the order inside
-  failed/working/unread, the same session ID on two servers, a peer that is the reader itself, the 4 KB fitting;
-  the reader's degradation (a peer that stops answering, the 60 seconds, its return, identity kept across restarts,
-  another protocol, an undecodable body); the real socket (only `GET /summary`, `0600`, absent socket, a live socket
-  never taken over); and the hub with a fake APNs: the "Todos" activity gets both servers, loses and regains the
-  peer, alerts through the joined card, push-to-start from the peer's work, a server without peers ignoring `scope`,
-  and the published summary staying the server's own.
-- `script/e2e-unified-summary.ts`: two sandboxes linked by a socket, each with its own fake APNs (see its header).
+- `test/unified-summary.test.ts`: `join` over the fixtures (sums, order, cuts, the offline server keeping what
+  waits), the order inside failed/working/unread, the same session ID on two servers, a summary of the hub itself,
+  the 4 KB fitting; the hub's side (a working summary expiring after 60 seconds and returning, a parked one never
+  expiring, `leave`, the restart restoring the settled part, storage written only when it changes, 30 days); the
+  sender (start, change, renewal only while working, at most one per second, the hub away and back with the 2/5/15
+  waits, `leave` only after a delivery); the HTTP call (route, Basic credential, wrong password, refusal, absent
+  hub) and where the password comes from; the RPC (a server that is not the hub, another protocol, an invalid body);
+  and the hub with a fake APNs: the "Todos" activity gets both servers, loses and regains the other's work, alerts
+  through the joined card, push-to-start from the other server's work, a server that is not the hub ignoring
+  `scope`, and two servers linked in memory (what is sent is the sender's own state; stopping it says goodbye).
+- `script/e2e-unified-summary.ts`: two sandboxes, one sending to the other over HTTP, each with its own fake APNs
+  (see its header).

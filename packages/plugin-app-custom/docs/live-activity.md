@@ -202,7 +202,7 @@ Same plugin RPC mechanism as `custom.device` (iOS calls it with `rpc("custom.liv
 | `unregister` | `{ deviceID }`                                                                              | `{}`                                                                               |
 | `snapshot`   | `{}`                                                                                        | `{ state: AgentsState \| null }` (`null` only from servers before rev. 2026-11-08) |
 
-`snapshot` and `changed` also carry `unified`, the joined state, from a server that reads its peers (rev.
+`snapshot` and `changed` also carry `unified`, the joined state, from the hub (rev.
 2026-11-13, [unified-summary.md](unified-summary.md)); it is absent everywhere else.
 
 Event **`changed`**: `{ state: AgentsState | null }`, emitted when the state changes (not for the state at the hub's
@@ -445,8 +445,9 @@ Code: `src/live-activity/` (`rpc.ts` contract schemas, `tracker.ts` state, `life
 decisions, `apns.ts` HTTP/2 client, `index.ts` hub and plugin wiring). Tests: `test/live-activity*.test.ts`.
 
 **Joined state (rev. 2026-11-13, [unified-summary.md](unified-summary.md)).** `unified.ts` holds the link's `Summary`
-and the pure `join`; `link.ts` publishes this server's summary on a Unix socket (`OPENCODE_SUMMARY_SOCKET`) and reads
-the peers' (`OPENCODE_SUMMARY_PEERS`). With peers, the hub's loop joins on every pass and runs a second lifecycle:
+and the pure `join`; `link.ts` sends this server's summary to the hub (`OPENCODE_SUMMARY_HUB`, RPC `custom.summary`)
+and, on the hub (`OPENCODE_HUB=1`), keeps the ones received. The hub's loop joins on every pass and runs a second
+lifecycle:
 one over the registrations with `scope: "all"` and the joined state, one over the others with the server's own, each
 with its own push-to-start, parked, dismissal and budget memory (`makeLifecycle`'s `only`). The tracker's `order`
 gives the rows' times the join interleaves by. Without either variable none of this runs.

@@ -17,10 +17,12 @@ const args = parseArgs({
     home: { type: "string" },
     // The watch gateway of a sandbox never takes production's 4192; 0 lets the OS pick a free port.
     "watch-port": { type: "string", default: "0" },
-    // The link between servers (plugin `docs/unified-summary.md`), only when a test asks for it: the Unix socket this
-    // sandbox publishes its summary on, and the peers' sockets (comma separated) it joins into the "Todos" activity.
-    "summary-socket": { type: "string" },
-    "summary-peers": { type: "string" },
+    // The link between servers (plugin `docs/unified-summary.md`), only when a test asks for it: the address of the
+    // sandbox that plays the hub, to which this one sends its summary.
+    "summary-hub": { type: "string" },
+    // With it, a new sandbox takes the password of that other sandbox's home instead of a random one: production's
+    // servers share one password, and the sender presents its own to the hub.
+    "password-from": { type: "string" },
   },
 })
 const action = args.positionals[0] ?? "status"
@@ -134,7 +136,7 @@ async function up() {
       ),
     )
     if (!(await Bun.file(path.join(home, "password")).exists()))
-      await privateFile(path.join(home, "password"), crypto.randomUUID() + crypto.randomUUID())
+      await privateFile(path.join(home, "password"), await newPassword())
     const commit = (await run(["git", "rev-parse", "HEAD"], source)).trim()
     await privateFile(
       path.join(home, "build.json"),
@@ -160,9 +162,9 @@ async function up() {
           .filter((name) => name.startsWith("OPENCODE_RESOURCES_HUB_"))
           .map((name) => [name, undefined]),
       ),
-      // Never production's link: a sandbox must neither publish on production's socket nor read production's peers.
-      OPENCODE_SUMMARY_SOCKET: args.values["summary-socket"],
-      OPENCODE_SUMMARY_PEERS: args.values["summary-peers"],
+      // Never production's link: a sandbox must not send its sessions to production's hub, nor carry its password.
+      OPENCODE_SUMMARY_HUB: args.values["summary-hub"],
+      OPENCODE_SUMMARY_HUB_PASSWORD: undefined,
       ...(hub
         ? {
             OPENCODE_RESOURCES_HUB_REMOTE_INFO: `${hub.state}/hub.json`,
@@ -250,6 +252,16 @@ async function up() {
   } finally {
     await rm(path.join(home, ".up-lock"), { recursive: true, force: true })
   }
+}
+
+/** A random password, or the one of the sandbox named by `--password-from` (never production's). */
+async function newPassword() {
+  const from = args.values["password-from"]
+  if (!from) return crypto.randomUUID() + crypto.randomUUID()
+  const other = path.resolve(from)
+  if (!(await Bun.file(path.join(other, "sandbox.json")).exists()))
+    throw new Error("--password-from is not an owned sandbox home")
+  return (await Bun.file(path.join(other, "password")).text()).trim()
 }
 
 /**

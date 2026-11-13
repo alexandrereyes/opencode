@@ -669,11 +669,13 @@ variable (the fixed port 4179 and the `REMOTE_*`/`PATH_MAP` that `manual.json` g
 - **Elsewhere** (macOS, plain Linux) the plugin starts a local hub in the sandbox's `xdg/state/opencode/resources-hub`,
   as before.
 
-**Link between servers.** `up` also drops production's `OPENCODE_SUMMARY_SOCKET` and `OPENCODE_SUMMARY_PEERS` (the
-plugin's `docs/unified-summary.md`), so a sandbox neither publishes on production's summary socket nor reads its
-peers. A test that needs the link names its own sockets: `up --summary-socket <path>` on the sandbox that publishes,
-`up --summary-peers <path>[,<path>]` on the one that writes the "Todos" activity
-(`packages/plugin-app-custom/script/e2e-unified-summary.ts` does both).
+**Link between servers.** `up` also drops production's `OPENCODE_SUMMARY_HUB` and `OPENCODE_SUMMARY_HUB_PASSWORD` (the
+plugin's `docs/unified-summary.md`), so a sandbox never sends its sessions to production's hub. A test that needs the
+link points one sandbox at another: `up --summary-hub http://127.0.0.1:<port>` on the one that sends, and
+`OPENCODE_HUB=1` in the environment of the one that receives
+(`packages/plugin-app-custom/script/e2e-unified-summary.ts` does both). The sender presents its own password to the
+hub, as production's two servers share one: `up --password-from <the hub sandbox's home>` gives a new sandbox that
+sandbox's password instead of a random one.
 
 Test scripts reach the sandbox hub's admin API (to register a simulator, emulator or Chrome as an agent's resource)
 only through `custom-sandbox.ts hub --port … --home …`, which writes `<home>/resources-hub.json` (0600,

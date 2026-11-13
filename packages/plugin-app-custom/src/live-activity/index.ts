@@ -1,10 +1,20 @@
 import type { Context } from "../context.js"
-import { Cause, Clock, Deferred, Effect, Exit, Queue, Scope, Semaphore, Stream } from "effect"
+import type { RpcCallContext } from "@opencode/plugin/effect/rpc"
+import { Cause, Clock, Deferred, Effect, Exit, Option, Queue, Scope, Semaphore, Stream } from "effect"
 import os from "node:os"
 import { load, type Client } from "./apns.js"
 import { identity } from "../instance/index.js"
 import { fit, makeLifecycle, makeRegistry, stateKey, type Device, type Lifecycle, type Storage } from "./lifecycle.js"
-import { linkSettings, makePeers, serveSummary, type LinkSettings, type Peers, type Read } from "./link.js"
+import {
+  httpSend,
+  linkSettings,
+  makeInbox,
+  makePublisher,
+  type Inbox,
+  type LinkSettings,
+  type Publisher,
+  type Send,
+} from "./link.js"
 import { marksFrom } from "../sessions/inventory.js"
 import { makeNotificationRegistry, makeNotifier, type Notifier } from "../notifications/index.js"
 import { Notifications } from "../notifications/rpc.js"
@@ -13,7 +23,7 @@ import { tool } from "../progress/todos.js"
 import { sharedRegistry, type Registry } from "../browser-handoff/registry.js"
 import { LiveActivity } from "./rpc.js"
 import { eventTypes, makeTracker, type Derived, type Event, type Tracker, type TrackerContext } from "./tracker.js"
-import { join as joinSummaries, summary } from "./unified.js"
+import { Definition as SummaryRpc, decodeSummary, join as joinSummaries, protocol, summary } from "./unified.js"
 
 const preferencesUpdated: Event = { type: "preferences.updated" }
 const tracked = <A extends { readonly type: string }>(event: A): event is Extract<A, Event> =>
@@ -43,10 +53,11 @@ export type HubOptions = {
   /** Browse handoffs waiting on Alexandre (`docs/browser-handoff.md`). */
   readonly handoffs?: Pick<Registry, "waiting" | "listen">
   /**
-   * The link between servers (`docs/unified-summary.md`): the socket this one publishes its own summary on, and the
-   * peers whose summaries it joins into the "Todos" activity. Without it, one Live Activity per server, as always.
+   * The link between servers (`docs/unified-summary.md`): whether this one is the hub, which accepts the others'
+   * summaries and joins them into the "Todos" activity, and the hub it sends its own summary to. Without either, one
+   * Live Activity per server, as always. `send` replaces the HTTP call in tests.
    */
-  readonly link?: LinkSettings & { readonly read?: Read }
+  readonly link?: LinkSettings & { readonly send?: Send }
 }
 
 type Running = {
@@ -56,8 +67,10 @@ type Running = {
   readonly tracker: Tracker
   readonly registry: ReturnType<typeof makeRegistry>
   readonly notifications: ReturnType<typeof makeNotificationRegistry>
-  /** Present on a server that joins its peers' summaries: it writes the "Todos" scope's activities. */
-  readonly peers?: Peers
+  /** Present on the hub: the other servers' summaries. It writes the "Todos" scope's activities. */
+  readonly peers?: Inbox
+  /** Present on a server that sends its summary to a hub. */
+  publisher?: Publisher
 }
 
 type Ready = { readonly host: string; readonly push: LiveActivity.Push; readonly instanceID: string }
@@ -92,15 +105,8 @@ export function makeHub(options: HubOptions) {
       }),
       registry: makeRegistry(member.ctx.storage),
       notifications: makeNotificationRegistry(member.ctx.storage),
-      ...(options.link && options.link.peers.length > 0
-        ? {
-            peers: makePeers({
-              sockets: options.link.peers,
-              storage: member.ctx.storage,
-              ...(options.link.read ? { read: options.link.read } : {}),
-              changed: () => Queue.offerUnsafe(signal, undefined),
-            }),
-          }
+      ...(options.link?.hub
+        ? { peers: makeInbox({ storage: member.ctx.storage, changed: () => Queue.offerUnsafe(signal, undefined) }) }
         : {}),
     }
     runtime.current = running
@@ -130,19 +136,23 @@ export function makeHub(options: HubOptions) {
         .rebuild(yield* Clock.currentTimeMillis)
         .pipe(Effect.catchCause((cause) => Effect.logWarning("Live Activity rebuild failed", { cause })))
       const push: LiveActivity.Push = client ? "configured" : "unconfigured"
-      const instanceID = options.link?.serve || running.peers ? (yield* identity(member.ctx.storage)).instanceID : ""
-      yield* Deferred.succeed(running.ready, { host, push, instanceID })
-      // Always this server's own state, never the joined one: two servers reading each other cannot loop.
-      if (options.link?.serve)
-        yield* serveSummary({
-          socket: options.link.serve,
-          read: () => summary({ instanceID, name: host }, running.tracker.derive(Date.now(), host)),
-        }).pipe(
-          Scope.provide(scope),
-          Effect.catchCause((cause) => Effect.logWarning("Unified summary could not be served", { cause })),
-          Effect.forkIn(scope, { startImmediately: true }),
+      const instanceID = options.link?.target || running.peers ? (yield* identity(member.ctx.storage)).instanceID : ""
+      if (running.peers)
+        yield* running.peers.load.pipe(
+          Effect.catchCause((cause) => Effect.logWarning("Unified summaries could not be restored", { cause })),
         )
-      if (running.peers) yield* running.peers.run.pipe(Effect.forkIn(scope, { startImmediately: true }))
+      // Always this server's own state, never the joined one: servers sending to each other cannot loop.
+      if (options.link?.target) {
+        const publisher = makePublisher({
+          read: (now) => summary({ instanceID, name: host }, running.tracker.derive(now, host)),
+          send: options.link.send ?? httpSend(options.link.target),
+        })
+        running.publisher = publisher
+        yield* Scope.addFinalizer(scope, publisher.leave)
+        yield* publisher.run.pipe(Effect.forkIn(scope, { startImmediately: true }))
+        yield* Effect.logInfo("Unified summary is sent to the hub", { hub: options.link.target })
+      }
+      yield* Deferred.succeed(running.ready, { host, push, instanceID })
       yield* loop(
         running,
         { host, push, instanceID },
@@ -187,18 +197,22 @@ export function makeHub(options: HubOptions) {
     const host = ready.host
     // The app learns the boot state through `snapshot`; `changed` reports differences from then on (the first pass
     // only records it: since rev. 2026-11-08 an idle boot state is a state too, not `null`).
-    const emitted = { key: undefined as string | undefined, at: -Infinity }
+    const emitted = { key: undefined as string | undefined, at: -Infinity, own: undefined as string | undefined }
     return Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
       yield* running.tracker.refreshHandoffs()
       running.tracker.prune(now)
       const derived = running.tracker.derive(now, host)
       const state = visible(derived.state, now)
+      // The publisher sends in its own fiber; here it only learns that the state moved.
+      const own = stateKey(derived.state)
+      if (own !== emitted.own) running.publisher?.changed()
+      emitted.own = own
       const all = joined(running, ready, derived, now)
       const key = (state ? stateKey(state) : "null") + (all ? stateKey(all.card) : "")
       emitted.key ??= key
       const wakes = derived.wakeAt === undefined ? [] : [derived.wakeAt]
-      // A peer that stops answering leaves the joined state when its last summary turns stale.
+      // A working server that stops renewing its summary loses its work when the last one turns stale.
       if (all?.wakeAt !== undefined) wakes.push(all.wakeAt)
       if (key !== emitted.key && now - emitted.at < emitMs) wakes.push(emitted.at + emitMs)
       if (key !== emitted.key && now - emitted.at >= emitMs) {
@@ -301,6 +315,41 @@ export function makeHub(options: HubOptions) {
       ),
   }
 
+  /** `custom.summary`: what the other servers call on the hub; every other server refuses it. */
+  const summaries = {
+    publish: (input: Readonly<Record<string, unknown>>, context: RpcCallContext<typeof SummaryRpc.methods.publish>) =>
+      Effect.gen(function* () {
+        const running = yield* current
+        yield* Deferred.await(running.ready)
+        if (!running.peers)
+          return yield* Effect.fail(context.error("not_hub", "This server is not the hub (OPENCODE_HUB=1)", {}))
+        if (input.protocol !== protocol)
+          return yield* Effect.fail(
+            context.error(
+              "protocol_mismatch",
+              `Summary protocol ${String(input.protocol)} is not this hub's (${protocol})`,
+              { expected: protocol },
+            ),
+          )
+        const decoded = decodeSummary(input)
+        if (Option.isNone(decoded))
+          return yield* Effect.fail(context.error("invalid_summary", "The summary does not decode", {}))
+        yield* running.peers.accept(decoded.value)
+        return { protocol }
+      }),
+    leave: (
+      input: { readonly protocol: number; readonly instanceID: string },
+      context: RpcCallContext<typeof SummaryRpc.methods.leave>,
+    ) =>
+      Effect.gen(function* () {
+        const running = yield* current
+        if (!running.peers)
+          return yield* Effect.fail(context.error("not_hub", "This server is not the hub (OPENCODE_HUB=1)", {}))
+        yield* running.peers.leave(input.instanceID)
+        return {}
+      }),
+  }
+
   const notifications = {
     register: (input: Notifications.RegisterInput) =>
       change((running, now) =>
@@ -339,7 +388,7 @@ export function makeHub(options: HubOptions) {
   /** A session's Progresso while it shows (`docs/progress.md`); none before the hub has started. */
   const progress = (sessionID: string) => runtime.current?.tracker.progress(sessionID)
 
-  return { join, handlers, notifications, view, members, runtime, progress }
+  return { join, handlers, notifications, summaries, view, members, runtime, progress }
 }
 
 export type Hub = ReturnType<typeof makeHub>
@@ -397,6 +446,7 @@ export const registerLiveActivity = Effect.fn("LiveActivity.register")(function*
   const hub = sharedHub()
   const registration = yield* ctx.rpc.register(LiveActivity.Definition, hub.handlers).pipe(Effect.orDie)
   yield* ctx.rpc.register(Notifications.Definition, hub.notifications).pipe(Effect.orDie)
+  yield* ctx.rpc.register(SummaryRpc, hub.summaries).pipe(Effect.orDie)
   yield* hub.join({
     ctx: {
       session: ctx.session,

@@ -1,15 +1,16 @@
+import { Rpc } from "@opencode/plugin/rpc"
 import { Schema } from "effect"
 import { LiveActivity } from "./rpc.js"
 import { clip, limits, type Derived } from "./tracker.js"
 
 /** Contract: `packages/plugin-app-custom/docs/unified-summary.md`. */
 
-/** The link's version: a summary with another number is not read, and its server counts as away. */
-export const protocol = 1
+/** The link's version: the hub refuses a summary with another number and goes on with its own sessions. */
+export const protocol = 1 as const
 
 /**
- * What a server publishes to the one that writes the "Todos" activity: always its **own** state, never a joined one,
- * so two servers reading each other cannot loop.
+ * What a server sends to the one that writes the "Todos" activity: always its **own** state, never a joined one, so
+ * servers sending to each other cannot loop.
  */
 export interface Summary extends Schema.Schema.Type<typeof Summary> {}
 export const Summary = Schema.Struct({
@@ -40,11 +41,62 @@ export function summary(
   }
 }
 
-/** A server the writer reads; without `summary`, it has not answered for a while and is shown as offline. */
+/**
+ * `custom.summary`, called by servers, not by the apps: `publish` hands the hub the caller's summary, `leave` says the
+ * caller is stopping. The input is loose on purpose, so a summary of another protocol is refused by name
+ * (`protocol_mismatch`) instead of as a generic invalid input.
+ */
+export const Definition = Rpc.define({
+  id: "custom.summary",
+  methods: {
+    publish: {
+      input: Schema.toStandardSchemaV1(Schema.Record(Schema.String, Schema.Unknown)),
+      output: Schema.toStandardSchemaV1(Schema.Struct({ protocol: Schema.Literal(protocol) })),
+      errors: {
+        not_hub: Schema.toStandardSchemaV1(Schema.Struct({})),
+        protocol_mismatch: Schema.toStandardSchemaV1(Schema.Struct({ expected: Schema.Number })),
+        invalid_summary: Schema.toStandardSchemaV1(Schema.Struct({})),
+      },
+    },
+    leave: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({ protocol: Schema.Number, instanceID: Schema.String })),
+      output: Schema.toStandardSchemaV1(Schema.Struct({})),
+      errors: { not_hub: Schema.toStandardSchemaV1(Schema.Struct({})) },
+    },
+  },
+  events: {},
+})
+
+/**
+ * A server the hub heard from. `offline`: it stopped renewing a summary with work in progress, or said it was
+ * stopping; its `summary` is then only what was left waiting there (`settled`).
+ */
 export type Peer = {
   readonly instanceID: string
   readonly name: string
   readonly summary?: Summary
+  readonly offline?: boolean
+}
+
+/**
+ * A summary without its work in progress: what stays true while the server sleeps or after it stopped. Requests,
+ * failures and unread answers remain; working sessions, the focus and their counts leave.
+ */
+export function settled(input: Summary): Summary {
+  const { focus: _, ...state } = input.state
+  const sessions = state.sessions.filter((row) => row.status !== "working")
+  return {
+    ...input,
+    state: {
+      ...state,
+      counts: { ...state.counts, working: 0 },
+      activeTotal: state.activeTotal - state.counts.working,
+      sessions,
+    },
+    order: Object.fromEntries(
+      sessions.flatMap((row) => (row.sessionID in input.order ? [[row.sessionID, input.order[row.sessionID]!]] : [])),
+    ),
+  }
 }
 
 const joining = new Set(["de", "da", "do", "das", "dos", "e", "of", "the", "and"])
@@ -78,8 +130,8 @@ const waits = (kind: string) => kind === "question" || kind === "permission" || 
 
 /**
  * One state for the "Todos" activity from the writer's own summary and its peers': counts added, lists interleaved by
- * the tracker's order and cut to the same limits, every row tagged with its server. A peer without a summary only
- * appears in `servers`, as offline. Pure: the result depends on its input alone. Ties go to the writer, then to the
+ * the tracker's order and cut to the same limits, every row tagged with its server. An offline peer is listed as such
+ * in `servers` and contributes whatever summary it was given. Pure: the result depends on its input alone. Ties go to the writer, then to the
  * peers in the given order, then to the session ID.
  */
 export function join(input: { readonly self: Summary; readonly peers: readonly Peer[] }): {
@@ -135,7 +187,7 @@ export function join(input: { readonly self: Summary; readonly peers: readonly P
       instanceID: peer.instanceID,
       name: peer.name,
       short: initials(peer.name),
-      ...(peer.summary ? {} : { offline: true }),
+      ...(peer.offline || !peer.summary ? { offline: true } : {}),
     })),
   ]
   const browser = sum((state) => state.counts.browser ?? 0)
@@ -161,7 +213,11 @@ export function join(input: { readonly self: Summary; readonly peers: readonly P
       needs: needs.slice(0, limits.needs),
       servers,
     },
-    // Qualified by server: an imported session has the same ID on both.
-    marks: new Map(parts.flatMap((part) => part.marks.map((mark) => [`${part.instanceID}/${mark}`, true] as const))),
+    // Qualified by server: an imported session has the same ID on both. A server going away or coming back is
+    // urgent too, so the card says so at once, also while parked (when routine updates wait).
+    marks: new Map([
+      ...parts.flatMap((part) => part.marks.map((mark) => [`${part.instanceID}/${mark}`, true] as const)),
+      ...servers.flatMap((server) => (server.offline ? [[`offline:${server.instanceID}`, true] as const] : [])),
+    ]),
   }
 }

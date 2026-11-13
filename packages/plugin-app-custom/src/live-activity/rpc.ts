@@ -133,7 +133,7 @@ export const Server = Schema.Struct({
   name: Schema.String,
   /** The badge's initials, by the apps' rule (`ServerSwitcher.initials`). */
   short: Schema.String,
-  /** Present (`true`) while the writer has no fresh summary of this server; its sessions are not in the state. */
+  /** Present (`true`) while this server is away: its work in progress is not in the state, what waited there is. */
   offline: optional(Schema.Boolean),
 }).annotate({ identifier: "LiveActivity.Server" })
 

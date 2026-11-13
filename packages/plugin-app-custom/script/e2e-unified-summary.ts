@@ -1,16 +1,18 @@
 #!/usr/bin/env bun
 /**
- * End to end for the single "Todos" Live Activity (docs/unified-summary.md): two owned sandboxes linked by a Unix
- * socket, each with its own MyAgents `script/fake-apns.ts`, so every push is read back per server. Nothing reaches
- * Apple, a device or production. It starts and stops everything it uses.
+ * End to end for the single "Todos" Live Activity (docs/unified-summary.md): two owned sandboxes, one sending its
+ * summary to the other over the normal API, each with its own MyAgents `script/fake-apns.ts`, so every push is read
+ * back per server. Nothing reaches Apple, a device or production. It starts and stops everything it uses.
  *
  *   bun script/e2e-unified-summary.ts [--hub-port 4187] [--peer-port 4188] [--fake-apns <MyAgents>/script/fake-apns.ts]
  *
- * The hub sandbox (`--summary-peers`) plays the Linux BRS, the peer (`--summary-socket`) the Mac. One session fails
- * on each (an unknown model, no LLM run). Checked: the activity registered on the hub with `scope: "all"` gets an
- * update with both servers' sessions; with the peer stopped its part leaves and it is listed offline; started again,
- * it returns; the peer never pushes to that activity's token and alerts its own failure as a plain notification,
- * which the hub does not repeat.
+ * The hub sandbox (`OPENCODE_HUB=1`) plays the Linux BRS, the peer (`--summary-hub`) the Mac; the peer takes the hub's
+ * password, as production's two servers share one. One session fails on each (an unknown model, no LLM run) and one works
+ * on the peer (a real Luna 6 / low run that sleeps in a shell). Checked: the activity registered on the hub with
+ * `scope: "all"` gets an update with both servers' sessions; the peer frozen (SIGSTOP, a Mac asleep) while working
+ * goes offline about 60 s after its last renewal, its work leaving and its failure staying, and returns when resumed;
+ * the peer stopped says goodbye and is offline at once, and started again is back; the peer never pushes to that
+ * activity's token and alerts its own failure as a plain notification, which the hub does not repeat.
  */
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import os from "node:os"
@@ -28,8 +30,6 @@ const args = parseArgs({
 const source = path.resolve(import.meta.dirname, "../../..")
 const sandboxScript = path.join(source, "packages/cli/script/custom-sandbox.ts")
 const root = await mkdtemp(path.join(await realpath(os.tmpdir()), "opencode", "unified-e2e-"))
-const socket = path.join(root, "summary.sock")
-if (Buffer.byteLength(socket) > 100) throw new Error("The socket path is too long for a Unix socket")
 const luna = { providerID: "llm-proxy", id: "gpt-6-luna", variant: "low" }
 const theme = Object.fromEntries(
   [
@@ -48,10 +48,10 @@ const theme = Object.fromEntries(
   ].map((role) => [role, "#120f0eff"]),
 )
 
-type Row = { sessionID: string; server?: string }
+type Row = { sessionID: string; server?: string; status: string }
 type State = {
   host: string
-  counts: { failed: number }
+  counts: { failed: number; working: number }
   sessions: Row[]
   servers?: { instanceID: string; name: string; short: string; offline?: boolean }[]
 }
@@ -81,7 +81,7 @@ async function until<T>(read: () => Promise<T | undefined>, timeout: number, wha
 }
 
 /** One sandbox with its own fake APNs. */
-async function node(name: string, port: number, hostName: string, link: string[]) {
+async function node(name: string, port: number, hostName: string, link: string[], hubFlag: boolean) {
   const home = path.join(root, name)
   const apnsLog = path.join(root, `${name}-apns.jsonl`)
   await Bun.write(apnsLog, "")
@@ -109,6 +109,7 @@ async function node(name: string, port: number, hostName: string, link: string[]
           ...process.env,
           OPENCODE_APNS_ORIGIN: `http://127.0.0.1:${apnsPort}`,
           OPENCODE_HOST_NAME: hostName,
+          OPENCODE_HUB: hubFlag ? "1" : "",
         },
         stdin: "ignore",
         stdout: "ignore",
@@ -161,7 +162,28 @@ async function node(name: string, port: number, hostName: string, link: string[]
     )
     return id
   }
-  return { name, home, url, sandbox, call, rpc, log, fail, stop: () => apns.kill() }
+  /** A session kept working by a shell that sleeps (one real Luna 6 / low run). */
+  const work = async (title: string) => {
+    const repo = path.join(home, "repos", "unified-e2e")
+    const id = (
+      await call<{ data: { id: string } }>("/api/session", {
+        title,
+        location: { directory: repo },
+        agent: "build",
+        model: luna,
+      })
+    ).data.id
+    await call(`/api/session/${id}/prompt`, {
+      text: "Use a ferramenta shell para rodar exatamente: sleep 240. Não faça mais nada antes disso.",
+    })
+    return id
+  }
+  /** Freezes or resumes the server process, as a Mac that sleeps and wakes: no goodbye, no renewal. */
+  const signal = async (name: "STOP" | "CONT") => {
+    const { pid } = (await Bun.file(path.join(home, "server.json")).json()) as { pid: number }
+    process.kill(pid, `SIG${name}`)
+  }
+  return { name, home, url, sandbox, call, rpc, log, fail, work, signal, stop: () => apns.kill() }
 }
 
 function expect<A>(actual: A, expected: A, what: string) {
@@ -169,16 +191,23 @@ function expect<A>(actual: A, expected: A, what: string) {
     throw new Error(`${what}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
 }
 
-const hub = await node("hub", Number(args.values["hub-port"]), "Linux e2e", ["--summary-peers", socket])
-const peer = await node("peer", Number(args.values["peer-port"]), "Mac e2e", ["--summary-socket", socket])
+const hub = await node("hub", Number(args.values["hub-port"]), "Linux e2e", [], true)
+const peer = await node(
+  "peer",
+  Number(args.values["peer-port"]),
+  "Mac e2e",
+  // The same password on both, as in production: the sender presents its own to the hub.
+  ["--summary-hub", `http://127.0.0.1:${args.values["hub-port"]}`, "--password-from", path.join(root, "hub")],
+  false,
+)
 const token = crypto.randomUUID().replaceAll("-", "")
 const alertToken = crypto.randomUUID().replaceAll("-", "")
 const deviceID = `e2e-${token.slice(0, 8)}`
 const results: Record<string, unknown> = {}
 try {
   console.log("Starting the two sandboxes (each builds the plugin and the web app)…")
-  await peer.sandbox("up")
   await hub.sandbox("up")
+  await peer.sandbox("up")
 
   // The app in the "Todos" scope: the activity on the hub only; on the peer, just the ordinary notifications.
   expect(
@@ -202,7 +231,7 @@ try {
       scope: "all",
     }),
     { push: "configured" },
-    "a server without peers does not confirm the scope",
+    "a server that is not the hub does not confirm the scope",
   )
   await peer.rpc("custom.live-activity/unregister", { deviceID: `${deviceID}-probe` })
   await peer.rpc("custom.notifications/register", {
@@ -269,28 +298,43 @@ try {
   expect(hubLog.filter((entry) => entry.type === "alert").length, 0, "no notification from the hub")
   results.alerts = { peerNotification: 1, hubCardAlert: 1, hubNotification: 0 }
 
-  // 3. The peer stops: its part leaves about 60 s later and it is listed offline.
+  // 3. A session works on the peer; frozen like a Mac asleep, the peer stops renewing: about 60 s later it is
+  //    offline, its work gone and its failure still there. Resumed, its work is back.
+  const working = await peer.work("Unificado — trabalhando no Mac")
+  const busy = (state: State) => state.sessions.some((row) => row.sessionID === working && row.status === "working")
+  await latest((state) => busy(state) && state.servers?.[1]?.offline !== true, 0, "the peer's working session")
+  const frozenAt = Date.now()
+  await peer.signal("STOP")
+  const asleep = await latest((state) => state.servers?.[1]?.offline === true, frozenAt, "the frozen peer as offline")
+  expect(asleep.state.counts.working, 0, "no work of the frozen peer")
+  expect(asleep.state.counts.failed, 2, "the frozen peer's failure stays")
+  expect(busy(asleep.state), false, "the frozen peer's working row left")
+  results.asleep = { host: asleep.state.host, afterMs: asleep.at - frozenAt, failed: asleep.state.counts.failed }
+  const resumedAt = Date.now()
+  await peer.signal("CONT")
+  const awake = await latest(
+    (state) => state.servers?.[1]?.offline !== true && busy(state),
+    resumedAt,
+    "the resumed peer's work back",
+  )
+  results.awake = { host: awake.state.host, afterMs: awake.at - resumedAt }
+  await peer.call(`/api/session/${working}/interrupt?resume=false`, {})
+
+  // 4. The peer stops for good: it says goodbye and is offline at once, its failure still listed. Started again
+  //    (its hub starts with the first RPC), it is back.
   const stoppedAt = Date.now()
   await peer.sandbox("down")
-  const alone = await latest((state) => state.servers?.[1]?.offline === true, stoppedAt, "the peer shown as offline")
-  expect(alone.state.counts.failed, 1, "only the hub's failure remains")
-  expect(
-    alone.state.sessions.map((row) => row.sessionID),
-    [onHub],
-    "only the hub's row remains",
-  )
-  results.offline = { host: alone.state.host, afterMs: alone.at - stoppedAt, failed: alone.state.counts.failed }
-
-  // 4. The peer returns (its hub starts with the first RPC) and its failure is back in the card.
+  const gone = await latest((state) => state.servers?.[1]?.offline === true, stoppedAt, "the stopped peer as offline")
+  expect(gone.state.counts.failed, 2, "the stopped peer's failure stays")
+  results.stopped = { host: gone.state.host, afterMs: gone.at - stoppedAt }
   const startedAt = Date.now()
   await peer.sandbox("up")
   await peer.rpc("custom.live-activity/snapshot", {})
   const back = await latest(
     (state) => state.servers?.[1]?.offline !== true && state.sessions.some((row) => row.sessionID === onPeer),
     startedAt,
-    "the peer's session back in the card",
+    "the peer back",
   )
-  expect(back.state.counts.failed, 2, "failed sessions of both servers again")
   results.back = { host: back.state.host, afterMs: back.at - startedAt }
 
   // 5. The peer never wrote to the Todos activity's token.
@@ -303,10 +347,12 @@ try {
   for (const [server, id] of [
     [hub, onHub],
     [peer, onPeer],
+    [peer, working],
   ] as const)
     await server.call(`/api/session/${id}`, undefined, "DELETE").catch(() => undefined)
   console.log(JSON.stringify({ ok: true, results }, null, 2))
 } finally {
+  await peer.signal("CONT").catch(() => undefined)
   await hub.rpc("custom.live-activity/unregister", { deviceID }).catch(() => undefined)
   await peer.rpc("custom.notifications/unregister", { deviceID }).catch(() => undefined)
   await hub.sandbox("down").catch(() => undefined)

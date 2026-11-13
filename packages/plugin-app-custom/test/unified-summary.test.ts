@@ -1,17 +1,27 @@
 import { expect, test } from "bun:test"
-import { Effect, Exit, Option, Queue, Scope, Stream } from "effect"
+import { Clock, Effect, Exit, Option, Queue, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { mkdtemp, realpath, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
 import { makeHub, type Member } from "../src/live-activity/index"
 import { body as rawBody, limits as pushLimits, push } from "../src/live-activity/lifecycle"
-import { limits, linkSettings, makePeers, readSocket, serveSummary } from "../src/live-activity/link"
+import {
+  hubPassword,
+  httpSend,
+  limits,
+  linkSettings,
+  makeInbox,
+  makePublisher,
+  peersKey,
+  type Send,
+  type Sent,
+} from "../src/live-activity/link"
 import type { LiveActivity } from "../src/live-activity/rpc"
 import type { Event } from "../src/live-activity/tracker"
-import { decodeSummary, initials, join, type Summary } from "../src/live-activity/unified"
+import { decodeSummary, initials, join, settled, type Summary } from "../src/live-activity/unified"
 import { T, created, execution, ids, minute, question, world } from "./fixture/live-activity"
 import { storage } from "./fixture/storage"
 
@@ -21,10 +31,12 @@ async function fixture(name: string) {
 const summaryOf = async (name: string) => Option.getOrThrow(decodeSummary(await fixture(name)))
 const linux = await summaryOf("summary-linux")
 const mac = await summaryOf("summary-mac")
+/** A server as the hub's inbox reports it: whole while it renews, only what waits there once it is offline. */
 const peer = (summary: Summary, online = true) => ({
   instanceID: summary.instanceID,
   name: summary.name,
-  ...(online ? { summary } : {}),
+  summary: online ? summary : settled(summary),
+  ...(online ? {} : { offline: true }),
 })
 const sessionIDs = (rows: readonly { readonly sessionID: string }[]) => rows.map((row) => row.sessionID)
 
@@ -46,16 +58,31 @@ test("the joined state adds the counts, interleaves the lists by the tracker's o
   expect(state).toEqual(await fixture("state-joined"))
 })
 
-test("a peer without a fresh summary leaves the state and stays listed as offline (contract fixture)", async () => {
+test("an offline server loses its work in progress and keeps what waits there, listed as offline (contract fixture)", async () => {
   const state = join({ self: linux, peers: [peer(mac, false)] }).state
-  expect(state.counts).toEqual(linux.state.counts)
-  expect(state.sessions.every((row) => row.server === linux.instanceID)).toBe(true)
+  // The Mac's working session and focus left; its question, permission, failures and unread answer are still true.
+  expect(state.counts).toEqual({ working: 2, question: 2, permission: 1, failed: 2, idle: 1, unread: 2 })
+  expect(state.activeTotal).toBe(5)
+  expect(settled(mac).state.focus).toBeUndefined()
+  expect(sessionIDs(state.attention)).toEqual([ids.cache, "ses_01JZRELEASEPROD0000000013", ids.oauth])
   expect(state.host).toBe("Linux BRS · Mac de Alexandre offline")
   expect(state.servers).toEqual([
     { instanceID: linux.instanceID, name: "Linux BRS", short: "LB" },
     { instanceID: mac.instanceID, name: "Mac de Alexandre", short: "MA", offline: true },
   ])
   expect(state).toEqual(await fixture("state-peer-offline"))
+  // Going away is urgent: the update goes out at once, also on a parked card.
+  expect([...join({ self: linux, peers: [peer(mac, false)] }).marks.keys()]).toContain(`offline:${mac.instanceID}`)
+  expect([...join({ self: linux, peers: [peer(mac)] }).marks.keys()].some((mark) => mark.startsWith("offline:"))).toBe(
+    false,
+  )
+  // Nothing working is left of a settled summary, rows included.
+  const busy = rows("mac", [
+    ["fail", "failed", 5],
+    ["busy", "working", 9],
+  ])
+  expect(sessionIDs(settled(busy).state.sessions)).toEqual(["fail"])
+  expect(settled(busy).order).toEqual({ fail: 5 })
 })
 
 /** A summary with only rows, each `[sessionID, status, order]`; the first working row is its focus. */
@@ -158,111 +185,240 @@ test("the badge's initials follow the apps' rule", () => {
 })
 
 test("the link is off without its variables", () => {
-  expect(linkSettings({})).toEqual({ peers: [] })
-  expect(
-    linkSettings({ OPENCODE_SUMMARY_SOCKET: " /run/s.sock ", OPENCODE_SUMMARY_PEERS: "/a.sock, /b.sock,/a.sock" }),
-  ).toEqual({
-    serve: "/run/s.sock",
-    peers: ["/a.sock", "/b.sock"],
+  expect(linkSettings({})).toEqual({ hub: false })
+  expect(linkSettings({ OPENCODE_HUB: "1" })).toEqual({ hub: true })
+  expect(linkSettings({ OPENCODE_SUMMARY_HUB: " http://opencode-svc/ " })).toEqual({
+    hub: false,
+    target: "http://opencode-svc",
   })
 })
 
 const settle = Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 1)))
-const settled = Effect.gen(function* () {
+const settled5 = Effect.gen(function* () {
   for (let round = 0; round < 5; round++) yield* settle
 })
 
+/** A parked summary: the Mac fixture with nothing working. */
+const parked = settled(mac)
+
 it.effect(
-  "a peer that stops answering keeps its last summary for 60 seconds, then is offline until it answers again",
+  "a working summary not renewed for 60 s leaves its server offline with only what waits there; a parked one never expires; a goodbye is offline at once",
   () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(T)
-      const shared = storage()
-      const answer = { current: (): Promise<unknown> => Promise.resolve(mac) }
       const changes = { count: 0 }
-      const peers = makePeers({
-        sockets: ["/mac.sock"],
-        storage: shared,
-        read: () => answer.current(),
-        changed: () => void changes.count++,
-      })
-      expect(peers.current(T).peers).toEqual([])
-      yield* peers.poll("/mac.sock")
-      expect(peers.current(T).peers).toEqual([peer(mac)])
+      const inbox = makeInbox({ storage: storage(), changed: () => void changes.count++ })
+      expect(inbox.current(T).peers).toEqual([])
+      yield* inbox.accept(mac)
+      expect(inbox.current(T)).toEqual({ peers: [peer(mac)], wakeAt: T + limits.staleMs })
+      // A renewal that says the same moves nothing; it only pushes the deadline.
+      yield* TestClock.adjust(limits.heartbeatMs)
+      yield* inbox.accept(mac)
       expect(changes.count).toBe(1)
-      // The same summary again changes nothing for the hub.
-      yield* peers.poll("/mac.sock")
-      expect(changes.count).toBe(1)
-      answer.current = () => Promise.reject(new Error("ENOENT"))
-      yield* TestClock.adjust(limits.staleMs - 1)
-      yield* peers.poll("/mac.sock")
-      expect(peers.current(T + limits.staleMs - 1)).toEqual({ peers: [peer(mac)], wakeAt: T + limits.staleMs })
-      expect(peers.current(T + limits.staleMs)).toEqual({ peers: [peer(mac, false)] })
-      yield* TestClock.adjust(minute)
-      answer.current = () => Promise.resolve(mac)
-      yield* peers.poll("/mac.sock")
-      expect(peers.current(T + limits.staleMs + minute).peers).toEqual([peer(mac)])
+      const renewed = T + limits.heartbeatMs
+      expect(inbox.current(renewed + limits.staleMs - 1).peers).toEqual([peer(mac)])
+      expect(inbox.current(renewed + limits.staleMs)).toEqual({ peers: [peer(mac, false)] })
+      // It answers again: whole, and the hub hears of it.
+      yield* TestClock.adjust(limits.staleMs + minute)
+      yield* inbox.accept(mac)
+      expect(inbox.current(renewed + limits.staleMs + minute).peers).toEqual([peer(mac)])
       expect(changes.count).toBe(2)
-      // After a restart with the peer away, it is still known, as offline.
-      const restarted = makePeers({
-        sockets: ["/mac.sock"],
-        storage: shared,
-        read: () => Promise.reject(new Error("ENOENT")),
-        changed: () => undefined,
+      // Parked, it has nothing to renew: still in force a day later, and not offline.
+      yield* inbox.accept(parked)
+      expect(inbox.current(T + 86_400_000)).toEqual({
+        peers: [{ instanceID: mac.instanceID, name: mac.name, summary: parked }],
       })
-      yield* restarted.load
-      yield* restarted.poll("/mac.sock")
-      expect(restarted.current(T).peers).toEqual([peer(mac, false)])
+      yield* inbox.leave(mac.instanceID)
+      expect(inbox.current(T + 86_400_000).peers).toEqual([peer(mac, false)])
+      expect(changes.count).toBe(4)
     }),
 )
 
-for (const [what, body] of [
-  ["another protocol version", { ...mac, protocol: 2 }],
-  ["a summary this version cannot decode", { ...mac, state: { ...mac.state, counts: "many" } }],
-  ["no JSON object", "<html>"],
-] as const)
-  it.effect(`a peer answering ${what} is never read, and replaces no summary already held`, () =>
+it.effect("a hub restart keeps a parked server's summary, written only when what waits there changes", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(T)
+    const shared = storage()
+    const writes = { count: 0 }
+    const counted = {
+      get: shared.get,
+      update: ((key, update) => {
+        writes.count++
+        return shared.update(key, update)
+      }) as typeof shared.update,
+    }
+    const inbox = makeInbox({ storage: counted, changed: () => undefined })
+    yield* inbox.accept(mac)
+    // Work moving (another activity time) is no reason to write.
+    yield* inbox.accept({
+      ...mac,
+      state: { ...mac.state, updatedAt: T + 1, focus: { ...mac.state.focus!, activity: "Pensando" } },
+    })
+    expect(writes.count).toBe(1)
+    yield* inbox.accept({ ...mac, marks: mac.marks.slice(1) })
+    expect(writes.count).toBe(2)
+    expect(shared.values.get(peersKey)).toHaveLength(1)
+    const restarted = makeInbox({ storage: shared, changed: () => undefined })
+    yield* restarted.load
+    // The server may have stopped working meanwhile; its next send says so. Until then, what waited there shows.
+    const [restored] = restarted.current(T + minute).peers
+    expect(restored?.offline).toBeUndefined()
+    expect(restored?.summary?.state.counts).toMatchObject({ working: 0, question: 1, failed: 2 })
+    expect(restored?.summary?.marks).toEqual(mac.marks.slice(1))
+    // A server silent for 30 days is forgotten.
+    yield* TestClock.adjust(limits.forgetMs)
+    const later = makeInbox({ storage: shared, changed: () => undefined })
+    yield* later.load
+    expect(later.current(T + limits.forgetMs).peers).toEqual([])
+  }),
+)
+
+/** A publisher over a mutable summary and a recorded, scriptable hub. */
+function publishing(initial: Summary) {
+  const local = { current: initial }
+  const calls: { at: number; method: string; input: unknown }[] = []
+  const answer = { current: { ok: true } as Sent }
+  const clock = { now: T }
+  const send: Send = (method, input) => {
+    calls.push({ at: clock.now, method, input })
+    return Promise.resolve(answer.current)
+  }
+  const publisher = makePublisher({ read: (now) => ((clock.now = now), local.current), send })
+  const advance = (ms: number) =>
+    Effect.gen(function* () {
+      yield* TestClock.adjust(ms)
+      yield* settled5
+    })
+  return { local, calls, answer, publisher, advance }
+}
+
+it.effect(
+  "the summary is sent when the server starts and when it changes; renewed every 15 s only while something works",
+  () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(T)
-      const answer = { current: body as unknown }
-      const peers = makePeers({
-        sockets: ["/mac.sock"],
-        storage: storage(),
-        read: () => Promise.resolve(answer.current),
-        changed: () => undefined,
-      })
-      yield* peers.poll("/mac.sock")
-      expect(peers.current(T).peers).toEqual([])
-      answer.current = mac
-      yield* peers.poll("/mac.sock")
-      answer.current = body
-      yield* peers.poll("/mac.sock")
-      expect(peers.current(T).peers).toEqual([peer(mac)])
-      expect(peers.current(T + limits.staleMs).peers).toEqual([peer(mac, false)])
+      const f = publishing(parked)
+      yield* f.publisher.run.pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* settled5
+      expect(f.calls.map((call) => [call.at - T, call.method])).toEqual([[0, "publish"]])
+      expect(f.calls[0]?.input).toEqual(parked)
+      // Parked: an hour without a single send.
+      yield* f.advance(3_600_000)
+      expect(f.calls).toHaveLength(1)
+      // Work starts: sent at once, then renewed every 15 s.
+      const start = T + 3_600_000
+      f.local.current = mac
+      f.publisher.changed()
+      yield* settled5
+      yield* f.advance(limits.heartbeatMs * 2)
+      expect(f.calls.slice(1).map((call) => call.at - start)).toEqual([0, limits.heartbeatMs, limits.heartbeatMs * 2])
+      // Two changes inside a second cost one more send, a second after the last.
+      f.local.current = { ...mac, marks: [] }
+      f.publisher.changed()
+      yield* settled5
+      f.local.current = { ...mac, marks: ["x"] }
+      f.publisher.changed()
+      yield* settled5
+      expect(f.calls).toHaveLength(4)
+      yield* f.advance(limits.minMs)
+      expect(f.calls).toHaveLength(5)
+      expect((f.calls[4]?.input as Summary).marks).toEqual(["x"])
+      // Work ends: the parked summary goes out once and the renewals stop.
+      f.local.current = parked
+      f.publisher.changed()
+      yield* f.advance(limits.minMs)
+      yield* f.advance(3_600_000)
+      expect(f.calls).toHaveLength(6)
+      // Stopping says goodbye once the hub ever heard from this server.
+      yield* f.publisher.leave
+      expect(f.calls.at(-1)).toMatchObject({ method: "leave", input: { protocol: 1, instanceID: mac.instanceID } })
     }),
-  )
+)
 
-test("the socket serves GET /summary only, an absent socket fails the read, and a live socket is never taken over", async () => {
-  const dir = await mkdtemp(path.join(await realpath(os.tmpdir()), "summary-"))
-  const socket = path.join(dir, "run", "summary.sock")
-  const scope = Effect.runSync(Scope.make())
+it.effect(
+  "a hub that is away is tried again after 2, 5 and then every 15 s, and gets the summary as soon as it is back",
+  () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(T)
+      const f = publishing(parked)
+      f.answer.current = { ok: false, reason: "unreachable" }
+      yield* f.publisher.run.pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* settled5
+      yield* f.advance(2_000)
+      yield* f.advance(5_000)
+      yield* f.advance(15_000)
+      yield* f.advance(15_000)
+      expect(f.calls.map((call) => call.at - T)).toEqual([0, 2_000, 7_000, 22_000, 37_000])
+      // Never having reached the hub, there is no goodbye to say.
+      yield* f.publisher.leave
+      expect(f.calls).toHaveLength(5)
+      f.answer.current = { ok: true }
+      yield* f.advance(15_000)
+      expect(f.calls).toHaveLength(6)
+      // Delivered: parked again, nothing more is sent.
+      yield* f.advance(3_600_000)
+      expect(f.calls).toHaveLength(6)
+    }),
+)
+
+test("the call is the hub's RPC with the client's Basic credential; a wrong password, a refusal and an absent hub are told apart without leaking the password", async () => {
+  const seen: { path: string; authorization: string | null; body: unknown }[] = []
+  const reply = { current: () => Response.json({ output: { protocol: 1 } }) }
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: async (request) => {
+      seen.push({
+        path: new URL(request.url).pathname,
+        authorization: request.headers.get("authorization"),
+        body: await request.json(),
+      })
+      return reply.current()
+    },
+  })
+  const target = `http://127.0.0.1:${server.port}`
   try {
-    await expect(readSocket(socket)).rejects.toBeDefined()
-    await Effect.runPromise(serveSummary({ socket, read: () => mac }).pipe(Scope.provide(scope)))
-    expect(Option.getOrThrow(decodeSummary(await readSocket(socket)))).toEqual(mac)
-    expect((await Bun.file(socket).stat()).mode & 0o777).toBe(0o600)
-    const other = await fetch("http://summary/api/session", { unix: socket })
-    expect(other.status).toBe(404)
-    expect((await fetch("http://summary/summary", { unix: socket, method: "POST" })).status).toBe(404)
-    // A second server given the same path (a sandbox with production's environment) leaves the first one serving.
-    const second = Effect.runSync(Scope.make())
-    await Effect.runPromise(serveSummary({ socket, read: () => linux }).pipe(Scope.provide(second)))
-    await Effect.runPromise(Scope.close(second, Exit.void))
-    expect(Option.getOrThrow(decodeSummary(await readSocket(socket))).instanceID).toBe(mac.instanceID)
-    await Effect.runPromise(Scope.close(scope, Exit.void))
-    await expect(readSocket(socket)).rejects.toBeDefined()
+    const send = httpSend(target, () => Promise.resolve("s3nha-do-hub"))
+    expect(await send("publish", mac)).toEqual({ ok: true })
+    expect(seen[0]).toEqual({
+      path: "/api/rpc/custom.summary/publish",
+      authorization: `Basic ${Buffer.from("opencode:s3nha-do-hub").toString("base64")}`,
+      body: { input: mac },
+    })
+    reply.current = () => new Response("Unauthorized", { status: 401 })
+    const refused = await send("publish", mac)
+    expect(refused).toEqual({ ok: false, reason: "unauthorized (the hub refused the password)" })
+    reply.current = () =>
+      Response.json(
+        { _tag: "RpcError", type: "protocol_mismatch", message: "…", data: { expected: 2 } },
+        { status: 400 },
+      )
+    expect(await send("publish", mac)).toEqual({ ok: false, reason: "protocol_mismatch (HTTP 400)" })
+    expect(await httpSend(target, () => Promise.resolve(undefined))("publish", mac)).toEqual({
+      ok: false,
+      reason: "no password for the hub",
+    })
   } finally {
-    await Effect.runPromise(Scope.close(scope, Exit.void))
+    await server.stop(true)
+  }
+  expect(await httpSend(target, () => Promise.resolve("s3nha-do-hub"))("publish", mac)).toEqual({
+    ok: false,
+    reason: "unreachable",
+  })
+})
+
+test("the hub's password: the explicit variable, else this server's own from the service config, else its runtime file", async () => {
+  const dir = await mkdtemp(path.join(await realpath(os.tmpdir()), "summary-"))
+  try {
+    const config = path.join(dir, "config")
+    await mkdir(config)
+    const env = { OPENCODE_CONFIG_DIR: config, OPENCODE_CUSTOM_HOME: dir }
+    expect(await hubPassword(env)).toBeUndefined()
+    await Bun.write(path.join(dir, "password"), "do-runtime\n")
+    expect(await hubPassword(env)).toBe("do-runtime")
+    await Bun.write(path.join(config, "service-custom.json"), JSON.stringify({ password: "do-servico" }))
+    expect(await hubPassword(env)).toBe("do-servico")
+    expect(await hubPassword({ ...env, OPENCODE_SUMMARY_HUB_PASSWORD: "do-hub" })).toBe("do-hub")
+  } finally {
     await rm(dir, { recursive: true, force: true })
   }
 })
@@ -299,19 +455,27 @@ const single: LiveActivity.RegisterInput = {
 type Body = { aps: { event: string; alert?: { title: string }; "content-state": LiveActivity.AgentsState } }
 const bodyOf = (item: Push) => item.body as Body
 
-/** A hub named Linux BRS over an in-memory server, a fake APNs and, with `read`, one peer socket. */
-function hubWith(read?: () => Promise<unknown>) {
+/** The RPC's error factory, as the host gives it to a handler. */
+const context = { error: (type: string, message: string, data: unknown) => ({ type, message, data }) } as never
+const outcome = <A, E>(effect: Effect.Effect<A, E>) =>
+  effect.pipe(
+    Effect.map((value) => ({ ok: value })),
+    Effect.catch((error) => Effect.succeed({ error: (error as { type: string }).type })),
+  )
+
+/** A server over an in-memory world and a fake APNs; `link` makes it the hub or points it at one. */
+function serverWith(name: string, link?: { hub: boolean; target?: string; send?: Send }) {
   const server = world()
   const shared = storage()
   const pushes: Push[] = []
   const emitted: { state: LiveActivity.AgentsState | null; unified?: LiveActivity.AgentsState }[] = []
   const hub = makeHub({
-    host: Effect.succeed("Linux BRS"),
+    host: Effect.succeed(name),
     apns: Effect.succeed({
       send: (item: Push) => Effect.sync((): Result => (pushes.push(item), { status: "sent" })),
       close: Effect.void,
     }),
-    ...(read ? { link: { peers: ["/mac.sock"], read } } : {}),
+    ...(link ? { link } : {}),
   })
   const join = (queue: Queue.Queue<Event>) => {
     const member: Member = {
@@ -321,26 +485,51 @@ function hubWith(read?: () => Promise<unknown>) {
     return hub.join(member)
   }
   const to = (token: string) => pushes.filter((item) => item.token === token)
-  return { server, shared, pushes, emitted, hub, join, to }
+  const publish = (input: unknown) => outcome(hub.summaries.publish(input as Record<string, unknown>, context))
+  return { server, shared, pushes, emitted, hub, join, to, publish }
 }
 
 it.effect(
-  "the Todos activity gets both servers' sessions, loses the peer's 60 s after it stops answering and gets them back; the other device keeps this server's own state",
+  "only the hub accepts summaries, and only this protocol's: the rest is refused by name and joins nothing",
   () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(T)
-      const answer = { current: (): Promise<unknown> => Promise.resolve(mac) }
-      const f = hubWith(() => answer.current())
+      const plain = serverWith("Mac")
+      yield* plain.join(yield* Queue.unbounded<Event>())
+      expect(yield* plain.publish(mac)).toEqual({ error: "not_hub" })
+      expect(yield* outcome(plain.hub.summaries.leave({ protocol: 1, instanceID: mac.instanceID }, context))).toEqual({
+        error: "not_hub",
+      })
+      const f = serverWith("Linux BRS", { hub: true })
+      yield* f.join(yield* Queue.unbounded<Event>())
+      expect(yield* f.publish({ ...mac, protocol: 2 })).toEqual({ error: "protocol_mismatch" })
+      expect(yield* f.publish({ ...mac, state: { ...mac.state, counts: "many" } })).toEqual({
+        error: "invalid_summary",
+      })
+      expect(yield* f.publish({ protocol: 1 })).toEqual({ error: "invalid_summary" })
+      expect((yield* f.hub.handlers.snapshot()).unified?.servers).toHaveLength(1)
+      expect(yield* f.publish(mac)).toEqual({ ok: { protocol: 1 } })
+      expect((yield* f.hub.handlers.snapshot()).unified?.servers).toHaveLength(2)
+    }),
+)
+
+it.effect(
+  "the Todos activity gets both servers' sessions, loses the other's work 60 s after its last renewal and gets it back; the other device keeps this server's own state",
+  () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(T)
+      const f = serverWith("Linux BRS", { hub: true })
       const queue = yield* Queue.unbounded<Event>()
       yield* f.join(queue)
       expect(yield* f.hub.handlers.register(everywhere)).toEqual({ push: "configured", scope: "all" })
       expect(yield* f.hub.handlers.register(single)).toEqual({ push: "configured" })
       yield* f.hub.handlers.activity({ deviceID: everywhere.deviceID, activityID: "act-todos", pushToken: "aa00" })
       yield* f.hub.handlers.activity({ deviceID: single.deviceID, activityID: "act-linux", pushToken: "bb00" })
+      yield* f.publish(mac)
       yield* Queue.offerAll(queue, [created(ids.live, T), execution("started", ids.live, T)])
-      yield* settled
+      yield* settled5
       yield* TestClock.adjust(pushLimits.coalesceMs)
-      yield* settled
+      yield* settled5
       const both = bodyOf(f.to("aa00").at(-1)!).aps["content-state"]
       // One working session here plus the Mac fixture's: 1 working, 1 question, 1 permission, 2 failed.
       expect(both.counts).toMatchObject({ working: 2, question: 1, permission: 1, failed: 2 })
@@ -360,23 +549,21 @@ it.effect(
       expect(snapshot.unified?.counts).toEqual(both.counts)
       expect(f.emitted.at(-1)?.unified?.servers).toHaveLength(2)
 
-      // The Mac sleeps: its part stays until its last summary is 60 s old, then leaves at once (urgent).
-      answer.current = () => Promise.reject(new Error("ECONNREFUSED"))
+      // The Mac sleeps while working: 60 s after its last renewal its work leaves, what waited there stays.
       const before = f.to("aa00").length
-      yield* TestClock.adjust(limits.staleMs + limits.pollMs)
-      yield* settled
-      const alone = bodyOf(f.to("aa00").at(-1)!).aps["content-state"]
+      yield* TestClock.adjust(limits.staleMs)
+      yield* settled5
+      const away = bodyOf(f.to("aa00").at(-1)!).aps["content-state"]
       expect(f.to("aa00").length).toBeGreaterThan(before)
-      expect(alone.counts).toMatchObject({ working: 1, question: 0, permission: 0, failed: 0 })
-      expect(alone.host).toBe("Linux BRS · Mac de Alexandre offline")
-      expect(alone.servers?.map((item) => item.offline)).toEqual([undefined, true])
+      expect(away.counts).toMatchObject({ working: 1, question: 1, permission: 1, failed: 2 })
+      expect(away.host).toBe("Linux BRS · Mac de Alexandre offline")
+      expect(away.servers?.map((item) => item.offline)).toEqual([undefined, true])
       expect(f.to("aa00").at(-1)?.priority).toBe(10)
 
-      answer.current = () => Promise.resolve(mac)
-      yield* TestClock.adjust(limits.pollMs)
-      yield* settled
+      yield* f.publish(mac)
+      yield* settled5
       yield* TestClock.adjust(pushLimits.coalesceMs)
-      yield* settled
+      yield* settled5
       const back = bodyOf(f.to("aa00").at(-1)!).aps["content-state"]
       expect(back.counts).toMatchObject({ working: 2, question: 1, failed: 2 })
       expect(back.servers?.some((item) => item.offline)).toBe(false)
@@ -384,64 +571,61 @@ it.effect(
       // A question of this server alerts once, through each device's own card: the joined one and the server's.
       f.server.forms.push(question("frm_1", ids.live, T + 2 * minute, "Publicar agora?"))
       yield* Queue.offer(queue, { type: "form.created", data: { form: f.server.forms[0]! } } as Event)
-      yield* settled
+      yield* settled5
       const alerts = f.pushes.filter((item) => bodyOf(item).aps.alert)
       expect(alerts.map((item) => [item.token, bodyOf(item).aps["content-state"].servers?.length])).toEqual([
         ["aa00", 2],
         ["bb00", undefined],
       ])
-      // The other device never received a state with the peer's sessions.
+      // The other device never received a state with the other server's sessions.
       expect(f.to("bb00").every((item) => bodyOf(item).aps["content-state"].counts.failed === 0)).toBe(true)
     }),
 )
 
-it.effect("push-to-start follows the joined state: the peer's work starts the Todos activity and no other", () =>
-  Effect.gen(function* () {
-    yield* TestClock.setTime(T)
-    const calm: Summary = {
-      ...mac,
-      state: {
-        ...linux.state,
-        counts: { ...linux.state.counts, working: 0, question: 0 },
-        activeTotal: 0,
-        attention: [],
-        attentionTotal: 0,
-        sessions: [],
-        needs: [],
-      },
-      order: {},
-      marks: [],
-    }
-    const answer = { current: calm as unknown }
-    const f = hubWith(() => Promise.resolve(answer.current))
-    yield* f.join(yield* Queue.unbounded<Event>())
-    yield* f.hub.handlers.register(everywhere)
-    yield* f.hub.handlers.register(single)
-    yield* settled
-    expect(f.pushes).toEqual([])
-    answer.current = mac
-    yield* TestClock.adjust(limits.pollMs)
-    yield* settled
-    expect(f.pushes.map((item) => [item.token, bodyOf(item).aps.event])).toEqual([["a11", "start"]])
-    const start = f.pushes[0]!.body as Body & { aps: { attributes: { serverKey: string } } }
-    expect(start.aps.attributes.serverKey).toBe("todos")
-    expect(start.aps["content-state"].servers).toHaveLength(2)
-    expect(start.aps["content-state"].activeTotal).toBe(3)
-  }),
+it.effect(
+  "push-to-start follows the joined state: the other server's work starts the Todos activity and no other",
+  () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(T)
+      const f = serverWith("Linux BRS", { hub: true })
+      yield* f.join(yield* Queue.unbounded<Event>())
+      yield* f.hub.handlers.register(everywhere)
+      yield* f.hub.handlers.register(single)
+      const calm: Summary = {
+        ...parked,
+        state: {
+          ...parked.state,
+          counts: { ...parked.state.counts, question: 0, permission: 0 },
+          activeTotal: 0,
+          attention: [],
+          attentionTotal: 0,
+        },
+      }
+      yield* f.publish(calm)
+      yield* settled5
+      expect(f.pushes).toEqual([])
+      yield* f.publish(mac)
+      yield* settled5
+      expect(f.pushes.map((item) => [item.token, bodyOf(item).aps.event])).toEqual([["a11", "start"]])
+      const start = f.pushes[0]!.body as Body & { aps: { attributes: { serverKey: string } } }
+      expect(start.aps.attributes.serverKey).toBe("todos")
+      expect(start.aps["content-state"].servers).toHaveLength(2)
+      expect(start.aps["content-state"].activeTotal).toBe(3)
+    }),
 )
 
-it.effect("without peers a server ignores the scope: its own state, no confirmation, nothing joined", () =>
+it.effect("a server that is not the hub ignores the scope: its own state, no confirmation, nothing joined", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(T)
-    const f = hubWith()
+    const f = serverWith("Linux BRS")
     const queue = yield* Queue.unbounded<Event>()
     yield* f.join(queue)
     expect(yield* f.hub.handlers.register(everywhere)).toEqual({ push: "configured" })
     yield* f.hub.handlers.activity({ deviceID: everywhere.deviceID, activityID: "act-todos", pushToken: "aa00" })
     yield* Queue.offerAll(queue, [created(ids.live, T), execution("started", ids.live, T)])
-    yield* settled
+    yield* settled5
     yield* TestClock.adjust(pushLimits.coalesceMs)
-    yield* settled
+    yield* settled5
     const state = bodyOf(f.to("aa00").at(-1)!).aps["content-state"]
     expect(state.host).toBe("Linux BRS")
     expect(state.servers).toBeUndefined()
@@ -451,40 +635,54 @@ it.effect("without peers a server ignores the scope: its own state, no confirmat
   }),
 )
 
-it.effect("the summary a server publishes is its own even while it joins its peers' (no loop)", () =>
-  Effect.gen(function* () {
-    const dir = yield* Effect.promise(async () => mkdtemp(path.join(await realpath(os.tmpdir()), "summary-")))
-    yield* Effect.addFinalizer(() => Effect.promise(() => rm(dir, { recursive: true, force: true })))
-    const socket = path.join(dir, "summary.sock")
-    const server = world()
-    const hub = makeHub({
-      host: Effect.succeed("Linux BRS"),
-      apns: Effect.succeed(undefined),
-      link: { serve: socket, peers: ["/mac.sock"], read: () => Promise.resolve(mac) },
-    })
-    const queue = yield* Queue.unbounded<Event>()
-    yield* hub.join({
-      ctx: { ...server.ctx, storage: storage(), events: Stream.fromQueue(queue) },
-      emit: () => Effect.void,
-    })
-    yield* Queue.offerAll(queue, [created(ids.live, Date.now()), execution("started", ids.live, Date.now())])
-    // The socket opens after real file-system work; the peers are read right after it.
-    const published = Option.getOrThrow(
-      decodeSummary(
-        yield* Effect.promise(async () => {
-          for (let round = 0; round < 200; round++) {
-            const body = await readSocket(socket).catch(() => undefined)
-            if (body) return body
-            await new Promise((resolve) => setTimeout(resolve, 10))
-          }
-        }),
-      ),
-    )
-    yield* settled
-    expect((yield* hub.handlers.snapshot()).unified?.counts.failed).toBe(2)
-    expect(published.name).toBe("Linux BRS")
-    expect(published.state.counts).toMatchObject({ working: 1, failed: 0, question: 0 })
-    expect(published.state.servers).toBeUndefined()
-    expect(published.order).toEqual({ [ids.live]: expect.any(Number) })
-  }),
+it.effect(
+  "two servers linked: the sender's events reach the hub's joined state, what it sends is its own state (no loop), and stopping it says goodbye",
+  () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(T)
+      const linuxServer = serverWith("Linux BRS", { hub: true })
+      yield* linuxServer.join(yield* Queue.unbounded<Event>())
+      yield* linuxServer.publish(linux)
+      const sent: unknown[] = []
+      // The sender is itself a hub here, holding another server's summary: it must still send only its own.
+      const send: Send = (method, input) => {
+        if (method === "publish") sent.push(input)
+        return Effect.runPromise(
+          outcome(
+            method === "publish"
+              ? linuxServer.hub.summaries.publish(input as Record<string, unknown>, context)
+              : linuxServer.hub.summaries.leave(input as { protocol: number; instanceID: string }, context),
+          ).pipe(Effect.provideService(Clock.Clock, clock)),
+        ).then((result): Sent => ("ok" in result ? { ok: true } : { ok: false, reason: result.error }))
+      }
+      const clock = yield* Clock.Clock
+      const macServer = serverWith("Mac de Alexandre", { hub: true, target: "http://hub.invalid", send })
+      const queue = yield* Queue.unbounded<Event>()
+      const scope = yield* Scope.make()
+      yield* macServer.join(queue).pipe(Scope.provide(scope))
+      yield* macServer.publish(linux)
+      yield* settled5
+      // Sent on start, with nothing to show yet.
+      expect(sent).toHaveLength(1)
+      yield* Queue.offerAll(queue, [created(ids.live, T), execution("started", ids.live, T)])
+      yield* settled5
+      yield* TestClock.adjust(limits.minMs)
+      yield* settled5
+      const published = Option.getOrThrow(decodeSummary(sent.at(-1)))
+      expect(published.name).toBe("Mac de Alexandre")
+      expect(published.state.counts).toMatchObject({ working: 1, question: 0 })
+      expect(published.state.servers).toBeUndefined()
+      expect(published.order).toEqual({ [ids.live]: expect.any(Number) })
+      const unified = (yield* linuxServer.hub.handlers.snapshot()).unified
+      expect(unified?.servers?.map((item) => [item.name, item.offline])).toContainEqual(["Mac de Alexandre", undefined])
+      expect(unified?.sessions.some((row) => row.sessionID === ids.live && row.server === published.instanceID)).toBe(
+        true,
+      )
+      // The Mac's server stops: the hub hears it and drops the Mac's work at once.
+      yield* Scope.close(scope, Exit.void)
+      yield* settled5
+      const after = (yield* linuxServer.hub.handlers.snapshot()).unified
+      expect(after?.servers?.find((item) => item.name === "Mac de Alexandre")?.offline).toBe(true)
+      expect(after?.sessions.some((row) => row.sessionID === ids.live)).toBe(false)
+    }),
 )
