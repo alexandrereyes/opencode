@@ -7,6 +7,7 @@ import { LiveActivity } from "../live-activity/rpc.js"
 
 /** Contract: `packages/plugin-app-custom/docs/watch.md`. Times are epoch milliseconds. */
 
+/** The Mac's gateway: the default of `OPENCODE_WATCH_GATEWAY_URL`, which every other server sets to its own. */
 export const gatewayURL = "https://watch-mac.alexandrem.com.br"
 export const defaultVoiceID = "rio"
 
@@ -26,7 +27,8 @@ export const DeviceView = Schema.Struct({
   deviceID: Schema.String,
   name: Schema.String,
   createdAt: Schema.Number,
-  lastSeenAt: Schema.Number,
+  /** Absent until the watch first calls the gateway. */
+  lastSeenAt: optional(Schema.Number),
 }).annotate({ identifier: "Watch.Device" })
 
 const OperationFailed = Schema.Struct({ message: Schema.String })

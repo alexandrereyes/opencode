@@ -329,6 +329,8 @@ export function gateway(input: {
   const fakeSidebands = input.sidebands ?? sidebands()
   const value = makeGateway({
     port: Effect.succeed(0),
+    hostname: Effect.succeed("127.0.0.1"),
+    gatewayURL: Effect.succeed("https://watch-test.alexandrem.com.br"),
     access: Effect.succeed({ clientId: "client.access", clientSecret: "secret-value" }),
     apns: Effect.succeed(undefined),
     widgetBundleID: Effect.succeed("br.com.alexandrem.opencode.watchkitapp"),

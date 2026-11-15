@@ -4,7 +4,7 @@ import { TestClock } from "effect/testing"
 import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { accessVariable, readAccess } from "../src/watch/index"
+import { accessVariable, gatewayAddress, readAccess } from "../src/watch/index"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
 import type { LiveActivity } from "../src/live-activity/rpc"
@@ -99,7 +99,7 @@ it.effect("pairing returns a token stored only as a hash; revoke removes the dev
   Effect.gen(function* () {
     const { gateway: watch, server, paired, call } = yield* setup()
     expect(paired).toMatchObject({
-      gatewayURL: "https://watch-mac.alexandrem.com.br",
+      gatewayURL: "https://watch-test.alexandrem.com.br",
       access: { clientId: "client.access", clientSecret: "secret-value" },
       voice: { voiceID: "rio" },
     })
@@ -111,11 +111,11 @@ it.effect("pairing returns a token stored only as a hash; revoke removes the dev
     })
     yield* TestClock.adjust(60_000)
     const later = yield* watch.handlers.pair({ deviceName: "Outro" })
+    // Never seen: no `lastSeenAt`, so the iPhone can tell a pairing that never reached this gateway.
     expect((yield* watch.handlers.devices()).devices.at(-1)).toEqual({
       deviceID: later.deviceID,
       name: "Outro",
       createdAt: T + 60_000,
-      lastSeenAt: T + 60_000,
     })
     yield* watch.handlers.revoke({ deviceID: paired.deviceID })
     yield* watch.handlers.revoke({ deviceID: later.deviceID })
@@ -152,6 +152,25 @@ it.live("the Access token comes from OPENCODE_WATCH_ACCESS_JSON, else the file; 
     expect(invalid).toContain(`em ${accessVariable} não é um JSON com clientId e clientSecret`)
     expect(invalid).not.toMatch(/secret"|leak|env\.access/)
     yield* Effect.promise(() => rm(directory, { recursive: true }))
+  }),
+)
+
+it.effect("each server's gateway address: the Mac's loopback and watch-mac by default, else its own", () =>
+  Effect.gen(function* () {
+    const read = (env: Record<string, string>) =>
+      Effect.all(gatewayAddress).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))))
+    const cases: [Record<string, string>, { hostname: string; url: string }][] = [
+      [{}, { hostname: "127.0.0.1", url: "https://watch-mac.alexandrem.com.br" }],
+      [
+        { OPENCODE_WATCH_GATEWAY_HOSTNAME: "0.0.0.0", OPENCODE_WATCH_GATEWAY_URL: "https://watch-linux.alexandrem.com.br/" },
+        { hostname: "0.0.0.0", url: "https://watch-linux.alexandrem.com.br" },
+      ],
+      [
+        { OPENCODE_WATCH_GATEWAY_HOSTNAME: " ", OPENCODE_WATCH_GATEWAY_URL: "" },
+        { hostname: "127.0.0.1", url: "https://watch-mac.alexandrem.com.br" },
+      ],
+    ]
+    for (const [env, expected] of cases) expect(yield* read(env)).toEqual(expected)
   }),
 )
 

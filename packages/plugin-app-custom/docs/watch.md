@@ -18,16 +18,30 @@ through a server that also attaches the GPT Live **sideband**. Spike code, logs 
 
 ```text
 Watch ──HTTPS──▶ watch-mac.alexandrem.com.br (Cloudflare Access, service token)
-                  └▶ cloudflared (Mac tunnel) ──▶ http://host.docker.internal:4192 ──▶ watch gateway (plugin)
-                                                                                         ├▶ live-activity hub, requests, sessions
-                                                                                         └▶ llm-proxy: GPT Live call + sideband
-Watch ══UDP (Opus, DTLS/ICE-lite)══▶ OpenAI GPT Live  (media never crosses the Mac)
+                  └▶ cloudflared (Mac tunnel) ──▶ http://host.docker.internal:4192 ──▶ watch gateway (Mac's plugin)
+Watch ──HTTPS──▶ watch-linux.alexandrem.com.br (same Access policy, path ^/watch/v1/ only)
+                  └▶ cloudflared (Swarm tunnel) ──▶ http://opencode-svc:4192 ──────▶ watch gateway (Linux BRS's plugin)
+                     each gateway ├▶ its server's live-activity state, requests, sessions
+                                  └▶ llm-proxy: GPT Live call + sideband
+Watch ══UDP (Opus, DTLS/ICE-lite)══▶ OpenAI GPT Live  (media never crosses a server)
 ```
 
-- The gateway listens on `127.0.0.1:${OPENCODE_WATCH_GATEWAY_PORT:-4192}`, **one listener per server process**
-  (same process-global hub pattern as `custom.live-activity`). It is not the OpenCode API: it exposes only the
-  allowlisted routes below, so the public hostname never reaches shell, files or arbitrary sessions.
-- The Cloudflare side already exists (`core-infra/cloudflare-one/watch-mac-cloudflare-manifest.json`). The service
+- Every server runs its own gateway, **one listener per server process** (same process-global hub pattern as
+  `custom.live-activity`), on `${OPENCODE_WATCH_GATEWAY_HOSTNAME:-127.0.0.1}:${OPENCODE_WATCH_GATEWAY_PORT:-4192}`.
+  It is not the OpenCode API: it exposes only the allowlisted routes below, so a public hostname never reaches
+  shell, files or arbitrary sessions. The Mac keeps the defaults (loopback, reached by its own tunnel through
+  `host.docker.internal`); the Linux BRS container sets `OPENCODE_WATCH_GATEWAY_HOSTNAME=0.0.0.0`, since the Swarm's
+  cloudflared is another container on the `public` network.
+- `OPENCODE_WATCH_GATEWAY_URL` is the public address `pair` hands the watch, default `https://watch-mac.alexandrem.com.br`
+  (the Mac). Every other server with a gateway sets its own (Linux BRS: `https://watch-linux.alexandrem.com.br`); a
+  server that leaves the default sends the watch to the Mac's gateway, which does not know its token (401).
+- **Several servers (rev. 2026-11-15):** the watch is paired with **every** server saved in the iPhone app, as many
+  pairings, and works like Sessões' "Todos": it reads each server's `/state`, joins them on the watch (each row tagged
+  with its server) and opens and answers a request on that request's own gateway. Nothing crosses between servers,
+  so there is no hub in the way and no delay. Voice calls the Sessão mestra of the hub (`custom.instance` `hub: true`,
+  the Linux BRS), else the first paired server.
+- The Cloudflare side: `core-infra/cloudflare-one/watch-mac-cloudflare-manifest.json` (Mac) and
+  `watch-linux-cloudflare-manifest.json` (Linux BRS, the same `opencode-watch` service token). The service
   token (`{clientId, clientSecret}`) comes from `OPENCODE_WATCH_ACCESS_JSON`, which the server keeps in its private
   environment from MyCredentials (`opencode/watch/cf-access-service-token.json`, `manual.json` `mycred`), or else from the fallback
   file `~/.config/opencode/watch/cf-access-service-token.json` (0600). Every watch
@@ -38,16 +52,22 @@ Watch ══UDP (Opus, DTLS/ICE-lite)══▶ OpenAI GPT Live  (media never cro
 
 ## Pairing and authentication
 
-1. The iPhone app (connected through WARP as today) calls RPC `custom.watch` → `pair({ deviceName })`.
+1. The iPhone app (connected through WARP as today) calls RPC `custom.watch` → `pair({ deviceName })` **on every saved
+   server**.
 2. The backend creates a **watch device token** (random 32 bytes, base64url), stores only its SHA-256 with
    `{deviceID, name, createdAt, lastSeenAt}` in plugin storage, and returns:
-   `{ deviceID, deviceToken, gatewayURL: "https://watch-mac.alexandrem.com.br", access: { clientId, clientSecret },
+   `{ deviceID, deviceToken, gatewayURL: OPENCODE_WATCH_GATEWAY_URL, access: { clientId, clientSecret },
 voice: { voiceID } }` (`voiceID` defaults to `rio`; the iPhone overrides it with its local voice preference).
-3. The iPhone sends that payload to the watch with WatchConnectivity (`transferUserInfo`, plus
-   `updateApplicationContext` for re-sync). The watch stores it in its Keychain. The iPhone keeps nothing.
+3. The iPhone checks each pairing with `GET /watch/v1/ping` on the gateway it names before sending it: a server whose
+   gateway rejects its own token (it is not published, or it names another server's) has that pairing revoked and is
+   reported in Você → Apple Watch instead of reaching the watch. It sends every pairing that answered, each with its
+   server (`{ id, name, hub }`, the app's saved server), as one set over WatchConnectivity (`transferUserInfo`, plus
+   `updateApplicationContext` for re-sync). The watch stores the set in its Keychain. The iPhone keeps nothing.
 4. Every gateway request carries `Authorization: Bearer <deviceToken>` in addition to the Access headers. Unknown,
-   revoked or malformed tokens get `401` with no detail.
-5. `custom.watch` → `devices()` returns `{ devices: [{ deviceID, name, createdAt, lastSeenAt }] }`; `revoke({ deviceID })` removes one. The iOS app shows them in
+   revoked or malformed tokens get `401` with no detail; the watch then drops that server's pairing only.
+5. `custom.watch` → `devices()` returns `{ devices: [{ deviceID, name, createdAt, lastSeenAt? }] }`, `lastSeenAt`
+   absent until the watch first calls the gateway (rev. 2026-11-15: it used to repeat `createdAt`, which made a
+   pairing that never arrived look used); `revoke({ deviceID })` removes one. The iOS app shows them per server in
    Você → Apple Watch with "Parear Apple Watch" and "Remover".
 6. `custom.watch` → `stats()` (diagnostics, rev. 2026-10-29) returns in-memory counters since the server started:
    `{ at, devices: [{ deviceID, day: Usage, hours: [{ hour } & Usage] }] }`, `day` summing the last 24 hours and
@@ -275,13 +295,15 @@ widget push type in `test/live-activity-apns.test.ts`.
 **One gateway per process.** The plugin module is evaluated again for every Location, so the gateway lives in the
 global slot `globalThis.opencodeCustomWatchGateway`, like the Live Activity hub: the first instance starts it, the
 last one to leave stops it (listener, calls, pushes). Requests use the oldest attached instance's context. The
-listener binds `127.0.0.1:${OPENCODE_WATCH_GATEWAY_PORT:-4192}`; a busy port logs one warning and is retried every
+listener binds `${OPENCODE_WATCH_GATEWAY_HOSTNAME:-127.0.0.1}:${OPENCODE_WATCH_GATEWAY_PORT:-4192}` (the log says
+`Watch gateway listening` with both); a busy port logs one warning and is retried every
 30 s without failing the plugin. `custom-sandbox.ts` sets the variable from `--watch-port` (default `0`, any free
 port) and refuses 4192.
 
 **Pairing and authentication.** `pair` creates `watch_<random>` and a 32-byte base64url token; storage
-(`watch:devices`) keeps its SHA-256, `createdAt`, `lastSeenAt` (written at most once a minute; `devices()` reports
-`createdAt` until the watch first calls the gateway) and the widget token.
+(`watch:devices`) keeps its SHA-256, `createdAt`, `lastSeenAt` (written at most once a minute; absent from storage
+and from `devices()` until the watch first calls the gateway) and the widget token. `gatewayURL` is
+`OPENCODE_WATCH_GATEWAY_URL` (trailing slashes removed), read at each `pair`.
 `access` is read at each `pair` from `OPENCODE_WATCH_ACCESS_JSON`, else from
 `~/.config/opencode/watch/cf-access-service-token.json`; the log says `Watch Cloudflare Access token read` with its
 `source`. With neither, or with content that is not `{clientId, clientSecret}`, `pair` fails with `operation_failed`

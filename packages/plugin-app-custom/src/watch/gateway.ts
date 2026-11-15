@@ -31,6 +31,10 @@ export type Access = { readonly clientId: string; readonly clientSecret: string 
 
 export type GatewayOptions = {
   readonly port: Effect.Effect<number>
+  /** The listener's address: loopback, or every interface where a tunnel reaches it from another container. */
+  readonly hostname: Effect.Effect<string>
+  /** The public address of this server's gateway, handed to the watch at pairing. */
+  readonly gatewayURL: Effect.Effect<string>
   readonly access: Effect.Effect<Access, unknown>
   readonly apns: Effect.Effect<Client | undefined>
   readonly widgetBundleID: Effect.Effect<string>
@@ -87,12 +91,13 @@ export function makeGateway(options: GatewayOptions) {
   const listen = (running: Running) =>
     Effect.gen(function* () {
       const port = yield* options.port
+      const hostname = yield* options.hostname
       const context = yield* Effect.context<never>()
       const warned = { at: false }
       for (;;) {
         const served = yield* Effect.try(() =>
           Bun.serve({
-            hostname: "127.0.0.1",
+            hostname,
             port,
             // Event long-polls hold a request for up to 25 s.
             idleTimeout: 60,
@@ -105,7 +110,7 @@ export function makeGateway(options: GatewayOptions) {
             running.scope,
             Effect.promise(() => served.value.stop(true)),
           )
-          return yield* Effect.logInfo("Watch gateway listening", { port: served.value.port })
+          return yield* Effect.logInfo("Watch gateway listening", { hostname, port: served.value.port })
         }
         if (!warned.at) yield* Effect.logWarning("Watch gateway port is busy; retrying", { port })
         warned.at = true
@@ -269,9 +274,10 @@ export function makeGateway(options: GatewayOptions) {
         const member = ctx()
         if (!member) return yield* Effect.fail(new Error("Watch gateway is not running"))
         const access = yield* options.access
+        const gatewayURL = yield* options.gatewayURL
         const paired = yield* makeDevices(member.storage).pair(input.deviceName)
-        yield* Effect.logInfo("Watch paired", { deviceID: paired.deviceID })
-        return { ...paired, gatewayURL: Watch.gatewayURL, access, voice: { voiceID: Watch.defaultVoiceID } }
+        yield* Effect.logInfo("Watch paired", { deviceID: paired.deviceID, gatewayURL })
+        return { ...paired, gatewayURL, access, voice: { voiceID: Watch.defaultVoiceID } }
       }),
     devices: () =>
       Effect.gen(function* () {
@@ -279,12 +285,12 @@ export function makeGateway(options: GatewayOptions) {
         if (!member) return { devices: [] }
         const devices = yield* makeDevices(member.storage).list()
         return {
+          // A watch that never called the gateway has no `lastSeenAt`: the iPhone tells it from one in use.
           devices: devices.map((device) => ({
             deviceID: device.deviceID,
             name: device.name,
             createdAt: device.createdAt,
-            // The contract always lists it; a watch that never called the gateway was last seen at pairing.
-            lastSeenAt: device.lastSeenAt ?? device.createdAt,
+            ...(device.lastSeenAt === undefined ? {} : { lastSeenAt: device.lastSeenAt }),
           })),
         }
       }),

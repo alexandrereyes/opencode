@@ -21,6 +21,23 @@ export const accessFile = path.join(os.homedir(), ".config/opencode/watch/cf-acc
 export const accessVariable = "OPENCODE_WATCH_ACCESS_JSON"
 export const defaultPort = 4192
 
+const setting = (name: string, fallback: string) =>
+  Config.String(name).pipe(
+    Config.withDefault(fallback),
+    Effect.orElseSucceed(() => fallback),
+    Effect.map((value) => value.trim() || fallback),
+  )
+
+/**
+ * Where this server's gateway listens and the public address the watch is given for it. Defaults are the Mac's:
+ * loopback behind its own tunnel, `watch-mac`. A server in a container sets `OPENCODE_WATCH_GATEWAY_HOSTNAME=0.0.0.0`
+ * so the tunnel's container reaches it, and `OPENCODE_WATCH_GATEWAY_URL` to its own public hostname.
+ */
+export const gatewayAddress = {
+  hostname: setting("OPENCODE_WATCH_GATEWAY_HOSTNAME", "127.0.0.1"),
+  url: setting("OPENCODE_WATCH_GATEWAY_URL", Watch.gatewayURL).pipe(Effect.map((url) => url.replace(/\/+$/, ""))),
+}
+
 const Access = Schema.fromJsonString(Schema.Struct({ clientId: Schema.String, clientSecret: Schema.String }))
 
 /**
@@ -65,6 +82,8 @@ export function sharedGateway() {
       Config.withDefault(defaultPort),
       Effect.orElseSucceed(() => defaultPort),
     ),
+    hostname: gatewayAddress.hostname,
+    gatewayURL: gatewayAddress.url,
     access: Effect.suspend(() => readAccess()),
     // The Live Activity hub reports the APNs configuration at startup; the gateway's own load stays quiet.
     apns: load(false),
