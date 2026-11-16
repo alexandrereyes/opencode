@@ -83,14 +83,15 @@ export const ChromeMeta = Schema.Struct({
   session: optional(Schema.String),
   /** Directory where `playwright-cli` ran: its sessions are per workspace, so `default` differs between worktrees. */
   workspace: optional(Schema.String),
-  /** CDP HTTP endpoint, for example `http://127.0.0.1:9333`. */
+  /** CDP HTTP endpoint, for example `http://127.0.0.1:9333`; for a browse resource, the browse relay's. */
   cdp: optional(Schema.String),
   /**
-   * rev. 2026-11-07 (`browse-handoff-remoto.md`): a browse session (`session_new` id) reached through the browse relay
-   * at `cdp`. Only that session's tabs are visible on the connection, and only its handoff's tab while one waits.
+   * rev. 2026-11-07 (`browse-handoff-remoto.md`): a browse resource, reached through the browse relay at `cdp`. Since
+   * rev. 2026-11-16 (browse 0.1.0) browse's owner of an OpenCode session's tabs (`mcp-` and 8 hex digits): only its tabs
+   * are shown, and only its handoff's tab while one waits.
    */
   browse: optional(Schema.String),
-  /** CDP target (page) the viewer follows. */
+  /** CDP target (page) the viewer follows; for a browse resource (rev. 2026-11-16), browse's integer tab ID. */
   targetID: optional(Schema.String),
   url: optional(Schema.String),
   title: optional(Schema.String),
@@ -144,7 +145,7 @@ export const Capabilities = Schema.Struct({
   stop: optional(Schema.Boolean),
 }).annotate({ identifier: "Resources.Capabilities" })
 
-/** rev. 2026-11-07: the browse handoff a `chrome:browse:<session>` resource waits on (`browse-handoff-remoto.md`). */
+/** rev. 2026-11-07: the browse handoff a `chrome:browse:<owner>` resource waits on (`browse-handoff-remoto.md`). */
 export interface Handoff extends Schema.Schema.Type<typeof Handoff> {}
 export const Handoff = Schema.Struct({
   /** `custom.browser-handoffs` item ID. */
@@ -187,34 +188,34 @@ export const Resource = Schema.Struct({
   /** The agents' latest shell commands that named it, newest first; absent until one does (and on older hubs). */
   activity: optional(Schema.Array(Activity)),
   /**
-   * rev. 2026-11-07: see `Capabilities`; present on `chrome:browse:<session>` resources only (rev. 2026-11-09:
+   * rev. 2026-11-07: see `Capabilities`; present on `chrome:browse:<owner>` resources only (rev. 2026-11-09:
    * `browseCapabilities` while no handoff waits, `handoffCapabilities` while one does), absent on older hubs.
    */
   capabilities: optional(Capabilities),
-  /** rev. 2026-11-07: present on a `chrome:browse:<session>` resource while a browse handoff waits on its tab. */
+  /** rev. 2026-11-07: present on a `chrome:browse:<owner>` resource while a browse handoff waits on its tab. */
   handoff: optional(Handoff),
   /**
-   * rev. 2026-11-09: the machine a `chrome:browse:<session>` resource's Chrome runs on, as `Handoff.machine` (which
+   * rev. 2026-11-09: the machine a `chrome:browse:<owner>` resource's Chrome runs on, as `Handoff.machine` (which
    * keeps it while a handoff waits): the Mac app offers "Abrir no Chrome" only when it equals its own.
    */
   machine: optional(Schema.String),
 }).annotate({ identifier: "Resources.Resource" })
 
 /**
- * rev. 2026-11-07: `end` reasons a viewer of a browse handoff's resource receives when the handoff stops waiting. Since
- * rev. 2026-11-09 the resource stays (the browse session goes on) and the message says so with `kept: true`. Other
- * resources keep ending with `ended`.
- */
-/**
- * rev. 2026-11-09 (`browse-handoff-remoto.md`): a browse session's resource while no handoff waits: Alexandre, once he
- * takes control, may navigate and switch among the session's own tabs (the relay keeps them to the session's allowlist),
- * and on the Mac bring the tab to the front.
+ * rev. 2026-11-09 (`browse-handoff-remoto.md`): a browse resource while no handoff waits: Alexandre, once he takes
+ * control, may navigate and switch among the session's own tabs (browse keeps each to its allowlist), and on the Mac
+ * bring the tab to the front.
  */
 export const browseCapabilities = { navigation: true, tabs: true, focus: true } as const satisfies Capabilities
 
 /** While a browse handoff waits: only its tab, no navigation (`browse-handoff-remoto.md`, section 3). */
 export const handoffCapabilities = { navigation: false, tabs: false, focus: true } as const satisfies Capabilities
 
+/**
+ * rev. 2026-11-07: `end` reasons a viewer of a browse handoff's resource receives when the handoff stops waiting. Since
+ * rev. 2026-11-09 the resource stays (the session's tabs go on) and the message says so with `kept: true`. Other
+ * resources keep ending with `ended`.
+ */
 export const handoffEndReasons = {
   completed: "handoff_completed",
   timeout: "handoff_timeout",
@@ -316,7 +317,8 @@ export const Definition = Rpc.define({
      * rev. 2026-11-07 (`browse-handoff-remoto.md`): brings the resource's tab to the front of its window and that window
      * to the front of its browser, for "Abrir no Chrome" on the Mac (which then activates the browser app). Only
      * resources with `capabilities.focus: true`, only while their handoff waits, only their own tab:
-     * `unavailable { reason: "unsupported" }` otherwise (`not_found` once the resource is gone).
+     * `unavailable { reason: "unsupported" }` otherwise (`not_found` once the resource is gone). Since rev. 2026-11-16
+     * (browse 0.1.0, which brings no tab forward) it answers `failed`, and the Mac app selects the tab itself.
      */
     focus: {
       input: Schema.toStandardSchemaV1(FocusInput),

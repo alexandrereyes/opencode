@@ -383,7 +383,7 @@ const used = {
   meta: { kind: "chrome" as const, cdp: "http://127.0.0.1:19988", browse: "login" },
   owner: { sessionID: "ses_child", rootSessionID: "ses_root", agent: "build" },
   used: true,
-  activity: { call: "call_1", command: "browse execute", running: true },
+  activity: { call: "call_1", command: "browse navigate", running: true },
 }
 
 test("a browse session in use is a resource: free to navigate, focusable on its Mac, controlled like any other", async () => {
@@ -396,7 +396,7 @@ test("a browse session in use is a resource: free to navigate, focusable on its 
     owner: used.owner,
     capabilities: Resources.browseCapabilities,
     machine: machineID(platform),
-    activity: [{ command: "browse execute", running: true, sessionID: "ses_child", agent: "build" }],
+    activity: [{ command: "browse navigate", running: true, sessionID: "ses_child", agent: "build" }],
   })
   expect(resource.handoff).toBeUndefined()
   expect(Schema.decodeUnknownSync(Resources.Resource)(resource)).toBeDefined()
@@ -441,10 +441,12 @@ test("a handoff on a browse session's resource locks it in place and, when it en
   })
   expect(fake.updated.at(-1)).toMatchObject({ handoff: { id: "brw_1" }, capabilities: Resources.handoffCapabilities })
   expect(viewer.messages.some((message) => !(message instanceof Uint8Array) && message.type === "end")).toBe(false)
-  // An agent's call meanwhile keeps the handoff and its locks.
-  expect(await client.upsert({ ...used, activity: { ...used.activity, call: "call_2" } })).toMatchObject({
+  // An agent's call meanwhile, on another of its tabs, keeps the handoff, its locks and its tab.
+  const tabbed = { ...used, meta: { ...used.meta, targetID: "TAB9" } }
+  expect(await client.upsert({ ...tabbed, activity: { ...used.activity, call: "call_2" } })).toMatchObject({
     handoff: { id: "brw_1" },
     capabilities: Resources.handoffCapabilities,
+    meta: { targetID: "TAB1" },
   })
   await client.finish("chrome:browse:login", Resources.handoffEndReasons.completed)
   expect(await viewer.next((message) => message.type === "end")).toEqual({
@@ -455,6 +457,17 @@ test("a handoff on a browse session's resource locks it in place and, when it en
   const after = await client.get("chrome:browse:login")
   expect(after).toMatchObject({ purpose: "Comprar o tênis", capabilities: Resources.browseCapabilities })
   expect(after.handoff).toBeUndefined()
+  // Without a handoff the agent's call takes the resource to the tab it works in, and a live viewer follows.
+  const again = socket(
+    `ws://127.0.0.1:${server.port}/resources/${encodeURIComponent("chrome:browse:login")}/stream?ticket=${hub.ticket("chrome:browse:login", "view")?.ticket}`,
+  )
+  await again.opened
+  await again.next((message) => message.type === "hello")
+  expect(await client.upsert({ ...tabbed, activity: { ...used.activity, call: "call_3" } })).toMatchObject({
+    meta: { targetID: "TAB9" },
+  })
+  expect(fake.updated.at(-1)).toMatchObject({ meta: { targetID: "TAB9" } })
+  again.ws.close()
   hub.close()
 })
 

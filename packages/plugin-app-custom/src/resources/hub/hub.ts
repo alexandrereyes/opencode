@@ -281,7 +281,7 @@ export function createHub(options: HubOptions) {
   }
 
   /**
-   * A browse session's resource: the handoff's locks while one waits, else `browseCapabilities`. An Android emulator
+   * A session's browse resource: the handoff's locks while one waits, else `browseCapabilities`. An Android emulator
    * known by its AVD can be shut down (`stop`).
    */
   const capabilitiesOf = (entry: Entry): Resources.Capabilities | undefined =>
@@ -298,6 +298,9 @@ export function createHub(options: HubOptions) {
     const base = idFor(input.meta)
     // A serial-made ID can already belong to an entry that is now another AVD: never overwrite it.
     const id = existing?.id ?? (entries.has(base) ? free(base) : base)
+    // While a browse handoff waits, an agent's call never moves its resource off the handoff's tab.
+    const meta =
+      existing?.handoff && !input.handoff && input.meta.kind === "chrome" ? untargeted(input.meta) : input.meta
     const entry: Entry = {
       id,
       kind: input.kind,
@@ -305,7 +308,7 @@ export function createHub(options: HubOptions) {
       ...((input.purpose ?? existing?.purpose) ? { purpose: input.purpose ?? existing?.purpose } : {}),
       ...((input.owner ?? existing?.owner) ? { owner: input.owner ?? existing?.owner } : {}),
       ...((input.startedBy ?? existing?.startedBy) ? { startedBy: input.startedBy ?? existing?.startedBy } : {}),
-      meta: existing ? mergeMeta(existing.meta, input.meta) : input.meta,
+      meta: existing ? mergeMeta(existing.meta, meta) : input.meta,
       status: "running",
       discoveredAt: existing?.discoveredAt ?? at,
       lastUsedAt: input.used || !existing ? at : existing.lastUsedAt,
@@ -361,18 +364,18 @@ export function createHub(options: HubOptions) {
   const register = async (input: Upsert) => {
     const adapter = options.adapters[input.kind]
     if (input.handoff) return handoff(input, input.handoff)
-    // A browse session's tab is the probe's to choose (`upsert` probes at once): an agent's call never moves the viewer
-    // off a waiting handoff's tab.
+    // A browse resource's tab is the agent's call's, or the probe's (`upsert` probes at once); `upsert` keeps a waiting
+    // handoff's.
     const browse = input.meta.kind === "chrome" && input.meta.browse !== undefined
     const meta = adapter.identify && !browse ? await adapter.identify(input.meta).catch(() => input.meta) : input.meta
-    // A browse session's resource says where its Chrome runs, for "Abrir no Chrome".
+    // A browse resource says where its Chrome runs, for "Abrir no Chrome".
     const machineID = meta.kind === "chrome" && browse ? await machine(meta.cdp).catch(() => undefined) : undefined
     return upsert({ ...input, meta }, machineID)
   }
 
   /**
-   * A browse handoff's resource exists only once its tab is known: the adapter must identify it (the relay answers and
-   * the session has the tab), else the registration fails and the handoff gets no resource. `machine` is the hub's.
+   * A browse handoff's resource exists only once its tab is known: the adapter must identify it (the relay lists it for
+   * the owner), else the registration fails and the handoff gets no resource. `machine` is the hub's.
    */
   const handoff = async (input: Upsert, handoff: Resources.Handoff) => {
     const identify = options.adapters[input.kind].identify
@@ -417,14 +420,14 @@ export function createHub(options: HubOptions) {
 
   /**
    * Ends a browse handoff on its resource (`browse-handoff-remoto.md`, Lifecycle): Alexandre's control stops at once,
-   * without a hand-back notice; every viewer gets `end { reason, kept }` and is closed. A browse session's resource stays
+   * without a hand-back notice; every viewer gets `end { reason, kept }` and is closed. A browse resource stays
    * (rev. 2026-11-09: `kept: true`), without its handoff and locks; any other goes. No `changed` event: the plugin
    * announces the handoff's end first and then the resources' (`announce`).
    */
   const finish = async (id: string, reason: string) => {
     const entry = entries.get(id)
     const kept = entry !== undefined && browseOf(entry) !== undefined
-    // A browse session's resource without a waiting handoff has nothing to end.
+    // A browse resource without a waiting handoff has nothing to end.
     if (!entry || (kept && !entry.handoff)) return false
     if (kept) {
       const { handoff: _, capabilities: __, purpose: ___, ...rest } = entry
@@ -454,7 +457,7 @@ export function createHub(options: HubOptions) {
   }
 
   /**
-   * `custom.resources/focus`: only resources whose capabilities offer it, through their adapter: a browse session's tab
+   * `custom.resources/focus`: only resources whose capabilities offer it, through their adapter: a browse resource's tab
    * (rev. 2026-11-09: also while no handoff waits).
    */
   const focus = async (id: string) => {
@@ -586,7 +589,7 @@ export function createHub(options: HubOptions) {
         }),
       ),
     )
-    // A browse session's resource lasts as long as the session: once the relay no longer lists it, it goes at once.
+    // A browse resource lasts as long as its owner has tabs: once the relay lists none (`gone`), it goes at once.
     const ended = results.flatMap((result) =>
       [...result.entries()].flatMap(([id, found]) => {
         const entry = entries.get(id)
@@ -1315,13 +1318,18 @@ export function names(entry: Pick<Entry, "id" | "meta" | "status">, meta: Resour
   return avd === undefined && meta.serial !== undefined && entry.meta.serial === meta.serial
 }
 
-/** The browse session a resource is (`chrome:browse:<session>`), if any. */
+/** The browse owner a resource shows the tabs of (`chrome:browse:<owner>`), if any. */
 export function browseOf(entry: Pick<Entry, "meta">) {
   return entry.meta.kind === "chrome" ? entry.meta.browse : undefined
 }
 
 function chromeOf(entry: Pick<Entry, "meta">) {
   return entry.meta.kind === "chrome" ? entry.meta : undefined
+}
+
+function untargeted(meta: Resources.ChromeMeta): Resources.ChromeMeta {
+  const { targetID: _, ...rest } = meta
+  return rest
 }
 
 function moved(before: Resources.Meta, after: Resources.Meta) {
@@ -1340,7 +1348,7 @@ export function sameResource(a: Resources.Meta, b: Resources.Meta) {
     if (a.avd !== undefined && b.avd !== undefined) return a.avd === b.avd
     return a.serial !== undefined && a.serial === b.serial
   }
-  // A browse session is its own resource, even though every session shares the relay's endpoint.
+  // Each browse owner is its own resource, even though every owner shares the relay's endpoint.
   if (a.kind === "chrome" && b.kind === "chrome" && (a.browse !== undefined || b.browse !== undefined))
     return a.browse === b.browse
   if (a.kind === "chrome" && b.kind === "chrome")

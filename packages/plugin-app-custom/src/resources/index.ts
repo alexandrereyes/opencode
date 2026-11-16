@@ -4,9 +4,8 @@ import { Tool } from "@opencode/schema/tool"
 import { optional } from "@opencode/schema/schema"
 import { Effect, Option, Schema } from "effect"
 import path from "node:path"
-import { sharedCurrentSessions } from "../browser-handoff/current.js"
-import { relayEndpoint, relayFind } from "../browser-handoff/index.js"
 import { limits, sharedRegistry } from "../browser-handoff/registry.js"
+import { relayEndpoint } from "./adapters/browse-relay.js"
 import { makeBrowseResources } from "./browse.js"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
 import { bareSerials, known, parseSimulators, resolveSimulators } from "./discovery.js"
@@ -72,7 +71,7 @@ export const registerResources = Effect.fn("Resources.register")(function* (
           if (!result.token) return { resource: result.resource }
           return { resource: result.resource, ticket: yield* ticketFor(input.id, "control") }
         }).pipe(Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason }))),
-      // `browse-handoff-remoto.md`, section 4: a browse session's tab; while a handoff is on it, only while it waits.
+      // `browse-handoff-remoto.md`, section 4: a session's browse tab; while a handoff is on it, only while it waits.
       focus: (input, context) =>
         call(async () => {
           const hub = hubs.owner(input.id)
@@ -126,16 +125,13 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     ...(owner.rootTitle ? { rootTitle: owner.rootTitle } : {}),
   })
 
-  // A browse session's resource (this machine's browser): registered while agents use it, refused to them while
-  // Alexandre controls it.
+  // A session's browse resource (its tabs in this machine's browser): registered while agents use it, refused to
+  // them while Alexandre controls it.
   const browse = makeBrowseResources({
     hub: hubs.local,
-    current: sharedCurrentSessions(),
-    find: relayFind(),
     family,
     scope: yield* Effect.scope,
-    now: () => Date.now(),
-    endpoint: relayEndpoint(),
+    endpoint: () => relayEndpoint(),
     graceMs: limits.graceMs,
   })
   yield* ctx.tool.hook("execute.before", browse.before)

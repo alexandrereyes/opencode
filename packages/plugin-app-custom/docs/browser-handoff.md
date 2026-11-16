@@ -1,23 +1,25 @@
 # Browser handoffs
 
-Rev. 2026-11-07. When an agent drives Alexandre's Chrome through [browse](https://github.com/anomalyco/browse) and
-calls `handoff("…")` (login, 2FA, captcha, payment), browse's `execute` tool blocks until he clicks **Continue** in the
-tab, for up to 10 minutes. browse reports nothing over MCP meanwhile (no progress, no elicitation), and core drops MCP
-progress anyway, so without this module the session only looks like it is working. This module makes such a call
-attention of kind `browser`: "Precisa de você" in the apps, the Live Activity, the watch and one push. It uses public
-plugin APIs only; no core change.
+Rev. 2026-11-16 (browse 0.1.0: its `handoff` and `demonstrate` tools). Earlier: 2026-11-07. When an agent drives
+Alexandre's Chrome through [browse](https://github.com/anomalyco/browse) and asks him to do something only a person can
+(login, 2FA, captcha, payment), browse's `handoff` tool blocks until he clicks **Continue** in the tab (or browse's
+toolbar button), for up to 10 minutes; `demonstrate` does the same while it records what he shows. browse reports
+nothing over MCP meanwhile (no progress, no elicitation), and core drops MCP progress anyway, so without this module the
+session only looks like it is working. This module makes such a call attention of kind `browser`: "Precisa de você" in
+the apps, the Live Activity, the watch and one push. It uses public plugin APIs only; no core change.
 
 ## Detection
 
 - `ctx.tool.hook("execute.before")` and `"execute.after"` fire for every tool call of the plugin's Location,
   including the calls inside Code Mode's `execute` (core runs `beforeExecute`/`executeTool` for each inner call).
   Their `id` is the tool part of the transcript: Code Mode's `execute`, or browse's own call when it is a direct tool.
-- A call counts when its tool is `browse_execute` (or `browse.execute`) and its `code` calls `handoff(` or
-  `demonstrate(` outside comments (`detect.ts`). The message is that call's first string literal argument (a
-  template's `${…}` reads as `…`), clipped to 120 characters; without one, `Conclua a etapa no navegador e clique em
-  Continue` (`Demonstre o fluxo…` for `demonstrate`).
+- A call counts when its tool is browse's `handoff` or `demonstrate` (`browse_handoff`, `browse.handoff`,
+  `browse_demonstrate`, `browse.demonstrate`; `detect.ts`). The message is the call's `message`, whitespace collapsed
+  and clipped to 120 characters; without one, `Conclua a etapa no navegador e clique em Continue` (`Demonstre o fluxo…`
+  for `demonstrate`). Its `tab` is where the resource of `browse-handoff-remoto.md` shows it.
 - It **waits** once it has run for 3 s (`limits.graceMs`, the permission alert delay), unless it ended before.
-- It **ends** on `execute.after` (same input object, or the same code in the same tool part when a hook replaced it),
+- It **ends** on `execute.after` (same input object, or the same message and tab in the same tool part when a hook
+  replaced it),
   on `session.tool.success`/`failed` of its tool part (Code Mode interrupts pending inner calls when its program
   returns), on `session.execution.succeeded`/`failed`/`interrupted` of its session (an interruption skips the hook),
   on `session.archived`/`deleted`, and when its Location unloads. A server restart forgets everything, as the call
@@ -28,10 +30,10 @@ plugin APIs only; no core change.
 
 ### False positives and misses
 
-It is a heuristic. A `handoff(` behind an `if` that does not run, or code that waits more than 3 s for something else
-before or after a handoff it never reaches, shows as waiting for as long as the call runs. A handoff passed through a
-variable (`const h = handoff; await h(…)`) or built with `eval` is missed. browse's other tools (`secrets_refresh`
-with an auth failure) can hand off too and are not detected.
+Since rev. 2026-11-16 the tool itself says it hands off, so there is no heuristic left: a `handoff` call that browse
+refuses at once (no `tab`, another owner's tab) ends within the grace period and never shows. browse's own `execute`
+(for clients without a code mode, or `OPENCODE_BROWSER_TOOLS=execute`) is no longer read: OpenCode gets the plain
+tools, and code passed to `execute` is not inspected for `handoff(` any more.
 
 ## RPC `custom.browser-handoffs`
 
@@ -66,9 +68,9 @@ Precedence everywhere: question > permission > browser > failed > working > unre
 
 ## Finishing it from the apps
 
-Rev. 2026-11-07: a handoff whose call names its browse `session` also gets a `resourceID`, the resource that shows its
-tab in the viewer; see `browse-handoff-remoto.md`. Rev. 2026-11-08: so does a call that names none, when the plugin can
-tell the agent's current browse session for sure (`browse-handoff-remoto.md`, "Sessão do browse").
+Rev. 2026-11-07: a waiting handoff also gets a `resourceID`, the resource that shows its tab in the viewer; see
+`browse-handoff-remoto.md`. Rev. 2026-11-16: every handoff whose `tab` the relay lists for the session's owner gets one
+(browse 0.1.0 names the tab in the call; nothing is guessed).
 
 ## Compatibility
 
@@ -79,8 +81,9 @@ tell the agent's current browse session for sure (`browse-handoff-remoto.md`, "S
 ## Tests
 
 `docs/live-activity/state-browser.json` is the normative Live Activity state with a handoff, shared with the
-apps' tests. `test/browser-handoff.test.ts` (detection, grace period, every way a call ends, two Locations, the tracker, the
-notifier, Sessões and the family). `script/e2e-browser-handoff.ts` runs real Luna 6 / low prompts on an owned
-sandbox against `test/fixture/browse-mcp.ts`, a fake browse whose `execute` blocks while its code hands off: no relay,
-no Chrome. It checks every surface above, the clear on Continue and on interruption, and that code without a handoff
-never shows; `--keep-waiting` leaves one session waiting for app captures.
+apps' tests. `test/browser-handoff.test.ts` (detection, the owner and tab of a call, grace period, every way a call ends
+with browse 0.1.0's own answers, two Locations, the tracker, the notifier, Sessões and the family).
+`script/e2e-browser-handoff.ts` runs real Luna 6 / low prompts on an owned sandbox against `test/fixture/browse-mcp.ts`,
+a fake browse whose `handoff` blocks until a release file appears: no relay, no Chrome. It checks every surface above,
+the clear on Continue and on interruption, and that a browse call that is no handoff never shows; `--keep-waiting`
+leaves one session waiting for app captures. `script/browse-relay-check.ts` finishes a real handoff from the viewer.

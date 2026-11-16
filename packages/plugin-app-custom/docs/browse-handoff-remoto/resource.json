@@ -13,7 +13,7 @@
     "kind": "chrome",
     "cdp": "http://127.0.0.1:19988",
     "browse": "github-login",
-    "targetID": "DCE46F98C99EA57BCEEAA18414974AC9",
+    "targetID": "1836872126",
     "url": "https://github.com/login",
     "title": "Sign in to GitHub · GitHub"
   },

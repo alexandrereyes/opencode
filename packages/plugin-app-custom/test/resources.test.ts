@@ -175,23 +175,23 @@ describe("control lock", () => {
     expect(blocking("curl http://127.0.0.1:9333/json", locks)).toBe(browser)
   })
 
-  test("a browse session Alexandre controls: its `browse` commands and its relay, never the word elsewhere", () => {
+  test("a browse tab Alexandre controls: `browse` commands naming it, its relay, never the number elsewhere", () => {
     const tab: Lock = {
-      id: "chrome:browse:login",
+      id: "chrome:browse:mcp-1a2b3c4d",
       kind: "chrome",
       label: "Navegador · loja.example",
-      meta: { kind: "chrome", cdp: "http://127.0.0.1:19988", browse: "login" },
+      meta: { kind: "chrome", cdp: "http://127.0.0.1:19988", browse: "mcp-1a2b3c4d", targetID: "1836872126" },
       expiresAt: 0,
     }
-    expect(blocking("browse execute -s login 'return page.url()'", [tab])).toBe(tab)
-    expect(blocking("curl -s http://127.0.0.1:19988/json/list", [tab])).toBe(tab)
-    expect(blocking("browse execute -s outra 'return 1'", [tab])).toBeUndefined()
-    expect(blocking("grep -rn login src/", [tab])).toBeUndefined()
+    expect(blocking("browse click --tab 1836872126 --x 10 --y 20", [tab])).toBe(tab)
+    expect(blocking(`browse fill --json '{"tab":1836872126,"selector":"#q","value":"x"}'`, [tab])).toBe(tab)
+    expect(blocking("browse tabs close mcp-1a2b3c4d", [tab])).toBe(tab)
+    expect(blocking("curl -s -X POST http://127.0.0.1:19988/tools/call", [tab])).toBe(tab)
+    expect(blocking("browse click --tab 1836872127 --x 10 --y 20", [tab])).toBeUndefined()
+    expect(blocking("echo 1836872126 > /tmp/n", [tab])).toBeUndefined()
     // It is no playwright-cli session: the default one stays free.
     expect(blocking("playwright-cli snapshot", [tab], "/tmp")).toBeUndefined()
-    expect(browseRefusal("login", false)).toContain('sessão do browse "login"')
-    expect(browseRefusal("login", false)).not.toContain("`session`")
-    expect(browseRefusal("login", true)).toContain("passando `session` com a sessão certa")
+    expect(browseRefusal()).toContain("Não tente contornar a trava por outra aba, por outra sessão, pelo shell")
   })
 
   test("lets unrelated commands through", () => {

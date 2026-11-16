@@ -2,10 +2,11 @@ import { existsSync } from "node:fs"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { Option, Schema } from "effect"
 import type { Input } from "../protocol.js"
 import type { Resources } from "../rpc.js"
 import { CDP, type ScreencastMetadata, type TargetInfo, type Transport } from "./cdp.js"
+import { makeBrowseView } from "./chrome-browse.js"
+import { decodeFocus, focusScript, normalizeURL, type ChromeState, type Focus, type Tab } from "./chrome-page.js"
 import { findRelay, Relay, relayAlive, type RelayEndpoint } from "./chrome-relay.js"
 import { size, text } from "./process.js"
 import type { Adapter, Entry, Image, Probe, StreamSink } from "./types.js"
@@ -18,6 +19,8 @@ import type { Adapter, Entry, Image, Probe, StreamSink } from "./types.js"
  * Chrome also listens on a random loopback port and writes it to `<user-data-dir>/DevToolsActivePort`. The adapter finds
  * the daemon of a `-s=<session>` by its command line, its Chrome child, and that file; it never touches a Chrome it
  * did not find this way (such as a personal browser with its own debugging port).
+ *
+ * An agent's tabs in Alexandre's own Chrome through browse (`meta.browse`) go to `chrome-browse.ts` instead.
  */
 
 export const settings = {
@@ -78,45 +81,6 @@ export function shellEnvironment(env: Record<string, string | undefined>, file: 
   env.PLAYWRIGHT_MCP_CONFIG = file
 }
 
-export type Field =
-  | "text"
-  | "multiline"
-  | "password"
-  | "email"
-  | "username"
-  | "url"
-  | "tel"
-  | "number"
-  | "search"
-  | "one-time-code"
-
-/** What the viewer needs to show the right keyboard. Never includes the field's value. */
-export interface Focus {
-  readonly editable: boolean
-  readonly field?: Field
-}
-
-export interface Tab {
-  readonly id: string
-  readonly title: string
-  readonly url: string
-}
-
-/** `meta` payload of the stream; the viewer replaces its state with each one. */
-export interface ChromeState {
-  readonly url: string
-  readonly title: string
-  readonly canGoBack: boolean
-  readonly canGoForward: boolean
-  readonly targetID: string
-  readonly tabs: readonly Tab[]
-  readonly focus: Focus
-  /** Counts taps that landed on an editable field, so the viewer reopens its keyboard on the same field. */
-  readonly editTaps: number
-  /** CSS pixels of the mirrored viewport. */
-  readonly viewport?: { readonly width: number; readonly height: number }
-}
-
 export interface Located {
   readonly pid: number
   readonly daemonPID: number
@@ -130,6 +94,7 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
 } {
   const connections = new Map<string, Promise<Live>>()
   const endpoints = new Map<string, Endpoint>()
+  const browse = makeBrowseView()
 
   const live = (entry: Entry) => {
     const existing = connections.get(entry.id)
@@ -157,113 +122,90 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
       // The process table is read only when a browser has no validated endpoint yet (or lost it).
       let processes: Promise<ProcessRow[]> | undefined
       const scan = () => (processes ??= listProcesses())
-      const result = new Map<string, Probe>()
-      // The relay's sessions, read once per probe and port.
-      const listed = new Map<number, Promise<readonly { id: string }[] | undefined>>()
-      const sessions = (port: number) => {
-        if (!listed.has(port))
-          listed.set(
-            port,
-            relaySessionIDs(port).catch(() => undefined),
-          )
-        return listed.get(port)!
-      }
+      const result = new Map<string, Probe>(await browse.probe(entries.filter(browsed)))
       await Promise.all(
-        entries.map(async (entry) => {
-          const meta = chromeMeta(entry)
-          if (meta?.browse) return void result.set(entry.id, await probeBrowse(entry, meta, sessions))
-          const found = await endpoint(entry, scan).catch(() => undefined)
-          if (!found) {
-            const session = sessionName(entry)
-            // An explicit registration by CDP endpoint disappears with its browser.
-            if (meta && !meta.session && meta.cdp) return void result.set(entry.id, { status: "gone" })
-            return void result.set(entry.id, {
-              status: (await sessionFileExists(session, options.daemonDir)) ? "stopped" : "gone",
-            })
-          }
-          // An attached browser (Alexandre's own Chrome) is alive while its daemon and Playwright server answer; its
-          // tab is read only while someone watches, so a probe never talks to his browser.
-          if (found.port === undefined)
-            return void result.set(entry.id, {
+        entries
+          .filter((entry) => !browsed(entry))
+          .map(async (entry) => {
+            const meta = chromeMeta(entry)
+            const found = await endpoint(entry, scan).catch(() => undefined)
+            if (!found) {
+              const session = sessionName(entry)
+              // An explicit registration by CDP endpoint disappears with its browser.
+              if (meta && !meta.session && meta.cdp) return void result.set(entry.id, { status: "gone" })
+              return void result.set(entry.id, {
+                status: (await sessionFileExists(session, options.daemonDir)) ? "stopped" : "gone",
+              })
+            }
+            // An attached browser (Alexandre's own Chrome) is alive while its daemon and Playwright server answer; its
+            // tab is read only while someone watches, so a probe never talks to his browser.
+            if (found.port === undefined)
+              return void result.set(entry.id, {
+                status: "running",
+                meta: { kind: "chrome", session: sessionName(entry) },
+              })
+            const pages = await listPages(found.port).catch(() => [])
+            const target = choose(pages, meta?.targetID)
+            result.set(entry.id, {
               status: "running",
-              meta: { kind: "chrome", session: sessionName(entry) },
+              meta: {
+                kind: "chrome",
+                ...(meta?.session || !meta?.cdp ? { session: sessionName(entry) } : {}),
+                cdp: `http://127.0.0.1:${found.port}`,
+                ...(target ? { targetID: target.targetId, url: target.url, title: target.title } : {}),
+              },
             })
-          const pages = await listPages(found.port).catch(() => [])
-          const target = choose(pages, meta?.targetID)
-          result.set(entry.id, {
-            status: "running",
-            meta: {
-              kind: "chrome",
-              ...(meta?.session || !meta?.cdp ? { session: sessionName(entry) } : {}),
-              cdp: `http://127.0.0.1:${found.port}`,
-              ...(target ? { targetID: target.targetId, url: target.url, title: target.title } : {}),
-            },
-          })
-        }),
+          }),
       )
       return result
     },
 
     async snapshot(entry) {
+      if (browsed(entry)) return browse.snapshot(entry)
       const browser = await live(entry)
       return browser.use(() => browser.capture(90))
     },
 
     async stream(entry, sink, signal) {
+      if (browsed(entry)) return browse.stream(entry, sink, signal)
       const browser = await live(entry)
       await browser.use(() => browser.stream(sink, signal, (economy) => sharpStill(entry, browser.density, economy)))
     },
 
     async input(entry, event) {
+      if (browsed(entry)) return browse.input(entry, event)
       const browser = await live(entry)
       browser.controlled = true
       await browser.use(() => browser.input(event))
     },
 
     async released(entry) {
+      if (browsed(entry)) return browse.released(entry)
       const browser = await connections.get(entry.id)?.catch(() => undefined)
       if (browser) browser.controlled = false
     },
 
-    /** A browse session's tab is activated through the relay (`Target.activateTarget`); nothing else can be. */
+    /** Only an agent's tab in Alexandre's Chrome offers it (`capabilities.focus`, browse resources). */
     async focus(entry) {
-      if (!chromeMeta(entry)?.browse) throw new Error("Only a browse session's tab can be focused.")
-      const browser = await live(entry)
-      await browser.use(() => browser.activate())
+      if (!browsed(entry)) throw new Error("Only a browse tab can be focused.")
+      await browse.focus()
     },
 
-    /**
-     * A browse session's resource whose handoff started or ended, or whose session moved to another tab: a streaming
-     * connection follows the new tab under the new locks; an idle one closes, so the next use opens it that way.
-     */
+    /** A browse resource moved to another tab, or a handoff started or ended on it (`chrome-browse.ts`). */
     async update(entry) {
-      const opening = connections.get(entry.id)
-      if (!opening) return
-      const browser = await opening.catch(() => undefined)
-      if (!browser) return
-      const meta = chromeMeta(entry)
-      if (browser.streaming) return browser.relock(handoffLocked(entry), meta?.targetID)
-      connections.delete(entry.id)
-      await browser.cdp.close().catch(() => undefined)
+      if (browsed(entry)) await browse.update(entry)
     },
 
     async forget(entry) {
+      if (browsed(entry)) return browse.forget(entry)
       endpoints.delete(entry.id)
       const opening = connections.get(entry.id)
       connections.delete(entry.id)
       await opening?.then((browser) => browser.cdp.close()).catch(() => undefined)
     },
 
-    /** A browse session's handoff tab (`handoffTab`); fails when the relay or the tab cannot be reached. */
-    async identify(meta) {
-      if (meta.kind !== "chrome" || !meta.browse) return meta
-      const port = relayPort(meta)
-      const pages = await listPages(port, meta.browse)
-      const current = await sessionPage(port, meta.browse).catch(() => undefined)
-      const tab = handoffTab(pages, meta.targetID, current)
-      if (!tab) throw new Error(`A sessão ${meta.browse} do browse não tem aba aberta.`)
-      return { ...meta, targetID: tab.targetId, url: tab.url, title: tab.title }
-    },
+    /** A browse handoff's tab, as its owner sees it; fails when the relay or the tab cannot be reached. */
+    identify: (meta) => browse.identify(meta),
 
     async close() {
       const all = [...connections.values()]
@@ -288,11 +230,7 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
         `O navegador da sessão ${sessionName(entry)} foi aberto sem porta de depuração; feche e abra de novo com playwright-cli open.`,
       )
     const cdp = await CDP.connect(found.browser)
-    // A browse session's connection sees only that session's tabs (the relay scopes it); while a handoff waits the
-    // viewer keeps to its tab.
-    const browser = found.browse
-      ? new Live(cdp, chromeMeta(entry)?.targetID, true, handoffLocked(entry))
-      : new Live(cdp, chromeMeta(entry)?.targetID)
+    const browser = new Live(cdp, chromeMeta(entry)?.targetID)
     await browser.init().catch(async (error) => {
       await cdp.close()
       throw error
@@ -338,7 +276,7 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
   async function endpoint(entry: Entry, scan: () => Promise<readonly ProcessRow[]>): Promise<Endpoint> {
     const cached = endpoints.get(entry.id)
     if (cached?.relay && (await relayAlive(cached.relay))) return cached
-    if (cached?.port !== undefined && (await browserURL(cached.port, cached.browse)) === cached.browser) return cached
+    if (cached?.port !== undefined && (await browserURL(cached.port)) === cached.browser) return cached
     endpoints.delete(entry.id)
     const found = await resolve(entry, scan)
     if (found.port !== undefined || found.relay) endpoints.set(entry.id, found)
@@ -348,12 +286,6 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
 
 async function resolve(entry: Entry, scan: () => Promise<readonly ProcessRow[]>): Promise<Endpoint> {
   const meta = chromeMeta(entry)
-  if (meta?.browse) {
-    const port = relayPort(meta)
-    const browser = await browserURL(port, meta.browse)
-    if (!browser) throw new Error(`O browse não responde em ${meta.cdp ?? "seu relay"}.`)
-    return { port, browser, browse: meta.browse }
-  }
   if (meta && !meta.session && meta.cdp) {
     const port = Number(URL.parse(meta.cdp)?.port)
     const browser = await browserURL(port)
@@ -384,13 +316,8 @@ interface Endpoint {
   readonly port?: number
   /** An attached session's browser, reached through its daemon (`chrome-relay.ts`). */
   readonly relay?: RelayEndpoint
-  /**
-   * The browser's `webSocketDebuggerUrl`, unique per launch. For a browse session it carries the relay token: it stays
-   * in memory and never reaches a message, a log or the hub.
-   */
+  /** The browser's `webSocketDebuggerUrl`, unique per launch. */
   readonly browser: string
-  /** A browse session reached through the browse relay at `port` (`meta.browse`). */
-  readonly browse?: string
   /** How to run `playwright-cli` against this browser's session: the daemon's Node, CLI and working directory. */
   readonly daemon?: { readonly node: string; readonly cli: string; readonly cwd: string }
 }
@@ -403,133 +330,11 @@ async function daemonOf(row: ProcessRow | undefined) {
   return { node: match[1]!, cli: path.join(path.dirname(match[2]!), "..", "tools", "cli-client", "cli.js"), cwd }
 }
 
-async function browserURL(port: number, browse?: string) {
-  const version = await fetchJSON<{ webSocketDebuggerUrl?: string }>(port, "/json/version", 1_500, browse).catch(
+async function browserURL(port: number) {
+  const version = await fetchJSON<{ webSocketDebuggerUrl?: string }>(port, "/json/version", 1_500).catch(
     () => undefined,
   )
   return version?.webSocketDebuggerUrl
-}
-
-/** The browse relay's port: `meta.cdp`'s, else browse's default. */
-function relayPort(meta: Resources.ChromeMeta) {
-  const port = Number(URL.parse(meta.cdp ?? "")?.port)
-  return Number.isInteger(port) && port > 0 ? port : 19988
-}
-
-/**
- * The browse relay's token, as browse itself finds it (`OPENCODE_BROWSER_HOME`, else `$XDG_DATA_HOME/browse`, else
- * `~/.local/share/browse`; `OPENCODE_BROWSE_RELAY_TOKEN_FILE` names the file directly). Read per request, used only in
- * the headers below and kept out of every message.
- */
-export function relayTokenFile(env: Record<string, string | undefined> = process.env) {
-  if (env.OPENCODE_BROWSE_RELAY_TOKEN_FILE) return env.OPENCODE_BROWSE_RELAY_TOKEN_FILE
-  const xdg = env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME) ? env.XDG_DATA_HOME : undefined
-  const root = env.OPENCODE_BROWSER_HOME || path.join(xdg ?? path.join(os.homedir(), ".local/share"), "browse")
-  return path.join(root, "relay-token")
-}
-
-async function relayAuthorization() {
-  const token = (
-    await Bun.file(relayTokenFile())
-      .text()
-      .catch(() => "")
-  ).trim()
-  if (!token) throw new Error("O token do relay do browse não pôde ser lido.")
-  return `Bearer ${token}`
-}
-
-/** The relay answers only with its token, and scopes `/json/version`'s WebSocket to the session in the header. */
-async function browseHeaders(browse: string): Promise<Record<string, string>> {
-  return { authorization: await relayAuthorization(), "opencode-browser-session-id": browse }
-}
-
-/**
- * The relay's sessions with when each last changed (`updatedAt`: an `execute` starting or ending in it, among others),
- * and nothing else they hold (`/cli/sessions`). Answers in milliseconds; a session whose time cannot be read is left out.
- */
-export async function relaySessions(port: number) {
-  const response = await fetch(`http://127.0.0.1:${port}/cli/sessions`, {
-    signal: AbortSignal.timeout(1_500),
-    headers: { authorization: await relayAuthorization() },
-  })
-  if (!response.ok) throw new Error(`browse /cli/sessions answered ${response.status}`)
-  const listed = (await response.json()) as { sessions?: { id?: unknown; updatedAt?: unknown }[] }
-  return (listed.sessions ?? []).flatMap((session) => {
-    const updatedAt = typeof session.updatedAt === "string" ? Date.parse(session.updatedAt) : NaN
-    return typeof session.id === "string" && Number.isFinite(updatedAt) ? [{ id: session.id, updatedAt }] : []
-  })
-}
-
-/** The relay's session IDs (`/cli/sessions`), nothing else they hold. */
-async function relaySessionIDs(port: number) {
-  return (await relaySessions(port)).map((session) => ({ id: session.id }))
-}
-
-/** A browse session's resource keeps to one tab, without navigation, while a handoff waits on it. */
-function handoffLocked(entry: Pick<Entry, "handoff" | "capabilities">) {
-  return entry.handoff !== undefined || entry.capabilities?.tabs === false
-}
-
-/**
- * A browse session's resource (`browse-handoff-remoto.md`, rev. 2026-11-09): `gone` once the relay answers without
- * the session (the hub then removes it); `stopped` while the relay does not answer or the session has no tab; else
- * `running` on the tab to follow: the handoff's while one waits (only that one), else the one followed so far, else the
- * session's own page. Every list is filtered to the session before anything leaves the adapter.
- */
-async function probeBrowse(
-  entry: Entry,
-  meta: Resources.ChromeMeta,
-  sessions: (port: number) => Promise<readonly { id: string }[] | undefined>,
-): Promise<Probe> {
-  const browse = meta.browse!
-  const port = relayPort(meta)
-  const listed = await sessions(port)
-  if (!listed) return { status: "stopped" }
-  if (!listed.some((session) => session.id === browse)) return { status: "gone" }
-  const pages = await listPages(port, browse).catch(() => undefined)
-  if (!pages) return { status: "stopped" }
-  const target = handoffLocked(entry)
-    ? pages.find((page) => page.targetId === meta.targetID)
-    : handoffTab(pages, meta.targetID, await sessionPage(port, browse).catch(() => undefined))
-  if (!target) return { status: "stopped" }
-  return {
-    status: "running",
-    meta: {
-      kind: "chrome",
-      browse,
-      cdp: `http://127.0.0.1:${port}`,
-      targetID: target.targetId,
-      url: target.url,
-      title: target.title,
-    },
-  }
-}
-
-/** The browse session's own page, as the relay reports it (`/cli/sessions`, read for this session only). */
-async function sessionPage(port: number, browse: string) {
-  const listed = await fetchJSON<{ sessions?: { id?: string; pageUrl?: string | null }[] }>(
-    port,
-    "/cli/sessions",
-    1_500,
-    browse,
-  )
-  return listed.sessions?.find((session) => session.id === browse)?.pageUrl ?? undefined
-}
-
-/**
- * The tab a browse handoff waits on, among its session's pages: the one already followed, else the session's own page
- * (handoffs wait on it unless the code passes another), else the newest with content.
- */
-export function handoffTab<T extends Pick<TargetInfo, "targetId" | "url">>(
-  pages: readonly T[],
-  preferred?: string,
-  current?: string,
-) {
-  return (
-    pages.find((page) => page.targetId === preferred) ??
-    pages.findLast((page) => current !== undefined && page.url === current) ??
-    choose(pages)
-  )
 }
 
 export const sessionName = (entry: Pick<Entry, "id" | "meta">) =>
@@ -537,6 +342,9 @@ export const sessionName = (entry: Pick<Entry, "id" | "meta">) =>
 
 const chromeMeta = (entry: Pick<Entry, "meta">): Resources.ChromeMeta | undefined =>
   entry.meta.kind === "chrome" ? entry.meta : undefined
+
+/** An agent's tabs in Alexandre's Chrome through browse (`chrome-browse.ts`). */
+const browsed = (entry: Pick<Entry, "meta">) => chromeMeta(entry)?.browse !== undefined
 
 export interface ProcessRow {
   readonly pid: number
@@ -669,25 +477,18 @@ function defaultDaemonDir() {
   return path.join(os.homedir(), "Library", "Caches", "ms-playwright", "daemon")
 }
 
-async function fetchJSON<T>(port: number, pathname: string, timeout = 3_000, browse?: string): Promise<T> {
-  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
-    signal: AbortSignal.timeout(timeout),
-    ...(browse ? { headers: await browseHeaders(browse) } : {}),
-  })
+async function fetchJSON<T>(port: number, pathname: string, timeout = 3_000): Promise<T> {
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, { signal: AbortSignal.timeout(timeout) })
   if (!response.ok) throw new Error(`CDP ${pathname} answered ${response.status}`)
   return response.json() as Promise<T>
 }
 
-type ListedTarget = { id: string; type: string; title: string; url: string; opencodeBrowserSessionId?: string }
+type ListedTarget = { id: string; type: string; title: string; url: string }
 
-/**
- * The browser's pages. The browse relay lists every session's tabs (with their titles and URLs): only `browse`'s own
- * survive, before anything reaches the hub or the apps.
- */
-export async function listPages(port: number, browse?: string) {
-  const targets: ListedTarget[] = await fetchJSON(port, "/json/list", 3_000, browse)
+/** The browser's pages. */
+export async function listPages(port: number) {
+  const targets: ListedTarget[] = await fetchJSON(port, "/json/list", 3_000)
   return targets
-    .filter((target) => browse === undefined || target.opencodeBrowserSessionId === browse)
     .filter((target) => target.type === "page" && !target.url.startsWith("chrome://"))
     .map((target) => ({ targetId: target.id, type: target.type, title: target.title, url: target.url }))
 }
@@ -699,14 +500,6 @@ export function choose<T extends Pick<TargetInfo, "targetId" | "url">>(pages: re
     pages.findLast((page) => page.url !== "about:blank") ??
     pages.at(-1)
   )
-}
-
-/** Normalizes what the viewer typed into the address bar. */
-export function normalizeURL(input: string) {
-  const value = input.trim()
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[^/:]+:\d+/.test(value)) return value
-  const local = /^(localhost|127\.|\[::1\]|0\.0\.0\.0|10\.|192\.168\.|[^/:]+\.local\b)/i.test(value)
-  return `${local ? "http" : "https"}://${value}`
 }
 
 const modifierBits = { alt: 1, control: 2, meta: 4, shift: 8 } as const
@@ -753,58 +546,6 @@ export function keyEvents(key: string, bits: number) {
     },
     { type: "keyUp" as const, key, code, windowsVirtualKeyCode: keyCode, modifiers: bits },
   ]
-}
-
-/** Runs in the page: classifies the focused editable element (through shadow roots and same-origin frames). */
-export const focusScript = `(() => {
-  const classify = (element) => {
-    if (element.isContentEditable) return { editable: true, field: "multiline" }
-    if (element.tagName === "TEXTAREA") return element.disabled || element.readOnly ? { editable: false } : { editable: true, field: "multiline" }
-    if (element.tagName !== "INPUT" || element.disabled || element.readOnly) return { editable: false }
-    const type = (element.type || "text").toLowerCase()
-    if (["button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit"].includes(type)) return { editable: false }
-    const auto = (element.getAttribute("autocomplete") || "").toLowerCase()
-    if (type === "password" || /(current|new)-password/.test(auto)) return { editable: true, field: "password" }
-    if (/one-time-code/.test(auto)) return { editable: true, field: "one-time-code" }
-    if (/username/.test(auto)) return { editable: true, field: "username" }
-    if (type === "email" || /email/.test(auto)) return { editable: true, field: "email" }
-    if (["url", "tel", "number", "search"].includes(type)) return { editable: true, field: type }
-    return { editable: true, field: "text" }
-  }
-  let element = document.activeElement
-  for (let depth = 0; element && depth < 16; depth++) {
-    if (element.shadowRoot && element.shadowRoot.activeElement) { element = element.shadowRoot.activeElement; continue }
-    if (element.tagName === "IFRAME" || element.tagName === "FRAME") {
-      let inner = null
-      try { inner = element.contentDocument && element.contentDocument.activeElement } catch {}
-      if (!inner) return { editable: true, field: "text" }
-      element = inner
-      continue
-    }
-    break
-  }
-  return element ? classify(element) : { editable: false }
-})()`
-
-const fields = new Set<string>([
-  "text",
-  "multiline",
-  "password",
-  "email",
-  "username",
-  "url",
-  "tel",
-  "number",
-  "search",
-  "one-time-code",
-])
-
-export function decodeFocus(value: unknown): Focus {
-  if (typeof value !== "object" || value === null || !("editable" in value) || value.editable !== true)
-    return { editable: false }
-  const field = "field" in value && typeof value.field === "string" && fields.has(value.field) ? value.field : "text"
-  // `fields` holds exactly the `Field` literals.
-  return { editable: true, field: field as Field }
 }
 
 /**
@@ -859,50 +600,24 @@ class Live {
     private readonly preferred?: string,
     /** Alexandre's own browser through a relay: no Playwright stills, no window resizing, a notice when it is hidden. */
     readonly attached = false,
-    /**
-     * A browse handoff waits: only the `preferred` tab. Other tabs never show up, the viewer cannot switch or navigate,
-     * and the connection closes when that tab does. `relock` changes it while streaming.
-     */
-    private locked = false,
   ) {}
-
-  /** A stream runs on this connection (`follow` is set while it does). */
-  get streaming() {
-    return this.follow !== undefined
-  }
-
-  /**
-   * A browse handoff started (`locked`, on its tab) or ended: the running stream moves to `target` when it differs and
-   * the tab list shrinks to it, or grows back to the session's tabs.
-   */
-  async relock(locked: boolean, target?: string) {
-    this.locked = locked
-    if (target && target !== this.targetId && this.follow) await this.follow(target)
-    const targets = await this.cdp.send("Target.getTargets", {}).catch(() => undefined)
-    if (targets) {
-      const pages = targets.targetInfos.filter(isPage)
-      this.tabs = pagesOf(locked ? pages.filter((page) => page.targetId === this.targetId) : targets.targetInfos)
-    }
-    this.publish()
-  }
 
   async init() {
     void this.cdp.closed.then(() => clearTimeout(this.idle))
     await this.cdp.send("Target.setDiscoverTargets", { discover: true })
     const targets = await this.cdp.send("Target.getTargets", {})
     const pages = targets.targetInfos.filter(isPage)
-    const target = this.locked ? pages.find((page) => page.targetId === this.preferred) : choose(pages, this.preferred)
-    if (!target)
-      throw new Error(this.locked ? "A aba do handoff não está aberta." : "O navegador não tem nenhuma aba aberta.")
-    this.tabs = pagesOf(this.locked ? [target] : targets.targetInfos)
+    const target = choose(pages, this.preferred)
+    if (!target) throw new Error("O navegador não tem nenhuma aba aberta.")
+    this.tabs = pagesOf(targets.targetInfos)
     await this.attach(target.targetId)
     this.cdp.on("Target.targetCreated", (event) => this.updateTab(event.targetInfo))
     this.cdp.on("Target.targetInfoChanged", (event) => this.updateTab(event.targetInfo))
     this.cdp.on("Target.targetDestroyed", (event) => {
       this.tabs = this.tabs.filter((tab) => tab.id !== event.targetId)
       if (event.targetId !== this.targetId) return this.publish()
-      // Without a stream the next use reconnects and picks another tab; a handoff's tab has no replacement.
-      if (!this.follow || this.locked) return void this.cdp.close()
+      // Without a stream the next use reconnects and picks another tab.
+      if (!this.follow) return void this.cdp.close()
       void this.follow().catch(() => this.cdp.close())
       this.publish()
     })
@@ -1359,26 +1074,7 @@ class Live {
     return true
   }
 
-  /**
-   * Brings the followed tab to the front of its window (`custom.resources/focus`), on its own CDP session: the browse
-   * relay routes only tab sessions. Chrome refuses `Target.activateTarget` to extensions (browse 0.0.14: "Not
-   * allowed"), and the relay blocks `Page.bringToFront` unless its environment has `OPENCODE_BROWSER_ALLOW_FOREGROUND=1`;
-   * when both refuse, so does this.
-   */
-  async activate() {
-    const refused = (error: unknown) => cdpMessage(error)
-    const activated = await this.cdp
-      .send("Target.activateTarget", { targetId: this.targetId }, this.sessionId)
-      .then(() => undefined, refused)
-    if (activated === undefined) return
-    const front = await this.cdp.send("Page.bringToFront", {}, this.sessionId).then(() => undefined, refused)
-    if (front === undefined) return
-    throw new Error(`O navegador não deixou trazer a aba para a frente (${activated}; ${front.split(":")[0]}).`)
-  }
-
   private async navigate(event: Extract<Input, { type: "navigate" }>) {
-    // The hub refuses these first (`capabilities`); a handoff's tab never leaves its page from the viewer.
-    if (this.locked) throw new Error("not_allowed")
     if (event.action === "reload") return void (await this.cdp.send("Page.reload", {}, this.sessionId))
     if (event.action === "tab") {
       if (!event.target || event.target === this.targetId || !this.tabs.some((tab) => tab.id === event.target)) return
@@ -1459,7 +1155,7 @@ class Live {
   }
 
   private updateTab(info: TargetInfo) {
-    if (!isPage(info) || (this.locked && info.targetId !== this.targetId)) return
+    if (!isPage(info)) return
     const tab = { id: info.targetId, title: info.title, url: info.url }
     const index = this.tabs.findIndex((existing) => existing.id === tab.id)
     this.tabs = index === -1 ? [...this.tabs, tab] : this.tabs.with(index, tab)
@@ -1483,14 +1179,6 @@ class Live {
   private publish() {
     this.sink?.meta({ ...this.state() })
   }
-}
-
-const decodeJSON = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({ message: Schema.String })))
-
-/** A CDP error's own message: the extension relays Chrome's errors as JSON (`{"code":-32000,"message":"…"}`). */
-function cdpMessage(error: unknown) {
-  const text = error instanceof Error ? error.message : String(error)
-  return (text.startsWith("{") ? Option.getOrUndefined(decodeJSON(text))?.message : undefined) ?? text
 }
 
 /**

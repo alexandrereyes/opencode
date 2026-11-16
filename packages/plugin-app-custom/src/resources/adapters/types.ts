@@ -25,7 +25,7 @@ export interface Entry {
   readonly capabilities?: Resources.Capabilities
   /** The browse handoff that waits on this resource's tab (`browse-handoff-remoto.md`). Never persisted. */
   readonly handoff?: Resources.Handoff
-  /** A browse session's machine (`Resources.Resource.machine`), computed by the hub. Never persisted. */
+  /** A browse resource's machine (`Resources.Resource.machine`), computed by the hub. Never persisted. */
   readonly machine?: string
 }
 
