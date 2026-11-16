@@ -382,9 +382,7 @@ test("each way a handoff ends has its outcome, and calls without a tab or a reso
   expect(await outcome("c1", () => run(handoffs.after({ ...browseCall("c1", 5), status: "completed", result })))).toBe(
     "completed",
   )
-  expect(await outcome("c2", () => run(handoffs.after(failed("c2", 5, '{"outcome":"closed","tab":5}'))))).toBe(
-    "failed",
-  )
+  expect(await outcome("c2", () => run(handoffs.after(failed("c2", 5, '{"outcome":"closed","tab":5}'))))).toBe("failed")
   expect(
     await outcome("c3", () =>
       run(handoffs.ended({ type: "session.execution.interrupted", data: { sessionID: ids.live } })),
@@ -452,7 +450,15 @@ test("the hub port registers the locked resource on the handoff's tab, refuses o
     finish: async (id: string, reason: string) => void calls.push(["finish", id, reason]),
     announce: async (ids: readonly string[]) => void calls.push(["announce", ids]),
   })
-  const handoff = { id: "brw_1", sessionID: "ses_child", message: "Entre", since: 5, browse: owner, tab: 3, agent: "build" }
+  const handoff = {
+    id: "brw_1",
+    sessionID: "ses_child",
+    message: "Entre",
+    since: 5,
+    browse: owner,
+    tab: 3,
+    agent: "build",
+  }
   const root = () => Effect.succeed("ses_root")
   const endpoint = async () => "http://127.0.0.1:19993"
   const locked = hubResources(hub({ capabilities, handoff: { id: "brw_1" } }), root, endpoint)
@@ -514,7 +520,10 @@ const browseErrors: readonly { readonly text: string; readonly outcome: BrowserH
     text: "The browser isn't answering (asleep, frozen or very busy?). Wake it or wait a moment, then try again.",
     outcome: "failed",
   },
-  { text: "Tab 3 isn't a browse tab you can use: browse didn't open it for you and the user didn't lend it.", outcome: "failed" },
+  {
+    text: "Tab 3 isn't a browse tab you can use: browse didn't open it for you and the user didn't lend it.",
+    outcome: "failed",
+  },
   { text: "Relay closed", outcome: "failed" },
 ]
 

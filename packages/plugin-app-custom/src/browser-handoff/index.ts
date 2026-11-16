@@ -74,14 +74,14 @@ export interface HandoffResources {
 
 /**
  * How a call that `execute.after` reports ended its handoff (browse 0.1.0). A call that returns ended with Continue
- * (`{"outcome":"continued","tab":…}`); any other outcome makes browse fail it with its JSON as the error text, which the
- * MCP tool reports as is:
+ * (`{"outcome":"continued","tab":…}`); any other outcome makes browse fail it with its JSON as the error text, which
+ * the MCP tool reports as is:
  *
  * - `{"outcome":"timeout",…}` (its 10 minutes, or the call's `timeoutSeconds`) → `timeout`;
  * - `{"outcome":"cancelled",…}` (another handoff replaced it on the tab) → `cancelled`;
  * - `{"outcome":"closed",…}` (the tab went away) → `failed`;
- * - the relay stopping the call (`The call was cancelled by its client.`, `… exited, so it was stopped.`, `… so this was
- *   stopped.`) and any abort or interruption → `cancelled`;
+ * - the relay stopping the call (`The call was cancelled by its client.`, `… exited, so it was stopped.`, `… so this
+ *   was stopped.`) and any abort or interruption → `cancelled`;
  * - anything else (an unresponsive browser, the relay going away, a refused tab) → `failed`.
  */
 export function afterOutcome(event: After): BrowserHandoffs.Outcome {
@@ -104,10 +104,10 @@ export function endedOutcome(event: Ended): BrowserHandoffs.Outcome {
 
 /**
  * One Location's view of browse handoffs (`docs/browser-handoff.md`). `before` records a browse `handoff` or
- * `demonstrate` call and, after `graceMs`, registers its resource (the session's browse resource, on the call's tab) and
- * marks it waiting unless it ended; `after` and the events in `endedTypes` remove it. Only the entries this instance recorded are settled and announced here, so every
- * change is announced once. A waiting handoff's end goes out in the contract's
- * order: its resource's viewers end, then `announce` with `ended`, then the resources' change.
+ * `demonstrate` call and, after `graceMs`, registers its resource (the session's browse resource, on the call's tab)
+ * and marks it waiting unless it ended; `after` and the events in `endedTypes` remove it. Only the entries this
+ * instance recorded are settled and announced here, so every change is announced once. A waiting handoff's end goes out
+ * in the contract's order: its resource's viewers end, then `announce` with `ended`, then the resources' change.
  */
 export function makeHandoffs(input: {
   readonly registry: Registry

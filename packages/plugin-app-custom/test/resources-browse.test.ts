@@ -248,7 +248,9 @@ test("the viewer gets frames in CSS pixels, the page's state and its owner's tab
   await adapter.input!(entry, { type: "navigate", action: "tab", target: "13" })
   await adapter.input!(entry, { type: "navigate", action: "tab", target: "11" })
   await adapter.input!(entry, { type: "navigate", action: "tab", target: "12" })
-  await viewer.until(() => viewer.states.at(-1)?.targetID === "12" && fake.named("screenshot").at(-1)?.arguments.tab === 12)
+  await viewer.until(
+    () => viewer.states.at(-1)?.targetID === "12" && fake.named("screenshot").at(-1)?.arguments.tab === 12,
+  )
   expect(new Set(fake.calls.map((call) => call.arguments.tab).filter((tab) => tab !== undefined))).toEqual(
     new Set([10, 12]),
   )

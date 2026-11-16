@@ -46,7 +46,13 @@ async function setup(
   })
   return { browse, upserts, asked: () => asked, close: () => run(Scope.close(scope, Exit.void)) }
 }
-const call = (id: string, tool: string, input: object, sessionID = S) => ({ tool, sessionID, id, input, agent: "build" })
+const call = (id: string, tool: string, input: object, sessionID = S) => ({
+  tool,
+  sessionID,
+  id,
+  input,
+  agent: "build",
+})
 const done = (id: string, tool: string, input: object, output?: unknown) => ({
   ...call(id, tool, input),
   status: "completed" as const,

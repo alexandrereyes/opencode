@@ -57,7 +57,12 @@ export async function fakeRelay() {
           { type: "image", data: Buffer.from(state.frame).toString("base64"), mimeType: "image/jpeg" },
           {
             type: "text",
-            text: JSON.stringify({ width, height, format: "jpeg", ...(state.view.scale === 1 ? {} : { scale: state.view.scale }) }),
+            text: JSON.stringify({
+              width,
+              height,
+              format: "jpeg",
+              ...(state.view.scale === 1 ? {} : { scale: state.view.scale }),
+            }),
           },
         ],
       }

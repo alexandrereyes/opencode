@@ -6,9 +6,9 @@ import { browseRefusal } from "./lock.js"
 import type { HubClient } from "./supervisor.js"
 
 /**
- * An OpenCode session's browse resource (`chrome:browse:<owner>`, `browse-handoff-remoto.md` rev. 2026-11-16): whenever
- * an agent uses the browser, the tab it works in shows in Recursos, live, and Alexandre can take control. While he holds
- * it the session's browse calls are refused; the hub removes the resource once the owner has no tab left.
+ * An OpenCode session's browse resource (`chrome:browse:<owner>`, `browse-handoff-remoto.md` rev. 2026-11-16):
+ * whenever an agent uses the browser, the tab it works in shows in Recursos, live, and Alexandre can take control. While
+ * he holds it the session's browse calls are refused; the hub removes the resource once the owner has no tab left.
  */
 
 /**

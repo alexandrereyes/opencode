@@ -41,7 +41,12 @@ const chrome = args.values.chrome ?? ""
 const port = Number(args.values.port)
 if (!browse || !extension || !chrome) throw new Error("Usage: --browse BINARY --extension DIR --chrome EXECUTABLE")
 if (port === 19988) throw new Error("Never on browse's default port: a live relay may be there")
-if (await fetch(`http://127.0.0.1:${port}/version`).then(() => true, () => false))
+if (
+  await fetch(`http://127.0.0.1:${port}/version`).then(
+    () => true,
+    () => false,
+  )
+)
   throw new Error(`Something already answers on ${port}`)
 
 const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "browse-relay-check-")))
@@ -60,14 +65,25 @@ const env = {
   OPENCODE_BROWSER_IDLE_SHUTDOWN_MS: "0",
 }
 // The relay client, the adapter and the hub below read these.
-Object.assign(process.env, { OPENCODE_BROWSER_HOME: env.OPENCODE_BROWSER_HOME, OPENCODE_BROWSER_PORT: env.OPENCODE_BROWSER_PORT })
+Object.assign(process.env, {
+  OPENCODE_BROWSER_HOME: env.OPENCODE_BROWSER_HOME,
+  OPENCODE_BROWSER_PORT: env.OPENCODE_BROWSER_PORT,
+})
 
 const children: { kill: (signal?: NodeJS.Signals) => void }[] = []
 const stops: (() => unknown)[] = []
 const report: Record<string, unknown> = { port, extension: id }
 try {
   children.push(Bun.spawn([browse, "serve"], { env, stdout: "ignore", stderr: "ignore" }))
-  await until(() => fetch(`http://127.0.0.1:${port}/version`).then((r) => r.ok, () => false), 10_000, "the relay")
+  await until(
+    () =>
+      fetch(`http://127.0.0.1:${port}/version`).then(
+        (r) => r.ok,
+        () => false,
+      ),
+    10_000,
+    "the relay",
+  )
   const pair = Bun.spawn([browse, "pair", "--wait-seconds", "120"], { env, stdout: "pipe", stderr: "ignore" })
   children.push(pair)
   const code = await pairingCode(pair.stdout)
@@ -141,7 +157,10 @@ try {
   const adapter = makeChromeAdapter()
   stops.push(() => adapter.close())
   const secret = randomUUID()
-  const hub = createHub({ adapters: { "ios-simulator": adapter, "android-emulator": adapter, chrome: adapter }, secret })
+  const hub = createHub({
+    adapters: { "ios-simulator": adapter, "android-emulator": adapter, chrome: adapter },
+    secret,
+  })
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: hub.fetch, websocket: hub.websocket })
   stops.push(() => {
     hub.close()
@@ -160,7 +179,9 @@ try {
   // Another owner sees none of it.
   report.otherOwnerTabs = JSON.parse(textOf(await callTool(browseOwner("ses_other"), "tabs", {})))
 
-  const viewer = watch(`ws://127.0.0.1:${server.port}/resources/${encodeURIComponent(resource.id)}/stream?ticket=${hub.ticket(resource.id, "view")!.ticket}`)
+  const viewer = watch(
+    `ws://127.0.0.1:${server.port}/resources/${encodeURIComponent(resource.id)}/stream?ticket=${hub.ticket(resource.id, "view")!.ticket}`,
+  )
   stops.push(() => viewer.ws.close())
   await until(async () => viewer.frames.length > 0, 10_000, "the first frame")
   // The page's clock changes every 50 ms, so every capture is a new frame: the counts are the capture rate.
@@ -177,7 +198,12 @@ try {
   report.controlledFps = await rate()
 
   // A handoff on the agent's tab, then Alexandre's tap on its Continue card from the viewer.
-  const handoff = callTool(owner, "handoff", { tab, message: "Entre e clique em Continue", timeoutSeconds: 60 }, { timeoutMs: 70_000 }).then(
+  const handoff = callTool(
+    owner,
+    "handoff",
+    { tab, message: "Entre e clique em Continue", timeoutSeconds: 60 },
+    { timeoutMs: 70_000 },
+  ).then(
     (output) => textOf(output),
     (error: Error) => `error: ${error.message}`,
   )
@@ -214,7 +240,13 @@ try {
   )
   report.handoff = { result: await handoff, tapToContinuedMs: Date.now() - tapped }
   report.viewerErrors = viewer.errors
-  console.log(JSON.stringify({ ok: report.handoff && String((report.handoff as { result: string }).result).includes('"continued"'), report }, null, 2))
+  console.log(
+    JSON.stringify(
+      { ok: report.handoff && String((report.handoff as { result: string }).result).includes('"continued"'), report },
+      null,
+      2,
+    ),
+  )
 } finally {
   if (!args.values.keep) {
     for (const stop of stops.toReversed()) await Promise.resolve(stop()).catch(() => undefined)

@@ -46,7 +46,8 @@ export function resultJson(output: unknown): unknown {
  */
 export function callTab(name: string, input: unknown, output?: unknown) {
   const action = typeof input === "object" && input !== null && "action" in input ? input.action : undefined
-  if (name === "tabs") return action === "new" ? Option.getOrUndefined(decodeTabbed(resultJson(output)))?.tab : undefined
+  if (name === "tabs")
+    return action === "new" ? Option.getOrUndefined(decodeTabbed(resultJson(output)))?.tab : undefined
   const named = Option.getOrUndefined(decodeTabbed(input))?.tab
   if (named !== undefined || name !== "navigate") return named
   return Option.getOrUndefined(decodeTabbed(resultJson(output)))?.tab

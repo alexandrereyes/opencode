@@ -22,7 +22,8 @@ export function detect(tool: string, input: unknown): { readonly message: string
   const name = browseName(tool)
   if (name !== "handoff" && name !== "demonstrate") return undefined
   const fields = typeof input === "object" && input !== null ? input : {}
-  const given = "message" in fields && typeof fields.message === "string" ? fields.message.replace(/\s+/g, " ").trim() : ""
+  const given =
+    "message" in fields && typeof fields.message === "string" ? fields.message.replace(/\s+/g, " ").trim() : ""
   const tab = "tab" in fields && Number.isInteger(fields.tab) ? Number(fields.tab) : undefined
   const chars = Array.from(given || messages[name])
   const message = chars.length <= maxMessage ? chars.join("") : `${chars.slice(0, maxMessage - 1).join("")}…`

@@ -16,7 +16,7 @@ export const defaultPort = 19988
 
 export type Env = Record<string, string | undefined>
 
-/** browse's `Paths`: `OPENCODE_BROWSER_HOME` replaces every root, else the XDG ones (absolute only), else `~/.<root>`. */
+/** browse's `Paths`: `OPENCODE_BROWSER_HOME` replaces every root, else the XDG ones (absolute only), else `~/.…`. */
 function root(env: Env, variable: string, fallback: string) {
   if (env.OPENCODE_BROWSER_HOME) return env.OPENCODE_BROWSER_HOME
   const configured = env[variable] && path.isAbsolute(env[variable]) ? env[variable] : undefined
