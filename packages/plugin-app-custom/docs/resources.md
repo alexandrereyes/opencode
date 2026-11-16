@@ -43,7 +43,7 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | `live`                                    | `{ stream, input }`: whether the adapter implements them (without `stream` the hub streams snapshots)                                                                                     |
 | `discoveredAt`, `lastUsedAt`, `updatedAt` | Epoch ms                                                                                                                                                                                  |
 | `activity`                                | Optional (rev. 2026-10-30): the agents' latest shell commands that named it, newest first, at most 5: `{ at, command, sessionID?, agent?, running? }`; see [Activity](#activity)          |
-| `capabilities`, `handoff`, `machine`      | Optional (rev. 2026-11-07, 2026-11-09): on `chrome:browse:<session>` resources only, what the viewer may offer (`false` = the hub refuses it), the browse handoff waiting on its tab, and the Chrome's machine; see [browse-handoff-remoto.md](browse-handoff-remoto.md) |
+| `capabilities`, `handoff`, `machine`      | Optional (rev. 2026-11-07, 2026-11-09): on `chrome:browse:<owner>` resources only, what the viewer may offer (`false` = the hub refuses it), the browse handoff waiting on its tab, and the Chrome's machine; see [browse-handoff-remoto.md](browse-handoff-remoto.md) |
 
 Two registrations name the same resource when they share a UDID, a Playwright session or CDP endpoint, or, for
 Android, the same AVD (see [Android identity](#android-identity)); the hub merges them into one entry (metadata
@@ -94,8 +94,9 @@ hub's `simctl`), `POST /admin/events?wait=<ms>` (long poll; each event goes to e
 Browse handoffs (rev. 2026-11-07, `browse-handoff-remoto.md`): the upsert also takes `capabilities` and `handoff`,
 `POST /admin/resources/<id>/end { reason }` ends one without an event, `POST /admin/announce { ids }` queues its
 `changed`, `POST /admin/resources/<id>/focus` (409 `unsupported`, 502 when the browser refuses). Since rev. 2026-11-09
-the plugin also registers a browse session whenever agents use it (upsert with `meta { cdp, browse }`, no
-`capabilities`): it stays until the relay no longer lists the session or the plugin deletes it, and `end` keeps it.
+the plugin also registers a session's browse resource whenever its agents use the browser (upsert with `meta { cdp,
+browse, targetID? }`, no `capabilities`): it stays while the session's owner has tabs (rev. 2026-11-16), and `end` keeps
+it. While a handoff waits on it, an upsert without `handoff` never changes its `targetID`.
 
 ### Remote hub (server on Linux)
 
@@ -292,7 +293,7 @@ have their own section below):
 | ------------------ | ------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
 | `ios-simulator`    | `xcrun simctl list devices -j` (Booted → running) | `simctl io <udid> screenshot --type=jpeg`       | Done: serve-sim, see `docs/resources-ios-simulator.md`  |
 | `android-emulator` | `avd/running/pid_*.ini` plus `adb devices`        | gRPC `getScreenshot` (adb `screencap` fallback) | Done: see [Android Emulator](#android-emulator)         |
-| `chrome`           | CDP `/json/list` or `playwright-cli list --json`  | CDP `Page.captureScreenshot`                    | `Page.startScreencast` + `Input.dispatch*`/`insertText` |
+| `chrome`           | CDP `/json/list` or `playwright-cli list --json`; browse: its `tabs` | CDP `Page.captureScreenshot`; browse: `screenshot` | `Page.startScreencast` + `Input.dispatch*`/`insertText`; browse: polled `screenshot` + its input tools |
 
 Without `stream`, the hub streams `snapshot` as JPEG frames (about 3 per second, 828 px wide), so every kind is
 viewable from the start.
@@ -457,13 +458,14 @@ After `playwright-cli resize`, headless Chrome screencasts its window instead of
 iPhone viewport in the default 500 × 572 window lost its bottom 87 px). The adapter then grows the window to hold the
 viewport (`Browser.setWindowBounds`, emulation untouched); windows are at least 500 px wide, so such a page keeps a
 margin on the right, and sharp stills (viewport only) are skipped so frames and taps share one geometry. Never in
-Alexandre's own Chrome (attached sessions and browse handoffs).
+Alexandre's own Chrome (attached sessions).
 
 Browser zoom (rev. 2026-11-07; Alexandre's Chrome runs at 125 %): screencast frames measure the viewport in
 device-independent pixels while input takes CSS pixels, so taps landed 25 % off. The adapter reads `innerWidth` ×
 `innerHeight` (at most once a second, when input needs it) and, when both differ from the frame by the same factor,
 maps touches, scrolls and `meta.viewport` through it (`browserZoom`). A window larger than an emulated viewport (above)
-is no zoom. Every mode shares it: `playwright-cli` sessions, attached ones and browse handoffs.
+is no zoom. Every CDP mode shares it: `playwright-cli` sessions and attached ones (browse's tools take CSS pixels
+already).
 
 **Meta** (`ChromeState`, replaced whole on every change): `{ url, title, canGoBack, canGoForward, targetID, tabs:
 [{ id, title, url }], focus: { editable, field? }, editTaps, viewport?: { width, height } }`. `focus.field` is one of
@@ -489,6 +491,14 @@ moves more than 8 CSS px into wheel scrolling, like a phone browser, instead of 
 wheel event; `key` maps DOM key names to `Input.dispatchKeyEvent`; `text` is `Input.insertText` and is never logged;
 `navigate` uses `Page.navigate` (addresses without a scheme get `http://` for local hosts, `https://` otherwise),
 history entries, `Page.reload`, and `tab` re-targets the stream (`Target.activateTarget` brings it to front).
+
+**Browse tabs** (rev. 2026-11-16, `adapters/chrome-browse.ts`, `adapters/browse-relay.ts`). A `chrome:browse:<owner>`
+resource is an OpenCode session's tabs in Alexandre's own Chrome, reached through browse 0.1.0's relay (`POST
+/tools/call` with the relay token and the session's owner; browse gives clients no CDP). Liveness is the owner's
+`tabs` (no relay or no browser → `stopped`, no tab left → `gone`); frames are polled `screenshot`s in CSS pixels
+(every 250 ms in control, 1 s watching, 2 s on economy); input goes through `click`, `drag`, `scroll`, `press`,
+`type` and `navigate`, and `meta` comes from `eval` in browse's isolated world. The contract and its trade-offs are in
+[browse-handoff-remoto.md](browse-handoff-remoto.md), "Live view".
 
 Checks: `bun test test/resources-chrome.test.ts` drives a real headless Chrome under a fake `cliDaemon.js` parent
 (skipped without Chrome) and real `playwright-cli` sessions (desktop and iPhone 15; skipped without the CLI) for the
@@ -516,9 +526,9 @@ machine's emulator is never a resource here ([Discovery](#discovery)), so it can
 "Assumir controle" (`control take`) gives Alexandre the resource. The plugin's `tool.hook("execute.before")` then
 refuses `shell` commands that name it (UDID or simulator name, adb serial or AVD, `-s=<session>`, CDP port) or
 target it implicitly (`simctl … booted`, `adb` without `-s`, `playwright-cli` without `-s` for the `default`
-session) with "Alexandre está usando … ; aguarde". For a browse session's resource (rev. 2026-11-09,
-`browse-handoff-remoto.md` section 0) it also refuses the agents' browse MCP calls on that session, and `browse` CLI
-commands that name it. Every input renews the lock; after 2 minutes without input
+session) with "Alexandre está usando … ; aguarde". For a session's browse resource (rev. 2026-11-09, rev. 2026-11-16,
+`browse-handoff-remoto.md` section 0) it also refuses that session's browse calls that touch a tab, and `browse` CLI
+commands that name its tab or owner. Every input renews the lock; after 2 minutes without input
 (`limits.controlIdleMs`) or on `release`, the hub queues a `released` event and one plugin instance adds a
 `session.synthetic` message (without resuming) to the owner session: "Alexandre interagiu com … Reavalie a tela".
 Only watching never blocks the agent.
