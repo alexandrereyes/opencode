@@ -358,6 +358,10 @@ hub; retrying`, with `reason`: `unreachable`, `unauthorized …`, `protocol_mism
   never sends its sessions to production's hub; a test sets `--summary-hub <url>` on the sandbox that sends. A source
   server started by hand (`custom-server.ts`) with production's environment **would** send to production's hub and
   appear there as one more server: unset the variable for such runs.
+- The package's tests drop `OPENCODE_HUB`, `OPENCODE_SUMMARY_HUB` and `OPENCODE_SUMMARY_HUB_PASSWORD` before they run
+  (`test/preload.ts`, loaded by the package's `bunfig.toml`). Run from an agent on the Mac, they inherit the managed
+  server's environment, and each server a test started (`server-question-drafts`, `server-navigation`, …) joined
+  production's hub, leaving its test question on the "Todos" card (2026-11-16).
 
 ## Deployment (written only; nothing of this is applied)
 
