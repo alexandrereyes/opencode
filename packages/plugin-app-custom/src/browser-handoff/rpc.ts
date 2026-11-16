@@ -9,7 +9,7 @@ import { Schema } from "effect"
  * `docs/browse-handoff-remoto.md`. Times are epoch milliseconds.
  */
 
-/** A browse `execute` call that has been waiting on Alexandre in the browser for at least the grace period. */
+/** A browse `handoff` or `demonstrate` call that has been waiting on Alexandre for at least the grace period. */
 export interface Handoff extends Schema.Schema.Type<typeof Handoff> {}
 export const Handoff = Schema.Struct({
   id: Schema.String,
@@ -18,14 +18,14 @@ export const Handoff = Schema.Struct({
   /** The tool part that waits: Code Mode's `execute`, or browse's own call when it is a direct tool. */
   callID: Schema.String,
   messageID: Schema.String,
-  /** What the agent asked for (`handoff("…")`), at most 120 characters, or a default when it passed no text. */
+  /** What the agent asked for (the call's `message`), at most 120 characters, or a default when it passed none. */
   message: Schema.String,
   /** When the call started. */
   since: Schema.Number,
   /**
-   * rev. 2026-11-07 (`browse-handoff-remoto.md`): the `custom.resources` resource (`chrome:browse:<browse session>`)
-   * that shows this handoff's tab and takes Alexandre's input while it waits. Absent when the call names no browse
-   * session, the relay cannot be reached, and on older servers: then the apps offer no way to finish it remotely.
+   * rev. 2026-11-07 (`browse-handoff-remoto.md`): the `custom.resources` resource (`chrome:browse:<owner>`) that shows
+   * this handoff's tab and takes Alexandre's input while it waits. Absent when the relay does not list the call's tab,
+   * the hub cannot be reached, and on older servers: then the apps offer no way to finish it remotely.
    */
   resourceID: optional(Schema.String),
 }).annotate({ identifier: "BrowserHandoffs.Handoff" })

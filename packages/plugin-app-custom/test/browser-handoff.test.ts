@@ -1,22 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { readdirSync } from "node:fs"
-import path from "node:path"
+import { existsSync } from "node:fs"
 import { Effect, Exit, Schema, Scope } from "effect"
 import { Session } from "@opencode/schema/session"
 import { Project } from "@opencode/schema/project"
 import { AbsolutePath } from "@opencode/schema/schema"
-import { detect, handoffMessage, maxMessage, messages } from "../src/browser-handoff/detect"
+import { browseOwner, callTab, resultJson } from "../src/browser-handoff/calls"
+import { detect, maxMessage, messages } from "../src/browser-handoff/detect"
 import {
   afterOutcome,
-  browseSession,
   capabilities,
   endedOutcome,
   hubResources,
   makeHandoffs,
-  type FindSession,
   type HandoffResources,
 } from "../src/browser-handoff/index"
-import { callerSession } from "../src/browser-handoff/current"
 import { makeRegistry, wire } from "../src/browser-handoff/registry"
 import { BrowserHandoffs } from "../src/browser-handoff/rpc"
 import { makeTracker } from "../src/live-activity/tracker"
@@ -32,32 +29,34 @@ import { storage } from "./fixture/storage"
 const host = "MacBook Pro"
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
 
-test("the message is the first handoff() or demonstrate() literal; other code cannot hand off", () => {
-  expect(handoffMessage(`await handoff("Faça login no GitHub e clique em Continue")`)).toBe(
-    "Faça login no GitHub e clique em Continue",
-  )
-  expect(handoffMessage(`await handoff('Aprove o 2FA', { timeoutMs: 600_000, start: () => go() })`)).toBe(
-    "Aprove o 2FA",
-  )
-  expect(handoffMessage("await handoff(`Resolva o captcha em ${origin}`)")).toBe("Resolva o captcha em …")
-  expect(handoffMessage(`await handoff("Diga \\"ok\\"\\nentão siga")`)).toBe('Diga "ok" então siga')
-  expect(handoffMessage(`await handoff()`)).toBe(messages.handoff)
-  expect(handoffMessage(`await handoff(message)`)).toBe(messages.handoff)
-  expect(handoffMessage(`await demonstrate()`)).toBe(messages.demonstrate)
-  expect(handoffMessage(`await handoff(\n  "Confirme o pagamento"\n)`)).toBe("Confirme o pagamento")
-  expect(Array.from(handoffMessage(`handoff("${"a".repeat(300)}")`) ?? "")).toHaveLength(maxMessage)
-  // Code that only mentions it, or calls something else, is no handoff.
-  expect(handoffMessage(`await page.goto("https://example.com"); return page.title()`)).toBeUndefined()
-  expect(handoffMessage(`// handoff("só um comentário")\nreturn 1`)).toBeUndefined()
-  expect(handoffMessage(`/* handoff("bloco") */ return 1`)).toBeUndefined()
-  expect(handoffMessage(`const handoffs = 1; return handoffs`)).toBeUndefined()
-  expect(handoffMessage(`await page.goto("https://a.b/c"); await handoff("Entre")`)).toBe("Entre")
-  // Only browse's execute, as Code Mode's inner call or its dotted path.
-  expect(detect("browse_execute", { code: `await handoff("x")` })).toBe("x")
-  expect(detect("browse.execute", { code: `await handoff("x")` })).toBe("x")
-  expect(detect("shell", { command: `handoff("x")` })).toBeUndefined()
-  expect(detect("browse_status", { code: `handoff("x")` })).toBeUndefined()
-  expect(detect("browse_execute", undefined)).toBeUndefined()
+test("browse's handoff and demonstrate calls wait on Alexandre, with the call's message and tab", () => {
+  expect(detect("browse_handoff", { message: "Faça login no GitHub e clique em Continue", tab: 3 })).toEqual({
+    message: "Faça login no GitHub e clique em Continue",
+    tab: 3,
+  })
+  expect(detect("browse.demonstrate", { tab: 4 })).toEqual({ message: messages.demonstrate, tab: 4 })
+  expect(detect("browse_handoff", { message: "  Diga\n  ok ", tab: 1 })?.message).toBe("Diga ok")
+  expect(detect("browse_handoff", { message: "", tab: 1 })?.message).toBe(messages.handoff)
+  expect(Array.from(detect("browse_handoff", { message: "a".repeat(300), tab: 1 })!.message)).toHaveLength(maxMessage)
+  // Without a tab (browse refuses it at once) it waits on nothing the apps can show.
+  expect(detect("browse_handoff", { message: "x" })).toEqual({ message: "x" })
+  for (const tool of ["browse_click", "browse_execute", "browse_navigate", "handoff", "shell"])
+    expect(detect(tool, { message: "x", tab: 1 })).toBeUndefined()
+})
+
+test("browse's owner of a session and the tab a call acts on", () => {
+  // `mcp-` and the first 8 hex digits of the SHA-256 of the trimmed session ID, as browse's MCP server derives it.
+  expect(browseOwner("ses_0123456789abcdefghijklmn")).toBe("mcp-666f6415")
+  expect(browseOwner(" ses_0123456789abcdefghijklmn\n")).toBe("mcp-666f6415")
+  expect(callTab("click", { tab: 7, x: 1, y: 2 })).toBe(7)
+  expect(callTab("navigate", { url: "x" }, { url: "x", tab: 9 })).toBe(9)
+  expect(callTab("navigate", { url: "x" }, `{\n  "url": "x",\n  "tab": 9\n}\nWarning: slow`)).toBe(9)
+  expect(callTab("navigate", { tab: 3, url: "x" }, { tab: 9 })).toBe(3)
+  expect(callTab("tabs", { action: "new" }, '{"tab":11}')).toBe(11)
+  // Closing tabs names them but follows none; a result without a tab says nothing.
+  expect(callTab("tabs", { action: "close", tab: 9 }, { closed: [9] })).toBeUndefined()
+  expect(callTab("navigate", { url: "x" }, "browse failed")).toBeUndefined()
+  expect(resultJson('{"a":1}\nNote: browse has an update')).toEqual({ a: 1 })
 })
 
 /** One Location's handoffs over a shared registry, with a short grace period on the real clock. */
@@ -74,20 +73,20 @@ async function location(registry = makeRegistry(), graceMs = 30) {
   return { registry, handoffs, announced, close: () => run(Scope.close(scope, Exit.void)), graceMs }
 }
 
-const call = (sessionID: string, id: string, code: string) => ({
-  tool: "browse_execute",
+const call = (sessionID: string, id: string, message: string, tab = 3, tool = "browse_handoff") => ({
+  tool,
   sessionID,
   messageID: "msg_1",
   id,
-  input: { code },
+  input: { message, tab },
 })
 
 test("a handoff call waits only after the grace period; its end, by hook or by event, clears it once", async () => {
   const { registry, handoffs, announced, close, graceMs } = await location()
-  const first = call(ids.live, "call_1", `await handoff("Faça login")`)
+  const first = call(ids.live, "call_1", "Faça login")
   await run(handoffs.before(first))
-  // Other browse code and other tools are never recorded.
-  await run(handoffs.before(call(ids.live, "call_2", `return page.title()`)))
+  // Other browse tools and other tools are never recorded.
+  await run(handoffs.before(call(ids.live, "call_2", "", 3, "browse_click")))
   await run(handoffs.before({ ...first, tool: "shell", id: "call_3" }))
   expect(registry.waiting()).toEqual([])
   await Bun.sleep(graceMs * 3)
@@ -109,7 +108,7 @@ test("a handoff call waits only after the grace period; its end, by hook or by e
   expect(announced).toEqual([ids.live, ids.live])
 
   // A call that ends inside the grace period never shows nor announces.
-  const quick = call(ids.live, "call_4", `await handoff("Rápido")`)
+  const quick = call(ids.live, "call_4", "Rápido")
   await run(handoffs.before(quick))
   await run(handoffs.after({ ...quick, status: "error" }))
   await Bun.sleep(graceMs * 3)
@@ -117,8 +116,8 @@ test("a handoff call waits only after the grace period; its end, by hook or by e
   expect(announced).toHaveLength(2)
 
   // An interruption skips `execute.after`: the session's end clears its calls.
-  await run(handoffs.before(call(ids.cache, "call_5", `await handoff("A")`)))
-  await run(handoffs.before(call(ids.cache, "call_6", `await demonstrate()`)))
+  await run(handoffs.before(call(ids.cache, "call_5", "A")))
+  await run(handoffs.before(call(ids.cache, "call_6", "", 3, "browse_demonstrate")))
   await Bun.sleep(graceMs * 3)
   expect(registry.waiting().map((entry) => entry.message)).toEqual(["A", messages.demonstrate])
   await run(handoffs.ended({ type: "session.execution.interrupted", data: { sessionID: ids.cache } }))
@@ -127,8 +126,8 @@ test("a handoff call waits only after the grace period; its end, by hook or by e
   expect(announced).toEqual([ids.live, ids.live, ids.cache, ids.cache, ids.cache, ids.cache])
 
   // Code Mode's execute ending (its program interrupted the pending call) clears only that tool part.
-  await run(handoffs.before(call(ids.oauth, "call_7", `await handoff("B")`)))
-  await run(handoffs.before(call(ids.oauth, "call_8", `await handoff("C")`)))
+  await run(handoffs.before(call(ids.oauth, "call_7", "B")))
+  await run(handoffs.before(call(ids.oauth, "call_8", "C")))
   await Bun.sleep(graceMs * 3)
   await run(handoffs.ended({ type: "session.tool.success", data: { sessionID: ids.oauth, id: "call_7" } }))
   expect(registry.waiting().map((entry) => entry.callID)).toEqual(["call_8"])
@@ -141,21 +140,21 @@ test("a replaced input still ends its call; another Location never settles or an
   const registry = makeRegistry()
   const a = await location(registry)
   const b = await location(registry)
-  const first = call(ids.live, "call_1", `await handoff("Entrar")`)
+  const first = call(ids.live, "call_1", "Entrar")
   await run(a.handoffs.before(first))
   await Bun.sleep(a.graceMs * 3)
   await run(b.handoffs.ended({ type: "session.execution.failed", data: { sessionID: ids.live } }))
   await run(b.handoffs.after({ ...first, input: { ...first.input }, status: "completed" }))
   expect(registry.waiting()).toHaveLength(1)
   expect(b.announced).toEqual([])
-  // Another hook replaced the input object: the same code in the same tool part matches.
-  await run(a.handoffs.after({ ...first, input: { code: first.input.code }, status: "completed" }))
+  // Another hook replaced the input object: the same message and tab in the same tool part match.
+  await run(a.handoffs.after({ ...first, input: { message: "Entrar", tab: 3 }, status: "completed" }))
   expect(registry.waiting()).toEqual([])
   expect(a.announced).toEqual([ids.live, ids.live])
   // The registry wakes its listeners on every change of the waiting list.
   let wakes = 0
   const stop = registry.listen(() => void wakes++)
-  await run(a.handoffs.before(call(ids.live, "call_2", `await handoff("x")`)))
+  await run(a.handoffs.before(call(ids.live, "call_2", "x")))
   await Bun.sleep(a.graceMs * 3)
   await run(a.handoffs.ended({ type: "session.execution.succeeded", data: { sessionID: ids.live } }))
   stop()
@@ -299,9 +298,7 @@ test("Sessões and the session family carry the waiting handoffs", async () => {
 })
 
 /** A Location whose handoffs get resources from a fake hub that logs every step in order. */
-async function withResources(
-  options: { readonly openMs?: number; readonly refuse?: boolean; readonly find?: FindSession } = {},
-) {
+async function withResources(options: { readonly openMs?: number; readonly refuse?: boolean } = {}) {
   const registry = makeRegistry()
   const scope = await run(Scope.make())
   const log: string[] = []
@@ -309,7 +306,7 @@ async function withResources(
   const resources: HandoffResources = {
     open: (handoff) =>
       Effect.promise(async () => {
-        log.push(`open ${handoff.browse} ${handoff.agent ?? "-"}`)
+        log.push(`open ${handoff.browse} ${handoff.tab} ${handoff.agent ?? "-"}`)
         await Bun.sleep(options.openMs ?? 0)
         return options.refuse ? undefined : `chrome:browse:${handoff.browse}`
       }),
@@ -322,7 +319,6 @@ async function withResources(
     graceMs: 30,
     now: () => T,
     resources,
-    ...(options.find ? { find: options.find } : {}),
     announce: (sessionID, ended) =>
       Effect.sync(() => {
         log.push(`browser-handoffs.changed ${sessionID}${ended ? ` ${ended.outcome}` : ""}`)
@@ -332,64 +328,63 @@ async function withResources(
   return { registry, handoffs, log, endings, close: () => run(Scope.close(scope, Exit.void)) }
 }
 
-const browseCall = (id: string, session?: string, sessionID = ids.live) => ({
-  ...call(sessionID, id, `await handoff("Entre com a senha")`),
-  input: { code: `await handoff("Entre com a senha")`, ...(session ? { session } : {}) },
+const owner = browseOwner(ids.live)
+const browseCall = (id: string, tab?: number) => ({
+  ...call(ids.live, id, "Entre com a senha"),
+  input: { message: "Entre com a senha", ...(tab === undefined ? {} : { tab }) },
   agent: "build",
 })
+const failed = (id: string, tab: number, message: string) => ({
+  ...browseCall(id, tab),
+  status: "error" as const,
+  error: { message },
+})
 
-test("a handoff that names its browse session waits with its resource and ends in the contract's order", async () => {
+test("a handoff waits on its session's browse resource, on its tab, and ends in the contract's order", async () => {
   const { registry, handoffs, log, endings, close } = await withResources({ openMs: 20 })
-  const first = browseCall("call_1", "login")
+  const first = browseCall("call_1", 3)
   await run(handoffs.before(first))
   // Within the grace period nothing exists yet, not even the resource.
   expect(log).toEqual([])
   await Bun.sleep(120)
   const waiting = registry.waiting()
-  expect(waiting.map((entry) => entry.resourceID)).toEqual(["chrome:browse:login"])
-  expect(wire(waiting[0]!).resourceID).toBe("chrome:browse:login")
+  expect(waiting.map((entry) => entry.resourceID)).toEqual([`chrome:browse:${owner}`])
+  expect(wire(waiting[0]!).resourceID).toBe(`chrome:browse:${owner}`)
   // The resource exists before anyone hears the handoff waits, so every surface gets its `resourceID` at once.
-  expect(log).toEqual(["open login build", `browser-handoffs.changed ${ids.live}`])
+  expect(log).toEqual([`open ${owner} 3 build`, `browser-handoffs.changed ${ids.live}`])
 
-  await run(
-    handoffs.after({
-      ...first,
-      status: "error",
-      error: { message: "Handoff timed out after 100ms waiting for the user: Entre com a senha" },
-    }),
-  )
+  await run(handoffs.after(failed("call_1", 3, '{"outcome":"timeout","tab":3}')))
   expect(registry.waiting()).toEqual([])
   // Its viewers end first, then the handoff's change with `ended`, then the resources' change.
   expect(log.slice(2)).toEqual([
-    "end chrome:browse:login timeout",
+    `end chrome:browse:${owner} timeout`,
     `browser-handoffs.changed ${ids.live} timeout`,
-    "resources.changed chrome:browse:login",
+    `resources.changed chrome:browse:${owner}`,
   ])
   expect(endings.at(-1)).toEqual({
     sessionID: ids.live,
-    ended: { id: waiting[0]!.id, resourceID: "chrome:browse:login", outcome: "timeout" },
+    ended: { id: waiting[0]!.id, resourceID: `chrome:browse:${owner}`, outcome: "timeout" },
   })
   expect(Schema.decodeUnknownSync(BrowserHandoffs.Changed)(endings.at(-1))).toEqual(endings.at(-1)!)
   await close()
 })
 
-test("each way a handoff ends has its outcome, and calls without a found session or a relay get no resource", async () => {
+test("each way a handoff ends has its outcome, and calls without a tab or a resource get none", async () => {
   const { registry, handoffs, log, endings, close } = await withResources()
   const outcome = async (id: string, finish: () => Promise<unknown>) => {
-    await run(handoffs.before(browseCall(id, `s-${id}`)))
+    await run(handoffs.before(browseCall(id, 5)))
     await Bun.sleep(100)
-    expect(registry.waiting().at(-1)?.resourceID).toBe(`chrome:browse:s-${id}`)
+    expect(registry.waiting().at(-1)?.resourceID).toBe(`chrome:browse:${owner}`)
     await finish()
     return endings.at(-1)?.ended?.outcome
   }
-  expect(await outcome("c1", () => run(handoffs.after({ ...browseCall("c1", "s-c1"), status: "completed" })))).toBe(
+  const result = { output: { outcome: "continued", tab: 5 } }
+  expect(await outcome("c1", () => run(handoffs.after({ ...browseCall("c1", 5), status: "completed", result })))).toBe(
     "completed",
   )
-  expect(
-    await outcome("c2", () =>
-      run(handoffs.after({ ...browseCall("c2", "s-c2"), status: "error", error: { message: "Tab closed" } })),
-    ),
-  ).toBe("failed")
+  expect(await outcome("c2", () => run(handoffs.after(failed("c2", 5, '{"outcome":"closed","tab":5}'))))).toBe(
+    "failed",
+  )
   expect(
     await outcome("c3", () =>
       run(handoffs.ended({ type: "session.execution.interrupted", data: { sessionID: ids.live } })),
@@ -402,7 +397,7 @@ test("each way a handoff ends has its outcome, and calls without a found session
   ).toBe("cancelled")
   expect(await outcome("c5", () => run(handoffs.unload))).toBe("cancelled")
 
-  // No `session` and nothing to find it with: it still waits and is still announced, without a resource.
+  // No tab: it still waits and is still announced, without a resource.
   log.length = 0
   await run(handoffs.before(browseCall("c6")))
   await Bun.sleep(100)
@@ -414,115 +409,37 @@ test("each way a handoff ends has its outcome, and calls without a found session
 
   // The relay (or an older hub) gives none: the same, and nothing to end.
   const refused = await withResources({ refuse: true })
-  await run(refused.handoffs.before(browseCall("c7", "login")))
+  await run(refused.handoffs.before(browseCall("c7", 3)))
   await Bun.sleep(100)
   expect(refused.registry.waiting().map((entry) => entry.resourceID)).toEqual([undefined])
-  await run(refused.handoffs.after({ ...browseCall("c7", "login"), status: "completed" }))
+  await run(refused.handoffs.after({ ...browseCall("c7", 3), status: "completed" }))
   expect(refused.log).toEqual([
-    "open login build",
+    `open ${owner} 3 build`,
     `browser-handoffs.changed ${ids.live}`,
     `browser-handoffs.changed ${ids.live} completed`,
   ])
   await refused.close()
 })
 
-test("a call without `session` gets the resource of the browse session found for it, or none when unsure", async () => {
-  const asked: { candidates: readonly string[]; since: number }[] = []
-  let answer: string | undefined
-  const { registry, handoffs, log, close } = await withResources({
-    find: (candidates, since) =>
-      Effect.sync(() => {
-        asked.push({ candidates, since })
-        return answer
-      }),
-  })
-  const mine = callerSession(ids.live)
-  answer = mine
-  await run(handoffs.before(browseCall("b1")))
-  await Bun.sleep(100)
-  // The agent never chose one: browse's default for its session, from when the call began.
-  expect(asked).toEqual([{ candidates: [mine], since: T }])
-  expect(registry.waiting().map((entry) => entry.resourceID)).toEqual([`chrome:browse:${mine}`])
-  expect(log).toEqual([`open ${mine} build`, `browser-handoffs.changed ${ids.live}`])
-  await run(handoffs.after({ ...browseCall("b1"), status: "completed", result: { output: { session: mine } } }))
-  expect(log.slice(2)).toEqual([
-    `end chrome:browse:${mine} completed`,
-    `browser-handoffs.changed ${ids.live} completed`,
-    `resources.changed chrome:browse:${mine}`,
-  ])
-
-  // The agent's own `session_use` moves its candidates; an explicit `session` never asks.
-  await run(
-    handoffs.after({
-      ...call(ids.live, "u1", ""),
-      tool: "browse_session_use",
-      input: { id: "conta" },
-      status: "completed",
-      result: { output: { currentSession: "conta" } },
-    }),
-  )
-  log.length = 0
-  asked.length = 0
-  await run(handoffs.before(browseCall("b2", "login")))
-  await Bun.sleep(100)
-  expect(asked).toEqual([])
-  expect(log).toEqual(["open login build", `browser-handoffs.changed ${ids.live}`])
-  await run(handoffs.after({ ...browseCall("b2", "login"), status: "completed" }))
-
-  // Unsure (none or several touched): it waits without a resource, as before.
-  log.length = 0
-  answer = undefined
-  await run(handoffs.before(browseCall("b3")))
-  await Bun.sleep(100)
-  // `login` became current with the explicit call.
-  expect(asked).toEqual([{ candidates: [mine, "login"], since: T }])
-  expect(registry.waiting().map((entry) => entry.resourceID)).toEqual([undefined])
-  expect(log).toEqual([`browser-handoffs.changed ${ids.live}`])
-  await run(handoffs.after({ ...browseCall("b3"), status: "completed" }))
-  await close()
-})
-
 test("a call that ends while its resource is being registered never waits and its resource goes quietly", async () => {
   const { registry, handoffs, log, close } = await withResources({ openMs: 80 })
-  await run(handoffs.before(browseCall("call_1", "login")))
+  await run(handoffs.before(browseCall("call_1", 3)))
   await Bun.sleep(50)
-  expect(log).toEqual(["open login build"])
-  await run(handoffs.after({ ...browseCall("call_1", "login"), status: "completed" }))
+  expect(log).toEqual([`open ${owner} 3 build`])
+  await run(handoffs.after({ ...browseCall("call_1", 3), status: "completed" }))
   await Bun.sleep(120)
   expect(registry.waiting()).toEqual([])
   expect(log).toEqual([
-    "open login build",
-    "end chrome:browse:login completed",
-    "resources.changed chrome:browse:login",
+    `open ${owner} 3 build`,
+    `end chrome:browse:${owner} completed`,
+    `resources.changed chrome:browse:${owner}`,
   ])
   await close()
 })
 
-test("outcomes, the browse session and the hub port", async () => {
-  const base = browseCall("x", "login")
-  expect(afterOutcome({ ...base, status: "completed" })).toBe("completed")
-  expect(
-    afterOutcome({
-      ...base,
-      status: "error",
-      error: { message: "Handoff timed out after 5000ms waiting for the user: x" },
-    }),
-  ).toBe("timeout")
-  expect(afterOutcome({ ...base, status: "error", error: { message: "The operation was aborted" } })).toBe("cancelled")
-  expect(afterOutcome({ ...base, status: "error", error: { message: "Target closed" } })).toBe("failed")
-  expect(afterOutcome({ ...base, status: "error" })).toBe("failed")
-  expect(endedOutcome({ type: "session.archived", data: { sessionID: "s" } })).toBe("cancelled")
-  expect(endedOutcome({ type: "session.deleted", data: { sessionID: "s" } })).toBe("cancelled")
-  expect(endedOutcome({ type: "session.execution.failed", data: { sessionID: "s" } })).toBe("failed")
-  expect(endedOutcome({ type: "session.tool.success", data: { sessionID: "s", id: "c" } })).toBe("completed")
-  expect(browseSession({ code: "x", session: "login" })).toBe("login")
-  expect(browseSession({ code: "x", session: "" })).toBeUndefined()
-  expect(browseSession({ code: "x" })).toBeUndefined()
-})
-
-test("the hub port registers the locked resource, refuses one an older hub returns without locks, and ends it", async () => {
+test("the hub port registers the locked resource on the handoff's tab, refuses one an older hub returns without locks, and ends it", async () => {
   const calls: unknown[] = []
-  const resource = (extra: object) => ({ id: "chrome:browse:login", kind: "chrome", ...extra }) as never
+  const resource = (extra: object) => ({ id: `chrome:browse:${owner}`, kind: "chrome", ...extra }) as never
   const hub = (answer: object) => ({
     upsert: async (input: unknown) => {
       calls.push(["upsert", input])
@@ -535,15 +452,16 @@ test("the hub port registers the locked resource, refuses one an older hub retur
     finish: async (id: string, reason: string) => void calls.push(["finish", id, reason]),
     announce: async (ids: readonly string[]) => void calls.push(["announce", ids]),
   })
-  const handoff = { id: "brw_1", sessionID: "ses_child", message: "Entre", since: 5, browse: "login", agent: "build" }
+  const handoff = { id: "brw_1", sessionID: "ses_child", message: "Entre", since: 5, browse: owner, tab: 3, agent: "build" }
   const root = () => Effect.succeed("ses_root")
-  const locked = hubResources(hub({ capabilities, handoff: { id: "brw_1" } }), root)
-  expect(await run(locked.open(handoff))).toBe("chrome:browse:login")
+  const endpoint = async () => "http://127.0.0.1:19993"
+  const locked = hubResources(hub({ capabilities, handoff: { id: "brw_1" } }), root, endpoint)
+  expect(await run(locked.open(handoff))).toBe(`chrome:browse:${owner}`)
   expect(calls[0]).toEqual([
     "upsert",
     {
       kind: "chrome",
-      meta: { kind: "chrome", cdp: "http://127.0.0.1:19988", browse: "login" },
+      meta: { kind: "chrome", cdp: "http://127.0.0.1:19993", browse: owner, targetID: "3" },
       purpose: "Entre",
       owner: { sessionID: "ses_child", rootSessionID: "ses_root", agent: "build" },
       used: true,
@@ -551,16 +469,16 @@ test("the hub port registers the locked resource, refuses one an older hub retur
       handoff: { id: "brw_1", sessionID: "ses_child", message: "Entre", since: 5 },
     },
   ])
-  await run(locked.close("chrome:browse:login", "cancelled"))
-  await run(locked.announce("chrome:browse:login"))
+  await run(locked.close(`chrome:browse:${owner}`, "cancelled"))
+  await run(locked.announce(`chrome:browse:${owner}`))
   expect(calls.slice(1)).toEqual([
-    ["finish", "chrome:browse:login", "handoff_cancelled"],
-    ["announce", ["chrome:browse:login"]],
+    ["finish", `chrome:browse:${owner}`, "handoff_cancelled"],
+    ["announce", [`chrome:browse:${owner}`]],
   ])
   calls.length = 0
   // An older hub ignores `handoff` and `capabilities`: its resource would take navigation, so it is removed.
-  expect(await run(hubResources(hub({}), root).open(handoff))).toBeUndefined()
-  expect(calls.at(-1)).toEqual(["remove", "chrome:browse:login"])
+  expect(await run(hubResources(hub({}), root, endpoint).open(handoff))).toBeUndefined()
+  expect(calls.at(-1)).toEqual(["remove", `chrome:browse:${owner}`])
   // A hub that fails leaves the handoff without a resource.
   const failing = hubResources(
     {
@@ -570,79 +488,71 @@ test("the hub port registers the locked resource, refuses one an older hub retur
       },
     },
     root,
+    endpoint,
   )
   expect(await run(failing.open(handoff))).toBeUndefined()
 })
 
 /**
- * browse 0.0.14's own error texts for a call that hands off, as its source writes them (`${…}` are its values). The
- * outcome rule matches on them; the second test finds every one in the installed package, so a browse that rewords one
- * fails here instead of silently turning an outcome into `failed`.
+ * What browse 0.1.0 answers when a handoff does not end with Continue, as the MCP tool reports it (the error text is
+ * the tool's own: its JSON, or the relay's message when it stopped the call). The outcome rule matches on them; the
+ * second test finds the relay's own texts in an installed browse binary, so a browse that rewords one fails here
+ * instead of silently turning an outcome into `failed`.
  */
-const browseErrors: readonly { readonly source: string; readonly outcome: BrowserHandoffs.Outcome }[] = [
+const browseErrors: readonly { readonly text: string; readonly outcome: BrowserHandoffs.Outcome }[] = [
+  { text: '{"outcome":"timeout","tab":1836872126}', outcome: "timeout" },
+  { text: '{"outcome":"cancelled","tab":3}', outcome: "cancelled" },
+  { text: '{"outcome":"closed","tab":3}', outcome: "failed" },
+  { text: "The call was cancelled by its client.", outcome: "cancelled" },
+  { text: "The client that called this (process 4242) exited, so it was stopped.", outcome: "cancelled" },
   {
-    source: "Handoff timed out after ${options.timeoutMs}ms waiting for the user: ${options.message}",
-    outcome: "timeout",
-  },
-  {
-    source: "Handoff cancelled because its session was stopped, deleted or reset: ${options.message}",
+    text: "The user dismissed the browser's debugging bar, which detached browse from their tabs, so this was stopped. Ask the user how to continue.",
     outcome: "cancelled",
   },
-  { source: "Handoff cancelled because its target ${targetEvent}: ${options.message}", outcome: "failed" },
-  { source: "Execute stopped because its caller disconnected.", outcome: "cancelled" },
-  { source: "Execute stopped: the session was stopped, deleted or reset", outcome: "cancelled" },
+  { text: "The call was stopped.", outcome: "cancelled" },
   {
-    source: 'Session ${id} was ${operation === "delete" ? "deleted" : "reset"} while this ran, so it was stopped.',
-    outcome: "cancelled",
-  },
-  {
-    source: "The user took tab ${tabId} back (browse toolbar button) while this script ran, so it was stopped.",
-    outcome: "cancelled",
-  },
-  {
-    source:
-      "Execute timed out after ${effectiveTimeoutMs}ms. Pass --timeout-ms <ms> (or timeoutMs in MCP) for longer runs, or 0 to disable.",
+    text: "The browser isn't answering (asleep, frozen or very busy?). Wake it or wait a moment, then try again.",
     outcome: "failed",
   },
-  { source: "The browser isn't responding (asleep or frozen?). Wake it and try again.", outcome: "failed" },
+  { text: "Tab 3 isn't a browse tab you can use: browse didn't open it for you and the user didn't lend it.", outcome: "failed" },
+  { text: "Relay closed", outcome: "failed" },
 ]
 
-/** A message as browse would produce it: every `${…}` filled in (`targetEvent` is `detached` or `crashed`). */
-const filled = (source: string, targetEvent = "detached") =>
-  source
-    .replace("${targetEvent}", targetEvent)
-    .replace('${operation === "delete" ? "deleted" : "reset"}', "deleted")
-    .replace(/\$\{[^}]*\}/g, (match) =>
-      /Ms\}$/.test(match) ? "20000" : match.includes("message") ? "Entre e clique em Continue" : "s1",
-    )
-
-describe("browse's error texts decide a handoff's outcome", () => {
-  test("each real message, as the MCP tool reports it, maps to its outcome", () => {
-    const base = browseCall("x", "login")
+describe("browse's answers decide a handoff's outcome", () => {
+  test("each real answer, as the MCP tool reports it, maps to its outcome", () => {
+    const base = browseCall("x", 3)
     const outcome = (message: string) => afterOutcome({ ...base, status: "error", error: { message } })
     for (const item of browseErrors) {
-      expect({ message: filled(item.source), outcome: outcome(filled(item.source)) }).toEqual({
-        message: filled(item.source),
-        outcome: item.outcome,
-      })
-      // Code Mode and the MCP client may prefix it (`Error: …`) or append browse's hints.
-      expect(outcome(`Error: ${filled(item.source)}\nLogs: none`)).toBe(item.outcome)
+      expect({ text: item.text, outcome: outcome(item.text) }).toEqual(item)
+      // The MCP client may prefix it, and browse appends its warnings.
+      expect(outcome(`Error: ${item.text}\nWarning: the tab was reloaded`)).toBe(item.outcome)
     }
-    expect(outcome(filled(browseErrors[2]!.source, "crashed"))).toBe("failed")
+    expect(afterOutcome({ ...base, status: "completed" })).toBe("completed")
+    expect(afterOutcome({ ...base, status: "error" })).toBe("failed")
+    expect(afterOutcome({ ...base, status: "error", error: { message: "The operation was aborted" } })).toBe(
+      "cancelled",
+    )
+    expect(endedOutcome({ type: "session.archived", data: { sessionID: "s" } })).toBe("cancelled")
+    expect(endedOutcome({ type: "session.deleted", data: { sessionID: "s" } })).toBe("cancelled")
+    expect(endedOutcome({ type: "session.execution.failed", data: { sessionID: "s" } })).toBe("failed")
+    expect(endedOutcome({ type: "session.tool.success", data: { sessionID: "s", id: "c" } })).toBe("completed")
   })
 
-  const dist = process.env.OPENCODE_BROWSE_PACKAGE ?? "/opt/homebrew/lib/node_modules/@opencode/browse"
-  const files = (() => {
-    try {
-      return readdirSync(path.join(dist, "dist")).filter((file) => file.endsWith(".mjs"))
-    } catch {
-      return []
-    }
-  })()
-  test.skipIf(files.length === 0)("every message is still in the installed browse package", async () => {
-    const version = (await Bun.file(path.join(dist, "package.json")).json()).version
-    const text = (await Promise.all(files.map((file) => Bun.file(path.join(dist, "dist", file)).text()))).join("\n")
-    const missing = browseErrors.filter((item) => !text.includes(item.source)).map((item) => item.source)
-    expect({ version, missing }).toEqual({ version, missing: [] })
+  const binary =
+    process.env.OPENCODE_BROWSE_BINARY ??
+    "/opt/homebrew/lib/node_modules/@opencode/browse/node_modules/@opencode/browse-darwin-arm64/bin/browse"
+  test.skipIf(!existsSync(binary))("the relay's own texts are still in the installed browse binary", async () => {
+    const text = new TextDecoder("latin1").decode(await Bun.file(binary).arrayBuffer())
+    const texts = [
+      "The call was cancelled by its client.",
+      "exited, so it was stopped.",
+      "so this was stopped.",
+      "The call was stopped.",
+      "continued",
+      "timeout",
+      "closed",
+      "cancelled",
+    ]
+    expect(texts.filter((item) => !text.includes(item))).toEqual([])
   })
 })

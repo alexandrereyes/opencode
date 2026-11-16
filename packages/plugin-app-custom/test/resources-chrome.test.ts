@@ -4,19 +4,17 @@ import os from "node:os"
 import path from "node:path"
 import {
   choose,
-  decodeFocus,
   keyEvents,
   locate,
   makeChromeAdapter,
   modifiers,
   namespaceOf,
-  normalizeURL,
   parseProcesses,
   sameNamespace,
   shellEnvironment,
   writeConfig,
-  type ChromeState,
 } from "../src/resources/adapters/chrome"
+import { decodeFocus, normalizeURL, type ChromeState } from "../src/resources/adapters/chrome-page"
 import { size } from "../src/resources/adapters/process"
 import type { Entry, StreamSink } from "../src/resources/adapters/types"
 import type { Resources } from "../src/resources/rpc"

@@ -1,42 +1,23 @@
 import type { Entry, StreamSink } from "../../src/resources/adapters/types"
-import type { ChromeState, makeChromeAdapter } from "../../src/resources/adapters/chrome"
+import type { makeChromeAdapter } from "../../src/resources/adapters/chrome"
+import type { ChromeState } from "../../src/resources/adapters/chrome-page"
 import type { Resources } from "../../src/resources/rpc"
 
 /**
- * A browser for the Chrome adapter's tests that needs no Chrome: a browse relay (with `token`: its HTTP token, session
- * header and `/json/list` of every session) or a plain Chrome (without), with enough CDP for one tab whose window
- * shows `view.device` DIP and `view.inner` CSS pixels (Alexandre's Chrome at 125 % by default). Every CDP command is
- * kept in `sent`.
+ * A Chrome for the Chrome adapter's tests that needs no Chrome, with enough CDP for one tab whose window shows
+ * `view.device` DIP and `view.inner` CSS pixels (Alexandre's Chrome at 125 % by default). Every CDP command is kept in
+ * `sent`.
  */
 
 export const jpeg =
   "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAA//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AN//Z"
-export const token = "relay-token-0123456789abcdefghijklmnopqrstuvwxyzAB"
-
 export type Sent = { readonly method: string; readonly params: Record<string, unknown>; readonly sessionId?: string }
 
-export const pages = [
-  {
-    id: "TAB1",
-    type: "page",
-    title: "Entrar · Abacato",
-    url: "http://127.0.0.1:5191/",
-    opencodeBrowserSessionId: "login",
-  },
-  { id: "TAB2", type: "page", title: "Ajuda", url: "http://127.0.0.1:5191/ajuda", opencodeBrowserSessionId: "login" },
-  {
-    id: "OTHER",
-    type: "page",
-    title: "Extrato · Banco do Alexandre",
-    url: "https://banco.example/extrato",
-    opencodeBrowserSessionId: "pessoal",
-  },
-]
+export const pages = [{ id: "TAB1", type: "page", title: "Entrar · Abacato", url: "http://127.0.0.1:5191/" }]
 
-/** A browse relay (with `token`) or a plain Chrome (without), whose one window shows `device` DIP and `inner` CSS px. */
-export function fakeBrowser(options: { readonly token?: string }) {
+/** A Chrome whose one window shows `device` DIP and `inner` CSS px. */
+export function fakeBrowser() {
   const sent: Sent[] = []
-  const refused: string[] = []
   /**
    * `delivered` counts the trusted presses the page received (what the adapter reads from its isolated world);
    * `blocked` drops them, as Chrome does while a dialog of its own covers the tab.
@@ -51,34 +32,18 @@ export function fakeBrowser(options: { readonly token?: string }) {
   }
   const inIframe = (x: number, y: number) =>
     view.iframes.some((box) => x >= box.x && x < box.x + box.width && y >= box.y && y < box.y + box.height)
-  /**
-   * What bringing a tab forward meets: Chrome refuses `Target.activateTarget` to the extension, and the relay blocks
-   * `Page.bringToFront` unless its environment allows it (both as browse 0.0.14 behaves by default).
-   */
-  const refuse: Record<string, string> = {
-    "Target.activateTarget": JSON.stringify({ code: -32000, message: "Not allowed" }),
-    "Page.bringToFront": "browse blocked Page.bringToFront: it raises the user's browser window over their work",
-  }
-  const sockets = new Set<Bun.ServerWebSocket<{ session: string }>>()
+  const sockets = new Set<Bun.ServerWebSocket<undefined>>()
   const info = (id: string) => {
     const page = pages.find((item) => item.id === id)!
     return { targetId: page.id, type: page.type, title: page.title, url: page.url }
   }
-  const results: Record<
-    string,
-    (params: Record<string, unknown>, socket: Bun.ServerWebSocket<{ session: string }>) => unknown
-  > = {
+  const results: Record<string, (params: Record<string, unknown>) => unknown> = {
     "Target.setDiscoverTargets": () => ({}),
-    "Target.getTargets": (_params, socket) => ({
-      targetInfos: pages
-        .filter((page) => page.opencodeBrowserSessionId === socket.data.session)
-        .map((page) => info(page.id)),
-    }),
+    "Target.getTargets": () => ({ targetInfos: pages.map((page) => info(page.id)) }),
     "Target.attachToTarget": (params) => ({ sessionId: `S-${params.targetId}` }),
     "Target.detachFromTarget": () => ({}),
     "Target.getTargetInfo": (params) => ({ targetInfo: info(String(params.targetId)) }),
     "Target.activateTarget": () => ({}),
-    "Page.bringToFront": () => ({}),
     "Page.navigate": () => ({ frameId: "F" }),
     "Page.reload": () => ({}),
     "Page.enable": () => ({}),
@@ -113,47 +78,16 @@ export function fakeBrowser(options: { readonly token?: string }) {
     "Input.dispatchKeyEvent": () => ({}),
     "Input.insertText": () => ({}),
   }
-  const server = Bun.serve<{ session: string }>({
+  const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request, server) {
       const url = new URL(request.url)
-      if (url.pathname.startsWith("/devtools/browser/")) {
-        if (options.token && url.searchParams.get("opencodeBrowserToken") !== options.token) {
-          refused.push(url.pathname)
-          return new Response(null, { status: 401 })
-        }
-        const session = url.searchParams.get("opencodeBrowserSessionId") ?? "login"
-        return server.upgrade(request, { data: { session } }) ? undefined : new Response(null, { status: 400 })
-      }
-      if (options.token && request.headers.get("authorization") !== `Bearer ${options.token}`) {
-        refused.push(url.pathname)
-        return new Response(null, { status: 401 })
-      }
-      const session = request.headers.get("opencode-browser-session-id")
-      if (url.pathname === "/json/version") {
-        const query = options.token ? `?opencodeBrowserSessionId=${session}&opencodeBrowserToken=${options.token}` : ""
-        return Response.json({ webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/browser/fake${query}` })
-      }
-      if (url.pathname === "/json/list") return Response.json(options.token ? pages : pages.slice(0, 1))
-      if (url.pathname === "/cli/sessions")
-        return Response.json({
-          sessions: [
-            {
-              id: "login",
-              pageUrl: "http://127.0.0.1:5191/",
-              updatedAt: "2026-11-08T20:00:01.500Z",
-              stateKeys: ["cookies"],
-            },
-            {
-              id: "pessoal",
-              pageUrl: "https://banco.example/extrato",
-              updatedAt: "2026-11-08T19:00:00.000Z",
-              allowedOrigins: ["banco.example"],
-            },
-            { id: "sem-hora", pageUrl: null },
-          ],
-        })
+      if (url.pathname.startsWith("/devtools/browser/"))
+        return server.upgrade(request, { data: undefined }) ? undefined : new Response(null, { status: 400 })
+      if (url.pathname === "/json/version")
+        return Response.json({ webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/browser/fake` })
+      if (url.pathname === "/json/list") return Response.json(pages)
       return new Response(null, { status: 404 })
     },
     websocket: {
@@ -172,19 +106,17 @@ export function fakeBrowser(options: { readonly token?: string }) {
           ...(message.sessionId ? { sessionId: message.sessionId } : {}),
         })
         const result = results[message.method]
-        if (refuse[message.method])
-          return void socket.send(JSON.stringify({ id: message.id, error: { message: refuse[message.method] } }))
         if (!result)
           return void socket.send(
             JSON.stringify({ id: message.id, error: { message: `${message.method} is not faked` } }),
           )
-        socket.send(JSON.stringify({ id: message.id, result: result(message.params ?? {}, socket) }))
+        socket.send(JSON.stringify({ id: message.id, result: result(message.params ?? {}) }))
         if (message.method === "Page.startScreencast") frame(socket, message.sessionId)
       },
     },
   })
   results["Page.startScreencast"] = () => ({})
-  const frame = (socket: Bun.ServerWebSocket<{ session: string }>, sessionId?: string) =>
+  const frame = (socket: Bun.ServerWebSocket<undefined>, sessionId?: string) =>
     socket.send(
       JSON.stringify({
         method: "Page.screencastFrame",
@@ -206,20 +138,11 @@ export function fakeBrowser(options: { readonly token?: string }) {
     )
   const event = (method: string, params: unknown) =>
     sockets.forEach((socket) => socket.send(JSON.stringify({ method, params })))
-  return { server, sent, refused, refuse, view, event, cdp: `http://127.0.0.1:${server.port}` }
+  return { server, sent, view, event, cdp: `http://127.0.0.1:${server.port}` }
 }
 
-export function entryOf(meta: Resources.Meta, id = "chrome:browse:login"): Entry {
+export function entryOf(meta: Resources.Meta, id: string): Entry {
   return { id, kind: "chrome", meta, status: "running", discoveredAt: 1, lastUsedAt: 1, updatedAt: 1 }
-}
-
-/** A browse session's resource while a handoff waits on its tab (`handoffCapabilities`). */
-export function handoffEntry(meta: Resources.Meta, id = "chrome:browse:login"): Entry {
-  return {
-    ...entryOf(meta, id),
-    handoff: { id: "brw_1", sessionID: "ses_1", message: "Entre", since: 1 },
-    capabilities: { navigation: false, tabs: false, focus: true },
-  }
 }
 
 /** Streams `entry` into `states` until the returned `stop`. */

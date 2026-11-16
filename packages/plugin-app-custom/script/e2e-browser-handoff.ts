@@ -2,14 +2,14 @@
 /**
  * End to end for browse handoffs (`docs/browser-handoff.md`) against an owned sandbox started with
  * `OPENCODE_APNS_ORIGIN` pointing at MyAgents `script/fake-apns.ts`. Real Luna 6 / low runs call a fake browse MCP
- * (`test/fixture/browse-mcp.ts`, configured as `browse` in the test repository) whose `execute` blocks while its code
- * hands off: no relay, no Chrome, nothing reaches Apple or a device.
+ * (`test/fixture/browse-mcp.ts`, configured as `browse` in the test repository) whose `handoff` blocks until a release
+ * file appears: no relay, no Chrome, nothing reaches Apple or a device.
  *
  *   bun script/e2e-browser-handoff.ts --url http://127.0.0.1:4197 --home <sandbox home> --apns-log <jsonl>
  *
  * Scenarios: a handoff that waits shows in custom.browser-handoffs, Sessões (custom.navigation), the session family,
  * the Live Activity and one alert, and clears when the call continues; one cleared by interrupting the session; and
- * browse code without a handoff that never shows. `--keep-waiting` leaves one waiting session (for app captures) and
+ * a browse call that is no handoff that never shows. `--keep-waiting` leaves one waiting session (for app captures) and
  * prints how to release it. Its sessions, repository and device are removed at the end otherwise.
  */
 import { mkdir, rm } from "node:fs/promises"
@@ -133,8 +133,8 @@ try {
   const browse = (id: string, code: string) =>
     call(`/api/session/${id}/prompt`, {
       text: [
-        "Chame exatamente uma vez, pelo execute do Code Mode, a ferramenta tools.browse.execute com este code,",
-        "sem mudar nada, e espere o resultado; depois responda apenas: pronto.",
+        "Rode exatamente uma vez, pelo execute do Code Mode, este código, sem mudar nada, e espere o resultado;",
+        "depois responda apenas: pronto.",
         "```js",
         code,
         "```",
@@ -154,7 +154,10 @@ try {
 
   // 1. A handoff that waits: every surface shows it, one alert; it clears when the user continues.
   const login = await create("Navegador — login de teste")
-  await browse(login, 'await handoff("Faça login no GitHub de teste e clique em Continue") // release:login')
+  await browse(
+    login,
+    'await tools.browse.handoff({ message: "Faça login no GitHub de teste e clique em Continue", tab: 1 })',
+  )
   const asked = Date.now()
   const shown = await until(async () => (await waiting(login))[0], 180_000, "the handoff to wait")
   expectEqual(shown.message, "Faça login no GitHub de teste e clique em Continue")
@@ -192,14 +195,14 @@ try {
     keep = true
     console.log(
       JSON.stringify(
-        { ok: true, keep: { sessionID: login, release: path.join(releases, "login"), repo, deviceID }, results },
+        { ok: true, keep: { sessionID: login, release: path.join(releases, "tab-1"), repo, deviceID }, results },
         null,
         2,
       ),
     )
     process.exit(0)
   }
-  await Bun.write(path.join(releases, "login"), "")
+  await Bun.write(path.join(releases, "tab-1"), "")
   await until(async () => ((await waiting(login)).length === 0 ? true : undefined), 15_000, "the handoff to clear")
   expectEqual((await row(login))?.browserText, undefined)
   await idle(login)
@@ -208,16 +211,16 @@ try {
 
   // 2. Interrupting the session clears a waiting handoff (the hook after the call never runs).
   const stuck = await create("Navegador — interrompido")
-  await browse(stuck, 'await handoff("Resolva o captcha de teste") // release:never')
+  await browse(stuck, 'await tools.browse.handoff({ message: "Resolva o captcha de teste", tab: 2 })')
   await until(async () => (await waiting(stuck))[0], 180_000, "the second handoff to wait")
   await call(`/api/session/${stuck}/interrupt?resume=false`, {})
   await until(async () => ((await waiting(stuck)).length === 0 ? true : undefined), 15_000, "the interrupted handoff")
   await idle(stuck)
   results.interrupted = { cleared: true }
 
-  // 3. browse code without a handoff never shows.
+  // 3. A browse call that is no handoff never shows.
   const plain = await create("Navegador — sem handoff")
-  await browse(plain, "return await page.title() // release:none")
+  await browse(plain, 'await tools.browse.navigate({ url: "https://example.com" })')
   const started = Date.now()
   let seen = false
   while (Date.now() - started < 60_000) {

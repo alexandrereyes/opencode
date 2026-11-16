@@ -12,7 +12,7 @@
     "kind": "chrome",
     "cdp": "http://127.0.0.1:19988",
     "browse": "github-login",
-    "targetID": "DCE46F98C99EA57BCEEAA18414974AC9",
+    "targetID": "1836872126",
     "url": "https://github.com/settings/profile",
     "title": "Your profile · GitHub"
   },
@@ -27,7 +27,7 @@
   "activity": [
     {
       "at": 1793104790000,
-      "command": "browse execute",
+      "command": "browse navigate",
       "sessionID": "ses_01JZLIVEACTIVITY0000000002",
       "agent": "build",
       "running": false
