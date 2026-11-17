@@ -278,11 +278,19 @@ export function body(alert: Alert, serverKey: string) {
   }
 }
 
+/** A handoff's message in a push (an alert or a Live Activity update): as short as the Live Activity's own text. */
+export const alertText = 120
+
+function clipped(text: string) {
+  const chars = Array.from(text)
+  return chars.length <= alertText ? text : `${chars.slice(0, alertText - 1).join("")}…`
+}
+
 function text(alert: Alert) {
   if (alert.kind === "finished") return `Terminou · ${alert.ref.project}`
   if (alert.kind === "failed") return `Parou com erro · ${alert.ref.project}`
   if (alert.kind === "question") return `Pergunta: ${alert.text ?? "responda na sessão"}`
-  if (alert.kind === "browser") return `Navegador: ${alert.text ?? "conclua a etapa no navegador"}`
+  if (alert.kind === "browser") return `Navegador: ${alert.text ? clipped(alert.text) : "conclua a etapa no navegador"}`
   return `Permissão: ${alert.text ?? "aprove ou negue na sessão"}`
 }
 

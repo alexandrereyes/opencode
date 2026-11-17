@@ -15,7 +15,8 @@ the apps, the Live Activity, the watch and one push. It uses public plugin APIs 
   Their `id` is the tool part of the transcript: Code Mode's `execute`, or browse's own call when it is a direct tool.
 - A call counts when its tool is browse's `handoff` or `demonstrate` (`browse_handoff`, `browse.handoff`,
   `browse_demonstrate`, `browse.demonstrate`; `detect.ts`). The message is the call's `message`, whitespace collapsed
-  and clipped to 120 characters; without one, `Conclua a etapa no navegador e clique em Continue` (`Demonstre o fluxo…`
+  and clipped to 1000 characters (rev. 2026-11-17, was 120: the apps' card and Resolver show the whole instruction;
+  the Live Activity and the push clip their copies to 120); without one, `Conclua a etapa no navegador e clique em Continue` (`Demonstre o fluxo…`
   for `demonstrate`). Its `tab` is where the resource of `browse-handoff-remoto.md` shows it.
 - It **waits** once it has run for 3 s (`limits.graceMs`, the permission alert delay), unless it ended before.
 - It **ends** on `execute.after` (same input object, or the same message and tab in the same tool part when a hook
@@ -46,7 +47,7 @@ Handoff {
   sessionID: string   // the session that runs it: top-level or a subagent
   callID: string      // the waiting tool part (Code Mode's execute, or browse's call)
   messageID: string
-  message: string     // ≤ 120 characters
+  message: string     // ≤ 1000 characters (120 before rev. 2026-11-17)
   since: number       // epoch ms the call started
 }
 ```

@@ -11,8 +11,12 @@ export const messages = {
   demonstrate: "Demonstre o fluxo no navegador e clique em Continue",
 }
 
-/** At most this many characters of the handoff message reach the apps (the Live Activity's text limit). */
-export const maxMessage = 120
+/**
+ * At most this many characters of the handoff message reach the apps: the whole instruction an agent writes for
+ * Alexandre (the conversation's card and the Resolver show it all), bounded only so a runaway message stays small. The
+ * Live Activity and the push clip their own copies (`live-activity` `limits.text`, `notifications` `alertText`).
+ */
+export const maxMessage = 1_000
 
 /**
  * The handoff a browse call asks for: its message (the call's `message`, whitespace collapsed, clipped to

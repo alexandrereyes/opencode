@@ -37,7 +37,10 @@ test("browse's handoff and demonstrate calls wait on Alexandre, with the call's 
   expect(detect("browse.demonstrate", { tab: 4 })).toEqual({ message: messages.demonstrate, tab: 4 })
   expect(detect("browse_handoff", { message: "  Diga\n  ok ", tab: 1 })?.message).toBe("Diga ok")
   expect(detect("browse_handoff", { message: "", tab: 1 })?.message).toBe(messages.handoff)
-  expect(Array.from(detect("browse_handoff", { message: "a".repeat(300), tab: 1 })!.message)).toHaveLength(maxMessage)
+  // The whole instruction reaches the apps (a real one, 2026-11-17, had 340 characters); only a runaway one is cut.
+  const instruction = "Aqui em Contas de serviço: clique em Gerar nova chave privada e copie o JSON. ".repeat(4).trim()
+  expect(detect("browse_handoff", { message: instruction, tab: 1 })?.message).toBe(instruction)
+  expect(Array.from(detect("browse_handoff", { message: "a".repeat(3_000), tab: 1 })!.message)).toHaveLength(maxMessage)
   // Without a tab (browse refuses it at once) it waits on nothing the apps can show.
   expect(detect("browse_handoff", { message: "x" })).toEqual({ message: "x" })
   for (const tool of ["browse_click", "browse_execute", "browse_navigate", "handoff", "shell"])
@@ -188,6 +191,8 @@ test("a handoff ranks after questions, marks the activity urgent and gives the w
 })
 
 test("a waiting handoff alerts once, collapsed per session, without a request to open", async () => {
+  const longMessage =
+    "O google-services.json já está no seu Mac. A API FCM V1 está ativada. Aqui em Contas de serviço: clique em Gerar nova chave privada e copie o JSON."
   const server = world()
   const tracker = makeTracker(server.ctx)
   const shared = storage()
@@ -214,7 +219,7 @@ test("a waiting handoff alerts once, collapsed per session, without a request to
       yield* tracker.apply(created(ids.live, T - minute), T)
       yield* tracker.apply(execution("started", ids.live, T), T)
       yield* step(T)
-      server.handoffs.push({ id: "brw_1", sessionID: ids.live, since: T, message: "Faça login no GitHub" })
+      server.handoffs.push({ id: "brw_1", sessionID: ids.live, since: T, message: longMessage })
       yield* step(T + 3_000)
       yield* step(T + 60_000)
     }),
@@ -222,7 +227,8 @@ test("a waiting handoff alerts once, collapsed per session, without a request to
   expect(pushes).toHaveLength(1)
   expect(pushes[0]?.collapseID).toBe(`attention:${ids.live}`)
   const body = pushes[0]?.body as { aps: { alert: { body: string } }; opencode: Record<string, unknown> }
-  expect(body.aps.alert.body).toBe("Navegador: Faça login no GitHub")
+  // The push says the start of a long instruction; the apps read it whole from the handoff.
+  expect(body.aps.alert.body).toBe(`Navegador: ${Array.from(longMessage).slice(0, 119).join("")}…`)
   expect(body.opencode).toMatchObject({ kind: "session.attention", sessionID: ids.live, attention: "browser" })
   expect("requestID" in body.opencode).toBe(false)
 })

@@ -18,7 +18,7 @@ export const Handoff = Schema.Struct({
   /** The tool part that waits: Code Mode's `execute`, or browse's own call when it is a direct tool. */
   callID: Schema.String,
   messageID: Schema.String,
-  /** What the agent asked for (the call's `message`), at most 120 characters, or a default when it passed none. */
+  /** What the agent asked for (the call's `message`), at most 1000 characters, or a default when it passed none. */
   message: Schema.String,
   /** When the call started. */
   since: Schema.Number,
