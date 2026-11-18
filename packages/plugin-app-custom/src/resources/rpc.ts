@@ -37,7 +37,35 @@ export const Owner = Schema.Struct({
   rootSessionID: Schema.String,
   /** Agent of `sessionID`, for "via <subagente>". */
   agent: optional(Schema.String),
+  /** rev. 2026-11-18: the session's and its root's titles, when the server that lists it knows them. */
+  title: optional(Schema.String),
+  rootTitle: optional(Schema.String),
+  /**
+   * rev. 2026-11-18: how the owner is known. `command` (or absent, as on older servers): an agent command named the
+   * resource. `process`: a process using it now (`Test`) carries the session in its environment
+   * (`OPENCODE_SESSION_ID`). `folder`: that process runs in a folder named after a session's worktree.
+   */
+  source: optional(Schema.Literals(["command", "process", "folder"])),
+  /** rev. 2026-11-18: a guess (`source: folder`): the app says "provável". */
+  probable: optional(Schema.Boolean),
 }).annotate({ identifier: "Resources.Owner" })
+
+/**
+ * rev. 2026-11-18: a process on the hub's machine using the resource now, outside any agent command the plugin saw (a
+ * test run's `xcodebuild`, Appium, `adb -s … instrument`, `dotnet test`): "Em uso por teste". Orphaned processes (whose
+ * parent is gone) and the hubs' own helpers do not count.
+ */
+export interface Test extends Schema.Schema.Type<typeof Test> {}
+export const Test = Schema.Struct({
+  /** The runner's command line (the outermost test runner above the process that names the resource), shortened. */
+  command: Schema.String,
+  /** Epoch ms when that runner started. */
+  since: Schema.Number,
+  /** `OPENCODE_SESSION_ID` from the process environment, when the command that started it exported it. */
+  sessionID: optional(Schema.String),
+  /** A worktree-like folder in the process chain's command lines (`…/Worktrees/<name>`, `run-<name>`, `repo-<name>`). */
+  folder: optional(Schema.String),
+}).annotate({ identifier: "Resources.Test" })
 
 /**
  * rev. 2026-11-11: who started an emulator (`emulator -avd`, `android-emulator --detach -avd`), with the session's and
@@ -177,6 +205,13 @@ export const Resource = Schema.Struct({
   owner: optional(Owner),
   /** rev. 2026-11-11: see `StartedBy`; absent when no agent command started it (and on older hubs). */
   startedBy: optional(StartedBy),
+  /**
+   * rev. 2026-11-18: the owner that expired (its session is gone, or it has not used the resource for
+   * `limits.ownerIdleMs`): the app says "último uso há … por …". `owner` is then absent.
+   */
+  previousOwner: optional(Owner),
+  /** rev. 2026-11-18: see `Test`. */
+  test: optional(Test),
   state: State,
   control: optional(Control),
   meta: Meta,
@@ -265,6 +300,14 @@ export const limits = {
   /** A command still open after this long (its end never arrived: a crash, a lost hook) no longer counts as use. */
   activityOpenMs: 30 * 60_000,
   activityCommandLength: 160,
+  /** rev. 2026-11-18: commands older than this leave the history. */
+  activityMaxAgeMs: 24 * 3_600_000,
+  /** rev. 2026-11-18: an owner that has not used the resource for this long is no longer its owner. */
+  ownerIdleMs: 12 * 3_600_000,
+  /** rev. 2026-11-18: how often the hub lists what runs on its machine (simulators booted, emulators attached). */
+  inventoryMs: 15_000,
+  /** rev. 2026-11-18: how often the hub reads its machine's processes (one `ps`) to find the resources tests use. */
+  processesMs: 10_000,
 }
 
 export const FocusInput = Schema.Struct({ id: ID }).annotate({ identifier: "Resources.FocusInput" })

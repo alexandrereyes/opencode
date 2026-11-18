@@ -4,6 +4,7 @@ import path from "node:path"
 import type { Input } from "../protocol.js"
 import { connect, decode, pb, type Connection } from "./android-grpc.js"
 import { run, size, text } from "./process.js"
+import type { Resources } from "../rpc.js"
 import type { Adapter, Entry, Image, Probe } from "./types.js"
 
 /**
@@ -46,6 +47,16 @@ export interface AndroidSystem {
 
 export function createAdapter(io: AndroidSystem) {
   const devices = new Map<string, Promise<Device>>()
+  // The inventory runs right after a probe: it reuses that probe's `adb devices` (and its `emu avd name`s). The probe
+  // itself always reads anew, since it decides which AVD holds a serial.
+  let attached: { at: number; value: Promise<RunningEmulator[]> } | undefined
+  const running = (fresh: boolean) => {
+    if (!fresh && attached && Date.now() - attached.at < 2_000) return attached.value
+    const value = io.emulators()
+    attached = { at: Date.now(), value }
+    value.catch(() => (attached = undefined))
+    return value
+  }
 
   /**
    * Proves which AVD runs on the target's serial now, before anything is sent there: a console port (and so a serial)
@@ -84,10 +95,30 @@ export function createAdapter(io: AndroidSystem) {
     kind: "android-emulator",
     async probe(entries) {
       const android = entries.filter((entry) => entry.meta.kind === "android-emulator")
-      const running = await io.emulators()
+      const emulators = await running(true)
       const names = [...new Set(android.flatMap((entry) => identity(entry) ?? []))]
       const existing = await Promise.all(names.map(async (avd) => [avd, await io.avdExists(avd)] as const))
-      return resolve(android, running, new Set(existing.flatMap(([avd, found]) => (found ? [avd] : []))))
+      return resolve(android, emulators, new Set(existing.flatMap(([avd, found]) => (found ? [avd] : []))))
+    },
+
+    /**
+     * rev. 2026-11-18: every emulator attached whose AVD is known (an emulator that cannot say which AVD it is stays
+     * out: a serial alone names whoever holds the port).
+     */
+    async inventory() {
+      return (await running(false)).flatMap((item): Resources.Meta[] =>
+        item.avd
+          ? [
+              {
+                kind: "android-emulator",
+                serial: item.serial,
+                avd: item.avd,
+                consolePort: item.consolePort,
+                ...(item.device ? { device: item.device } : {}),
+              },
+            ]
+          : [],
+      )
     },
 
     /** A serial alone gets the AVD that runs there now, so the hub never files it under whoever ran there before. */

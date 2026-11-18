@@ -9,6 +9,7 @@ import { jpeg, size } from "../adapters/process.js"
 import type { Adapter, Entry, Image, StoredActivity, StreamSink } from "../adapters/types.js"
 import type { Simulator } from "../discovery.js"
 import { makeMachine } from "../machine.js"
+import type { Device, Use } from "../processes.js"
 import { ResourceProtocol } from "../protocol.js"
 import { Resources } from "../rpc.js"
 import { makeInputQueue } from "./input-queue.js"
@@ -30,6 +31,18 @@ export interface HubOptions {
   readonly simulators?: () => Promise<readonly Simulator[]>
   /** `handoff.machine` for a browse relay at `cdp` (`machine.ts` `makeMachine`). */
   readonly machine?: (cdp: string | undefined) => Promise<string | undefined>
+  /**
+   * rev. 2026-11-18: the processes using each running simulator and emulator now (`processes.ts`
+   * `makeProcessWatch`), every `processesMs`. Without it (tests) nothing is "Em uso por teste".
+   */
+  readonly processes?: (
+    devices: readonly Device[],
+    now: number,
+  ) => Promise<ReadonlyMap<string, Use & { readonly sessionID?: string }>>
+  /** rev. 2026-11-18: list every running simulator and emulator (`Adapter.inventory`); the Mac's hubs only. */
+  readonly inventory?: boolean
+  readonly inventoryMs?: number
+  readonly processesMs?: number
 }
 
 export const Upsert = Schema.Struct({
@@ -195,6 +208,9 @@ export function createHub(options: HubOptions) {
   let writing: ReturnType<typeof setTimeout> | undefined
   let probes = Promise.resolve()
   let probing = 0
+  /** What processes use now (`watch`), per resource; never persisted. */
+  let tests = new Map<string, Resources.Test>()
+  let watching = false
 
   const load = async () => {
     if (!options.file) return
@@ -240,15 +256,21 @@ export function createHub(options: HubOptions) {
     const at = now()
     const adapter = options.adapters[entry.kind]
     const open = (item: StoredActivity) => item.endedAt === undefined && at - item.at < Resources.limits.activityOpenMs
+    const activity = recent(entry.activity ?? [], at)
+    // Found by the inventory and never used by an agent: running, nobody's, "Livre".
+    const used = entry.owner !== undefined || activity.length > 0
     const state: Resources.State = lock
       ? "user"
       : entry.status !== "running"
         ? entry.status
-        : at - entry.lastUsedAt < Resources.limits.agentRecentMs || entry.activity?.some(open)
-          ? "agent"
-          : at - entry.lastUsedAt < Resources.limits.liveRecentMs
-            ? "live"
-            : "idle"
+        : !used
+          ? "idle"
+          : at - entry.lastUsedAt < Resources.limits.agentRecentMs || activity.some(open)
+            ? "agent"
+            : at - entry.lastUsedAt < Resources.limits.liveRecentMs
+              ? "live"
+              : "idle"
+    const test = entry.status === "running" ? tests.get(entry.id) : undefined
     return {
       id: entry.id,
       kind: entry.kind,
@@ -256,6 +278,7 @@ export function createHub(options: HubOptions) {
       ...(entry.purpose ? { purpose: entry.purpose } : {}),
       ...(entry.owner ? { owner: entry.owner } : {}),
       ...(entry.startedBy ? { startedBy: entry.startedBy } : {}),
+      ...(test ? { test } : {}),
       state,
       ...(lock ? { control: { holder: "user" as const, since: lock.since, expiresAt: lock.expiresAt } } : {}),
       meta: entry.meta,
@@ -263,9 +286,9 @@ export function createHub(options: HubOptions) {
       lastUsedAt: entry.lastUsedAt,
       updatedAt: entry.updatedAt,
       live: { stream: adapter.stream !== undefined, input: adapter.input !== undefined },
-      ...(entry.activity?.length
+      ...(activity.length
         ? {
-            activity: entry.activity.toReversed().map((item) => ({
+            activity: activity.toReversed().map((item) => ({
               at: item.at,
               command: item.command,
               ...(item.sessionID ? { sessionID: item.sessionID } : {}),
@@ -632,6 +655,78 @@ export function createHub(options: HubOptions) {
         return entry.id
       })
     if (updated.length + pruned.length > 0) changed(...updated, ...pruned)
+  }
+
+  /**
+   * rev. 2026-11-18: every simulator booted and emulator attached on this machine becomes a resource, even if no command
+   * named it: nobody's, "Livre", until an agent uses it (`docs/resources.md`, "Inventory and tests"). A known one that
+   * had gone comes back; the probe keeps the rest current. Physical devices stay out (adapters list emulators only).
+   */
+  const inventory = () => {
+    probing++
+    probes = probes.then(() => inventoryNow()).finally(() => probing--)
+    return probes
+  }
+
+  const inventoryNow = async () => {
+    const at = now()
+    const touched: string[] = []
+    for (const kind of ["ios-simulator", "android-emulator"] as const) {
+      const adapter = options.adapters[kind]
+      if (!options.inventory || !adapter.inventory) continue
+      const found = await adapter.inventory().catch((error: unknown) => {
+        console.error(`resources hub: ${kind} inventory failed`, error)
+        return []
+      })
+      for (const meta of found) {
+        const existing = registered(kind, meta)
+        if (existing && existing.status !== "gone") continue
+        if (existing) {
+          entries.set(existing.id, { ...existing, status: "running", meta: mergeMeta(existing.meta, meta), updatedAt: at })
+          touched.push(existing.id)
+          continue
+        }
+        const base = idFor(meta)
+        const id = entries.has(base) ? free(base) : base
+        entries.set(id, { id, kind, meta, status: "running", discoveredAt: at, lastUsedAt: at, updatedAt: at })
+        touched.push(id)
+      }
+    }
+    if (touched.length > 0) changed(...touched)
+  }
+
+  /** rev. 2026-11-18: which running simulators and emulators processes use now (`HubOptions.processes`). */
+  const watch = async () => {
+    if (!options.processes || watching) return
+    watching = true
+    try {
+      const devices = [...entries.values()].flatMap((entry) =>
+        entry.status === "running" && entry.kind !== "chrome" ? [{ id: entry.id, meta: entry.meta }] : [],
+      )
+      const found = await options.processes(devices, now()).catch((error: unknown) => {
+        console.error("resources hub: process watch failed", error)
+        return undefined
+      })
+      if (!found) return
+      const next = new Map(
+        [...found].map(([id, use]): [string, Resources.Test] => [
+          id,
+          {
+            command: shown(use.command),
+            since: use.since,
+            ...(use.sessionID ? { sessionID: use.sessionID } : {}),
+            ...(use.folder ? { folder: use.folder } : {}),
+          },
+        ]),
+      )
+      const ids = [...new Set([...tests.keys(), ...next.keys()])].filter(
+        (id) => JSON.stringify(tests.get(id)) !== JSON.stringify(next.get(id)),
+      )
+      tests = next
+      if (ids.length > 0) emit({ type: "changed", ids })
+    } finally {
+      watching = false
+    }
   }
 
   const snapshot = (id: string, maxWidth?: number) => {
@@ -1228,7 +1323,10 @@ export function createHub(options: HubOptions) {
     await load()
     timers.push(setInterval(() => void expire(), 1_000))
     timers.push(setInterval(() => probing === 0 && void probe(), options.probeMs ?? 5_000))
+    timers.push(setInterval(() => void inventory(), options.inventoryMs ?? Resources.limits.inventoryMs))
+    timers.push(setInterval(() => void watch(), options.processesMs ?? Resources.limits.processesMs))
     void probe()
+    void inventory().then(() => watch())
   }
 
   const close = () => {
@@ -1255,6 +1353,8 @@ export function createHub(options: HubOptions) {
     control,
     ticket,
     probe,
+    inventory,
+    watch,
     expire,
     claim,
     view,
@@ -1297,7 +1397,12 @@ export function record(
     ...(owner?.agent ? { agent: owner.agent } : {}),
     ...(input.running ? {} : { endedAt: at }),
   }
-  return [...current, next].slice(-Resources.limits.activityKept)
+  return recent([...current, next], at).slice(-Resources.limits.activityKept)
+}
+
+/** rev. 2026-11-18: the history without commands older than `limits.activityMaxAgeMs`. */
+export function recent(activity: readonly StoredActivity[], at: number) {
+  return activity.filter((item) => at - item.at < Resources.limits.activityMaxAgeMs)
 }
 
 /** The command as the history shows it: leading `NAME=value` assignments (often tokens) dropped, one short line. */

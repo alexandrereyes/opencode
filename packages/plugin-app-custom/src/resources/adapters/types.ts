@@ -95,6 +95,11 @@ export interface StreamSink {
 export interface Adapter {
   readonly kind: Resources.Kind
   probe(entries: readonly Entry[]): Promise<ReadonlyMap<string, Probe>>
+  /**
+   * rev. 2026-11-18: every resource of this kind running on the hub's machine now, known or not (a simulator booted, an
+   * emulator attached), so the hub lists them all. Simulators and emulators only.
+   */
+  inventory?(): Promise<readonly Resources.Meta[]>
   snapshot(entry: Entry): Promise<Image>
   stream?(entry: Entry, sink: StreamSink, signal: AbortSignal): Promise<void>
   input?(entry: Entry, event: Input): Promise<void>
