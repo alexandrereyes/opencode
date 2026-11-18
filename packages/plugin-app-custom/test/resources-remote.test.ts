@@ -335,7 +335,12 @@ describe("standalone hub", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-standalone-hub-"))
     roots.push(root)
     const state = path.join(root, "state")
-    const env: Record<string, string | undefined> = { ...process.env, OPENCODE_RESOURCES_HUB_STATE: state }
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      OPENCODE_RESOURCES_HUB_STATE: state,
+      // This Mac's own simulators and emulators would fill the list.
+      OPENCODE_RESOURCES_HUB_INVENTORY: "0",
+    }
     delete env.OPENCODE_RESOURCES_HUB_PARENT
     delete env.OPENCODE_RESOURCES_HUB_PORT
     const child = Bun.spawn([...hubCommand(path.join(import.meta.dir, "../src/resources/supervisor.ts"))], {

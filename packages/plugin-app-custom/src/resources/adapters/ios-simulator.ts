@@ -22,7 +22,7 @@ import type { Adapter, Entry, Probe, StreamSink } from "./types.js"
 export const adapter: Adapter = {
   kind: "ios-simulator",
   async probe(entries) {
-    const devices = await list()
+    const devices = await recentList(true)
     return new Map(
       entries.flatMap((entry): [string, Probe][] => {
         if (entry.meta.kind !== "ios-simulator") return []
@@ -39,6 +39,10 @@ export const adapter: Adapter = {
         ]
       }),
     )
+  },
+  /** rev. 2026-11-18: every booted simulator (the probe's own `simctl list` when it ran a moment ago). */
+  async inventory() {
+    return booted(await recentList(false))
   },
   async snapshot(entry) {
     if (entry.meta.kind !== "ios-simulator") throw new Error("Not an iOS simulator")
@@ -140,6 +144,33 @@ export type SimulatorDevice = {
   readonly state: string
   readonly device?: string
   readonly runtime?: string
+}
+
+/** Booted simulators as resource metadata (`Adapter.inventory`). */
+export function booted(devices: ReadonlyMap<string, SimulatorDevice>) {
+  return [...devices.values()].flatMap((device) =>
+    device.state === "Booted"
+      ? [
+          {
+            kind: "ios-simulator" as const,
+            udid: device.udid,
+            name: device.name,
+            ...(device.device ? { device: device.device } : {}),
+            ...(device.runtime ? { runtime: device.runtime } : {}),
+          },
+        ]
+      : [],
+  )
+}
+
+/** `list`; the inventory, right after a probe, reuses the probe's for a couple of seconds. */
+let cached: { at: number; value: Promise<ReadonlyMap<string, SimulatorDevice>> } | undefined
+function recentList(fresh: boolean) {
+  if (!fresh && cached && Date.now() - cached.at < 2_000) return cached.value
+  const value = list()
+  cached = { at: Date.now(), value }
+  value.catch(() => (cached = undefined))
+  return value
 }
 
 /** Every simulator known to CoreSimulator, by UDID. */

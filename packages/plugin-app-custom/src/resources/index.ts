@@ -2,7 +2,7 @@ import { Plugin } from "@opencode/plugin/effect"
 import { Session } from "@opencode/schema/session"
 import { Tool } from "@opencode/schema/tool"
 import { optional } from "@opencode/schema/schema"
-import { Effect, Option, Schema } from "effect"
+import { DateTime, Effect, Option, Schema } from "effect"
 import path from "node:path"
 import { limits, sharedRegistry } from "../browser-handoff/registry.js"
 import { relayEndpoint } from "./adapters/browse-relay.js"
@@ -10,6 +10,7 @@ import { makeBrowseResources } from "./browse.js"
 import { shellEnvironment, writeConfig } from "./adapters/chrome.js"
 import { bareSerials, known, parseSimulators, resolveSimulators } from "./discovery.js"
 import { commandLock, makeHubs, routes, sharedMacHub, type Hubs } from "./hubs.js"
+import { present, type Known, type Sessions } from "./presence.js"
 import { refusal, returned } from "./lock.js"
 import { Resources } from "./rpc.js"
 import { HubError, hubSettings, makeHubClient, stateDirectory } from "./supervisor.js"
@@ -41,20 +42,24 @@ export const registerResources = Effect.fn("Resources.register")(function* (
     })
   const ticketFor = (id: string, capability: Resources.Capability) => call(() => hubs.ticket(id, capability))
 
+  const sessions = owners(ctx)
   const registration = yield* ctx.rpc
     .register(Resources.Definition, {
       list: (input, context) =>
         // Alexandre asked for it: a Mac hub in its backoff may be back.
         call(() => hubs.list({ probe: true })).pipe(
-          Effect.map((result) => ({
+          Effect.flatMap((result) => present(result.resources, sessions, Date.now())),
+          Effect.map((resources) => ({
             resources: input.sessionID
-              ? result.resources.filter((resource) => resource.owner?.rootSessionID === input.sessionID)
-              : result.resources,
+              ? resources.filter((resource) => resource.owner?.rootSessionID === input.sessionID)
+              : resources,
           })),
           Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
         ),
       get: (input, context) =>
         call(() => hubs.get(input.id)).pipe(
+          Effect.flatMap((resource) => present([resource], sessions, Date.now())),
+          Effect.map(([resource]) => resource!),
           Effect.mapError((error) => context.error("unavailable", error.message, { reason: error.reason })),
         ),
       snapshot: (input, context) =>
@@ -314,6 +319,62 @@ export const registerResources = Effect.fn("Resources.register")(function* (
       )
   })
 })
+
+/**
+ * rev. 2026-11-18: this server's sessions for `present` (`presence.ts`): a session and its family, and the sessions of
+ * a worktree folder. Both cached for a minute: lists come with every `changed` event.
+ */
+export function owners(ctx: Pick<Plugin.Context, "session">): Sessions {
+  const known = new Map<string, { at: number; value: Known | undefined }>()
+  let folders: { at: number; value: readonly (Known & { folder: string; updated: number })[] } | undefined
+  const fresh = (at: number) => Date.now() - at < 60_000
+  const get = (sessionID: string): Effect.Effect<Known | undefined> =>
+    Effect.gen(function* () {
+      const cached = known.get(sessionID)
+      if (cached && fresh(cached.at)) return cached.value
+      const session = yield* ctx.session.get({ sessionID: Session.ID.make(sessionID) }).pipe(Effect.option)
+      if (Option.isNone(session)) {
+        known.set(sessionID, { at: Date.now(), value: undefined })
+        return undefined
+      }
+      const info = session.value
+      const parent = info.parentID ? yield* get(info.parentID) : undefined
+      const value: Known = {
+        sessionID,
+        rootSessionID: parent?.rootSessionID ?? sessionID,
+        ...(info.agent ? { agent: info.agent } : {}),
+        ...(info.title ? { title: info.title } : {}),
+        ...((parent ? parent.rootTitle : info.title) ? { rootTitle: parent ? parent.rootTitle : info.title } : {}),
+      }
+      known.set(sessionID, { at: Date.now(), value })
+      return value
+    })
+  const scanned = (after?: Session.ID): Effect.Effect<readonly (Known & { folder: string; updated: number })[]> =>
+    ctx.session.scan({ limit: 500, ...(after ? { after } : {}) }).pipe(
+      Effect.flatMap((page) =>
+        Effect.gen(function* () {
+          const here = yield* Effect.forEach(page.data, (row) =>
+            get(row.session.id).pipe(
+              Effect.map((found) =>
+                found
+                  ? [{ ...found, folder: path.basename(row.session.location.directory), updated: DateTime.toEpochMillis(row.session.time.updated) }]
+                  : [],
+              ),
+            ),
+          )
+          const rest = page.next && page.next !== after ? yield* scanned(page.next) : []
+          return [...here.flat(), ...rest]
+        }),
+      ),
+      Effect.orElseSucceed(() => []),
+    )
+  const inFolder = (folder: string): Effect.Effect<readonly Known[]> =>
+    Effect.gen(function* () {
+      if (!folders || !fresh(folders.at)) folders = { at: Date.now(), value: yield* scanned() }
+      return folders.value.filter((item) => item.folder === folder).toSorted((a, b) => b.updated - a.updated)
+    })
+  return { get, inFolder }
+}
 
 /** This machine's hub and, when configured, the Mac's (`resources.md`, "Mac hub"); a misconfiguration only warns. */
 const defaultHubs = Effect.fn("Resources.hubs")(function* () {

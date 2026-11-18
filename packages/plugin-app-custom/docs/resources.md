@@ -35,7 +35,9 @@ plugin (every Location) ──loopback, bearer secret──▶ hub /admin/*
 | `kind`                                    | `ios-simulator`, `android-emulator`, `chrome` (clients must tolerate unknown kinds)                                                                                                       |
 | `label`                                   | Display name derived from `meta` (`iPhone 17 · OpenCode Salto Turno`, `Pixel 9 · abacato v2`, `localhost:5173/login`) unless registration named it                                        |
 | `purpose`                                 | Optional, from explicit registration                                                                                                                                                      |
-| `owner`                                   | `{ sessionID, rootSessionID, agent? }`: the session whose tool call used it last (a subagent's own session) and the family's root; lists group by root and show "via <subagente>". Since rev. 2026-11-11 commands that only ask about an emulator do not count (see [Discovery](#discovery)); `lastUsedAt` says when |
+| `owner`                                   | `{ sessionID, rootSessionID, agent?, title?, rootTitle?, source?, probable? }` (the last four rev. 2026-11-18, see [Owners](#owners)): the session whose tool call used it last (a subagent's own session) and the family's root; lists group by root and show "via <subagente>". Since rev. 2026-11-11 commands that only ask about an emulator do not count (see [Discovery](#discovery)); `lastUsedAt` says when |
+| `test`                                    | Optional (rev. 2026-11-18): `{ command, since, sessionID?, folder? }`, a process on the hub's machine using it now ("Em uso por teste"); see [Inventory and tests](#inventory-and-tests) |
+| `previousOwner`                           | Optional (rev. 2026-11-18): the `owner` that expired, for "último uso há … por …"; see [Owners](#owners)                                                                                  |
 | `startedBy`                               | Optional (rev. 2026-11-11): `{ sessionID, rootSessionID, agent?, title?, rootTitle?, at }`, the session whose completed command started the emulator (`emulator -avd`, `android-emulator --detach -avd`) and its and its root's titles then; dropped when it stops |
 | `state`                                   | `user` (Alexandre controls it) › `agent` (a command naming it is running, or ended in the last 90 s) › `live` (running, used in the last 10 min) › `idle` ("Livre") › `stopped` › `gone`  |
 | `control`                                 | `{ holder: "user", since, expiresAt }` while Alexandre holds control                                                                                                                      |
@@ -609,6 +611,45 @@ endedAt? }` in `resources.json` (0600). The list shows them newest first without
   `command` drops leading `NAME=value` assignments (where tokens usually go), collapses whitespace and is cut at 160
   characters. Registries written before the field load unchanged; older hubs ignore `activity` and answer 404 to the
   end route, which the plugin ignores; older apps ignore the field.
+
+## Inventory and tests
+
+rev. 2026-11-18. Discovery by command (above) only knows a device some agent command named; a test script that
+picks its devices itself (`scripts/e2e --ios`, Appium, `dotnet test`) never names them, and its devices were missing
+or showed as another session's and "Livre" while the test ran. The Mac's hubs (the Mac server's and the one the Linux
+server reaches, `OPENCODE_RESOURCES_HUB_INVENTORY=0` turns this off) now also:
+
+- **Inventory** (`Adapter.inventory`, every `limits.inventoryMs`, 15 s): every simulator booted (`simctl list`, the
+  probe's own listing when it ran a moment ago) and every emulator attached whose AVD is known (`adb devices`, the
+  emulators' ini files) becomes a resource, owner-less and `idle`, until an agent uses it. A known one that had gone
+  comes back. Physical devices stay out. Both hubs list the same devices; each keeps its own owners and history.
+- **Tests** (`processes.ts`, every `limits.processesMs`, 10 s): one `ps -Ao pid=,ppid=,etime=,command=`, skipped while
+  no simulator or emulator runs. A process uses a device when its command line names the UDID or the serial (as a
+  word: `id=<UDID>`, `-s emulator-5556`, `said-<UDID>`). Not counted: paths inside the simulator
+  (`CoreSimulator/Devices/<UDID>/…`), orphans (parent PID 1: Appium's WebDriverAgent or `adb logcat` left by an
+  earlier run), the hubs' own processes, the emulator itself, `emu avd name` probes, and processes younger than 3 s.
+  The use reports the outermost test runner above the process (`scripts/…`, `dotnet test|run|watch`, `xcodebuild`,
+  Appium…), its start, a worktree-like folder from the chain's command lines (`…/Worktrees/<name>`, `run-<name>`,
+  `repo-<name>`) and `OPENCODE_SESSION_ID` from the runner's environment (one `ps -E` per new runner, cached by PID).
+  The resource gets `test`; the hub announces `changed` when it starts or ends. It never changes `state`.
+
+## Owners
+
+rev. 2026-11-18, in the plugin's `list` and `get` (`presence.ts`, with this server's sessions):
+
+- The hub's owner (the last command that named it) **expires** when its session is not on this server any more (or is
+  another server's) or it has not used the resource for `limits.ownerIdleMs` (12 h), unless an agent uses it now
+  (`agent`, `user`). It then moves to `previousOwner` and the resource is nobody's: no session's list has it.
+- A **test** names the owner: the session in its environment (`source: process`), else the most recently updated
+  session whose directory ends in its folder (`source: folder`, `probable: true`). It outranks the hub's owner unless
+  an agent uses the resource now; the earlier owner, another family's, becomes `previousOwner`.
+- Owners carry `title` and `rootTitle` when this server knows them, so the apps can name another session's devices.
+- Sessions on the Linux server reach the Mac over the `mac` bridge, which forwards only the variables in `MACENV`: for
+  `source: process` the bridge must forward `OPENCODE_SESSION_ID` (`core-infra`, `opencode-docker/mac-bridge`).
+  Without it, the folder is the only clue.
+- History: commands older than `limits.activityMaxAgeMs` (24 h) leave the list and the stored history.
+
+Older apps ignore the new fields (a test-used device still reads "Livre"); newer apps work with older servers.
 
 ## Hub process
 

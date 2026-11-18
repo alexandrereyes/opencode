@@ -402,7 +402,8 @@ describe("Android identity in the hub", () => {
         }),
         owner,
         discoveredAt: 1_793_539_960_859,
-        activity: [{ call: "call_old", command: "adb -s emulator-5554 install app.apk", at: 1_793_539_965_000 }],
+        // Within the day the history keeps (rev. 2026-11-18).
+        activity: [{ call: "call_old", command: "adb -s emulator-5554 install app.apk", at: Date.now() - 60_000 }],
       },
       {
         ...entry("android-emulator:Abacato_curious_falcon", {

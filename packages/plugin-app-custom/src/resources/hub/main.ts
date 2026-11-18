@@ -5,6 +5,7 @@ import { writeConfig } from "../adapters/chrome.js"
 import { adapters } from "../adapters/index.js"
 import { text } from "../adapters/process.js"
 import { parseSimulators } from "../discovery.js"
+import { makeProcessWatch } from "../processes.js"
 import { createHub, protocol } from "./hub.js"
 
 /** Argument that makes the bundled plugin (`plugin/index.js`) run the hub instead of exporting the plugin. */
@@ -28,11 +29,24 @@ export async function main() {
   await Promise.all(Object.values(adapters).map((adapter) => adapter.recover?.()))
   const secret = randomBytes(32).toString("base64url")
   await writeConfig(path.join(state, "playwright-cli.json"))
+  const watches = process.platform === "darwin" && process.env.OPENCODE_RESOURCES_HUB_INVENTORY !== "0"
   const hub = createHub({
     adapters,
     secret,
     file: path.join(state, "resources.json"),
     simulators: async () => parseSimulators(JSON.parse(await text(["xcrun", "simctl", "list", "devices", "-j"]))),
+    // rev. 2026-11-18: on the Mac, every simulator and emulator running, and the tests using them (one `ps` a cycle);
+    // `OPENCODE_RESOURCES_HUB_INVENTORY=0` turns both off (tests of the hub process).
+    inventory: watches,
+    ...(watches
+      ? {
+          processes: makeProcessWatch({
+            list: () => text(["ps", "-Ao", "pid=,ppid=,etime=,command="], { timeout: 5_000 }),
+            environment: (pids) =>
+              text(["ps", "-E", "-ww", "-o", "pid=,command=", "-p", pids.join(",")], { timeout: 5_000 }),
+          }),
+        }
+      : {}),
   })
   await hub.start()
   const server = Bun.serve({
