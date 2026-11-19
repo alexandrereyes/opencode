@@ -24,6 +24,7 @@ import { registerDictation } from "./dictation/index.js"
 import { registerMacData } from "./mac-data/index.js"
 import { registerDevice } from "./device/index.js"
 import { registerResources } from "./resources/index.js"
+import { registerBancada } from "./bancada/index.js"
 import { registerQuotes } from "./quotes/index.js"
 import { registerQuestionDrafts } from "./question-drafts/index.js"
 import { registerLiveActivity } from "./live-activity/index.js"
@@ -63,6 +64,7 @@ export default Plugin.define({
       yield* registerMacData(ctx)
       yield* registerDevice(ctx)
       yield* registerResources(ctx)
+      yield* registerBancada(ctx)
       yield* registerQuotes(ctx)
       yield* registerQuestionDrafts(ctx)
       yield* registerBrowserHandoffs(ctx)
