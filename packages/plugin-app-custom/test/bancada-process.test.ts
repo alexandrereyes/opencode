@@ -63,12 +63,13 @@ describe("process", () => {
       { protocol: 1, state: "ok" },
       { protocol: 1, state: "ok" },
     ])
-    const log = await Bun.file(path.join(state, "bancada.log")).text()
-    // Both clients spawned one: the loser found the folder taken and left.
-    expect(log.match(/ started pid=/g)).toHaveLength(1)
-    expect(log.match(/another Bancada process holds/g)).toHaveLength(1)
+    // Both clients spawned one: the loser found the folder taken and left (it may still be leaving).
+    const log = () => Bun.file(path.join(state, "bancada.log")).text()
+    await until(async () => (await log()).includes("another Bancada process holds"), 5_000)
+    expect((await log()).match(/ started pid=/g)).toHaveLength(1)
+    expect((await log()).match(/another Bancada process holds/g)).toHaveLength(1)
     const info = await read(state)
-    expect(log).toContain(`started pid=${info?.pid}`)
+    expect(await log()).toContain(`started pid=${info?.pid}`)
     expect((await fs.stat(path.join(state, "bancada.json"))).mode & 0o777).toBe(0o600)
 
     const other = makeBancadaClient({ state, owner: owner("srv-b", "Servidor B"), command })
