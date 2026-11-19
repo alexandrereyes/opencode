@@ -17,10 +17,33 @@ const machine = (name: string, hub: boolean, android = 0): Machine => ({
   capabilities: android ? { android: {} } : {},
   capacity: { memMb: 0, cpuMilli: 0, builds: 1, android, ios: 0 },
 })
-const core = (config: Machine, db = new Database(":memory:")) => {
+const core = (config: Machine, launcher: Launcher = idle, db = new Database(":memory:")) => {
   let n = 0
-  return { db, core: createCore({ db, now: () => 1_000, random: () => `id-${++n}`, machine: config, launcher: idle }) }
+  return { db, core: createCore({ db, now: () => 1_000, random: () => `id-${++n}`, machine: config, launcher }) }
 }
+/** What the hub would send: one offer of one device per part, in one batch. */
+const offers = (...parts: string[]): BancadaProtocol.SyncOutput => ({
+  protocol: BancadaProtocol.version,
+  ack: null,
+  out: {
+    stream: "hub-stream",
+    base: 0,
+    messages: parts.map((part, index) => ({
+      seq: index + 1,
+      body: {
+        type: "offer",
+        job: "j-7qk2m9xa",
+        part,
+        attempt: 1,
+        spec: { ...spec, part, devices: { min: 1, max: 1 } },
+        origin: { instanceID: "i", machineID: "m", name: "Linux", sessionID: "s", rootSessionID: "s" },
+        code,
+        devices: { min: 1, proposed: 1 },
+      },
+    })),
+  },
+})
+const sent = (target: ReturnType<typeof core>) => target.core.outgoing().out.messages.map((message) => message.body)
 const spec: BancadaProtocol.PartSpec = {
   part: "android",
   label: "Android",
@@ -162,6 +185,48 @@ describe("core", () => {
       reason: { code: "orcamento", text: "aguardando folga" },
     })
     expect(mac.db.query("SELECT COUNT(*) AS n FROM lease").get()).toEqual({ n: 0 })
+  })
+
+  test("two ticks at once report the end of an execution once", async () => {
+    const gate = Promise.withResolvers<void>()
+    const mac = core(machine("Mac", false, 1), {
+      start: async () => {},
+      status: async () => {
+        await gate.promise
+        return { state: "done", exit: 0, planned: ["a1"], scenarios: [{ id: "a1", result: "passou" }] }
+      },
+    })
+    mac.core.incoming(offers("android"))
+    const both = Promise.all([mac.core.tick(), mac.core.tick()])
+    gate.resolve()
+    await both
+    expect(sent(mac).filter((body) => body.type === "attempt" && body.state === "concluido")).toHaveLength(1)
+  })
+
+  test("a start that fails, or a status that cannot be read, never holds the other attempts", async () => {
+    const started: string[] = []
+    const mac = core(machine("Mac", false, 3), {
+      start: async (launch) => {
+        if (launch.part === "falha") throw new Error("sem processo")
+        started.push(launch.part)
+      },
+      status: async (key) => {
+        if (key.part === "muda") throw new Error("ps estourou o prazo")
+        return { state: "rodando" }
+      },
+    })
+    mac.core.incoming(offers("falha", "muda", "segue"))
+    await mac.core.tick()
+    expect(started).toEqual(["muda", "segue"])
+    const reports = sent(mac).filter((body) => body.type === "attempt")
+    expect(reports).toEqual([
+      expect.objectContaining({
+        part: "falha",
+        state: "perdido",
+        outcome: expect.objectContaining({ reason: "a partida falhou: sem processo" }),
+      }),
+      expect.objectContaining({ part: "segue", state: "rodando" }),
+    ])
   })
 
   test("sync is the hub's alone and refuses another protocol by name", () => {

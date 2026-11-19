@@ -173,6 +173,34 @@ export function createCore(ports: Ports) {
     }
   }
 
+  /** One round: executions starting and ending, then the queue (and, on the hub, this machine's loop to it). */
+  const round = async () => {
+    await executor.tick()
+    if (!coordinator) return
+    db.transaction(() => coordinator.schedule())()
+    loop()
+  }
+  /**
+   * One `tick` at a time: a call while one runs joins it and asks for one more round at its end. Two rounds waiting on
+   * the same execution would both see it end and report it twice.
+   */
+  const ticking: { current?: Promise<void>; again: boolean } = { again: false }
+  const tick = () => {
+    if (ticking.current) {
+      ticking.again = true
+      return ticking.current
+    }
+    ticking.current = (async () => {
+      do {
+        ticking.again = false
+        await round()
+      } while (ticking.again)
+    })().finally(() => {
+      ticking.current = undefined
+    })
+    return ticking.current
+  }
+
   return {
     submit: (request: NewJob) => origin.submit(request),
     status: origin.status,
@@ -182,12 +210,7 @@ export function createCore(ports: Ports) {
     incoming,
     sync,
     /** Advances what depends on time or on the outside: executions starting and ending, the queue. */
-    tick: async () => {
-      await executor.tick()
-      if (!coordinator) return
-      db.transaction(() => coordinator.schedule())()
-      loop()
-    },
+    tick,
   }
 }
 

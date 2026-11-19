@@ -135,39 +135,54 @@ export function makeExecutor(input: {
     db.run("DELETE FROM attempt WHERE job_id = ? AND state NOT IN ('aceito', 'compilando', 'rodando')", [message.job])
   }
 
-  /** Starts what was accepted and follows what runs; one report per change. */
+  /**
+   * Starts what was accepted and follows what runs; one report per change. Every transition is conditional on the
+   * state read before the `await`s, and reports only when the row changed. One attempt never holds the others: a start
+   * that fails loses that attempt, a status that cannot be read leaves it as it was until the next round.
+   */
   const tick = async () => {
     for (const row of live.all()) {
       const key = { job: row.job_id, part: row.part, attempt: row.n }
       if (row.started_at === null) {
-        await input.launcher.start({
-          ...key,
-          spec: JSON.parse(row.spec),
-          code: JSON.parse(row.code),
-          devices: row.devices,
-          ...(row.only_scenarios ? { only: JSON.parse(row.only_scenarios) } : {}),
-        })
-        db.run("UPDATE attempt SET started_at = ? WHERE job_id = ? AND part = ? AND n = ?", [
+        const failure = await input.launcher
+          .start({
+            ...key,
+            spec: JSON.parse(row.spec),
+            code: JSON.parse(row.code),
+            devices: row.devices,
+            ...(row.only_scenarios ? { only: JSON.parse(row.only_scenarios) } : {}),
+          })
+          .then(
+            () => undefined,
+            (error: unknown) => (error instanceof Error ? error.message : String(error)),
+          )
+        if (failure !== undefined) {
+          finish(row, { state: "gone", reason: `a partida falhou: ${failure}` })
+          continue
+        }
+        db.run("UPDATE attempt SET started_at = ? WHERE job_id = ? AND part = ? AND n = ? AND started_at IS NULL", [
           input.now(),
           row.job_id,
           row.part,
           row.n,
         ])
       }
-      const status = await input.launcher.status(key)
+      const status = await input.launcher.status(key).catch(() => undefined)
+      if (!status) continue
       if (status.state === "done" || status.state === "gone") {
         finish(row, status)
         continue
       }
       if (status.state === row.state) continue
       db.transaction(() => {
-        db.run("UPDATE attempt SET state = ? WHERE job_id = ? AND part = ? AND n = ?", [
+        const changed = db.run("UPDATE attempt SET state = ? WHERE job_id = ? AND part = ? AND n = ? AND state = ?", [
           status.state,
           row.job_id,
           row.part,
           row.n,
-        ])
-        input.send({ type: "attempt", ...key, state: status.state })
+          row.state,
+        ]).changes
+        if (changed) input.send({ type: "attempt", ...key, state: status.state })
       })()
     }
   }
@@ -180,14 +195,11 @@ export function makeExecutor(input: {
         : judge(status)
     const state = status.state === "gone" ? "perdido" : "concluido"
     db.transaction(() => {
-      db.run("UPDATE attempt SET state = ?, ended_at = ?, outcome = ? WHERE job_id = ? AND part = ? AND n = ?", [
-        state,
-        input.now(),
-        JSON.stringify(outcome),
-        row.job_id,
-        row.part,
-        row.n,
-      ])
+      const changed = db.run(
+        "UPDATE attempt SET state = ?, ended_at = ?, outcome = ? WHERE job_id = ? AND part = ? AND n = ? AND state = ?",
+        [state, input.now(), JSON.stringify(outcome), row.job_id, row.part, row.n, row.state],
+      ).changes
+      if (!changed) return
       db.run("UPDATE lease SET state = 'released', released_at = ? WHERE id = ?", [input.now(), row.lease_id])
       input.send({ type: "attempt", job: row.job_id, part: row.part, attempt: row.n, state, outcome })
     })()
