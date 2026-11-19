@@ -205,9 +205,32 @@ export function createWorld(options: {
         invariants()
       }
     },
-    /** What must hold once everything settled: each job noticed exactly once, and its result tells the truth. */
+    /**
+     * What must hold once everything settled: each job noticed exactly once and its result telling the truth; no
+     * reservation or attempt left, every outbox empty, no part of the hub's queue unfinished, every request delivered
+     * at its origin, nothing in `dead_letter`.
+     */
     settle: () => {
       invariants()
+      for (const machine of machines.values()) {
+        const count = (sql: string) => machine.db.query<{ n: number }, []>(sql).get()!.n
+        const left = {
+          "active leases": count("SELECT COUNT(*) AS n FROM lease WHERE state = 'active'"),
+          // After delivery the executor keeps nothing of the job (D9).
+          "attempts kept after delivery": count("SELECT COUNT(*) AS n FROM attempt"),
+          "outbox messages": count("SELECT COUNT(*) AS n FROM outbox"),
+          "dead letters": count("SELECT COUNT(*) AS n FROM dead_letter"),
+          "requests not delivered": count("SELECT COUNT(*) AS n FROM job WHERE state <> 'entregue'"),
+          "unfinished parts in the queue": count(
+            "SELECT COUNT(*) AS n FROM hub_part WHERE state NOT IN ('concluido', 'perdido', 'cancelado', 'invalido')",
+          ),
+        }
+        const unsettled = Object.entries(left).filter(([, n]) => n > 0)
+        if (unsettled.length)
+          throw new Error(
+            `${machine.name} did not settle: ${unsettled.map(([what, n]) => `${n} ${what}`).join(", ")}\n${logs.join("\n")}`,
+          )
+      }
       for (const job of facts.submitted.keys()) {
         if (facts.notices.get(job) !== 1) throw new Error(`${job} was noticed ${facts.notices.get(job) ?? 0} times`)
         for (const result of facts.delivered.get(job) ?? []) {

@@ -60,9 +60,6 @@ describe("simulation", () => {
       { part: "ios", state: "concluido", attempts: 1, machine: { name: "Mac" }, outcome: { approved: true } },
     ])
     expect(world.machines.get("Linux")!.core.status("j-7qk2m9xa")).toMatchObject({ state: "entregue" })
-    // After delivery the executor keeps nothing of the job.
-    const left = world.machines.get("Mac")!.db.query("SELECT COUNT(*) AS n FROM attempt").get() as { n: number }
-    expect(left.n).toBe(0)
   })
 
   // Several seeds: each draws another sequence of losses, duplicates and delays.
