@@ -2,7 +2,8 @@
 # `run` do projeto de exemplo: o comportamento vem dos argumentos, para os testes da Bancada injetarem cada caso.
 # --cenarios N; --falha <id> (falha com mensagem e evidência); --perde <id> (não grava o resultado); --dorme <s>;
 # --sai <código>; --sem-summary; --sem-planned; --marca <arquivo> (copia um arquivo do checkout para a saída: prova de
-# que rodou naquele commit). Com BANCADA_APENAS, roda só aqueles cenários. Bash 3.2 (o do macOS).
+# que rodou naquele commit); --ambiente (grava em ambiente.txt os nomes das variáveis que recebeu). Com BANCADA_APENAS,
+# roda só aqueles cenários. Bash 3.2 (o do macOS).
 set -eu
 cenarios=2
 falhas=" "
@@ -12,6 +13,7 @@ sai=""
 sem_summary=""
 sem_planned=""
 marca=""
+ambiente=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --cenarios) cenarios=$2; shift 2 ;;
@@ -22,6 +24,7 @@ while [ "$#" -gt 0 ]; do
     --sem-summary) sem_summary=1; shift ;;
     --sem-planned) sem_planned=1; shift ;;
     --marca) marca=$2; shift 2 ;;
+    --ambiente) ambiente=1; shift ;;
     *) shift ;;
   esac
 done
@@ -50,6 +53,7 @@ if [ -z "$sem_planned" ] && [ ! -f "$out/planned.json" ]; then
   } > "$out/planned.json"
 fi
 if [ -n "$marca" ]; then cp "$marca" "$out/marca"; fi
+if [ -n "$ambiente" ]; then env | sed 's/=.*//' | sort > "$out/ambiente.txt"; fi
 echo "rodando:$ids"
 sleep "$dorme"
 falhou=""

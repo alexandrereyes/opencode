@@ -182,11 +182,15 @@ describe("detached execution", () => {
     await Bun.write(path.join(context.repository, "novo.txt"), "só no snapshot\n")
     const { key, dir, launch } = await prepare(context, {
       job: "j-aaaaaaaa",
-      args: ["--cenarios", "2", "--dorme", "1", "--marca", "novo.txt"],
+      args: ["--cenarios", "2", "--dorme", "1", "--marca", "novo.txt", "--ambiente"],
       snapshot: true,
     })
-    await context.launcher.start(launch)
-    await context.launcher.start(launch)
+    // What turns a Bancada on reaches the runners (the launcher passes its environment on), never the commands.
+    process.env.OPENCODE_BANCADA_STATE_TESTE = "/nao/usar"
+    await context.launcher
+      .start(launch)
+      .then(() => context.launcher.start(launch))
+      .finally(() => delete process.env.OPENCODE_BANCADA_STATE_TESTE)
     expect((await until(context.launcher, key, (status) => status.state === "rodando")).state).toBe("rodando")
     const status = await until(context.launcher, key, ended)
     if (status.state !== "done") throw new Error(JSON.stringify(status))
@@ -196,6 +200,9 @@ describe("detached execution", () => {
       expect.arrayContaining(["attempt.json", "runner.json", "runner.ts", "build.log"]),
     )
     expect(await Bun.file(path.join(dir, "parts/simples/out/marca")).text()).toBe("só no snapshot\n")
+    const environment = (await Bun.file(path.join(dir, "parts/simples/out/ambiente.txt")).text()).split("\n")
+    expect(environment).toContain("BANCADA_OUT")
+    expect(environment.filter((name) => name.startsWith("OPENCODE_BANCADA") || name === "BUN_BE_BUN")).toEqual([])
     expect(await Bun.file(path.join(dir, "build.log")).text()).toContain("compilado")
     // Every command recorded its start time and its end; nothing of their groups is left.
     const all = await events(dir)
@@ -256,6 +263,28 @@ describe("detached execution", () => {
     await reaped(context)
     expect(groupAlive(run)).toBe(false)
   }, 20_000)
+
+  test("a fresh heartbeat proves the runner alive without asking the system; a stale one asks", async () => {
+    const context = await setup()
+    const dir = path.join(context.state, "attempts", "j-rrrrrrrr", "simples-1")
+    await fs.mkdir(dir, { recursive: true })
+    const gone = Bun.spawn(["true"])
+    await gone.exited
+    await Bun.write(
+      path.join(dir, "attempt.json"),
+      JSON.stringify({
+        format: 1,
+        parts: [{ part: "simples", run: ["scripts/run"], args: [] }],
+        timing: { heartbeatMs: 200 },
+      }),
+    )
+    await Bun.write(path.join(dir, "runner.json"), JSON.stringify({ pid: gone.pid, startedAt: "1" }))
+    const key = { job: "j-rrrrrrrr", part: "simples", attempt: 1 }
+    await Bun.write(path.join(dir, "heartbeat"), JSON.stringify({ at: Date.now(), awakeMs: 0 }))
+    expect(await context.launcher.status(key)).toEqual({ state: "compilando" })
+    await Bun.write(path.join(dir, "heartbeat"), JSON.stringify({ at: Date.now() - 1_000, awakeMs: 0 }))
+    expect(await context.launcher.status(key)).toMatchObject({ state: "done", ending: { cause: "runner_morto" } })
+  })
 
   test("orphans: a leader with another start time, or without a recorded one, is never touched", async () => {
     const child = Bun.spawn(["sleep", "30"], { detached: true })
