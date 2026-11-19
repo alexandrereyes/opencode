@@ -174,18 +174,35 @@ export function makeWorkdirs(input: {
       )
       return [...new Set(tips.flat())]
     },
+    /** Every folder some attempt holds, with its holder (`<job>/<part>/<attempt>`). */
+    held: () =>
+      db
+        .query<Row, []>("SELECT * FROM workdir WHERE busy_by IS NOT NULL ORDER BY path")
+        .all()
+        .map((row) => ({ id: row.id, project: row.project, path: row.path, owner: row.busy_by! })),
     /** A delivered request's commit no longer needs holding here. */
     forget: (workdir: Workdir, job: string) => git(["update-ref", "-d", ref(job)], { cwd: workdir.path }),
     /** Folders nobody used for `limits.unusedMs` are removed (their caches with them). */
     prune: async () => {
+      // Held by the sweep while it removes the folder: no attempt takes it, and no new folder reuses its path. One left
+      // held by a sweep that died midway is swept again.
       const old = db
-        .query<Row, [number]>("SELECT * FROM workdir WHERE busy_by IS NULL AND last_used_at < ?")
+        .query<
+          Row,
+          [number]
+        >("SELECT * FROM workdir WHERE (busy_by IS NULL OR busy_by = 'faxina') AND last_used_at < ?")
         .all(input.now() - limits.unusedMs)
-      for (const row of old) {
+      const swept = old.filter(
+        (row) =>
+          db.run("UPDATE workdir SET busy_by = 'faxina' WHERE id = ? AND (busy_by IS NULL OR busy_by = 'faxina')", [
+            row.id,
+          ]).changes > 0,
+      )
+      for (const row of swept) {
         await fs.rm(row.path, { recursive: true, force: true })
-        db.run("DELETE FROM workdir WHERE id = ? AND busy_by IS NULL", [row.id])
+        db.run("DELETE FROM workdir WHERE id = ?", [row.id])
       }
-      return old.length
+      return swept.length
     },
   }
 }

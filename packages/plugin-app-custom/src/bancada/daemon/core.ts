@@ -87,6 +87,8 @@ export function createCore(ports: Ports) {
     launcher: ports.launcher,
     send: toHub,
     repository: origin.repository,
+    // A task of an attempt ended: its result should not wait for the next second.
+    wake: () => void tick(),
   })
   const coordinator = self.hub
     ? makeCoordinator({

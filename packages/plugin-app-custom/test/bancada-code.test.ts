@@ -210,7 +210,7 @@ describe("working folders", () => {
   test("a free folder that held the commit is preferred, a busy one never shared nor taken twice, an unused one pruned", async () => {
     const { root } = await project()
     let now = 1_000
-    const { workdirs: folders } = workdirs(root, () => now)
+    const { db, workdirs: folders } = workdirs(root, () => now)
     const a = await folders.acquire("exemplo", "c1", "j-1/g1")
     const b = await folders.acquire("exemplo", "c1", "j-2/g1")
     expect(b.path).not.toBe(a.path)
@@ -224,6 +224,13 @@ describe("working folders", () => {
     now += 15 * 86_400_000
     expect(await folders.prune()).toBe(1)
     expect(await fs.exists(b.path)).toBe(false)
+    expect(await fs.exists(a.path)).toBe(true)
+    // A folder a sweep that died midway left held is swept again; one an attempt holds never is.
+    const c = await folders.acquire("exemplo", "c1", "j-4/g1")
+    db.run("UPDATE workdir SET busy_by = 'faxina' WHERE id = ?", [c.id])
+    now += 15 * 86_400_000
+    expect(await folders.prune()).toBe(1)
+    expect(await fs.exists(c.path)).toBe(false)
     expect(await fs.exists(a.path)).toBe(true)
   })
 

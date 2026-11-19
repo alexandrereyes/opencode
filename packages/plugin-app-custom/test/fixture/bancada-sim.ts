@@ -10,6 +10,8 @@ import type { BancadaProtocol } from "../../src/bancada/protocol"
 /** How a part's execution goes, on virtual time. */
 export type Script =
   | {
+      /** How long the start takes (the code coming from far): the round must never wait for it. */
+      readonly startMs?: number
       readonly buildMs: number
       readonly runMs: number
       readonly exit: number
@@ -58,6 +60,8 @@ export function createWorld(options: {
     refusals: new Set<string>(),
     states: new Map<string, string[]>(),
   }
+  /** Starts still bringing their code, released when the virtual clock reaches them. */
+  const starting: { readonly at: number; readonly resolve: () => void }[] = []
   const logs: string[] = []
   const inflight: { readonly at: number; readonly order: number; readonly run: () => void }[] = []
   let order = 0
@@ -77,6 +81,9 @@ export function createWorld(options: {
       if (runs.has(`${machine}:${name}`)) return
       const script = scripts.get(`${launch.job}/${launch.part}`)
       if (!script) throw new Error(`no script for ${launch.job}/${launch.part}`)
+      const slow = "startMs" in script ? script.startMs : undefined
+      if (slow) await new Promise<void>((resolve) => starting.push({ at: clock.now + slow, resolve }))
+      if (runs.has(`${machine}:${name}`)) return
       runs.set(`${machine}:${name}`, { awakeMs: 0, script, cancelled: false })
       const part = `${launch.job}/${launch.part}`
       facts.starts.set(part, (facts.starts.get(part) ?? 0) + 1)
@@ -114,9 +121,19 @@ export function createWorld(options: {
       const run = runs.get(`${machine}:${key(attempt)}`)
       if (run) run.cancelled = true
     },
-    finish: async () => {},
+    reap: async () => {},
     cleanup: async () => {},
   })
+
+  /**
+   * One round of a machine. Every port of the world answers at once (in microtasks): a round still running when the
+   * next timer fires is waiting for something outside it, which a real round must never do.
+   */
+  const round = async (machine: SimMachine) => {
+    const late = new Promise<"late">((resolve) => setTimeout(() => resolve("late"), 0))
+    if ((await Promise.race([machine.core.tick().then(() => "done" as const), late])) === "late")
+      throw new Error(`${machine.name}: a round waited for work outside it`)
+  }
 
   const build = (config: Machine, db: Database) =>
     createCore({
@@ -253,7 +270,13 @@ export function createWorld(options: {
       for (const end = clock.now + ms; clock.now < end; ) {
         clock.now += step
         for (const [name, run] of runs) if (machines.get(name.slice(0, name.indexOf(":")))?.awake) run.awakeMs += step
-        for (const machine of machines.values()) if (machine.awake) await machine.core.tick()
+        starting
+          .filter((start) => start.at <= clock.now)
+          .forEach((start) => {
+            starting.splice(starting.indexOf(start), 1)
+            start.resolve()
+          })
+        for (const machine of machines.values()) if (machine.awake) await round(machine)
         for (const machine of machines.values()) if (machine.awake && machine !== hub) exchange(machine)
         inflight.sort((a, b) => a.at - b.at || a.order - b.order)
         while (inflight[0] && inflight[0].at <= clock.now) inflight.shift()!.run()

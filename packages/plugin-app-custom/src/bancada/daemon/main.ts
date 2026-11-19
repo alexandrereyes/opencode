@@ -10,7 +10,8 @@ import { Bancada } from "../rpc.js"
 import { createCore, type Core } from "./core.js"
 import { openExclusive } from "./db.js"
 import { runGit } from "./git.js"
-import { liveness, makeProcessLauncher } from "./launcher/process.js"
+import { makeProcessLauncher } from "./launcher/process.js"
+import { makeBlobs } from "./blobs.js"
 import { Invalid, submit } from "./requests.js"
 import { makeWorkdirs } from "./workdir.js"
 import { migrate, NewerSchemaError } from "./schema.js"
@@ -24,6 +25,9 @@ export const adminProtocol = 1
 export const limits = {
   /** How often the core advances (executions, the queue); also after every request. */
   tickMs: 1_000,
+  /** How often unused working folders and expired transfers go (also once, a little after the start). */
+  sweepMs: 60 * 60_000,
+  firstSweepMs: 60_000,
   /** How often the process checks that its server still runs (pid and start time). */
   parentCheckMs: 2_000,
   /** The goodbye to the hub must not hold the exit. */
@@ -59,7 +63,7 @@ const held: {
   process?: {
     db: Database
     server: ReturnType<typeof Bun.serve>
-    timers: ReturnType<typeof setInterval>[]
+    timers: (ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>)[]
     core?: Core
   }
 } = {}
@@ -115,6 +119,15 @@ export async function main() {
     const now = () => Date.now()
     const random = () => randomBytes(16).toString("hex")
     const workdirs = makeWorkdirs({ db, root: path.join(state, "work"), now, random, git: runGit })
+    const blobs = makeBlobs({ root: path.join(state, "blobs"), now })
+    // Started more often than hourly (a deploy, a restart), a machine would never sweep without the first one.
+    const sweep = () =>
+      void Promise.all([workdirs.prune(), blobs.expire()]).then(
+        ([folders, transfers]) =>
+          folders + transfers > 0 && log(`swept ${folders} unused working folder(s), ${transfers} expired transfer(s)`),
+        (error: unknown) => log(`the hourly sweep failed: ${String(error)}`),
+      )
+    current.timers.push(setTimeout(sweep, limits.firstSweepMs), setInterval(sweep, limits.sweepMs))
     current.core = createCore({
       db,
       now,
@@ -136,7 +149,7 @@ export async function main() {
           ios: 0,
         },
       },
-      launcher: makeProcessLauncher({ state, workdirs, git: runGit, now, random }),
+      launcher: makeProcessLauncher({ state, workdirs, git: runGit, now, random, wake: advance, log }),
     })
     advance()
     return current.core
@@ -151,7 +164,9 @@ export async function main() {
     idleTimeout: 120,
     fetch: (request) => admin(request, { secret, machineID, owner, stop, serving, advance }),
   })
-  const timers: ReturnType<typeof setInterval>[] = [setInterval(advance, limits.tickMs)]
+  const timers: (ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>)[] = [
+    setInterval(advance, limits.tickMs),
+  ]
   held.process = { db, server, timers }
   await Bun.write(
     `${info}.tmp`,
@@ -167,19 +182,13 @@ export async function main() {
   process.on("SIGTERM", () => void stop("SIGTERM"))
   process.on("SIGINT", () => void stop("SIGINT"))
   if (parent <= 0) return
-  // The server is gone only on proof: a check that could not ask (`unknown`) keeps waiting for the next one.
-  const parentCheck: { started?: string; checking: boolean } = { checking: false }
-  const check = async () => {
-    if (parentCheck.checking) return
-    parentCheck.checking = true
-    const now = await liveness(parent)
-    parentCheck.checking = false
-    if (now.state === "unknown") return
-    parentCheck.started ??= now.state === "alive" ? now.started : undefined
-    if (now.state === "dead" || now.started !== parentCheck.started) void stop(`server ${parent} is gone`)
+  // When its parent dies the system gives this process another one at once: proof, without asking anything (no `ps` on
+  // a loaded Mac, no language or time zone). The rule against the ppid is for telling whether another process lives.
+  const check = () => {
+    if (process.ppid !== parent) void stop(`server ${parent} is gone`)
   }
-  await check()
-  timers.push(setInterval(() => void check(), limits.parentCheckMs))
+  check()
+  timers.push(setInterval(check, limits.parentCheckMs))
 }
 
 /** The admin API, on loopback, for the plugin instances of the owner server; every route needs the secret. */

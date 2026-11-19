@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url"
 import { Effect } from "effect"
 import { bancadaCommand, BancadaError, makeBancadaClient } from "../src/bancada/client"
 import { fromPs, fromStat, liveness } from "../src/bancada/daemon/launcher/process"
+import { startOf } from "../src/bancada/daemon/runner"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { startServer } from "../../server/test/fixture/server"
@@ -48,13 +49,38 @@ describe("process identity", () => {
     [
       "a running process",
       { code: 0, stdout: "S    Thu Nov 19 17:31:12 2026\n" },
+      true,
       { state: "alive", started: "Thu Nov 19 17:31:12 2026" },
     ],
-    ["a zombie", { code: 0, stdout: "Z    Thu Nov 19 17:31:12 2026" }, { state: "dead" }],
-    ["no such process", { code: 1, stdout: "" }, { state: "dead" }],
-    ["ps that missed its deadline or did not start", undefined, { state: "unknown" }],
-    ["ps that failed otherwise", { code: 1, stdout: "ps: something odd" }, { state: "unknown" }],
-  ] as const)("macOS: %s", (_name, result, expected) => expect(fromPs(result)).toEqual(expected))
+    ["a zombie", { code: 0, stdout: "Z    Thu Nov 19 17:31:12 2026" }, true, { state: "dead" }],
+    ["no such process, and kill(pid, 0) agrees", { code: 1, stdout: "" }, true, { state: "dead" }],
+    // `ps -p 999999` on the Mac: exit 1, nothing printed, "process id too large" on stderr.
+    ["exit 1 without text while kill(pid, 0) still finds it", { code: 1, stdout: "" }, false, { state: "unknown" }],
+    ["ps that missed its deadline or did not start", undefined, true, { state: "unknown" }],
+    ["ps that failed otherwise", { code: 1, stdout: "ps: something odd" }, true, { state: "unknown" }],
+  ] as const)("macOS: %s", (_name, result, absent, expected) => expect(fromPs(result, () => absent)).toEqual(expected))
+
+  test("ps reads the same start time whatever the asker's language and time zone, as the runner reads its own", async () => {
+    const child = Bun.spawn(["sleep", "30"])
+    const saved = { LC_ALL: process.env.LC_ALL, TZ: process.env.TZ }
+    try {
+      const read = async (env: { LC_ALL: string; TZ: string }) => {
+        Object.assign(process.env, env)
+        return liveness(child.pid, "darwin")
+      }
+      const first = await read({ LC_ALL: "C", TZ: "UTC" })
+      if (first.state !== "alive") throw new Error(`not alive: ${JSON.stringify(first)}`)
+      const started = first.started
+      expect(await read({ LC_ALL: "pt_BR.UTF-8", TZ: "America/Sao_Paulo" })).toEqual({ state: "alive", started })
+      expect(await read({ LC_ALL: "en_US.UTF-8", TZ: "Asia/Tokyo" })).toEqual({ state: "alive", started })
+      expect(await startOf(child.pid, "darwin")).toBe(started)
+    } finally {
+      Object.entries(saved).forEach(([name, value]) =>
+        value === undefined ? delete process.env[name] : (process.env[name] = value),
+      )
+      child.kill()
+    }
+  })
 
   test("this machine: a live process is alive with its start time, a finished one is dead", async () => {
     const child = Bun.spawn(["true"])

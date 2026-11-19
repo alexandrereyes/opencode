@@ -53,6 +53,54 @@ describe("simulation: executions outlive the Bancada process", () => {
     },
   )
 
+  test("S17: a start that takes two minutes, on the Mac and on the hub, never holds a round", async () => {
+    const sim = createWorld({ seed: 11, timings: { silentMs: 45_000 } })
+    sim.addMachine({ name: "Linux", hub: true, platform: "linux", capabilities: { docker: {} } })
+    sim.addMachine({
+      name: "Mac",
+      capabilities: { android: {} },
+      capacity: { memMb: 96_000, cpuMilli: 13_000, builds: 1, android: 2, ios: 0 },
+    })
+    const docker: BancadaProtocol.PartSpec = {
+      ...android,
+      part: "docker",
+      label: "Docker",
+      platform: "none",
+      needs: ["docker"],
+      devices: { min: 0, max: 0 },
+    }
+    const quick = { buildMs: 2_000, runMs: 5_000, exit: 0, planned: ["c1"], scenarios: passed(["c1"]) }
+    sim.script("j-aaaaaaaa", "android", { ...quick, runMs: 10_000 })
+    // The code of these two comes from far: their starts take two minutes.
+    sim.script("j-bbbbbbbb", "android", { ...quick, startMs: 120_000 })
+    sim.script("j-cccccccc", "docker", { ...quick, startMs: 120_000 })
+    sim.script("j-dddddddd", "docker", quick)
+    const ask = (id: string, part: BancadaProtocol.PartSpec) =>
+      sim.submit("Linux", { id, sessionID: "ses_a", rootSessionID: "ses_a", code, parts: [part] })
+    ask("j-aaaaaaaa", android)
+    await sim.advance(5_000)
+    expect(sim.seen("j-aaaaaaaa", "android").at(-1)).toBe("rodando")
+    ask("j-bbbbbbbb", android)
+    ask("j-cccccccc", docker)
+    await sim.advance(15_000)
+    // The Mac read and reported its other attempt while B's code was still coming.
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([{ part: "android", outcome: { approved: true } }])
+    expect([sim.seen("j-bbbbbbbb", "android").at(-1), sim.seen("j-cccccccc", "docker").at(-1)]).toEqual([
+      "aceito",
+      "aceito",
+    ])
+    // On the hub, a new request is acknowledged, offered and run while C's code is still coming.
+    ask("j-dddddddd", docker)
+    await sim.advance(1_000)
+    expect(sim.seen("j-dddddddd", "docker")).toContain("aceito")
+    await sim.advance(10_000)
+    expect(sim.facts.delivered.get("j-dddddddd")).toMatchObject([{ part: "docker", outcome: { approved: true } }])
+    expect(sim.seen("j-cccccccc", "docker").at(-1)).toBe("aceito")
+    await sim.advance(120_000)
+    sim.settle()
+    expect(["j-bbbbbbbb/android", "j-cccccccc/docker"].map((part) => sim.facts.starts.get(part))).toEqual([1, 1])
+  })
+
   test("S3: the Mac sleeps 20 minutes in the middle of a run: incerto, then its real state, and nothing is lost", async () => {
     const sim = world()
     await sim.advance(12_000)

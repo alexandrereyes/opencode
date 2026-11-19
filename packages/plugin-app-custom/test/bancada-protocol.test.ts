@@ -11,7 +11,7 @@ const idle: Launcher = {
   start: async () => {},
   status: async () => ({ state: "rodando" }),
   cancel: async () => {},
-  finish: async () => {},
+  reap: async () => {},
   cleanup: async () => {},
 }
 const machine = (name: string, hub: boolean, android = 0): Machine => ({

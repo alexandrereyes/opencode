@@ -17,23 +17,31 @@ export type Launch = AttemptKey & {
 
 /**
  * What an execution reports, read from its folder: still building or running, or ended (how, with the project's files,
- * judged by `results.ts`). `gone`: the launcher has no trace of it.
+ * judged by `results.ts`). `gone`: it never started, or the launcher has no trace of it. `unstarted`: this process
+ * never started it and no runner took it (the process restarted in between): start it again.
  */
 export type Status =
-  | { readonly state: "compilando" | "rodando" }
+  | { readonly state: "compilando" | "rodando" | "unstarted" }
   | { readonly state: "done"; readonly ending: Ending }
   | { readonly state: "gone"; readonly reason: string }
 
-/** Starts executions away from the server and reads how they go; every method is idempotent per attempt. */
+/**
+ * Starts executions away from the server and reads how they go; every method is idempotent per attempt. `start` and
+ * `cleanup` may take minutes (a fetch, a big folder): the executor runs them off its round. `status` and `reap` read
+ * only what is local and never wait for long work.
+ */
 export interface Launcher {
   readonly start: (launch: Launch) => Promise<void>
-  /** Rejects when it cannot tell (a `ps` that missed its deadline): nothing changes for that attempt this round. */
+  /** Rejects when it cannot tell (no answer about the runner yet): nothing changes for that attempt this round. */
   readonly status: (key: AttemptKey) => Promise<Status>
   /** Asks the execution to stop; it ends with `cancelado`. */
   readonly cancel: (key: AttemptKey) => Promise<void>
-  /** The attempt ended: what it held (its working folder) is free for the next. */
-  readonly finish: (key: AttemptKey) => Promise<void>
-  /** After delivery: nothing of the attempt stays (its folder, the commit's ref). */
+  /**
+   * What attempts not in `live` still hold (their working folder) goes back once nothing they started runs: the
+   * launcher ends what they left with proof it is theirs, on its own time.
+   */
+  readonly reap: (live: ReadonlyArray<AttemptKey>) => Promise<void>
+  /** After delivery: nothing of the attempt stays (its folder, the commit's ref); rejects while it still holds any. */
   readonly cleanup: (key: AttemptKey) => Promise<void>
 }
 
@@ -67,6 +75,8 @@ export function makeExecutor(input: {
   readonly send: (body: BancadaProtocol.FromMachine) => void
   /** The session's repository of a request this machine's origin holds (the same machine: nothing travels). */
   readonly repository: (job: string) => string | undefined
+  /** Asks for a round: a task of an attempt ended. */
+  readonly wake: () => void
 }) {
   const db = input.db
   const used = db.query<{ android: number; ios: number }, []>(
@@ -84,6 +94,40 @@ export function makeExecutor(input: {
   const findAttempt = db.query<AttemptRow, [string, string, number]>(
     "SELECT * FROM attempt WHERE job_id = ? AND part = ? AND n = ?",
   )
+  /**
+   * Work of an attempt that may take long (its start, its removal): it runs on its own and a later round collects how
+   * it ended (`docs/bancada.md`, "Process"). Per process: after a restart the launcher says what to start again.
+   */
+  const tasks = new Map<string, { done: boolean; failure?: string }>()
+  const run = (id: string, work: () => Promise<void>) => {
+    const task: { done: boolean; failure?: string } = { done: false }
+    tasks.set(id, task)
+    void work()
+      .catch((error: unknown) => {
+        task.failure = error instanceof Error ? error.message : String(error)
+      })
+      .finally(() => {
+        task.done = true
+        input.wake()
+      })
+  }
+  const begin = (row: AttemptRow) => {
+    const origin: BancadaProtocol.Origin = JSON.parse(row.origin)
+    const repository = origin.machineID === input.machineID ? input.repository(row.job_id) : undefined
+    run(`start:${row.job_id}/${row.part}/${row.n}`, () =>
+      input.launcher.start({
+        job: row.job_id,
+        part: row.part,
+        attempt: row.n,
+        spec: JSON.parse(row.spec),
+        code: JSON.parse(row.code),
+        devices: row.devices,
+        ...(row.only_scenarios ? { only: JSON.parse(row.only_scenarios) } : {}),
+        ...(repository ? { repository } : {}),
+      }),
+    )
+  }
+  const keyOf = (row: AttemptRow): AttemptKey => ({ job: row.job_id, part: row.part, attempt: row.n })
 
   const free = (): BancadaProtocol.Vector => {
     const taken = used.get()!
@@ -161,69 +205,71 @@ export function makeExecutor(input: {
     ])
 
   /**
-   * Starts what was accepted and follows what runs; one report per change. Every transition is conditional on the
-   * state read before the `await`s, and reports only when the row changed. One attempt never holds the others: a start
-   * that fails loses that attempt, a status that cannot be read leaves it as it was until the next round.
+   * Starts what was accepted and follows what runs; one report per change. The round only reads what is local and
+   * never waits for a task: an attempt whose start runs stays `aceito` and counts as not read yet. Every transition is
+   * conditional on the state read before the `await`s, and reports only when the row changed. One attempt never holds
+   * the others: a start that fails loses that attempt, a status that cannot be read leaves it as it was.
    */
   const tick = async () => {
     const unread = { count: 0 }
     for (const row of live.all()) {
-      const key = { job: row.job_id, part: row.part, attempt: row.n }
-      if (row.started_at === null) {
-        const origin: BancadaProtocol.Origin = JSON.parse(row.origin)
-        const repository = origin.machineID === input.machineID ? input.repository(row.job_id) : undefined
-        const failure = await input.launcher
-          .start({
-            ...key,
-            spec: JSON.parse(row.spec),
-            code: JSON.parse(row.code),
-            devices: row.devices,
-            ...(row.only_scenarios ? { only: JSON.parse(row.only_scenarios) } : {}),
-            ...(repository ? { repository } : {}),
-          })
-          .then(
-            () => undefined,
-            (error: unknown) => (error instanceof Error ? error.message : String(error)),
-          )
-        if (failure !== undefined) {
-          await finish(row, { state: "gone", reason: `a partida falhou: ${failure}` })
-          continue
-        }
+      const key = keyOf(row)
+      const id = `start:${key.job}/${key.part}/${key.attempt}`
+      const task = tasks.get(id)
+      if (task && !task.done) {
+        unread.count++
+        continue
+      }
+      if (task) tasks.delete(id)
+      if (task?.failure !== undefined) {
+        finish(row, { state: "gone", reason: `a partida falhou: ${task.failure}` })
+        continue
+      }
+      if (task)
         db.run("UPDATE attempt SET started_at = ? WHERE job_id = ? AND part = ? AND n = ? AND started_at IS NULL", [
           input.now(),
           row.job_id,
           row.part,
           row.n,
         ])
+      if (!task && row.started_at === null) {
+        begin(row)
+        unread.count++
+        continue
       }
       const status = await input.launcher.status(key).catch(() => undefined)
-      if (!status) {
+      if (!status || status.state === "unstarted") {
+        if (status) begin(row)
         unread.count++
         continue
       }
       if (status.state === "done" || status.state === "gone") {
-        await finish(row, status)
+        finish(row, status)
         continue
       }
-      if (status.state === row.state) continue
+      const next = status.state
+      if (next === row.state) continue
       db.transaction(() => {
         const changed = db.run("UPDATE attempt SET state = ? WHERE job_id = ? AND part = ? AND n = ? AND state = ?", [
-          status.state,
+          next,
           row.job_id,
           row.part,
           row.n,
           row.state,
         ]).changes
-        if (changed) input.send({ type: "attempt", ...key, state: status.state })
+        if (changed) input.send({ type: "attempt", ...key, state: next })
       })()
     }
     if (unread.count === 0) reconciling.value = false
+    await input.launcher.reap(live.all().map(keyOf)).catch(() => undefined)
     for (const row of delivered.all()) {
-      const ok = await input.launcher.cleanup({ job: row.job_id, part: row.part, attempt: row.n }).then(
-        () => true,
-        () => false,
-      )
-      if (!ok) continue
+      const id = `cleanup:${row.job_id}/${row.part}/${row.n}`
+      const task = tasks.get(id)
+      if (!task) run(id, () => input.launcher.cleanup(keyOf(row)))
+      if (!task?.done) continue
+      // Failed (the folder is still held): asked again on the next round.
+      tasks.delete(id)
+      if (task.failure !== undefined) continue
       db.transaction(() => {
         db.run("DELETE FROM lease WHERE id = ? AND state <> 'active'", [row.lease_id])
         db.run("DELETE FROM attempt WHERE job_id = ? AND part = ? AND n = ? AND state = 'limpar'", [
@@ -236,27 +282,26 @@ export function makeExecutor(input: {
   }
 
   /**
-   * The execution ended (or vanished): its reservation is released and the hub hears how it went, in one step; then
-   * what it held goes back. Infrastructure (a dead runner, a deadline, exit 75) loses the attempt; a cancel cancels it.
+   * The execution ended (or never started): its reservation is released and the hub hears how it went, in one step.
+   * What it held on the machine goes back by `reap`, once nothing it started runs. Infrastructure (a dead runner, a
+   * deadline, exit 75) loses the attempt; a cancel cancels it.
    */
-  const finish = async (row: AttemptRow, status: Extract<Status, { state: "done" | "gone" }>) => {
+  const finish = (row: AttemptRow, status: Extract<Status, { state: "done" | "gone" }>) => {
     const outcome: BancadaProtocol.Outcome =
       status.state === "gone"
         ? { verdict: "infraestrutura", reason: status.reason, planned: [], scenarios: [], lost: [], approved: false }
         : judge(status.ending)
     const state =
       outcome.verdict === "infraestrutura" ? "perdido" : outcome.verdict === "cancelado" ? "cancelado" : "concluido"
-    const changed = db.transaction(() => {
+    db.transaction(() => {
       const changed = db.run(
         "UPDATE attempt SET state = ?, ended_at = ?, outcome = ? WHERE job_id = ? AND part = ? AND n = ? AND state = ?",
         [state, input.now(), JSON.stringify(outcome), row.job_id, row.part, row.n, row.state],
       ).changes
-      if (!changed) return false
+      if (!changed) return
       db.run("UPDATE lease SET state = 'released', released_at = ? WHERE id = ?", [input.now(), row.lease_id])
       input.send({ type: "attempt", job: row.job_id, part: row.part, attempt: row.n, state, outcome })
-      return true
     })()
-    if (changed) await input.launcher.finish({ job: row.job_id, part: row.part, attempt: row.n }).catch(() => undefined)
   }
 
   return {

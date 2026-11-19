@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 import type { Ending } from "../../results.js"
 import type { AttemptKey, Launch, Launcher, Status } from "../executor.js"
 import type { Git } from "../git.js"
-import { runFlag, type Attempt, type PartStatus } from "../runner.js"
+import { createOnce, runFlag, type Attempt, type Claim, type Event, type PartStatus } from "../runner.js"
 import { contractAt } from "../snapshot.js"
 import { prepareCommands, scrubCommands, type Workdirs } from "../workdir.js"
 
@@ -40,7 +40,8 @@ export async function liveness(pid: number, platform: NodeJS.Platform = process.
           (error: unknown) => ({ error: code(error) }),
         ),
     )
-  return fromPs(await ps(pid))
+  const answer = await ps(pid)
+  return fromPs(answer, () => signalZero(pid) === "absent")
 }
 
 /**
@@ -59,13 +60,17 @@ export function fromStat(read: { readonly text: string } | { readonly error: str
 }
 
 /**
- * `ps -o stat=,lstart= -p <pid>` on macOS (`S    Thu Nov 19 17:31:12 2026`). Exit 1 with nothing printed is proof the
- * process is gone; a `ps` that did not run, missed its deadline or failed otherwise is not.
+ * `ps -o stat=,lstart= -p <pid>` on macOS (`S    Thu Nov 19 17:31:12 2026`). Exit 1 with nothing printed is also what
+ * `ps` answers when it fails by itself (`ps -p 999999`: "process id too large"), so it proves the process gone only if
+ * `kill(pid, 0)` asked afterwards says `ESRCH` (`absent`). A `ps` that did not run or missed its deadline is no answer.
  */
-export function fromPs(result: { readonly code: number; readonly stdout: string } | undefined): Liveness {
+export function fromPs(
+  result: { readonly code: number; readonly stdout: string } | undefined,
+  absent: () => boolean,
+): Liveness {
   if (!result) return unknown
   const line = result.stdout.trim()
-  if (result.code === 1 && line === "") return dead
+  if (result.code === 1 && line === "") return absent() ? dead : unknown
   if (result.code !== 0 || line === "") return unknown
   if (line.startsWith("Z")) return dead
   const space = line.search(/\s/)
@@ -84,6 +89,13 @@ function signalZero(pid: number): "present" | "absent" | "unknown" {
   }
 }
 
+/**
+ * The environment of every `ps` that reads a start time, here and in the runner: without it the text follows the
+ * asker's language and time zone ("Thu Nov 19 19:40:31", "qui 19 nov 19:40:31", "Thu Nov 19 22:40:31" for one process
+ * on the Mac) and a live runner would pass for another process with its pid.
+ */
+export const psEnv = { LC_ALL: "C", TZ: "UTC", PATH: "/usr/bin:/bin" }
+
 async function ps(pid: number) {
   const child = spawn(["/bin/ps", "-o", "stat=,lstart=", "-p", String(pid)])
   if (!child) return undefined
@@ -95,7 +107,7 @@ async function ps(pid: number) {
 /** A `fork` that fails (the Mac out of processes or memory) is no answer, not an error to raise. */
 function spawn(argv: string[]) {
   try {
-    return Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: psTimeoutMs })
+    return Bun.spawn(argv, { env: psEnv, stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: psTimeoutMs })
   } catch {
     return undefined
   }
@@ -117,8 +129,14 @@ export type Deadlines = Attempt["deadlines"]
 
 export const defaults = {
   deadlines: { prepareMs: 10 * 60_000, buildMs: 30 * 60_000, runMs: 60 * 60_000 } satisfies Deadlines,
-  /** How long an attempt folder may wait for its runner to write `runner.json` before it counts as never started. */
+  /** How long a start this process gave may wait for its runner to take the attempt before it is revoked. */
   startGraceMs: 60_000,
+  /** A heartbeat younger than this many beats proves the runner alive without asking the system. */
+  beats: 3,
+  heartbeatMs: 5_000,
+  killGraceMs: 10_000,
+  /** Orphans that cannot be proven ours (or gone) for this long raise an alert in the log. */
+  stuckAlertMs: 10 * 60_000,
   logTailLines: 30,
 }
 
@@ -127,7 +145,8 @@ export const defaults = {
  * Starting an attempt brings its commit into a working folder, reads the contract of that commit (only what it says
  * runs, never a command from a message), writes `attempts/<job>/<part>-<attempt>/attempt.json`, copies the runner there
  * and starts it in a session of its own, so neither the server's nor this process's end touches it. Its state is read
- * back from that folder alone; who is alive is decided by pid and start time, and "could not ask" is never "dead".
+ * back from that folder alone; who is alive is decided by the heartbeat, then by pid and start time, and "could not
+ * ask" is never "dead". Only `start` and the reaping take long, and the executor runs them off its round.
  */
 export function makeProcessLauncher(input: {
   readonly state: string
@@ -140,24 +159,66 @@ export function makeProcessLauncher(input: {
   readonly startGraceMs?: number
   readonly lowPriority?: boolean
   readonly runner?: string
+  /** Asks for a round: an answer about a process came, or a reaping ended. */
+  readonly wake?: () => void
+  readonly log?: (line: string) => void
 }): Launcher {
   const folder = (key: AttemptKey) => path.join(input.state, "attempts", key.job, `${key.part}-${key.attempt}`)
+  const name = (key: AttemptKey) => `${key.job}/${key.part}/${key.attempt}`
+  /** When this process last started each attempt: the grace of a start counts from here, never from a file's date. */
+  const given = new Map<string, number>()
+  const reaping = new Set<string>()
+  const stuck = new Map<string, { since: number; alerted: boolean }>()
+  const asked = new Map<number, { result?: Liveness }>()
   const json = async <T>(file: string) =>
     (await Bun.file(file)
       .json()
       .catch(() => undefined)) as T | undefined
-  const tail = async (file: string) => {
-    const text = await Bun.file(file)
+  const text = (file: string) =>
+    Bun.file(file)
       .text()
       .catch(() => "")
-    return text.trimEnd().split("\n").slice(-defaults.logTailLines).join("\n").slice(-4_000)
+  const tail = async (file: string) =>
+    (await text(file)).trimEnd().split("\n").slice(-defaults.logTailLines).join("\n").slice(-4_000)
+  /** `attempt.json` when it is whole; a cut one (written before renames, or a broken disk) is written again. */
+  const stored = async (dir: string) => {
+    const attempt = await json<Stored>(path.join(dir, "attempt.json"))
+    return attempt?.format === 1 ? attempt : undefined
+  }
+
+  /**
+   * On the Mac a `ps` may take seconds under load, and the round never waits: the question runs on its own and the
+   * next round takes the answer. On Linux it is a read of `/proc`.
+   */
+  const ask = async (pid: number, wait: boolean): Promise<Liveness> => {
+    if (wait || process.platform === "linux") return liveness(pid)
+    const entry = asked.get(pid)
+    if (entry?.result) {
+      asked.delete(pid)
+      return entry.result
+    }
+    if (entry) return unknown
+    const fresh: { result?: Liveness } = {}
+    asked.set(pid, fresh)
+    void liveness(pid).then((answer) => {
+      fresh.result = answer
+      input.wake?.()
+    })
+    return unknown
+  }
+  /** The runner of a folder: a fresh heartbeat proves it alive; only a stale one asks the system. */
+  const runner = async (dir: string, attempt: Stored, claim: { pid: number; startedAt: string }, wait = false) => {
+    const beat = await json<{ at: number }>(path.join(dir, "heartbeat"))
+    const every = attempt.timing?.heartbeatMs ?? defaults.heartbeatMs
+    if (beat && input.now() - beat.at < defaults.beats * every) return "alive"
+    const life = await ask(claim.pid, wait)
+    if (life.state === "unknown") return "unknown"
+    return life.state === "alive" && life.started === claim.startedAt ? "alive" : "dead"
   }
 
   /** How an attempt ended, from its folder: the status the runner wrote, the project's two files, the log's end. */
   const ending = async (dir: string, attempt: Stored, part: string, status: PartStatus | undefined) => {
-    const events = await Bun.file(path.join(dir, "events.jsonl"))
-      .text()
-      .catch(() => "")
+    const events = await text(path.join(dir, "events.jsonl"))
     const stage = status?.stage ?? (events.includes('"type":"run.start"') ? "run" : "build")
     const out = path.join(dir, "parts", part, "out")
     const log =
@@ -166,7 +227,9 @@ export function makeProcessLauncher(input: {
     return {
       stage,
       ...(status?.exit === undefined ? {} : { exit: status.exit }),
+      ...(status?.signal ? { signal: status.signal } : {}),
       ...(status ? (status.cause ? { cause: status.cause } : {}) : { cause: "runner_morto" as const }),
+      ...(status?.reason ? { reason: status.reason } : {}),
       planned: await json(path.join(out, "planned.json")),
       summary: await json(path.join(out, "summary.json")),
       ...(only ? { only } : {}),
@@ -174,14 +237,74 @@ export function makeProcessLauncher(input: {
     } satisfies Ending
   }
 
+  const status = async (key: AttemptKey): Promise<Status> => {
+    const dir = folder(key)
+    const read = () => json<PartStatus>(path.join(dir, "parts", key.part, "status.json"))
+    const attempt = await stored(dir)
+    const written = await read()
+    if (attempt && written) return { state: "done", ending: await ending(dir, attempt, key.part, written) }
+    const claim = await json<Claim>(path.join(dir, "runner.json"))
+    if (!claim) return unclaimed(key, dir)
+    if ("revoked" in claim) return { state: "gone", reason: "a execução não começou" }
+    if (!attempt) throw new Error("o attempt.json de uma tentativa em curso não pôde ser lido")
+    const life = await runner(dir, attempt, claim)
+    if (life === "unknown") throw new Error("não foi possível saber se a execução segue")
+    if (life === "alive")
+      return {
+        state: (await text(path.join(dir, "events.jsonl"))).includes('"type":"run.start"') ? "rodando" : "compilando",
+      }
+    // The runner is gone (or another process took its pid): it may have written the status just before.
+    return { state: "done", ending: await ending(dir, attempt, key.part, await read()) }
+  }
+
+  /**
+   * No runner took the attempt yet; it may just be late (a Mac at its limit, or asleep right after the start). One this
+   * process never started is started again (a restart). Past the grace, giving up takes the attempt from the runner by
+   * the door it uses to take it: `runner.json` created by this process, so one that comes later leaves at once.
+   */
+  const unclaimed = async (key: AttemptKey, dir: string): Promise<Status> => {
+    const at = given.get(name(key))
+    if (at === undefined) return { state: "unstarted" }
+    if (input.now() - at <= (input.startGraceMs ?? defaults.startGraceMs)) return { state: "compilando" }
+    if (createOnce(path.join(dir, "runner.json"), { revoked: true, at: input.now() } satisfies Claim))
+      return { state: "gone", reason: "a execução não começou" }
+    // A runner took it just now.
+    return status(key)
+  }
+
+  /**
+   * What an attempt that no longer lives still holds goes back only when nothing it started runs: its runner is dead,
+   * and each command group without `command.end` is ended with proof it is ours (`docs/bancada.md`, "Orphans").
+   */
+  const sweep = async (key: AttemptKey) => {
+    const dir = folder(key)
+    const attempt = await stored(dir)
+    const claim = await json<Claim>(path.join(dir, "runner.json"))
+    if (attempt && claim && "pid" in claim && (await runner(dir, attempt, claim, true)) !== "dead")
+      return { free: false, commit: attempt.commit }
+    const events = (await text(path.join(dir, "events.jsonl")))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Event)
+    const ended = new Set(events.flatMap((event) => (event.type === "command.end" && event.pid ? [event.pid] : [])))
+    const open = events.filter((event) => event.type === "command.start" && event.pid && !ended.has(event.pid))
+    const grace = attempt?.timing?.killGraceMs ?? defaults.killGraceMs
+    const results = await Promise.all(open.map((command) => orphan(command.pid!, command.startedAt, grace)))
+    return { free: results.every(Boolean), ...(attempt ? { commit: attempt.commit } : {}) }
+  }
+
   return {
     start: async (launch) => {
       const dir = folder(launch)
       if (await Bun.file(path.join(dir, "runner.json")).exists()) return
-      if (!(await Bun.file(path.join(dir, "attempt.json")).exists())) await write(launch, dir)
+      if (!(await stored(dir))) await write(launch, dir)
       const source = input.runner ?? runnerSource()
       const copy = path.join(dir, `runner${path.extname(source) || ".js"}`)
-      await fs.copyFile(source, copy)
+      if (!(await Bun.file(copy).exists())) {
+        const aside = `${copy}.${input.random()}.tmp`
+        await fs.copyFile(source, aside)
+        await fs.rename(aside, copy)
+      }
       const log = openSync(path.join(dir, "runner.log"), "a", 0o600)
       const child = Bun.spawn([process.execPath, copy, runFlag, dir], {
         cwd: dir,
@@ -193,79 +316,72 @@ export function makeProcessLauncher(input: {
       })
       closeSync(log)
       child.unref()
+      given.set(name(launch), input.now())
     },
 
-    status: async (key): Promise<Status> => {
-      const dir = folder(key)
-      const attempt = await json<Stored>(path.join(dir, "attempt.json"))
-      if (!attempt) return { state: "gone", reason: "a execução não começou" }
-      const read = () => json<PartStatus>(path.join(dir, "parts", key.part, "status.json"))
-      const written = await read()
-      if (written) return { state: "done", ending: await ending(dir, attempt, key.part, written) }
-      const runner = await json<{ pid: number; startedAt: string }>(path.join(dir, "runner.json"))
-      if (!runner) {
-        const age = input.now() - (await fs.stat(path.join(dir, "attempt.json"))).mtimeMs
-        return age > (input.startGraceMs ?? defaults.startGraceMs)
-          ? { state: "gone", reason: "a execução não começou" }
-          : { state: "compilando" }
-      }
-      const life = await liveness(runner.pid)
-      if (life.state === "unknown") throw new Error("não foi possível saber se a execução segue")
-      if (life.state === "alive" && life.started === runner.startedAt) {
-        const events = await Bun.file(path.join(dir, "events.jsonl"))
-          .text()
-          .catch(() => "")
-        return { state: events.includes('"type":"run.start"') ? "rodando" : "compilando" }
-      }
-      // The runner is gone (or another process took its pid): it may have written the status just before.
-      return { state: "done", ending: await ending(dir, attempt, key.part, await read()) }
-    },
+    status,
 
     cancel: async (key) => {
       const dir = folder(key)
       if (await fs.exists(dir)) await Bun.write(path.join(dir, "cancel"), String(input.now()))
     },
 
-    finish: async (key) => {
-      const attempt = await json<Stored>(path.join(folder(key), "attempt.json"))
-      if (attempt)
-        input.workdirs.release(
-          { id: attempt.workdirID, project: attempt.project, path: attempt.workdir },
-          attempt.commit,
-        )
+    reap: async (live) => {
+      const alive = new Set(live.map(name))
+      for (const held of input.workdirs.held()) {
+        const [job, part, attempt] = held.owner.split("/")
+        if (alive.has(held.owner) || reaping.has(held.owner) || !job || !part || !attempt) continue
+        reaping.add(held.owner)
+        void sweep({ job, part, attempt: Number(attempt) })
+          .then((result) => {
+            if (result.free) {
+              stuck.delete(held.owner)
+              return input.workdirs.release(held, result.commit)
+            }
+            const known = stuck.get(held.owner) ?? { since: input.now(), alerted: false }
+            stuck.set(held.owner, known)
+            if (known.alerted || input.now() - known.since < defaults.stuckAlertMs) return
+            known.alerted = true
+            input.log?.(
+              `alert: ${held.owner} still holds ${held.path}: processes it started could not be proven gone or ours`,
+            )
+          })
+          .finally(() => {
+            reaping.delete(held.owner)
+            input.wake?.()
+          })
+      }
     },
 
     cleanup: async (key) => {
+      if (input.workdirs.held().some((held) => held.owner === name(key)))
+        throw new Error("a pasta de trabalho ainda está presa à tentativa")
       const dir = folder(key)
-      const attempt = await json<Stored>(path.join(dir, "attempt.json"))
+      const attempt = await stored(dir)
       if (attempt)
         await input.workdirs.forget({ id: attempt.workdirID, project: attempt.project, path: attempt.workdir }, key.job)
       await fs.rm(dir, { recursive: true, force: true })
       await fs.rmdir(path.dirname(dir)).catch(() => undefined)
+      given.delete(name(key))
     },
   }
 
-  /** The commit into a working folder, the contract of that commit, and `attempt.json`, before anything starts. */
+  /** The commit into a working folder, the contract of that commit, and `attempt.json` (by rename), before the start. */
   async function write(launch: Launch, dir: string) {
-    const workdir = await input.workdirs.acquire(
-      launch.code.project,
-      launch.code.commit,
-      `${launch.job}/${launch.part}/${launch.attempt}`,
-    )
+    const workdir = await input.workdirs.acquire(launch.code.project, launch.code.commit, name(launch))
     const fetched = await input.workdirs.fetch(workdir, launch.code.commit, {
       job: launch.job,
       ...(launch.repository ? { local: { repository: launch.repository } } : {}),
       ...(launch.code.inRemote && launch.code.remotes[0] ? { remote: { url: launch.code.remotes[0] } } : {}),
     })
-    const given = () => input.workdirs.release(workdir)
     if (!fetched.ok) {
-      given()
+      input.workdirs.release(workdir)
       throw new Error(`o código não chegou (${fetched.tried.join("; ") || "nenhuma fonte"})`)
     }
     const contract = await contractAt(input.git, workdir.path, launch.code.commit, launch.code.project)
     const test = contract.ok ? contract.contract.tests[launch.part] : undefined
     if (!contract.ok || !test) {
-      given()
+      input.workdirs.release(workdir)
       throw new Error(contract.ok ? `o teste ${launch.part} não existe neste commit` : contract.problems.join("; "))
     }
     const deadlines = input.deadlines ?? defaults.deadlines
@@ -303,7 +419,52 @@ export function makeProcessLauncher(input: {
         path.join(dir, "parts", launch.part, "devices.json"),
         JSON.stringify({ versao: 1, aparelhos: [] }),
       )
-    await Bun.write(path.join(dir, "attempt.json"), JSON.stringify(attempt, null, 2))
+    await Bun.write(path.join(dir, "attempt.json.tmp"), JSON.stringify(attempt, null, 2))
+    await fs.rename(path.join(dir, "attempt.json.tmp"), path.join(dir, "attempt.json"))
+  }
+}
+
+/**
+ * Ends a command group a dead runner left, only with proof it is ours (`docs/bancada.md`, "Orphans"); true when nothing
+ * of it is left. Its leader alive with the start time recorded: ours, SIGTERM to the group, the grace, SIGKILL. Alive
+ * with another start time: the number was reused, so nothing of ours is left. Gone while the group still has members:
+ * the system never reuses a number that is still a live group's id, so they are ours: SIGKILL. Could not ask, or no
+ * start time recorded with the leader alive: touch nothing, ask again on the next round.
+ */
+export async function orphan(pid: number, startedAt: string | undefined, graceMs: number) {
+  const leader = await liveness(pid)
+  if (leader.state === "unknown") return false
+  if (leader.state === "alive" && (!startedAt || leader.started !== startedAt)) return startedAt !== undefined
+  if (leader.state === "alive") {
+    group(pid, "SIGTERM")
+    await settle(pid, graceMs)
+  }
+  if (groupAlive(pid)) group(pid, "SIGKILL")
+  await settle(pid, 1_000)
+  return !groupAlive(pid)
+}
+
+/** Waits up to `ms` for a process group to be empty. */
+async function settle(pid: number, ms: number) {
+  const deadline = Date.now() + ms
+  while (groupAlive(pid) && Date.now() < deadline) await Bun.sleep(50)
+}
+
+/** `kill(-pgid, 0)`: the group still has members (`EPERM` too: they exist, someone else's). */
+function groupAlive(pid: number) {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch (error) {
+    return code(error) === "EPERM"
+  }
+}
+
+function group(pid: number, name: "SIGTERM" | "SIGKILL") {
+  try {
+    process.kill(-pid, name)
+  } catch {
+    // The group is already gone.
   }
 }
 

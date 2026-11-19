@@ -4,11 +4,12 @@
 // an execution needs only its folder (a release swapped meanwhile, or a container that mounts only that folder,
 // changes nothing). Started as `<bun> <folder>/runner.(ts|js) --opencode-bancada-run <folder>`.
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 
 export const runFlag = "--opencode-bancada-run"
 
-/** `attempt.json`, written by the process before the start and never changed (format 1). */
+/** `attempt.json`, written by the process before the start, by rename, and never changed (format 1). */
 export type Attempt = {
   readonly format: 1
   readonly job: string
@@ -49,13 +50,26 @@ export type PartStatus = {
   readonly stage: "build" | "plan" | "run"
   readonly exit?: number
   readonly signal?: string
-  readonly cause?: "prazo" | "runner_morto" | "cancelado"
+  readonly cause?: "prazo" | "cancelado" | "runner_erro"
   readonly reason?: string
   readonly endedAt: number
   readonly awakeMs: number
 }
 
-type Ended = { readonly exit: number; readonly signal?: string } | { readonly cause: "prazo" | "cancelado" }
+/**
+ * `runner.json`: who took the attempt, created only if absent and with its whole content. Its runner (pid and the
+ * process's start time, as the system gives it), or the Bancada process that gave up on a start that never came.
+ */
+export type Claim =
+  | { readonly pid: number; readonly startedAt: string }
+  | { readonly revoked: true; readonly at: number }
+
+/** One event of `events.jsonl`; `command.start` and `command.end` are what the process reads to end orphans. */
+export type Event = { readonly type: string; readonly pid?: number; readonly startedAt?: string }
+
+type Ended =
+  | { readonly exit: number; readonly signal?: string; readonly reason?: string }
+  | { readonly cause: "prazo" | "cancelado" }
 
 /**
  * Awake time: each step adds what passed since the last one, but never more than `clampMs`, so a machine that slept
@@ -67,11 +81,13 @@ export function awake(total: number, last: number, now: number, clampMs: number)
 
 export async function runAttempt(dir: string) {
   const attempt: Attempt = JSON.parse(fs.readFileSync(path.join(dir, "attempt.json"), "utf8"))
-  // Set only so the compiled server binary behaves as Bun; the project's commands must not inherit it.
-  delete process.env.BUN_BE_BUN
-  delete process.env.OPENCODE_BANCADA_PARENT
-  delete process.env.OPENCODE_BANCADA_STATE
-  if (!claim(dir)) return
+  // The project's commands must not inherit what makes the server's binary behave as Bun, nor anything that would
+  // turn on a Bancada of a server a test starts (D13).
+  Object.keys(process.env)
+    .filter((name) => name === "BUN_BE_BUN" || name.startsWith("OPENCODE_BANCADA"))
+    .forEach((name) => delete process.env[name])
+  const startedAt = await ownStart()
+  if (!startedAt || !createOnce(path.join(dir, "runner.json"), { pid: process.pid, startedAt })) return
   const timing = {
     pollMs: attempt.timing?.pollMs ?? 200,
     heartbeatMs: attempt.timing?.heartbeatMs ?? 5_000,
@@ -94,7 +110,6 @@ export async function runAttempt(dir: string) {
       : undefined
   caffeinate?.unref()
   tick()
-  const groups = new Set<number>()
   const cancelled = () => fs.existsSync(path.join(dir, "cancel"))
   const event = (type: string, extra: Record<string, unknown> = {}) =>
     fs.appendFileSync(
@@ -108,8 +123,13 @@ export async function runAttempt(dir: string) {
     fs.mkdirSync(path.join(dir, "parts", part), { recursive: true })
     writeJson(path.join(dir, "parts", part, "status.json"), { ...status, endedAt: Date.now(), awakeMs: clock.awakeMs })
   }
+  const stage: { current: PartStatus["stage"] } = { current: "build" }
 
-  /** Runs one command in a session of its own; stops it (and everything it started) at the deadline or a cancel. */
+  /**
+   * Runs one command in a session of its own and stops it (and everything it started) at the deadline or a cancel.
+   * When it ends, whatever it left running in its group dies with it, before its number can go to anyone else. A
+   * command that cannot start is that command's result, never the runner's end.
+   */
   const execute = async (
     argv: ReadonlyArray<string>,
     options: {
@@ -120,25 +140,29 @@ export async function runAttempt(dir: string) {
     },
   ): Promise<Ended> => {
     if (cancelled()) return { cause: "cancelado" }
-    const log = fs.openSync(options.log, "a")
-    const child = Bun.spawn([...(attempt.lowPriority ? ["nice", "-n", "10"] : []), ...argv], {
+    const child = spawn([...(attempt.lowPriority ? ["nice", "-n", "10"] : []), ...argv], {
       cwd: options.cwd,
       env: { ...process.env, ...attempt.env, ...options.env },
-      stdin: "ignore",
-      stdout: log,
-      stderr: log,
-      detached: true,
+      log: options.log,
     })
-    fs.closeSync(log)
-    groups.add(child.pid)
-    event("command.start", { pid: child.pid, argv })
+    if (typeof child === "string") {
+      event("command.fail", { argv, reason: child })
+      return { exit: 126, reason: `o comando não partiu: ${child}` }
+    }
+    const identity = await startOf(child.pid)
+    event("command.start", { pid: child.pid, ...(identity ? { startedAt: identity } : {}), argv })
+    const result = await follow(child, options.deadlineMs)
+    signal(child.pid, "SIGKILL")
+    event("command.end", { pid: child.pid })
+    return result
+  }
+  const follow = async (child: Bun.Subprocess, deadlineMs: number): Promise<Ended> => {
     const started = clock.awakeMs
     for (;;) {
       const done = await Promise.race([child.exited.then(() => true), Bun.sleep(timing.pollMs).then(() => false)])
       tick()
-      if (done)
-        return { exit: child.exitCode ?? 128, ...(child.signalCode ? { signal: String(child.signalCode) } : {}) }
-      const cause = cancelled() ? "cancelado" : clock.awakeMs - started > options.deadlineMs ? "prazo" : undefined
+      if (done) return exited(child)
+      const cause = cancelled() ? "cancelado" : clock.awakeMs - started > deadlineMs ? "prazo" : undefined
       if (!cause) continue
       await stop(child.pid, child.exited)
       return { cause }
@@ -164,10 +188,15 @@ export async function runAttempt(dir: string) {
     ...argv.slice(1),
     ...part.args,
   ]
-  attempt.parts.forEach((part) => fs.mkdirSync(path.join(dir, "parts", part.part, "out"), { recursive: true }))
   const pending = () => attempt.parts.filter((part) => !ended.has(part.part))
   const endAll = (status: Omit<PartStatus, "endedAt" | "awakeMs">) =>
     pending().forEach((part) => finish(part.part, status))
+  /** How a command's end closes a part at the current stage: a cause, or its exit (and signal, and reason). */
+  const close = (part: string, result: Ended) =>
+    finish(
+      part,
+      "cause" in result ? { stage: stage.current, cause: result.cause } : { stage: stage.current, ...result },
+    )
 
   /** The argv lists of `commands` in the working folder, stopping at the first that does not exit 0. */
   const sequence = async (commands: ReadonlyArray<ReadonlyArray<string>>, log: string): Promise<Ended> => {
@@ -178,13 +207,6 @@ export async function runAttempt(dir: string) {
     return { exit: 0 }
   }
 
-  // Checkout.
-  event("checkout")
-  const checkout = await sequence(attempt.prepare, path.join(dir, "checkout.log"))
-  if ("cause" in checkout) endAll({ stage: "build", cause: checkout.cause })
-  else if (checkout.exit !== 0) endAll({ stage: "build", exit: 75, reason: "o checkout falhou" })
-
-  // Builds, in sequence, a repeated command once.
   const build = async (part: Attempt["parts"][number], argv: string[]) => {
     event("build.start", { part: part.part })
     const result = await execute(argv, {
@@ -199,7 +221,8 @@ export async function runAttempt(dir: string) {
   /** In a reused folder a compile error is tried once more, from a folder cleaned of everything, caches included. */
   const buildOnce = async (part: Attempt["parts"][number], argv: string[]): Promise<Ended> => {
     const first = await build(part, argv)
-    const compileError = "exit" in first && first.exit !== 0 && first.exit !== 2 && first.exit !== 75
+    const compileError =
+      "exit" in first && !first.signal && first.exit !== 0 && first.exit !== 2 && first.exit !== 75 && first.exit < 126
     if (!compileError || !attempt.reused) return first
     event("build.clean", { part: part.part })
     const scrubbed = await sequence(attempt.scrub, path.join(dir, "build.log"))
@@ -208,100 +231,189 @@ export async function runAttempt(dir: string) {
     if (!("exit" in prepared) || prepared.exit !== 0) return first
     return build(part, argv)
   }
-  const builds = new Map<string, Ended>()
-  for (const part of pending()) {
-    if (!part.build) continue
-    const argv = command(part.build, part)
-    const key = JSON.stringify(argv)
-    const result = builds.get(key) ?? (await buildOnce(part, argv))
-    builds.set(key, result)
-    if ("cause" in result) finish(part.part, { stage: "build", cause: result.cause })
-    else if (result.exit !== 0) finish(part.part, { stage: "build", exit: result.exit, ...signalOf(result) })
-  }
 
-  // Plans.
-  for (const part of pending()) {
-    if (!part.plan) continue
-    const result = await execute(command(part.plan, part), {
-      cwd: attempt.workdir,
-      log: path.join(dir, "parts", part.part, "out", "plan.log"),
-      env: env(part),
-      deadlineMs: attempt.deadlines.buildMs,
-    })
-    event("plan.end", { part: part.part, ...result })
-    if ("cause" in result) finish(part.part, { stage: "plan", cause: result.cause })
-    else if (result.exit !== 0) finish(part.part, { stage: "plan", exit: result.exit, ...signalOf(result) })
-  }
+  const steps = async () => {
+    attempt.parts.forEach((part) => fs.mkdirSync(path.join(dir, "parts", part.part, "out"), { recursive: true }))
 
-  // Devices: the process writes each part's devices.json when they are ready.
-  event("devices.wait")
-  const waitStarted = clock.awakeMs
-  while (pending().some((part) => !fs.existsSync(devices(dir, part.part)))) {
-    if (cancelled()) endAll({ stage: "run", cause: "cancelado" })
-    else if (clock.awakeMs - waitStarted > attempt.deadlines.prepareMs)
-      pending()
-        .filter((part) => !fs.existsSync(devices(dir, part.part)))
-        .forEach((part) =>
+    event("checkout")
+    const checkout = await sequence(attempt.prepare, path.join(dir, "checkout.log"))
+    if ("cause" in checkout) endAll({ stage: "build", cause: checkout.cause })
+    if ("exit" in checkout && checkout.exit !== 0)
+      endAll({ stage: "build", exit: 75, reason: checkout.reason ?? "o checkout falhou" })
+
+    // Builds, in sequence, a repeated command once.
+    const builds = new Map<string, Ended>()
+    for (const part of pending()) {
+      if (!part.build) continue
+      const argv = command(part.build, part)
+      const key = JSON.stringify(argv)
+      const result = builds.get(key) ?? (await buildOnce(part, argv))
+      builds.set(key, result)
+      if (!("exit" in result) || result.exit !== 0) close(part.part, result)
+    }
+
+    stage.current = "plan"
+    for (const part of pending()) {
+      if (!part.plan) continue
+      const result = await execute(command(part.plan, part), {
+        cwd: attempt.workdir,
+        log: path.join(dir, "parts", part.part, "out", "plan.log"),
+        env: env(part),
+        deadlineMs: attempt.deadlines.buildMs,
+      })
+      event("plan.end", { part: part.part, ...result })
+      if (!("exit" in result) || result.exit !== 0) close(part.part, result)
+    }
+
+    // Devices: the process writes each part's devices.json when they are ready.
+    stage.current = "run"
+    event("devices.wait")
+    const waitStarted = clock.awakeMs
+    const unready = () => pending().filter((part) => !fs.existsSync(devices(dir, part.part)))
+    while (unready().length > 0) {
+      tick()
+      if (cancelled()) endAll({ stage: "run", cause: "cancelado" })
+      if (clock.awakeMs - waitStarted > attempt.deadlines.prepareMs)
+        unready().forEach((part) =>
           finish(part.part, { stage: "run", cause: "prazo", reason: "os aparelhos não ficaram prontos" }),
         )
-    else await Bun.sleep(timing.pollMs)
-    tick()
+      await Bun.sleep(timing.pollMs)
+    }
+
+    // Runs, in parallel.
+    await Promise.all(
+      pending().map(async (part) => {
+        const out = path.join(dir, "parts", part.part, "out")
+        const only = part.only ? path.join(dir, "parts", part.part, "apenas") : undefined
+        if (only) fs.writeFileSync(only, part.only!.join("\n") + "\n")
+        const argv = command(part.run, part)
+        event("run.start", { part: part.part })
+        const result = await execute(
+          part.secrets ? ["mycred", "run", "--keychain", part.secrets, "--mask", "--", ...argv] : argv,
+          {
+            cwd: attempt.workdir,
+            log: path.join(out, "run.log"),
+            env: { ...env(part), BANCADA_DEVICES: devices(dir, part.part), ...(only ? { BANCADA_APENAS: only } : {}) },
+            deadlineMs: attempt.deadlines.runMs,
+          },
+        )
+        event("run.end", { part: part.part, ...result })
+        close(part.part, result)
+      }),
+    )
+    if (cancelled()) event("cancelled")
   }
 
-  // Runs, in parallel.
-  await Promise.all(
-    pending().map(async (part) => {
-      const out = path.join(dir, "parts", part.part, "out")
-      const only = part.only ? path.join(dir, "parts", part.part, "apenas") : undefined
-      if (only) fs.writeFileSync(only, part.only!.join("\n") + "\n")
-      const argv = command(part.run, part)
-      event("run.start", { part: part.part })
-      const result = await execute(
-        part.secrets ? ["mycred", "run", "--keychain", part.secrets, "--mask", "--", ...argv] : argv,
-        {
-          cwd: attempt.workdir,
-          log: path.join(out, "run.log"),
-          env: { ...env(part), BANCADA_DEVICES: devices(dir, part.part), ...(only ? { BANCADA_APENAS: only } : {}) },
-          deadlineMs: attempt.deadlines.runMs,
-        },
-      )
-      event("run.end", { part: part.part, ...result })
-      if ("cause" in result) finish(part.part, { stage: "run", cause: result.cause })
-      else finish(part.part, { stage: "run", exit: result.exit, ...signalOf(result) })
-    }),
-  )
-  if (cancelled()) event("cancelled")
-
-  // Whatever the commands left running in their groups goes too.
-  groups.forEach((pid) => signal(pid, "SIGKILL"))
+  // The runner never dies silently: whatever goes wrong in it closes the parts still open, with the reason.
+  await steps().catch((error: unknown) => {
+    const reason = error instanceof Error ? error.message : String(error)
+    event("runner.error", { reason })
+    endAll({ stage: stage.current, cause: "runner_erro", reason })
+  })
   clearInterval(heartbeat)
   caffeinate?.kill()
   tick()
 }
 
 /**
- * Takes the attempt: `runner.json` is created only if absent, so a second start (the process came back before this
- * runner wrote it) leaves at once. It holds this process's pid and start time, the identity the process checks.
+ * A process's start time as the Bancada process reads it (`launcher/process.ts`): field 22 of `/proc/<pid>/stat` on
+ * Linux; `ps -o lstart=` on macOS, in the C language and UTC (never the asker's), with a short deadline. Undefined
+ * when it cannot be read.
  */
-function claim(dir: string) {
-  const file = path.join(dir, "runner.json")
-  const content = JSON.stringify({ pid: process.pid, startedAt: ownStart() })
+export async function startOf(pid: number, platform: NodeJS.Platform = process.platform) {
+  if (platform === "linux") {
+    const stat = readText(`/proc/${pid}/stat`)
+    return stat?.slice(stat.lastIndexOf(")") + 2).split(" ")[19] || undefined
+  }
+  const child = spawn(["/bin/ps", "-o", "lstart=", "-p", String(pid)], {
+    env: { LC_ALL: "C", TZ: "UTC", PATH: "/usr/bin:/bin" },
+    timeoutMs: 5_000,
+  })
+  if (typeof child === "string" || !child.stdout || typeof child.stdout === "number") return undefined
+  const [text, code] = await Promise.all([new Response(child.stdout).text(), child.exited])
+  return code === 0 ? text.trim() || undefined : undefined
+}
+
+/**
+ * Creates `file` with its whole content only if it does not exist: written aside, then linked under its name (the link
+ * fails when the name exists). Used for `runner.json`, by the runner taking the attempt and by the process revoking it.
+ */
+export function createOnce(file: string, content: unknown) {
+  const aside = `${file}.${process.pid}.${Date.now()}.tmp`
+  fs.writeFileSync(aside, JSON.stringify(content))
+  const created = link(aside, file)
+  fs.rmSync(aside, { force: true })
+  return created
+}
+
+/** The runner's own start time; a loaded Mac may miss a `ps`, so it asks a few times before giving up. */
+async function ownStart() {
+  for (const _ of [1, 2, 3]) {
+    const started = await startOf(process.pid)
+    if (started) return started
+  }
+  return undefined
+}
+
+/**
+ * Starts a command in a session of its own, its output appended to `log`; the reason as text when it cannot start
+ * (no execute permission, a `fork` that fails on a machine at its limit).
+ */
+function spawn(
+  argv: string[],
+  options: {
+    readonly cwd?: string
+    readonly env?: Record<string, string | undefined>
+    readonly log?: string
+    readonly timeoutMs?: number
+  },
+) {
+  const log = options.log ? fs.openSync(options.log, "a") : undefined
+  const started = attemptSpawn(() =>
+    Bun.spawn(argv, {
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      ...(options.env ? { env: options.env } : {}),
+      ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+      stdin: "ignore",
+      stdout: log ?? "pipe",
+      stderr: log ?? "ignore",
+      detached: log !== undefined,
+    }),
+  )
+  if (log !== undefined) fs.closeSync(log)
+  return started
+}
+
+function attemptSpawn(start: () => Bun.Subprocess) {
   try {
-    fs.writeFileSync(file, content, { flag: "wx" })
+    return start()
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+}
+
+/** How a command ended; killed by a signal it counts as `128 + n`, as a shell reports it. */
+function exited(child: Bun.Subprocess): Ended {
+  if (!child.signalCode) return { exit: child.exitCode ?? 128 }
+  const number = os.constants.signals[child.signalCode as keyof typeof os.constants.signals] ?? 0
+  return { exit: child.exitCode ?? 128 + number, signal: String(child.signalCode) }
+}
+
+function link(from: string, to: string) {
+  try {
+    fs.linkSync(from, to)
     return true
   } catch {
     return false
   }
 }
 
-/** This process's start time, as the process reads it (`launcher/process.ts`): `/proc` field 22, or `ps` lstart. */
-function ownStart() {
-  if (process.platform === "linux") {
-    const stat = fs.readFileSync("/proc/self/stat", "utf8")
-    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] ?? ""
+function readText(file: string) {
+  try {
+    return fs.readFileSync(file, "utf8")
+  } catch {
+    return undefined
   }
-  const result = Bun.spawnSync(["/bin/ps", "-o", "lstart=", "-p", String(process.pid)])
-  return result.stdout.toString().trim()
 }
 
 function signal(pid: number, name: "SIGTERM" | "SIGKILL") {
@@ -310,10 +422,6 @@ function signal(pid: number, name: "SIGTERM" | "SIGKILL") {
   } catch {
     // The group is already gone.
   }
-}
-
-function signalOf(result: Ended) {
-  return "signal" in result && result.signal ? { signal: result.signal } : {}
 }
 
 function devices(dir: string, part: string) {
