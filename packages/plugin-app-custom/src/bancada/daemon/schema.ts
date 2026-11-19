@@ -81,6 +81,15 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       outcome TEXT,
       PRIMARY KEY (job_id, part, n)
     )`,
+    // The executor's working folders: one git repository each, for one attempt group at a time.
+    `CREATE TABLE workdir (
+      id TEXT PRIMARY KEY,
+      project TEXT NOT NULL,
+      path TEXT NOT NULL UNIQUE,
+      busy_by TEXT,
+      last_commit TEXT,
+      last_used_at INTEGER NOT NULL
+    )`,
     `CREATE TABLE hub_machine (
       machine_id TEXT PRIMARY KEY,
       instance_id TEXT NOT NULL,
