@@ -7,9 +7,6 @@ import { HttpServer } from "effect/http"
 import path from "node:path"
 import { serverConfig } from "./custom-config"
 
-// A source server is a development or sandbox server: its Bancada stays off unless it is asked for (plugin
-// `docs/bancada.md`), so it never takes this machine's devices from the installed server.
-process.env.OPENCODE_BANCADA ??= "0"
 const root = process.env.OPENCODE_CUSTOM_HOME
 const version = process.env.OPENCODE_CUSTOM_COMMIT
 if (!root || !version) throw new Error("Set OPENCODE_CUSTOM_HOME and OPENCODE_CUSTOM_COMMIT")

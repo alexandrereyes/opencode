@@ -165,13 +165,13 @@ async function up() {
       // Never production's link: a sandbox must not send its sessions to production's hub, nor carry its password.
       OPENCODE_SUMMARY_HUB: args.values["summary-hub"],
       OPENCODE_SUMMARY_HUB_PASSWORD: undefined,
-      // Nor production's Bancada (plugin `docs/bancada.md`): a sandbox never takes this machine's devices or folder.
+      // Nor production's Bancada (plugin `docs/bancada.md`): without `OPENCODE_BANCADA=1` it stays off, so a sandbox
+      // never takes this machine's devices or folder.
       ...Object.fromEntries(
         Object.keys(environment)
-          .filter((name) => name.startsWith("OPENCODE_BANCADA_"))
+          .filter((name) => name.startsWith("OPENCODE_BANCADA"))
           .map((name) => [name, undefined]),
       ),
-      OPENCODE_BANCADA: "0",
       ...(hub
         ? {
             OPENCODE_RESOURCES_HUB_REMOTE_INFO: `${hub.state}/hub.json`,

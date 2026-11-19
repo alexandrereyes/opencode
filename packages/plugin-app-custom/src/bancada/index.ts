@@ -9,19 +9,20 @@ import { Bancada } from "./rpc.js"
 /**
  * The Bancada of this machine (`docs/bancada.md`). The plugin only relays: every `custom.bancada` call goes to this
  * machine's process, which this instance starts as soon as it loads. A process that is missing or broken makes the
- * Bancada unavailable here, never the server. `OPENCODE_BANCADA=0` turns it off: no process, and every call answers
- * `unavailable { reason: "off" }`.
+ * Bancada unavailable here, never the server. It runs only with `OPENCODE_BANCADA=1`, which the launchers of the
+ * installed servers set (D13): tests and scripts of other packages load this plugin too, and must never start a process
+ * in the machine's folder. Off, every call answers `unavailable { reason: "off" }`.
  */
 export const registerBancada = Effect.fn("Bancada.register")(function* (
   ctx: Pick<Context, "rpc" | "storage">,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ) {
-  if (env.OPENCODE_BANCADA?.trim() === "0") {
+  if (env.OPENCODE_BANCADA?.trim() !== "1") {
     yield* ctx.rpc
       .register(Bancada.Definition, {
         wake: (_input, context) =>
           Effect.fail(
-            context.error("unavailable", "A Bancada está desligada neste servidor (OPENCODE_BANCADA=0).", {
+            context.error("unavailable", "A Bancada está desligada neste servidor (liga com OPENCODE_BANCADA=1).", {
               reason: "off",
             }),
           ),

@@ -186,42 +186,57 @@ describe("process", () => {
   }, 30_000)
 })
 
+// Boots a server in this process with the whole plugin, in two Locations.
 it.live(
-  "OPENCODE_BANCADA=0 answers off and starts nothing",
+  "without OPENCODE_BANCADA=1 the plugin answers off and creates nothing",
   () =>
     Effect.gen(function* () {
       const tmp = yield* tmpdirScoped("opencode-bancada-off-")
-      const project = path.join(tmp.path, "project")
       const state = path.join(tmp.path, "state")
       const plugin = pathToFileURL(path.resolve(import.meta.dir, "../src/index.ts")).href
-      yield* Effect.promise(async () => {
-        await fs.mkdir(path.join(project, ".opencode", "plugins"), { recursive: true })
-        await fs.writeFile(
-          path.join(project, ".opencode", "plugins", "app-custom.ts"),
-          `export { default } from ${JSON.stringify(plugin)}\n`,
-        )
-      })
-      // The preload turns the Bancada off for every test; this one also names a folder, which must stay untouched.
-      expect(process.env.OPENCODE_BANCADA).toBe("0")
+      const [unset, zero] = ["unset", "zero"].map((name) => path.join(tmp.path, name))
+      yield* Effect.promise(() =>
+        Promise.all(
+          [unset!, zero!].map(async (project) => {
+            await fs.mkdir(path.join(project, ".opencode", "plugins"), { recursive: true })
+            await fs.writeFile(
+              path.join(project, ".opencode", "plugins", "app-custom.ts"),
+              `export { default } from ${JSON.stringify(plugin)}\n`,
+            )
+          }),
+        ),
+      )
+      // The preload removes every OPENCODE_BANCADA* variable; this test also names a folder, which must stay untouched.
+      expect(process.env.OPENCODE_BANCADA).toBeUndefined()
       process.env.OPENCODE_BANCADA_STATE = state
-      yield* Effect.addFinalizer(() => Effect.sync(() => delete process.env.OPENCODE_BANCADA_STATE))
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          delete process.env.OPENCODE_BANCADA_STATE
+          delete process.env.OPENCODE_BANCADA
+        }),
+      )
       const server = yield* startServer(path.join(tmp.path, "config"))
-      const url = new URL("/api/rpc/custom.bancada/wake", server.base)
-      url.searchParams.set("location[directory]", project)
-      const answer = yield* Effect.promise(async () => {
-        const deadline = Date.now() + 15_000
-        while (Date.now() < deadline) {
-          const response = await fetch(url, {
-            method: "POST",
-            headers: { ...server.headers, "content-type": "application/json" },
-            body: JSON.stringify({ input: {} }),
-          })
-          const body = (await response.json()) as { type?: string; data?: unknown }
-          if (body.type !== "rpc.unavailable") return { status: response.status, body }
-          await Bun.sleep(100)
-        }
-      })
-      expect(answer).toMatchObject({ status: 400, body: { type: "unavailable", data: { reason: "off" } } })
+      const wake = (project: string) =>
+        Effect.promise(async () => {
+          const url = new URL("/api/rpc/custom.bancada/wake", server.base)
+          url.searchParams.set("location[directory]", project)
+          const deadline = Date.now() + 15_000
+          while (Date.now() < deadline) {
+            const response = await fetch(url, {
+              method: "POST",
+              headers: { ...server.headers, "content-type": "application/json" },
+              body: JSON.stringify({ input: {} }),
+            })
+            const body = (await response.json()) as { type?: string; data?: unknown }
+            if (body.type !== "rpc.unavailable") return { status: response.status, body }
+            await Bun.sleep(100)
+          }
+        })
+      const off = { status: 400, body: { type: "unavailable", data: { reason: "off" } } }
+      // Each Location loads the plugin, which reads the switch then: unset for the first, the production "0" for the second.
+      expect(yield* wake(unset!)).toMatchObject(off)
+      process.env.OPENCODE_BANCADA = "0"
+      expect(yield* wake(zero!)).toMatchObject(off)
       expect(yield* Effect.promise(() => fs.exists(state))).toBe(false)
     }),
   20_000,
