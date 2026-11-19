@@ -56,6 +56,8 @@ export function makeCoordinator(input: {
   readonly now: () => number
   /** A machine that has not called for this long is silent: what it runs becomes `incerto`. */
   readonly silentMs: number
+  /** When this hub's process started: a machine's silence counts only from then (it could not call a hub that was out). */
+  readonly startedAt: number
   readonly send: (machineID: string, body: BancadaProtocol.FromHub) => number
   /** The last sequence number `machineID` acknowledged of the hub's stream to it. */
   readonly acknowledged: (machineID: string) => number
@@ -300,10 +302,13 @@ export function makeCoordinator(input: {
 
   /**
    * A machine silent for `silentMs` (asleep, or gone): what it runs becomes `incerto`, never approved nor lost by itself
-   * here; it returns to its real state when the machine calls again.
+   * here; it returns to its real state when the machine calls again. The silence counts only while the hub listens:
+   * from the later of the machine's last call and this hub's start (after a deploy every last call is old).
    */
   const watch = () => {
-    for (const quiet of silent.all(input.now() - input.silentMs)) {
+    const since = input.now() - input.silentMs
+    if (input.startedAt > since) return
+    for (const quiet of silent.all(since)) {
       db.run("UPDATE hub_machine SET state = 'silenciosa' WHERE machine_id = ?", [quiet.machine_id])
       for (const row of runningOn.all(quiet.machine_id)) {
         update(row, { state: "incerto", held_state: row.state, since: input.now() })

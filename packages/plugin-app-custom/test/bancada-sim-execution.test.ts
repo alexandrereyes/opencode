@@ -53,6 +53,33 @@ describe("simulation: executions outlive the Bancada process", () => {
     },
   )
 
+  test("S16: the hub's process is out for two minutes while the Mac runs a part: nothing goes silent or uncertain", async () => {
+    const sim = world()
+    sim.script("j-7qk2m9xa", "android", {
+      buildMs: 4_000,
+      runMs: 300_000,
+      exit: 0,
+      planned: ["a1"],
+      scenarios: passed(["a1"]),
+    })
+    await sim.advance(10_000)
+    expect(sim.seen("j-7qk2m9xa", "android").at(-1)).toBe("rodando")
+    // The hub's process is gone (a deploy): it runs nothing and hears nobody, then a new one opens its database.
+    sim.sleep("Linux", true)
+    await sim.advance(120_000)
+    sim.restart("Linux")
+    sim.sleep("Linux", false)
+    // Its very first round, before any machine called: a whole step would hide the mistake behind the Mac's call.
+    await sim.round("Linux")
+    const hub = sim.machines.get("Linux")!.db
+    expect(hub.query("SELECT state FROM hub_machine WHERE machine_id = 'm-Mac'").get()).toEqual({ state: "ok" })
+    expect(hub.query("SELECT state FROM hub_part WHERE job_id = 'j-7qk2m9xa'").get()).toEqual({ state: "rodando" })
+    await sim.advance(240_000)
+    sim.settle()
+    expect(sim.seen("j-7qk2m9xa", "android")).not.toContain("incerto")
+    expect(sim.facts.delivered.get("j-7qk2m9xa")).toMatchObject([{ part: "android", outcome: { approved: true } }])
+  })
+
   test("S17: a start that takes two minutes, on the Mac and on the hub, never holds a round", async () => {
     const sim = createWorld({ seed: 11, timings: { silentMs: 45_000 } })
     sim.addMachine({ name: "Linux", hub: true, platform: "linux", capabilities: { docker: {} } })

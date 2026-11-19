@@ -95,6 +95,7 @@ export function createCore(ports: Ports) {
         db,
         now: ports.now,
         silentMs: times.silentMs,
+        startedAt: ports.now(),
         send: (machineID, body) => messages.send(machineID, body),
         acknowledged: (machineID) => messages.acknowledged(machineID),
       })

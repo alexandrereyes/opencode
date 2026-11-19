@@ -259,6 +259,8 @@ export function createWorld(options: {
     sleep: (name: string, asleep: boolean) => {
       machines.get(name)!.awake = !asleep
     },
+    /** One round of one machine, nothing else: for a state a full step would already undo. */
+    round: (name: string) => round(machines.get(name)!),
     /** States a part of the hub's queue went through, in order and without repeats. */
     seen: (job: string, part: string) => facts.states.get(`${job}/${part}`) ?? [],
     submit: (machine: string, job: NewJob) => {
