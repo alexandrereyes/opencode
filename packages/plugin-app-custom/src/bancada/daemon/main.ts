@@ -7,7 +7,7 @@ import path from "node:path"
 import { Option, Schema } from "effect"
 import { Bancada } from "../rpc.js"
 import { openExclusive } from "./db.js"
-import { startTime } from "./launcher/process.js"
+import { liveness } from "./launcher/process.js"
 import { migrate, NewerSchemaError } from "./schema.js"
 
 /** Argument that makes the bundled plugin (`plugin/index.js`) run this process instead of exporting the plugin. */
@@ -118,13 +118,19 @@ export async function main() {
   process.on("SIGTERM", () => void stop("SIGTERM"))
   process.on("SIGINT", () => void stop("SIGINT"))
   if (parent <= 0) return
-  const born = await startTime(parent)
-  if (!born) return void stop(`server ${parent} was already gone`)
-  timers.push(
-    setInterval(async () => {
-      if ((await startTime(parent)) !== born) void stop(`server ${parent} is gone`)
-    }, limits.parentCheckMs),
-  )
+  // The server is gone only on proof: a check that could not ask (`unknown`) keeps waiting for the next one.
+  const parentCheck: { started?: string; checking: boolean } = { checking: false }
+  const check = async () => {
+    if (parentCheck.checking) return
+    parentCheck.checking = true
+    const now = await liveness(parent)
+    parentCheck.checking = false
+    if (now.state === "unknown") return
+    parentCheck.started ??= now.state === "alive" ? now.started : undefined
+    if (now.state === "dead" || now.started !== parentCheck.started) void stop(`server ${parent} is gone`)
+  }
+  await check()
+  timers.push(setInterval(() => void check(), limits.parentCheckMs))
 }
 
 /** The admin API, on loopback, for the plugin instances of the owner server; every route needs the secret. */

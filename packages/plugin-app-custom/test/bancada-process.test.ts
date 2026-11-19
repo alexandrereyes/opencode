@@ -5,7 +5,7 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { Effect } from "effect"
 import { bancadaCommand, BancadaError, makeBancadaClient } from "../src/bancada/client"
-import { darwinStart, linuxStart, startTime } from "../src/bancada/daemon/launcher/process"
+import { fromPs, fromStat, liveness } from "../src/bancada/daemon/launcher/process"
 import { tmpdirScoped } from "../../core/test/fixture/tmpdir"
 import { it } from "../../core/test/lib/effect"
 import { startServer } from "../../server/test/fixture/server"
@@ -25,32 +25,42 @@ afterEach(async () => {
   await Promise.all(
     started.folders.splice(0).map(async (folder) => {
       const info = await read(path.join(folder, "state"))
-      if (info && (await startTime(info.pid))) process.kill(info.pid, "SIGTERM")
-      if (info) await until(async () => !(await startTime(info.pid)), 5_000)
+      if (info && (await liveness(info.pid)).state !== "dead") process.kill(info.pid, "SIGTERM")
+      if (info) await until(async () => (await liveness(info.pid)).state === "dead", 5_000)
       await fs.rm(folder, { recursive: true, force: true })
     }),
   )
 })
 
 describe("process identity", () => {
+  const stat = (state: string, name = "bun") =>
+    `1234 (${name}) ${state} 1 1234 1234 0 -1 4194560 0 0 0 0 1 2 0 0 20 0 9 0 777 0 0`
   test.each([
-    ["a running process", "1234 (bun) S 1 1234 1234 0 -1 4194560 0 0 0 0 1 2 0 0 20 0 9 0 777 0 0", "777"],
-    ["a name with spaces and parentheses", "99 (a (b) c) S 1 99 99 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 31337 0 0", "31337"],
-    ["a zombie", "1234 (bun) Z 1 1234 1234 0 -1 4194560 0 0 0 0 1 2 0 0 20 0 9 0 777 0 0", undefined],
-    ["no process", undefined, undefined],
-  ])("Linux: %s", (_name, stat, expected) => expect(linuxStart(stat)).toBe(expected))
+    ["a running process", { text: stat("S") }, { state: "alive", started: "777" }],
+    ["a name with spaces and parentheses", { text: stat("R", "a (b) c") }, { state: "alive", started: "777" }],
+    ["a zombie", { text: stat("Z") }, { state: "dead" }],
+    ["no such file", { error: "ENOENT" }, { state: "dead" }],
+    ["a file it could not read", { error: "EACCES" }, { state: "unknown" }],
+    ["a truncated line", { text: "1234 (bun) S 1" }, { state: "unknown" }],
+  ] as const)("Linux: %s", (_name, read, expected) => expect(fromStat(read)).toEqual(expected))
 
   test.each([
-    ["a running process", "S    Thu Nov 19 17:31:12 2026\n", "Thu Nov 19 17:31:12 2026"],
-    ["a zombie", "Z    Thu Nov 19 17:31:12 2026", undefined],
-    ["no process", "", undefined],
-  ])("macOS: %s", (_name, line, expected) => expect(darwinStart(line)).toBe(expected))
+    [
+      "a running process",
+      { code: 0, stdout: "S    Thu Nov 19 17:31:12 2026\n" },
+      { state: "alive", started: "Thu Nov 19 17:31:12 2026" },
+    ],
+    ["a zombie", { code: 0, stdout: "Z    Thu Nov 19 17:31:12 2026" }, { state: "dead" }],
+    ["no such process", { code: 1, stdout: "" }, { state: "dead" }],
+    ["ps that missed its deadline or did not start", undefined, { state: "unknown" }],
+    ["ps that failed otherwise", { code: 1, stdout: "ps: something odd" }, { state: "unknown" }],
+  ] as const)("macOS: %s", (_name, result, expected) => expect(fromPs(result)).toEqual(expected))
 
-  test("this machine: a live process has a start time, a finished one has none", async () => {
+  test("this machine: a live process is alive with its start time, a finished one is dead", async () => {
     const child = Bun.spawn(["true"])
     await child.exited
-    expect(await startTime(process.pid)).toBeString()
-    expect(await startTime(child.pid)).toBeUndefined()
+    expect(await liveness(process.pid)).toMatchObject({ state: "alive", started: expect.any(String) })
+    expect(await liveness(child.pid)).toEqual({ state: "dead" })
   })
 })
 
@@ -163,10 +173,10 @@ describe("process", () => {
     expect(await wake()).toEqual({ status: 200, body: { output: { protocol: 1, state: "ok" } } })
     const info = await read(state)
     if (!info) throw new Error("no bancada.json")
-    expect(await startTime(info.pid)).toBeString()
+    expect((await liveness(info.pid)).state).toBe("alive")
 
     server.kill("SIGKILL")
-    await until(async () => !(await startTime(info.pid)), 10_000)
+    await until(async () => (await liveness(info.pid)).state === "dead", 10_000)
     // The hub also gets this server's unified summary (`custom.summary`), which is another feature's.
     expect(calls.filter((call) => call.path.startsWith("/api/rpc/custom.bancada/"))).toEqual([
       {
