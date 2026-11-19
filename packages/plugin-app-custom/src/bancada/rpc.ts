@@ -3,6 +3,7 @@ export * as Bancada from "./rpc.js"
 import { Rpc } from "@opencode/plugin/rpc"
 import { optional } from "@opencode/schema/schema"
 import { Schema } from "effect"
+import { BancadaProtocol } from "./protocol.js"
 
 /**
  * The Bancada (`docs/bancada.md`): one process per machine that owns its test devices and runs tests away from the
@@ -11,7 +12,7 @@ import { Schema } from "effect"
  */
 
 /** Version of the protocol between servers; a server of another version is refused by name, never half understood. */
-export const protocol = 1
+export const protocol = BancadaProtocol.version
 
 /** `reconciling`: the process came back and checks what ran while it was away before it takes new work. */
 export const State = Schema.Literals(["ok", "reconciling"]).annotate({ identifier: "Bancada.State" })

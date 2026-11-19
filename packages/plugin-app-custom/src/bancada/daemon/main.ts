@@ -8,6 +8,7 @@ import { Option, Schema } from "effect"
 import { Bancada } from "../rpc.js"
 import { openExclusive } from "./db.js"
 import { startTime } from "./launcher/process.js"
+import { migrate, NewerSchemaError } from "./schema.js"
 
 /** Argument that makes the bundled plugin (`plugin/index.js`) run this process instead of exporting the plugin. */
 export const flag = "--opencode-bancada"
@@ -67,6 +68,12 @@ export async function main() {
   await fs.mkdir(state, { recursive: true, mode: 0o700 })
   const db = openExclusive(path.join(state, "bancada.db"))
   if (!db) return log(`another Bancada process holds ${state}; leaving`)
+  const newer = schema(db)
+  if (newer) {
+    log(newer.message)
+    db.close()
+    process.exit(1)
+  }
   const machineID = await machine(state)
   const secret = randomBytes(32).toString("base64url")
   const info = path.join(state, "bancada.json")
@@ -197,6 +204,17 @@ async function farewell(machineID: string, owner: Owner | undefined) {
     }),
     signal: AbortSignal.timeout(limits.farewellMs),
   }).catch(() => undefined)
+}
+
+/** Brings the database to this release's schema; a database of a newer release is left untouched. */
+function schema(db: Database) {
+  try {
+    migrate(db)
+    return undefined
+  } catch (error) {
+    if (error instanceof NewerSchemaError) return error
+    throw error
+  }
 }
 
 /** The machine's id: drawn once and kept in `machine.json`; the database lock is already this process's. */
