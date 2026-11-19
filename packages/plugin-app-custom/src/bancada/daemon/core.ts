@@ -32,6 +32,8 @@ export interface Ports {
   readonly random: () => string
   readonly machine: Machine
   readonly launcher: Launcher
+  /** A line for the process's log: what an operator must be able to read later (never secrets). */
+  readonly log: (line: string) => void
 }
 
 export class CoreError extends Error {
@@ -59,7 +61,7 @@ export function createCore(ports: Ports) {
   const db = ports.db
   migrate(db)
   const self = ports.machine
-  const messages = makeMessages(db, ports.random, ports.now)
+  const messages = makeMessages(db, ports.random, ports.now, ports.log)
   const toHub = (body: BancadaProtocol.FromMachine) => void messages.send(hub, body)
   const executor = makeExecutor({
     db,
@@ -137,7 +139,9 @@ export function createCore(ports: Ports) {
         expected: BancadaProtocol.version,
       })
     messages.acked(hub, output.success.ack)
-    if (messages.receive(hub, output.success.out, (body) => fromHub(body as BancadaProtocol.FromHub))) hello(true)
+    // A hub that changed stream (another database) may have forgotten this machine.
+    if (messages.receive(hub, output.success.out, (body) => fromHub(body as BancadaProtocol.FromHub)) === "changed")
+      hello(true)
   }
 
   /** The hub's side of `custom.bancada/sync`: applies what the machine sent and answers with what waits for it. */

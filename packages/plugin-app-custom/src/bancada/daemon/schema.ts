@@ -18,6 +18,16 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       in_stream TEXT,
       in_seq INTEGER NOT NULL
     )`,
+    // A message the handler could not apply (it threw): kept with the error, and the stream goes on past it.
+    `CREATE TABLE dead_letter (
+      peer TEXT NOT NULL,
+      stream TEXT NOT NULL,
+      seq INTEGER NOT NULL,
+      body TEXT NOT NULL,
+      error TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      PRIMARY KEY (peer, stream, seq)
+    )`,
     `CREATE TABLE outbox (
       peer TEXT NOT NULL,
       seq INTEGER NOT NULL,

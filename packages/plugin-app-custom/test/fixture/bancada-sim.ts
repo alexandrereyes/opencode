@@ -54,6 +54,7 @@ export function createWorld(options: {
     /** Offers an executor refused, by machine and sequence number: the hub offered more than the machine had. */
     refusals: new Set<string>(),
   }
+  const logs: string[] = []
   const inflight: { readonly at: number; readonly order: number; readonly run: () => void }[] = []
   let order = 0
   let hub: SimMachine | undefined
@@ -161,6 +162,7 @@ export function createWorld(options: {
     clock,
     machines,
     facts,
+    logs,
     addMachine: (input: { readonly name: string; readonly hub?: boolean } & Partial<Omit<Machine, "hub" | "name">>) => {
       const config: Machine = {
         machineID: `m-${input.name}`,
@@ -173,7 +175,14 @@ export function createWorld(options: {
         capacity: input.capacity ?? { memMb: 0, cpuMilli: 0, builds: 1, android: 0, ios: 0 },
       }
       const db = new Database(":memory:")
-      const core = createCore({ db, now: () => clock.now, random: id, machine: config, launcher: launcher(input.name) })
+      const core = createCore({
+        db,
+        now: () => clock.now,
+        random: id,
+        machine: config,
+        launcher: launcher(input.name),
+        log: (line) => logs.push(`${input.name}: ${line}`),
+      })
       const machine: SimMachine = { name: input.name, core, db, config, awake: true }
       machines.set(input.name, machine)
       if (config.hub) hub = machine

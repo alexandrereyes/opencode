@@ -19,7 +19,10 @@ const machine = (name: string, hub: boolean, android = 0): Machine => ({
 })
 const core = (config: Machine, launcher: Launcher = idle, db = new Database(":memory:")) => {
   let n = 0
-  return { db, core: createCore({ db, now: () => 1_000, random: () => `id-${++n}`, machine: config, launcher }) }
+  return {
+    db,
+    core: createCore({ db, now: () => 1_000, random: () => `id-${++n}`, machine: config, launcher, log: () => {} }),
+  }
 }
 /** What the hub would send: one offer of one device per part, in one batch. */
 const offers = (...parts: string[]): BancadaProtocol.SyncOutput => ({
@@ -66,32 +69,42 @@ const dump = (db: Database) =>
 describe("message streams", () => {
   const pair = () => {
     let n = 0
-    const sender = new Database(":memory:")
-    const receiver = new Database(":memory:")
-    migrate(sender)
-    migrate(receiver)
+    const logs: string[] = []
+    const open = () => {
+      const db = new Database(":memory:")
+      migrate(db)
+      return db
+    }
+    const sender = open()
+    const receiver = open()
+    const messages = (db: Database) =>
+      makeMessages(
+        db,
+        () => `stream-${++n}`,
+        () => 0,
+        (line) => logs.push(line),
+      )
     return {
-      sender: makeMessages(
-        sender,
-        () => `stream-${++n}`,
-        () => 0,
-      ),
-      receiver: makeMessages(
-        receiver,
-        () => `stream-${++n}`,
-        () => 0,
-      ),
+      sender: messages(sender),
+      receiver: messages(receiver),
       senderDb: sender,
       receiverDb: receiver,
+      messages,
+      logs,
     }
   }
-  const take = (messages: ReturnType<typeof makeMessages>, stream: Stream) => {
+  const take = (messages: ReturnType<typeof makeMessages>, stream: Stream, fail?: string) => {
     const applied: unknown[] = []
-    messages.receive("sender", stream, (body) => applied.push(body))
+    messages.receive("sender", stream, (body) => {
+      if (body === fail) throw new Error(`cannot apply ${body}`)
+      applied.push(body)
+    })
     return applied
   }
+  /** The same database as it was at this moment: a backup to restore later. */
+  const copy = (db: Database) => Database.deserialize(db.serialize())
 
-  test("a stream delivered twice, late or with a hole applies each message once and in order", () => {
+  test("a stream delivered twice, late or with a hole applies each message once and in order (rule 1)", () => {
     const { sender, receiver } = pair()
     ;["a", "b", "c", "d"].forEach((body) => sender.send("receiver", body))
     const all = sender.outgoing("receiver")
@@ -106,7 +119,7 @@ describe("message streams", () => {
     expect(take(receiver, later)).toEqual(["e", "f"])
   })
 
-  test("an acknowledgement removes what it covers, and one of another stream removes nothing", () => {
+  test("an acknowledgement removes what it covers, and one of another stream removes nothing (rule 5)", () => {
     const { sender, receiver } = pair()
     ;["a", "b", "c"].forEach((body) => sender.send("receiver", body))
     take(receiver, { ...sender.outgoing("receiver"), messages: sender.outgoing("receiver").messages.slice(0, 2) })
@@ -116,20 +129,55 @@ describe("message streams", () => {
     expect(sender.outgoing("receiver")).toMatchObject({ base: 2, messages: [{ seq: 3, body: "c" }] })
   })
 
-  test("a receiver whose database was replaced starts after what its predecessor acknowledged", () => {
-    const { sender, receiver } = pair()
+  test("a receiver whose database was replaced starts after what its predecessor acknowledged (rule 2)", () => {
+    const { sender, receiver, messages } = pair()
     ;["a", "b"].forEach((body) => sender.send("receiver", body))
     take(receiver, sender.outgoing("receiver"))
     sender.acked("receiver", receiver.ack("sender"))
     sender.send("receiver", "c")
     const fresh = new Database(":memory:")
     migrate(fresh)
-    const replaced = makeMessages(
-      fresh,
-      () => "stream-new",
-      () => 0,
-    )
-    expect(take(replaced, sender.outgoing("receiver"))).toEqual(["c"])
+    expect(take(messages(fresh), sender.outgoing("receiver"))).toEqual(["c"])
+  })
+
+  test("a receiver restored from an older copy goes on from what was acknowledged instead of waiting forever (rule 3)", () => {
+    const { sender, receiver, receiverDb, messages, logs } = pair()
+    ;["a", "b"].forEach((body) => sender.send("receiver", body))
+    take(receiver, sender.outgoing("receiver"))
+    const backup = copy(receiverDb)
+    ;["c", "d"].forEach((body) => sender.send("receiver", body))
+    take(receiver, sender.outgoing("receiver"))
+    sender.acked("receiver", receiver.ack("sender"))
+    sender.send("receiver", "e")
+    // The restored receiver's cursor is at 2; "c" and "d" were acknowledged by the database it replaced.
+    expect(take(messages(backup), sender.outgoing("receiver"))).toEqual(["e"])
+    expect(logs.join("\n")).toContain("going on from 4")
+  })
+
+  test("a sender restored from an older copy starts a new stream, so what it writes next is not skipped (rule 4)", () => {
+    const { sender, receiver, senderDb, messages } = pair()
+    sender.send("receiver", "a")
+    const backup = copy(senderDb)
+    ;["b", "c"].forEach((body) => sender.send("receiver", body))
+    take(receiver, sender.outgoing("receiver"))
+    const restored = messages(backup)
+    restored.send("receiver", "x")
+    // The receiver acknowledges 3; the restored sender only wrote up to 2, the same number "x" now has.
+    restored.acked("receiver", receiver.ack("sender"))
+    const stream = restored.outgoing("receiver")
+    expect(stream.stream).not.toBe(receiver.ack("sender")?.stream)
+    expect(take(receiver, stream)).toEqual(["a", "x"])
+  })
+
+  test("a message its handler cannot apply goes to dead_letter and the stream goes on (rule 6)", () => {
+    const { sender, receiver, receiverDb, logs } = pair()
+    ;["a", "poison", "c"].forEach((body) => sender.send("receiver", body))
+    expect(take(receiver, sender.outgoing("receiver"), "poison")).toEqual(["a", "c"])
+    expect(receiverDb.query("SELECT seq, body, error FROM dead_letter").all()).toEqual([
+      { seq: 2, body: '"poison"', error: "cannot apply poison" },
+    ])
+    expect(receiver.ack("sender")).toMatchObject({ seq: 3 })
+    expect(logs.join("\n")).toContain("dead_letter")
   })
 })
 
