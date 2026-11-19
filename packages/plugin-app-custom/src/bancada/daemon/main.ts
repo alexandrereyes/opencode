@@ -167,11 +167,6 @@ async function admin(
     setTimeout(() => void context.stop("asked to shut down"), 0)
     return Response.json({})
   }
-  // Diagnostics: a full collection, to check that the machine's lock survives it (prova E6).
-  if (url.pathname === "/admin/gc") {
-    Bun.gc(true)
-    return Response.json({})
-  }
   if (!url.pathname.startsWith("/admin/rpc/")) return new Response(null, { status: 404 })
   if (!owner) return Response.json({ error: "not configured" }, { status: 412 })
   if (request.headers.get(instanceHeader) !== owner.instanceID) return taken(owner)

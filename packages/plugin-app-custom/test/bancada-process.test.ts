@@ -65,6 +65,7 @@ describe("process identity", () => {
 })
 
 describe("process", () => {
+  // Starts processes from source; the loser waits out the database's lock wait before it leaves.
   test("clients racing on one folder start a single process, which refuses another server by name", async () => {
     const root = await folder()
     const state = path.join(root, "state")
@@ -88,19 +89,17 @@ describe("process", () => {
     expect(refused).toMatchObject({ reason: "owner", owner: { instanceID: "srv-a", name: "Servidor A" } })
   }, 15_000)
 
+  // Starts two processes from source, one of which collects garbage.
   test("a second process on the folder gives up, even after the first collected all its garbage", async () => {
     const root = await folder()
     const state = path.join(root, "state")
-    const client = makeBancadaClient({ state, owner: owner("srv-a", "Servidor A"), command })
+    const collecting = [process.execPath, path.join(import.meta.dir, "fixture/bancada-collecting.ts")]
+    const client = makeBancadaClient({ state, owner: owner("srv-a", "Servidor A"), command: collecting })
     await client.call("wake", {})
     const info = await read(state)
     if (!info) throw new Error("no bancada.json")
-    // A Database only a collected local held would be closed here, and its lock with it (prova E6).
-    const collected = await fetch(`http://127.0.0.1:${info.port}/admin/gc`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${info.secret}` },
-    })
-    expect(collected.status).toBe(200)
+    // A Database only a collected local held would be closed by now, and its lock with it (prova E6).
+    await until(() => Bun.file(path.join(state, "collected")).exists(), 5_000)
 
     const second = Bun.spawn([...command], {
       env: {
