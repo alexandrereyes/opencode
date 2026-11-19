@@ -42,6 +42,8 @@ export interface Ports {
 export const timings = {
   /** A machine that has not called for this long is silent. */
   silentMs: 45_000,
+  /** A request the hub acknowledged and never registered closes at its origin after this long. */
+  unregisteredMs: 60_000,
 }
 
 export class CoreError extends Error {
@@ -70,13 +72,15 @@ export function createCore(ports: Ports) {
   migrate(db)
   const self = ports.machine
   const messages = makeMessages(db, ports.random, ports.now, ports.log)
-  const toHub = (body: BancadaProtocol.FromMachine) => void messages.send(hub, body)
+  const toHub = (body: BancadaProtocol.FromMachine) => messages.send(hub, body)
   const times = { ...timings, ...ports.timings }
   const origin = makeOrigin({
     db,
     now: ports.now,
     identity: { instanceID: self.instanceID, machineID: self.machineID, name: self.name },
     send: toHub,
+    unregisteredMs: times.unregisteredMs,
+    log: ports.log,
   })
   const executor = makeExecutor({
     db,
@@ -202,6 +206,7 @@ export function createCore(ports: Ports) {
   /** One round: executions starting and ending, then the queue (and, on the hub, this machine's loop to it). */
   const round = async () => {
     await executor.tick()
+    db.transaction(() => origin.unregistered(messages.acknowledged(hub)))()
     if (!coordinator) return
     db.transaction(() => {
       coordinator.watch()

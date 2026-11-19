@@ -2,10 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { bancadaCommand, makeBancadaClient, type BancadaClient } from "../src/bancada/client"
+import { bancadaCommand, BancadaError, makeBancadaClient, type BancadaClient } from "../src/bancada/client"
 import { runGit } from "../src/bancada/daemon/git"
 import { liveness } from "../src/bancada/daemon/launcher/process"
-import type { BancadaProtocol } from "../src/bancada/protocol"
+import { BancadaProtocol } from "../src/bancada/protocol"
 import type { Bancada } from "../src/bancada/rpc"
 import { initGit } from "../../core/test/fixture/git"
 
@@ -36,6 +36,7 @@ describe("execution through the Bancada process", () => {
     await Bun.write(path.join(context.repository, "ignorado.txt"), "fica de fora\n")
     const before = await worktree(context.repository)
     const submitted = await context.client.call<Bancada.Submitted>("submit", {
+      id: BancadaProtocol.jobID("ponta a ponta"),
       sessionID: "ses_a",
       diretorio: context.repository,
       testes: [{ teste: "simples", args: ["--dorme", "4", "--marca", "novo.txt"] }],
@@ -73,6 +74,7 @@ describe("execution through the Bancada process", () => {
   test("a runner killed mid-run loses the part: the execution died", async () => {
     const context = await setup()
     const submitted = await context.client.call<Bancada.Submitted>("submit", {
+      id: BancadaProtocol.jobID("runner morto"),
       sessionID: "ses_a",
       diretorio: context.repository,
       testes: [{ teste: "simples", args: ["--dorme", "30"] }],
@@ -92,6 +94,52 @@ describe("execution through the Bancada process", () => {
       },
     ])
   }, 40_000)
+})
+
+describe("requests the process refuses or joins", () => {
+  // Starts the process from source.
+  test("no id, a test asked twice, a command without execute permission: refused before anything is queued", async () => {
+    const context = await setup()
+    await fs.chmod(path.join(context.repository, "scripts/run"), 0o644)
+    await runGit(["commit", "-q", "-am", "run sem permissão"], { cwd: context.repository })
+    const refusal = (input: Record<string, unknown>) =>
+      context.client.call("submit", { sessionID: "ses_a", diretorio: context.repository, ...input }).then(
+        () => undefined,
+        (error: BancadaError) => ({ reason: error.reason, problems: error.problems }),
+      )
+    expect(await refusal({ testes: [{ teste: "simples" }] })).toMatchObject({ reason: "invalid" })
+    expect(
+      await refusal({ id: BancadaProtocol.jobID("duas vezes"), testes: [{ teste: "lento" }, { teste: "lento" }] }),
+    ).toEqual({ reason: "invalid", problems: ["o teste lento aparece duas vezes no pedido"] })
+    expect(await refusal({ id: BancadaProtocol.jobID("sem x"), testes: [{ teste: "simples" }] })).toEqual({
+      reason: "invalid",
+      // Every test of the example runs scripts/run: the contract lists each.
+      problems: expect.arrayContaining([
+        'teste.simples.run: "scripts/run" não é executável neste commit (chmod +x e commit)',
+      ]),
+    })
+    // Nothing was queued nor left in the repository.
+    expect((await runGit(["for-each-ref", "refs/bancada"], { cwd: context.repository })).stdout).toBe("")
+  }, 20_000)
+
+  test("two calls with the same id at once are one request, frozen once", async () => {
+    const context = await setup()
+    await Bun.write(path.join(context.repository, "novo.txt"), "só no snapshot\n")
+    const request = {
+      id: BancadaProtocol.jobID("duas chamadas"),
+      sessionID: "ses_a",
+      diretorio: context.repository,
+      testes: [{ teste: "simples" }],
+      snapshot: true,
+    }
+    const [first, second] = await Promise.all([
+      context.client.call<Bancada.Submitted>("submit", request),
+      context.client.call<Bancada.Submitted>("submit", request),
+    ])
+    expect(second).toEqual(first)
+    expect(first).toMatchObject({ job: request.id, snapshot: { arquivos: [{ caminho: "novo.txt" }] } })
+    await until(async () => (await view(context.client, request.id))?.state === "concluido", 20_000)
+  }, 30_000)
 })
 
 /** The example project as the session's repository, and a client of a process that is the hub. */

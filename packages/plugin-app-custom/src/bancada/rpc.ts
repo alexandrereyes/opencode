@@ -38,10 +38,11 @@ export type Wake = typeof Wake.Type
 
 /**
  * A request to run tests of the session's `.bancada.toml` (`docs/bancada.md`, "Request"). Keys in Portuguese: the
- * agent writes it. `id`: the tool derives it from its call, so a call made again is the same request.
+ * agent writes it. `id` is required: the tool derives it from its call, so a call made again (after a deadline, or a
+ * restart) is the same request, never a second one.
  */
 export const Request = Schema.Struct({
-  id: optional(BancadaProtocol.JobID),
+  id: BancadaProtocol.JobID,
   sessionID: Schema.String,
   rootSessionID: optional(Schema.String),
   sessionTitle: optional(Schema.String),

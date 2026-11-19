@@ -1,7 +1,5 @@
-import { randomBytes } from "node:crypto"
 import { Result, Schema } from "effect"
 import { partSpec } from "../contract.js"
-import { BancadaProtocol } from "../protocol.js"
 import { Bancada } from "../rpc.js"
 import type { Core } from "./core.js"
 import type { Git } from "./git.js"
@@ -19,13 +17,27 @@ export class Invalid extends Error {
 /**
  * `custom.bancada/submit` on this machine (`docs/bancada.md`, "Request"): the code is frozen in the session's
  * repository, the tests are resolved against the contract of that very commit, and the request goes to the queue. An
- * id that exists is the same request, answered as it is, never frozen again.
+ * id that exists is the same request, answered as it is, never frozen again; a second call with an id still being
+ * frozen waits for the first and gets its answer (the snapshot's temporary index is named after the id).
  */
-export async function submit(core: Core, git: Git, raw: unknown): Promise<Bancada.Submitted> {
-  const decoded = decodeRequest(raw)
-  if (Result.isFailure(decoded)) throw new Invalid([decoded.failure.message])
-  const request = decoded.success
-  const id = request.id ?? BancadaProtocol.jobID(randomBytes(16).toString("hex"))
+export function makeRequests(core: Core, git: Git) {
+  const running = new Map<string, Promise<Bancada.Submitted>>()
+  return {
+    submit: (raw: unknown) => {
+      const decoded = decodeRequest(raw)
+      if (Result.isFailure(decoded)) return Promise.reject(new Invalid([decoded.failure.message]))
+      const request = decoded.success
+      const known = running.get(request.id)
+      if (known) return known
+      const answer = submit(core, git, request).finally(() => running.delete(request.id))
+      running.set(request.id, answer)
+      return answer
+    },
+  }
+}
+
+async function submit(core: Core, git: Git, request: Bancada.Request): Promise<Bancada.Submitted> {
+  const id = request.id
   const known = core.status(id)
   if (known)
     return {
@@ -39,6 +51,11 @@ export async function submit(core: Core, git: Git, raw: unknown): Promise<Bancad
         ...(part.reason ? { motivo: part.reason } : {}),
       })),
     }
+  // A part is named after its test everywhere (the hub's queue, the attempt's folder, the notice).
+  const repeated = [...new Set(request.testes.map((item) => item.teste))].filter(
+    (name) => request.testes.filter((item) => item.teste === name).length > 1,
+  )
+  if (repeated.length) throw new Invalid(repeated.map((name) => `o teste ${name} aparece duas vezes no pedido`))
   const frozen = await freeze({
     git,
     directory: request.diretorio,

@@ -28,6 +28,8 @@ type JobRow = {
   readonly id: string
   readonly session_id: string
   readonly code: string
+  readonly parts: string
+  readonly acked_at: number | null
   readonly state: string
   readonly view: string
   readonly result: string | null
@@ -49,12 +51,19 @@ export function makeOrigin(input: {
   readonly db: Database
   readonly now: () => number
   readonly identity: { readonly instanceID: string; readonly machineID: string; readonly name: string }
-  readonly send: (body: BancadaProtocol.FromMachine) => void
+  /** Writes a message to the hub; returns its sequence number. */
+  readonly send: (body: BancadaProtocol.FromMachine) => number
+  /** How long a request the hub acknowledged receiving may wait for its `submit.ack` before it closes here. */
+  readonly unregisteredMs: number
+  readonly log: (line: string) => void
 }) {
   const db = input.db
   const find = db.query<JobRow, [string]>("SELECT * FROM job WHERE id = ?")
   const ready = db.query<JobRow, []>(
     "SELECT * FROM job WHERE state = 'concluido' AND delivered_at IS NULL ORDER BY notice_ready_at",
+  )
+  const waiting = db.query<JobRow, [number]>(
+    "SELECT * FROM job WHERE state = 'aguardando_confirmacao' AND submit_seq IS NOT NULL AND submit_seq <= ?",
   )
 
   const submit = (request: NewJob) =>
@@ -92,7 +101,7 @@ export function makeOrigin(input: {
           input.now(),
         ],
       )
-      input.send({
+      const seq = input.send({
         type: "submit",
         job: request.id,
         origin,
@@ -100,6 +109,7 @@ export function makeOrigin(input: {
         parts: [...request.parts],
         createdAt: input.now(),
       })
+      db.run("UPDATE job SET submit_seq = ? WHERE id = ?", [seq, request.id])
       return find.get(request.id)!
     })()
 
@@ -153,9 +163,41 @@ export function makeOrigin(input: {
     }
   }
 
+  /**
+   * Nothing waits forever here: a request whose `submit` the hub acknowledged (its handler may have failed, and the
+   * message went to its `dead_letter`) and that still has no `submit.ack` `unregisteredMs` later closes as `invalido`,
+   * with an alert (`docs/bancada.md`, "Request"). Called in a round, with what the hub acknowledged of this stream.
+   */
+  const unregistered = (acknowledged: number) => {
+    for (const row of waiting.all(acknowledged)) {
+      if (row.acked_at === null) {
+        db.run("UPDATE job SET acked_at = ? WHERE id = ?", [input.now(), row.id])
+        continue
+      }
+      if (input.now() - row.acked_at < input.unregisteredMs) continue
+      const specs: BancadaProtocol.PartSpec[] = JSON.parse(row.parts)
+      const outcome: BancadaProtocol.Outcome = {
+        verdict: "invalido",
+        reason: "o hub não conseguiu registrar o pedido",
+        planned: [],
+        scenarios: [],
+        lost: [],
+        approved: false,
+      }
+      db.run("UPDATE job SET state = 'concluido', result = ?, view = ?, notice_ready_at = ? WHERE id = ?", [
+        JSON.stringify(specs.map((spec) => ({ part: spec.part, state: "invalido", attempts: 0, outcome }))),
+        JSON.stringify(Object.fromEntries(specs.map((spec) => [spec.part, { state: "invalido", attempt: 0 }]))),
+        input.now(),
+        row.id,
+      ])
+      input.log(`alert: the hub acknowledged request ${row.id} but never registered it; closed as invalido`)
+    }
+  }
+
   return {
     submit,
     apply,
+    unregistered,
     repository: (job: string) =>
       db.query<{ repo_dir: string | null }, [string]>("SELECT repo_dir FROM job WHERE id = ?").get(job)?.repo_dir ??
       undefined,

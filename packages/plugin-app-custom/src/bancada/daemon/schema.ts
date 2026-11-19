@@ -47,6 +47,8 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       state TEXT NOT NULL,
       view TEXT NOT NULL,
       result TEXT,
+      submit_seq INTEGER,
+      acked_at INTEGER,
       confirmed_at INTEGER,
       notice_ready_at INTEGER,
       delivered_at INTEGER,

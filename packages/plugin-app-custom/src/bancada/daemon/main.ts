@@ -12,7 +12,7 @@ import { openExclusive } from "./db.js"
 import { runGit } from "./git.js"
 import { makeProcessLauncher } from "./launcher/process.js"
 import { makeBlobs } from "./blobs.js"
-import { Invalid, submit } from "./requests.js"
+import { Invalid, makeRequests } from "./requests.js"
 import { makeWorkdirs } from "./workdir.js"
 import { migrate, NewerSchemaError } from "./schema.js"
 
@@ -65,6 +65,7 @@ const held: {
     server: ReturnType<typeof Bun.serve>
     timers: (ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>)[]
     core?: Core
+    requests?: ReturnType<typeof makeRequests>
   }
 } = {}
 
@@ -151,6 +152,7 @@ export async function main() {
       },
       launcher: makeProcessLauncher({ state, workdirs, git: runGit, now, random, wake: advance, log }),
     })
+    current.requests = makeRequests(current.core, runGit)
     advance()
     return current.core
   }
@@ -162,7 +164,8 @@ export async function main() {
     hostname: "127.0.0.1",
     port: 0,
     idleTimeout: 120,
-    fetch: (request) => admin(request, { secret, machineID, owner, stop, serving, advance }),
+    fetch: (request) =>
+      admin(request, { secret, machineID, owner, stop, serving, advance, requests: () => held.process?.requests }),
   })
   const timers: (ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>)[] = [
     setInterval(advance, limits.tickMs),
@@ -201,6 +204,7 @@ async function admin(
     readonly stop: (why: string) => Promise<void>
     readonly serving: () => Core | undefined
     readonly advance: () => void
+    readonly requests: () => ReturnType<typeof makeRequests> | undefined
   },
 ) {
   if (request.headers.get("authorization") !== `Bearer ${context.secret}`) return new Response(null, { status: 401 })
@@ -240,8 +244,9 @@ async function admin(
       state: core.reconciling() ? "reconciling" : "ok",
     } satisfies Bancada.Wake)
   const input: unknown = await request.json().catch(() => undefined)
-  if (method === "submit") {
-    const answer = await submit(core, runGit, input).then(
+  const requests = context.requests()
+  if (method === "submit" && requests) {
+    const answer = await requests.submit(input).then(
       (submitted) => Response.json(submitted),
       (error: unknown) =>
         error instanceof Invalid

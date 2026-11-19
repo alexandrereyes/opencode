@@ -128,4 +128,31 @@ describe("simulation", () => {
       expect(world.facts.refusals.size).toBe(0)
     },
   )
+
+  test("a request the hub acknowledged but could not register closes at its origin a minute later, with an alert", async () => {
+    const world = createWorld({ seed: 3 })
+    layout(world, 1)
+    // A part named twice: the hub's queue names parts by test, its handler fails and the submit goes to dead_letter.
+    world.submit("Mac", {
+      id: "j-7qk2m9xa",
+      sessionID: "ses_a",
+      rootSessionID: "ses_a",
+      code,
+      parts: [spec("android", "android"), spec("android", "android")],
+    })
+    await world.advance(30_000)
+    expect(world.facts.delivered.get("j-7qk2m9xa")).toBeUndefined()
+    await world.advance(40_000)
+    const closed = {
+      part: "android",
+      state: "invalido",
+      attempts: 0,
+      outcome: { verdict: "invalido", reason: "o hub não conseguiu registrar o pedido", approved: false },
+    }
+    expect(world.facts.delivered.get("j-7qk2m9xa")).toMatchObject([closed, closed])
+    expect(world.facts.notices.get("j-7qk2m9xa")).toBe(1)
+    expect(world.logs).toContainEqual(expect.stringContaining("alert: the hub acknowledged request j-7qk2m9xa"))
+    const hub = world.machines.get("Linux")!.db
+    expect(hub.query("SELECT COUNT(*) AS n FROM dead_letter").get()).toEqual({ n: 1 })
+  })
 })
