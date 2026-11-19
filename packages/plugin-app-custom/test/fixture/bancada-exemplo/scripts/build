@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# `build` do projeto de exemplo: compila de mentira. --falha-build sai 1 com um erro no log; --build-sai <código>
-# sai com aquele código; --build-dorme <s> demora. O que fica em cache/ sobrevive ao `git clean` da Bancada.
-# Bash 3.2 (o do macOS).
+# `build` do projeto de exemplo: compila de mentira. --falha-build sai 1 com um erro no log; --falha-com-cache sai 1
+# quando acha um cache/ de antes (um cache velho que quebra a compilação); --build-sai <código> sai com aquele
+# código; --build-dorme <s> demora. O que fica em cache/ sobrevive ao `git clean` da Bancada. Bash 3.2 (o do macOS).
 set -eu
 falha=""
+falha_com_cache=""
 sai=""
 dorme=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --falha-build) falha=1; shift ;;
+    --falha-com-cache) falha_com_cache=1; shift ;;
     --build-sai) sai=$2; shift 2 ;;
     --build-dorme) dorme=$2; shift 2 ;;
     *) shift ;;
@@ -16,6 +18,10 @@ while [ "$#" -gt 0 ]; do
 done
 echo "compilando $(git rev-parse --short HEAD 2>/dev/null || echo sem-git)"
 sleep "$dorme"
+if [ -n "$falha_com_cache" ] && [ -d cache ]; then
+  echo "Program.cs(1,1): error CS0006: o cache de uma compilação anterior está corrompido" >&2
+  exit 1
+fi
 mkdir -p cache
 date > cache/ultimo-build
 if [ -n "$sai" ]; then exit "$sai"; fi

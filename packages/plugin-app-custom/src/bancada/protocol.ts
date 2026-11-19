@@ -20,6 +20,18 @@ export const JobID = Schema.String.check(Schema.isPattern(/^j-[0-9a-hjkmnp-tv-z]
 export const PartName = Schema.String.check(Schema.isPattern(/^[a-z0-9-]{1,40}$/)).annotate({
   identifier: "Bancada.PartName",
 })
+/** The alphabet of request ids: digits and lowercase letters without `i`, `l`, `o` and `u` (never misread). */
+const alphabet = "0123456789abcdefghjkmnpqrstvwxyz"
+
+/**
+ * A request id from a seed: `j-` and 8 characters of SHA-256. The tool seeds it with its server and its call, so a call
+ * made again (the server restarted meanwhile) is the same request; anything else seeds it with random bytes.
+ */
+export function jobID(seed: string) {
+  const digest = new Bun.CryptoHasher("sha256").update(seed).digest()
+  return `j-${Array.from(digest.subarray(0, 8), (byte) => alphabet[byte % 32]).join("")}`
+}
+
 const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 

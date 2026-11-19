@@ -10,6 +10,8 @@ export type NewJob = {
   readonly rootTitle?: string
   readonly code: BancadaProtocol.Code
   readonly parts: ReadonlyArray<BancadaProtocol.PartSpec>
+  /** The session's repository root, where the commit is frozen (an executor on this machine fetches from it). */
+  readonly repository?: string
 }
 
 /** Where each part stands, as the hub last said. */
@@ -25,6 +27,7 @@ export type PartView = {
 type JobRow = {
   readonly id: string
   readonly session_id: string
+  readonly code: string
   readonly state: string
   readonly view: string
   readonly result: string | null
@@ -76,10 +79,11 @@ export function makeOrigin(input: {
         ]),
       )
       db.run(
-        "INSERT INTO job (id, session_id, root_session_id, origin, code, parts, scope, state, view, created_at) VALUES (?, ?, ?, ?, ?, ?, 'hub', 'aguardando_confirmacao', ?, ?)",
+        "INSERT INTO job (id, session_id, repo_dir, root_session_id, origin, code, parts, scope, state, view, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'hub', 'aguardando_confirmacao', ?, ?)",
         [
           request.id,
           request.sessionID,
+          request.repository ?? null,
           request.rootSessionID,
           JSON.stringify(origin),
           JSON.stringify(request.code),
@@ -152,6 +156,9 @@ export function makeOrigin(input: {
   return {
     submit,
     apply,
+    repository: (job: string) =>
+      db.query<{ repo_dir: string | null }, [string]>("SELECT repo_dir FROM job WHERE id = ?").get(job)?.repo_dir ??
+      undefined,
     /** Results waiting to reach their sessions. */
     notices: (): Notice[] =>
       ready.all().map((row) => ({ job: row.id, sessionID: row.session_id, parts: JSON.parse(row.result ?? "[]") })),
@@ -170,6 +177,7 @@ export function makeOrigin(input: {
       return {
         job: row.id,
         state: row.state,
+        commit: (JSON.parse(row.code) as BancadaProtocol.Code).commit,
         parts: JSON.parse(row.view) as Record<string, PartView>,
         ...(row.result ? { result: JSON.parse(row.result) as BancadaProtocol.PartResult[] } : {}),
       }

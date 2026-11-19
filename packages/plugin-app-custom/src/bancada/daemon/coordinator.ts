@@ -13,6 +13,7 @@ type PartRow = {
   readonly offer_seq: number | null
   readonly refused_by: string | null
   readonly refused_pulse: number | null
+  readonly held_state: BancadaProtocol.PartState | null
   readonly outcome: string | null
 }
 type MachineRow = {
@@ -53,6 +54,8 @@ const rank: Record<BancadaProtocol.PartState, number> = {
 export function makeCoordinator(input: {
   readonly db: Database
   readonly now: () => number
+  /** A machine that has not called for this long is silent: what it runs becomes `incerto`. */
+  readonly silentMs: number
   readonly send: (machineID: string, body: BancadaProtocol.FromHub) => number
   /** The last sequence number `machineID` acknowledged of the hub's stream to it. */
   readonly acknowledged: (machineID: string) => number
@@ -67,6 +70,13 @@ export function makeCoordinator(input: {
   const offered = db.query<PartRow, []>("SELECT * FROM hub_part WHERE state = 'oferecido'")
   const machines = db.query<MachineRow, []>("SELECT * FROM hub_machine WHERE state = 'ok' ORDER BY machine_id")
   const machine = db.query<MachineRow, [string]>("SELECT * FROM hub_machine WHERE machine_id = ?")
+  const uncertain = db.query<PartRow, [string]>("SELECT * FROM hub_part WHERE state = 'incerto' AND machine_id = ?")
+  const silent = db.query<{ machine_id: string }, [number]>(
+    "SELECT machine_id FROM hub_machine WHERE state IN ('ok', 'reconciling') AND last_sync_at < ?",
+  )
+  const runningOn = db.query<PartRow, [string]>(
+    "SELECT * FROM hub_part WHERE machine_id = ? AND state IN ('aceito', 'compilando', 'rodando')",
+  )
 
   const update = (row: PartRow, fields: Partial<Record<keyof PartRow | "since", unknown>>) => {
     const names = Object.keys(fields)
@@ -192,7 +202,11 @@ export function makeCoordinator(input: {
     if (message.type === "delivered") return handlers.delivered(from, message)
   }
 
-  /** Records who called and its pulse; a pulse older than the last one applied changes nothing. */
+  /**
+   * Records who called and its pulse; a pulse older than the last one applied changes nothing. A machine that was
+   * silent is back: each of its `incerto` parts it still runs (its pulse lists it) returns to where it was; one it no
+   * longer lists waits for its final report.
+   */
   const seen = (sync: BancadaProtocol.SyncInput) => {
     const known = machine.get(sync.machineID)
     if (!known)
@@ -201,9 +215,15 @@ export function makeCoordinator(input: {
         [sync.machineID, sync.instanceID, sync.name, sync.protocol, input.now()],
       )
     db.run(
-      "UPDATE hub_machine SET instance_id = ?, name = ?, state = 'ok', protocol = ?, last_sync_at = ? WHERE machine_id = ?",
-      [sync.instanceID, sync.name, sync.protocol, input.now(), sync.machineID],
+      "UPDATE hub_machine SET instance_id = ?, name = ?, state = ?, protocol = ?, last_sync_at = ? WHERE machine_id = ?",
+      [sync.instanceID, sync.name, sync.pulse.state, sync.protocol, input.now(), sync.machineID],
     )
+    const running = new Set(sync.pulse.running.map((item) => `${item.job}/${item.part}/${item.attempt}`))
+    for (const row of uncertain.all(sync.machineID))
+      if (row.held_state && running.has(`${row.job_id}/${row.part}/${row.attempt_n}`)) {
+        update(row, { state: row.held_state, held_state: null })
+        tell(row)
+      }
     const stream = sync.out.stream
     const current = db
       .query<
@@ -278,7 +298,21 @@ export function makeCoordinator(input: {
     }
   }
 
-  return { apply, seen, schedule }
+  /**
+   * A machine silent for `silentMs` (asleep, or gone): what it runs becomes `incerto`, never approved nor lost by itself
+   * here; it returns to its real state when the machine calls again.
+   */
+  const watch = () => {
+    for (const quiet of silent.all(input.now() - input.silentMs)) {
+      db.run("UPDATE hub_machine SET state = 'silenciosa' WHERE machine_id = ?", [quiet.machine_id])
+      for (const row of runningOn.all(quiet.machine_id)) {
+        update(row, { state: "incerto", held_state: row.state, since: input.now() })
+        tell(row)
+      }
+    }
+  }
+
+  return { apply, seen, schedule, watch }
 }
 
 export type Coordinator = ReturnType<typeof makeCoordinator>

@@ -3,11 +3,16 @@ export * as BancadaDaemon from "./main.js"
 import type { Database } from "bun:sqlite"
 import { randomBytes, randomUUID } from "node:crypto"
 import fs from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { Option, Schema } from "effect"
 import { Bancada } from "../rpc.js"
+import { createCore, type Core } from "./core.js"
 import { openExclusive } from "./db.js"
-import { liveness } from "./launcher/process.js"
+import { runGit } from "./git.js"
+import { liveness, makeProcessLauncher } from "./launcher/process.js"
+import { Invalid, submit } from "./requests.js"
+import { makeWorkdirs } from "./workdir.js"
 import { migrate, NewerSchemaError } from "./schema.js"
 
 /** Argument that makes the bundled plugin (`plugin/index.js`) run this process instead of exporting the plugin. */
@@ -17,6 +22,8 @@ export const flag = "--opencode-bancada"
 export const adminProtocol = 1
 
 export const limits = {
+  /** How often the core advances (executions, the queue); also after every request. */
+  tickMs: 1_000,
   /** How often the process checks that its server still runs (pid and start time). */
   parentCheckMs: 2_000,
   /** The goodbye to the hub must not hold the exit. */
@@ -49,7 +56,12 @@ export const instanceHeader = "x-bancada-instance"
  * runs (prova E6), so nothing of this may sit only in a local of a function that returns.
  */
 const held: {
-  process?: { db: Database; server: ReturnType<typeof Bun.serve>; timers: ReturnType<typeof setInterval>[] }
+  process?: {
+    db: Database
+    server: ReturnType<typeof Bun.serve>
+    timers: ReturnType<typeof setInterval>[]
+    core?: Core
+  }
 } = {}
 
 /**
@@ -96,12 +108,51 @@ export async function main() {
     process.exit(0)
   }
 
+  /** The core starts with its owner: the machine is that server's (its id, its name, whether it is the hub). */
+  const serving = () => {
+    const current = held.process
+    if (!current || current.core || !owner.current) return current?.core
+    const now = () => Date.now()
+    const random = () => randomBytes(16).toString("hex")
+    const workdirs = makeWorkdirs({ db, root: path.join(state, "work"), now, random, git: runGit })
+    current.core = createCore({
+      db,
+      now,
+      random,
+      log,
+      machine: {
+        machineID,
+        instanceID: owner.current.instanceID,
+        name: owner.current.name,
+        platform: process.platform === "darwin" ? "darwin" : "linux",
+        hub: owner.current.hub,
+        speed: "normal",
+        capabilities: {},
+        capacity: {
+          memMb: Math.round((os.totalmem() / 1_048_576) * 0.75),
+          cpuMilli: os.availableParallelism() * 800,
+          builds: 1,
+          android: 0,
+          ios: 0,
+        },
+      },
+      launcher: makeProcessLauncher({ state, workdirs, git: runGit, now, random }),
+    })
+    advance()
+    return current.core
+  }
+  /** One round of the core now (it runs one at a time; a call during one asks for another). */
+  const advance = () =>
+    void held.process?.core?.tick().catch((error: unknown) => log(`a round of the core failed: ${String(error)}`))
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     idleTimeout: 120,
-    fetch: (request) => admin(request, { secret, machineID, owner, stop }),
+    fetch: (request) => admin(request, { secret, machineID, owner, stop, serving, advance }),
   })
+  const timers: ReturnType<typeof setInterval>[] = [setInterval(advance, limits.tickMs)]
+  held.process = { db, server, timers }
   await Bun.write(
     `${info}.tmp`,
     JSON.stringify({ protocol: adminProtocol, pid: process.pid, port: server.port, secret, machineID }),
@@ -111,8 +162,6 @@ export async function main() {
   )
   await fs.chmod(`${info}.tmp`, 0o600)
   await fs.rename(`${info}.tmp`, info)
-  const timers: ReturnType<typeof setInterval>[] = []
-  held.process = { db, server, timers }
   log(`started pid=${process.pid} machine=${machineID}`)
 
   process.on("SIGTERM", () => void stop("SIGTERM"))
@@ -141,6 +190,8 @@ async function admin(
     readonly machineID: string
     readonly owner: { current?: Owner }
     readonly stop: (why: string) => Promise<void>
+    readonly serving: () => Core | undefined
+    readonly advance: () => void
   },
 ) {
   if (request.headers.get("authorization") !== `Bearer ${context.secret}`) return new Response(null, { status: 401 })
@@ -161,6 +212,7 @@ async function admin(
     if (owner && owner.instanceID !== next.value.instanceID) return taken(owner)
     if (!owner) log(`serving ${next.value.name} (${next.value.instanceID})`)
     context.owner.current = next.value
+    context.serving()
     return Response.json({})
   }
   if (url.pathname === "/admin/shutdown") {
@@ -171,7 +223,30 @@ async function admin(
   if (!owner) return Response.json({ error: "not configured" }, { status: 412 })
   if (request.headers.get(instanceHeader) !== owner.instanceID) return taken(owner)
   const method = url.pathname.slice("/admin/rpc/".length)
-  if (method === "wake") return Response.json({ protocol: Bancada.protocol, state: "ok" } satisfies Bancada.Wake)
+  const core = context.serving()
+  if (!core) return Response.json({ error: "not configured" }, { status: 412 })
+  if (method === "wake")
+    return Response.json({
+      protocol: Bancada.protocol,
+      state: core.reconciling() ? "reconciling" : "ok",
+    } satisfies Bancada.Wake)
+  const input: unknown = await request.json().catch(() => undefined)
+  if (method === "submit") {
+    const answer = await submit(core, runGit, input).then(
+      (submitted) => Response.json(submitted),
+      (error: unknown) =>
+        error instanceof Invalid
+          ? Response.json({ type: "invalid", problems: error.problems }, { status: 400 })
+          : Promise.reject(error),
+    )
+    context.advance()
+    return answer
+  }
+  if (method === "status") {
+    const job = typeof input === "object" && input !== null && "job" in input ? String(input.job) : ""
+    const view = core.status(job)
+    return Response.json({ jobs: view ? [view] : [] })
+  }
   return new Response(null, { status: 404 })
 }
 

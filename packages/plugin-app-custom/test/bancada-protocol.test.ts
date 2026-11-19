@@ -6,7 +6,13 @@ import { makeMessages, type Stream } from "../src/bancada/daemon/messages"
 import { migrate, NewerSchemaError, steps } from "../src/bancada/daemon/schema"
 import { BancadaProtocol } from "../src/bancada/protocol"
 
-const idle: Launcher = { start: async () => {}, status: async () => ({ state: "rodando" }) }
+const idle: Launcher = {
+  start: async () => {},
+  status: async () => ({ state: "rodando" }),
+  cancel: async () => {},
+  finish: async () => {},
+  cleanup: async () => {},
+}
 const machine = (name: string, hub: boolean, android = 0): Machine => ({
   machineID: `m-${name}`,
   instanceID: `i-${name}`,
@@ -238,7 +244,7 @@ describe("core", () => {
   test("two ticks at once report the end of an execution once", async () => {
     const gate = Promise.withResolvers<void>()
     const mac = core(machine("Mac", false, 1), {
-      start: async () => {},
+      ...idle,
       status: async () => {
         await gate.promise
         return {
@@ -262,6 +268,7 @@ describe("core", () => {
   test("a start that fails, or a status that cannot be read, never holds the other attempts", async () => {
     const started: string[] = []
     const mac = core(machine("Mac", false, 3), {
+      ...idle,
       start: async (launch) => {
         if (launch.part === "falha") throw new Error("sem processo")
         started.push(launch.part)
@@ -283,6 +290,48 @@ describe("core", () => {
       }),
       expect.objectContaining({ part: "segue", state: "rodando" }),
     ])
+  })
+
+  test("back after a restart, an executor takes no offer until one round has read everything it started", async () => {
+    const readable = { value: true }
+    const launcher: Launcher = {
+      ...idle,
+      status: async () => {
+        if (!readable.value) throw new Error("ps estourou o prazo")
+        return { state: "rodando" }
+      },
+    }
+    const first = core(machine("Mac", false, 2), launcher)
+    first.core.incoming(offers("android"))
+    await first.core.tick()
+    // The process dies; another opens the same database while `ps` cannot answer.
+    readable.value = false
+    const again = core(machine("Mac", false, 2), launcher, first.db)
+    await again.core.tick()
+    const later = offers("outra")
+    again.core.incoming({
+      ...later,
+      out: { ...later.out, messages: later.out.messages.map((message) => ({ ...message, seq: 2 })) },
+    })
+    expect(again.core.reconciling()).toBe(true)
+    expect(again.core.outgoing()).toMatchObject({
+      pulse: { state: "reconciling" },
+      out: {
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            body: expect.objectContaining({
+              type: "offer.reply",
+              part: "outra",
+              accepted: false,
+              reason: expect.objectContaining({ code: "reconciliando" }),
+            }),
+          }),
+        ]),
+      },
+    })
+    readable.value = true
+    await again.core.tick()
+    expect(again.core.reconciling()).toBe(false)
   })
 
   test("sync is the hub's alone and refuses another protocol by name", () => {

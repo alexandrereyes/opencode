@@ -36,6 +36,50 @@ export type Unavailable = typeof Unavailable.Type
 export const Wake = Schema.Struct({ protocol: Schema.Number, state: State }).annotate({ identifier: "Bancada.Wake" })
 export type Wake = typeof Wake.Type
 
+/**
+ * A request to run tests of the session's `.bancada.toml` (`docs/bancada.md`, "Request"). Keys in Portuguese: the
+ * agent writes it. `id`: the tool derives it from its call, so a call made again is the same request.
+ */
+export const Request = Schema.Struct({
+  id: optional(BancadaProtocol.JobID),
+  sessionID: Schema.String,
+  rootSessionID: optional(Schema.String),
+  sessionTitle: optional(Schema.String),
+  rootTitle: optional(Schema.String),
+  toolCallID: optional(Schema.String),
+  diretorio: Schema.String,
+  testes: Schema.Array(
+    Schema.Struct({ teste: BancadaProtocol.PartName, args: optional(Schema.Array(Schema.String)) }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
+  snapshot: optional(Schema.Boolean),
+  commit: optional(Schema.String),
+  esperar: optional(Schema.Boolean),
+}).annotate({ identifier: "Bancada.Request" })
+export type Request = typeof Request.Type
+
+export const Submitted = Schema.Struct({
+  job: BancadaProtocol.JobID,
+  state: Schema.String,
+  commit: Schema.String,
+  snapshot: optional(
+    Schema.Struct({
+      arquivos: Schema.Array(
+        Schema.Struct({ caminho: Schema.String, mudanca: Schema.Literals(["novo", "alterado", "removido"]) }),
+      ),
+      naoIncluidos: optional(Schema.Int),
+    }),
+  ),
+  partes: Schema.Array(
+    Schema.Struct({
+      teste: Schema.String,
+      posicao: optional(Schema.Int),
+      etaMs: optional(Schema.Number),
+      motivo: optional(BancadaProtocol.Reason),
+    }),
+  ),
+}).annotate({ identifier: "Bancada.Submitted" })
+export type Submitted = typeof Submitted.Type
+
 const errors = { unavailable: Schema.toStandardSchemaV1(Unavailable) }
 
 export const Definition = Rpc.define({

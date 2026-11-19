@@ -2,7 +2,7 @@
 // clock, a scripted launcher and a network that drops, delays, duplicates and partitions. Every step checks the
 // invariants; `settle` checks the ones that hold only at the end.
 import { Database } from "bun:sqlite"
-import { createCore, type Core, type Machine } from "../../src/bancada/daemon/core"
+import { createCore, type Core, type Machine, type timings } from "../../src/bancada/daemon/core"
 import type { AttemptKey, Launch, Launcher, Status } from "../../src/bancada/daemon/executor"
 import type { NewJob } from "../../src/bancada/daemon/origin"
 import type { BancadaProtocol } from "../../src/bancada/protocol"
@@ -27,7 +27,8 @@ export type Faults = {
 
 export type SimMachine = {
   readonly name: string
-  readonly core: Core
+  /** Replaced by `restart`: a new core on the same database, as a restarted process. */
+  core: Core
   readonly db: Database
   readonly config: Machine
   awake: boolean
@@ -39,12 +40,14 @@ export function createWorld(options: {
   readonly toMachine?: Faults
   /** Virtual-time windows during which everything between a machine and the hub is lost. */
   readonly partitions?: ReadonlyArray<{ readonly machine: string; readonly from: number; readonly to: number }>
+  readonly timings?: Partial<typeof timings>
 }) {
   const clock = { now: 1_000_000 }
   const random = rng(options.seed)
   const machines = new Map<string, SimMachine>()
   const scripts = new Map<string, Script>()
-  const runs = new Map<string, { readonly startedAt: number; readonly script: Script }>()
+  /** Executions go on whatever happens to the Bancada process; they count only the time their machine is awake. */
+  const runs = new Map<string, { awakeMs: number; readonly script: Script; cancelled: boolean }>()
   const facts = {
     starts: new Map<string, number>(),
     notices: new Map<string, number>(),
@@ -53,6 +56,7 @@ export function createWorld(options: {
     delivered: new Map<string, ReadonlyArray<BancadaProtocol.PartResult>>(),
     /** Offers an executor refused, by machine and sequence number: the hub offered more than the machine had. */
     refusals: new Set<string>(),
+    states: new Map<string, string[]>(),
   }
   const logs: string[] = []
   const inflight: { readonly at: number; readonly order: number; readonly run: () => void }[] = []
@@ -73,16 +77,19 @@ export function createWorld(options: {
       if (runs.has(`${machine}:${name}`)) return
       const script = scripts.get(`${launch.job}/${launch.part}`)
       if (!script) throw new Error(`no script for ${launch.job}/${launch.part}`)
-      runs.set(`${machine}:${name}`, { startedAt: clock.now, script })
+      runs.set(`${machine}:${name}`, { awakeMs: 0, script, cancelled: false })
       const part = `${launch.job}/${launch.part}`
       facts.starts.set(part, (facts.starts.get(part) ?? 0) + 1)
     },
     status: async (attempt: AttemptKey): Promise<Status> => {
       const run = runs.get(`${machine}:${key(attempt)}`)
       if (!run) return { state: "gone", reason: "no execution" }
-      const elapsed = clock.now - run.startedAt
+      const elapsed = run.awakeMs
+      if (run.cancelled) return { state: "done", ending: { stage: "run", cause: "cancelado" } }
       if ("vanishMs" in run.script)
-        return elapsed < run.script.vanishMs ? { state: "rodando" } : { state: "gone", reason: "a execução morreu" }
+        return elapsed < run.script.vanishMs
+          ? { state: "rodando" }
+          : { state: "done", ending: { stage: "run", cause: "runner_morto" } }
       if (elapsed < run.script.buildMs) return { state: "compilando" }
       if (elapsed < run.script.buildMs + run.script.runMs) return { state: "rodando" }
       // The project's two files, as a real run writes them.
@@ -103,7 +110,24 @@ export function createWorld(options: {
         },
       }
     },
+    cancel: async (attempt) => {
+      const run = runs.get(`${machine}:${key(attempt)}`)
+      if (run) run.cancelled = true
+    },
+    finish: async () => {},
+    cleanup: async () => {},
   })
+
+  const build = (config: Machine, db: Database) =>
+    createCore({
+      db,
+      now: () => clock.now,
+      random: id,
+      machine: config,
+      launcher: launcher(config.name),
+      log: (line) => logs.push(`${config.name}: ${line}`),
+      ...(options.timings ? { timings: options.timings } : {}),
+    })
 
   const faults = (direction: Faults | undefined, machine: string) => {
     if (options.partitions?.some((cut) => cut.machine === machine && clock.now >= cut.from && clock.now < cut.to))
@@ -157,6 +181,16 @@ export function createWorld(options: {
       machine.core.delivered(notice.job)
     })
 
+  /** The states every part of the hub's queue passes through, for scenarios that check the way, not only the end. */
+  const record = () =>
+    hub?.db
+      .query<{ job_id: string; part: string; state: string }, []>("SELECT job_id, part, state FROM hub_part")
+      .all()
+      .forEach((row) => {
+        const states = facts.states.get(`${row.job_id}/${row.part}`) ?? []
+        if (states.at(-1) !== row.state) facts.states.set(`${row.job_id}/${row.part}`, [...states, row.state])
+      })
+
   const invariants = () => {
     for (const machine of machines.values()) {
       const used = machine.db
@@ -191,20 +225,25 @@ export function createWorld(options: {
         capacity: input.capacity ?? { memMb: 0, cpuMilli: 0, builds: 1, android: 0, ios: 0 },
       }
       const db = new Database(":memory:")
-      const core = createCore({
-        db,
-        now: () => clock.now,
-        random: id,
-        machine: config,
-        launcher: launcher(input.name),
-        log: (line) => logs.push(`${input.name}: ${line}`),
-      })
+      const core = build(config, db)
       const machine: SimMachine = { name: input.name, core, db, config, awake: true }
       machines.set(input.name, machine)
       if (config.hub) hub = machine
       return machine
     },
     script: (job: string, part: string, script: Script) => scripts.set(`${job}/${part}`, script),
+    /** The Bancada process of a machine dies and comes back on the same database; its executions go on. */
+    restart: (name: string) => {
+      const machine = machines.get(name)!
+      machine.core = build(machine.config, machine.db)
+      return machine.core
+    },
+    /** A machine sleeps (nothing of it runs, its executions' awake time stops) or wakes. */
+    sleep: (name: string, asleep: boolean) => {
+      machines.get(name)!.awake = !asleep
+    },
+    /** States a part of the hub's queue went through, in order and without repeats. */
+    seen: (job: string, part: string) => facts.states.get(`${job}/${part}`) ?? [],
     submit: (machine: string, job: NewJob) => {
       facts.submitted.set(job.id, { machine, job })
       return machines.get(machine)!.core.submit(job)
@@ -213,11 +252,13 @@ export function createWorld(options: {
     advance: async (ms: number, step = 1_000) => {
       for (const end = clock.now + ms; clock.now < end; ) {
         clock.now += step
+        for (const [name, run] of runs) if (machines.get(name.slice(0, name.indexOf(":")))?.awake) run.awakeMs += step
         for (const machine of machines.values()) if (machine.awake) await machine.core.tick()
         for (const machine of machines.values()) if (machine.awake && machine !== hub) exchange(machine)
         inflight.sort((a, b) => a.at - b.at || a.order - b.order)
         while (inflight[0] && inflight[0].at <= clock.now) inflight.shift()!.run()
         for (const machine of machines.values()) if (machine.awake) deliver(machine)
+        record()
         invariants()
       }
     },

@@ -34,6 +34,14 @@ export interface Ports {
   readonly launcher: Launcher
   /** A line for the process's log: what an operator must be able to read later (never secrets). */
   readonly log: (line: string) => void
+  /** Shorter times for tests; production uses `defaults`. */
+  readonly timings?: Partial<typeof timings>
+}
+
+/** The times of the protocol (`docs/bancada.md`, "State machine"). */
+export const timings = {
+  /** A machine that has not called for this long is silent. */
+  silentMs: 45_000,
 }
 
 export class CoreError extends Error {
@@ -63,24 +71,28 @@ export function createCore(ports: Ports) {
   const self = ports.machine
   const messages = makeMessages(db, ports.random, ports.now, ports.log)
   const toHub = (body: BancadaProtocol.FromMachine) => void messages.send(hub, body)
-  const executor = makeExecutor({
-    db,
-    now: ports.now,
-    random: ports.random,
-    capacity: self.capacity,
-    launcher: ports.launcher,
-    send: toHub,
-  })
+  const times = { ...timings, ...ports.timings }
   const origin = makeOrigin({
     db,
     now: ports.now,
     identity: { instanceID: self.instanceID, machineID: self.machineID, name: self.name },
     send: toHub,
   })
+  const executor = makeExecutor({
+    db,
+    now: ports.now,
+    random: ports.random,
+    machineID: self.machineID,
+    capacity: self.capacity,
+    launcher: ports.launcher,
+    send: toHub,
+    repository: origin.repository,
+  })
   const coordinator = self.hub
     ? makeCoordinator({
         db,
         now: ports.now,
+        silentMs: times.silentMs,
         send: (machineID, body) => messages.send(machineID, body),
         acknowledged: (machineID) => messages.acknowledged(machineID),
       })
@@ -126,7 +138,14 @@ export function createCore(ports: Ports) {
         name: self.name,
         out: messages.outgoing<BancadaProtocol.FromMachine>(hub),
         ack: messages.ack(hub),
-        pulse: { seq, state: "ok", free: executor.free(), brake: false, presence: false, running: executor.running() },
+        pulse: {
+          seq,
+          state: executor.reconciling() ? "reconciling" : "ok",
+          free: executor.free(),
+          brake: false,
+          presence: false,
+          running: executor.running(),
+        },
         waitMs,
       } satisfies BancadaProtocol.SyncInput
     })()
@@ -181,7 +200,10 @@ export function createCore(ports: Ports) {
   const round = async () => {
     await executor.tick()
     if (!coordinator) return
-    db.transaction(() => coordinator.schedule())()
+    db.transaction(() => {
+      coordinator.watch()
+      coordinator.schedule()
+    })()
     loop()
   }
   /**
@@ -207,6 +229,8 @@ export function createCore(ports: Ports) {
 
   return {
     submit: (request: NewJob) => origin.submit(request),
+    /** Whether this machine is still reading again what it started before a restart. */
+    reconciling: executor.reconciling,
     status: origin.status,
     notices: origin.notices,
     delivered: origin.delivered,

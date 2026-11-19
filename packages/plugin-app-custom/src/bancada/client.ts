@@ -21,13 +21,16 @@ const decodeTaken = Schema.decodeUnknownOption(Taken)
 
 export class BancadaError extends Error {
   constructor(
-    readonly reason: "process" | "owner",
+    readonly reason: "process" | "owner" | "invalid",
     message: string,
     readonly owner?: Bancada.Owner,
+    readonly problems?: ReadonlyArray<string>,
   ) {
     super(message)
   }
 }
+const Problems = Schema.Struct({ type: Schema.Literal("invalid"), problems: Schema.Array(Schema.String) })
+const decodeProblems = Schema.decodeUnknownOption(Problems)
 
 export const limits = {
   /** Deadline of an ordinary admin request; the process answers on loopback in milliseconds. */
@@ -168,6 +171,10 @@ export function makeBancadaClient(options: {
         : undefined
       if (response?.ok) return (await response.json()) as T
       if (response?.status === 409) throw taken(await response.json().catch(() => undefined))
+      const invalid =
+        response?.status === 400 ? decodeProblems(await response.json().catch(() => undefined)) : undefined
+      if (invalid && Option.isSome(invalid))
+        throw new BancadaError("invalid", invalid.value.problems.join("\n"), undefined, invalid.value.problems)
       if (response && response.status !== 401 && response.status !== 412) throw unavailable()
       // Gone, restarted (a new secret, or a process this client never configured): look again once.
       cached = undefined

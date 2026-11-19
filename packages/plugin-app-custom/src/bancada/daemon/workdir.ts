@@ -4,7 +4,13 @@ import path from "node:path"
 import type { Git } from "./git.js"
 import { ref } from "./snapshot.js"
 
-export type Workdir = { readonly id: string; readonly project: string; readonly path: string }
+/** A working folder; `reused`: an earlier execution used it (its build may be stale: one clean rebuild on failure). */
+export type Workdir = {
+  readonly id: string
+  readonly project: string
+  readonly path: string
+  readonly reused?: boolean
+}
 
 /** Where a request's commit may come from, tried in this order (`docs/bancada.md`, "Frozen code"). */
 export type Sources = {
@@ -48,8 +54,11 @@ export function makeWorkdirs(input: {
   const git = input.git
   const byProject = db.query<Row, [string]>("SELECT * FROM workdir WHERE project = ? ORDER BY path")
 
+  /** Idempotent per owner: a start repeated after a restart gets back the folder its first try took. */
   const acquire = async (project: string, commit: string, owner: string): Promise<Workdir> => {
     const chosen = db.transaction(() => {
+      const held = byProject.all(project).find((row) => row.busy_by === owner)
+      if (held) return { row: held, fresh: false }
       const free = byProject
         .all(project)
         .filter((row) => row.busy_by === null)
@@ -88,7 +97,7 @@ export function makeWorkdirs(input: {
       await fs.mkdir(chosen.row.path, { recursive: true })
       await git(["init", "--quiet"], { cwd: chosen.row.path })
     }
-    return { id: chosen.row.id, project, path: chosen.row.path }
+    return { id: chosen.row.id, project, path: chosen.row.path, reused: chosen.row.last_commit !== null }
   }
 
   const release = (workdir: Workdir, commit?: string) =>

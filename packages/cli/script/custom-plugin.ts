@@ -8,7 +8,9 @@ import type { Tool } from "@opencode/schema/tool"
 import { Effect, Schema } from "effect"
 
 // The release ships one plugin file; the resources hub and the Bancada run from it as separate processes
-// (`BUN_BE_BUN=1 opencode plugin/index.js --opencode-resources-hub`, `… --opencode-bancada`).
+// (`BUN_BE_BUN=1 opencode plugin/index.js --opencode-resources-hub`, `… --opencode-bancada`). A copy of it in an
+// attempt's folder is that attempt's runner (`… runner.js --opencode-bancada-run <folder>`), which the bundled
+// `bancada/daemon/runner.ts` starts by itself when it loads.
 if (process.argv.includes(flag)) await main()
 if (process.argv.includes(BancadaDaemon.flag)) await BancadaDaemon.main()
 

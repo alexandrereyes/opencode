@@ -62,7 +62,8 @@ export async function freeze(input: {
   const commit = chosen.commit
   await git(["update-ref", ref(input.job), commit], { cwd: root })
   const remotes = await urls(git, root)
-  const contract = await read(git, root, commit, remotes)
+  const project = remotes.map(normalizeRemote).find((name) => name !== undefined) ?? path.basename(root)
+  const contract = await contractAt(git, root, commit, project)
   if (!contract.ok) {
     await release(git, root, input.job)
     return contract
@@ -139,13 +140,15 @@ async function existing(git: Git, root: string, name: string): Promise<Chosen> {
   return { commit: found.stdout.trim(), files: [], notIncluded }
 }
 
-/** The `.bancada.toml` of that commit, checked against the files of that commit. */
-async function read(git: Git, root: string, commit: string, remotes: ReadonlyArray<string>) {
+/**
+ * The `.bancada.toml` of a commit, checked against the files of that commit: at the origin before anything is queued,
+ * and again at the executor, which runs only what the contract of the commit it checked out says.
+ */
+export async function contractAt(git: Git, root: string, commit: string, project: string) {
   const text = await git(["show", `${commit}:.bancada.toml`], { cwd: root })
   if (text.code !== 0) return refused(`o commit ${commit.slice(0, 8)} não tem .bancada.toml na raiz do repositório`)
   const listed = await git(["ls-tree", "-r", "--name-only", "-z", commit], { cwd: root })
   const files = new Set(listed.stdout.split("\0").filter(Boolean))
-  const project = remotes.map(normalizeRemote).find((name) => name !== undefined) ?? path.basename(root)
   return parseContract(text.stdout, { project, exists: (file) => files.has(file) })
 }
 

@@ -207,13 +207,15 @@ describe("working folders", () => {
     expect(refused).toMatchObject({ ok: false, tried: [expect.stringContaining("bundle:")] })
   })
 
-  test("a free folder that held the commit is preferred, a busy one never shared, an unused one pruned", async () => {
+  test("a free folder that held the commit is preferred, a busy one never shared nor taken twice, an unused one pruned", async () => {
     const { root } = await project()
     let now = 1_000
     const { workdirs: folders } = workdirs(root, () => now)
     const a = await folders.acquire("exemplo", "c1", "j-1/g1")
     const b = await folders.acquire("exemplo", "c1", "j-2/g1")
     expect(b.path).not.toBe(a.path)
+    // The same owner again (a start repeated after a restart) gets the folder it holds, never a second one.
+    expect(await folders.acquire("exemplo", "c1", "j-1/g1")).toEqual(a)
     folders.release(a, "c1")
     now += 10
     folders.release(b, "c2")

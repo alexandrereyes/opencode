@@ -38,6 +38,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
     `CREATE TABLE job (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL,
+      repo_dir TEXT,
       root_session_id TEXT NOT NULL,
       origin TEXT NOT NULL,
       code TEXT NOT NULL,
@@ -126,6 +127,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       devices_granted INTEGER,
       refused_by TEXT,
       refused_pulse INTEGER,
+      held_state TEXT,
       since INTEGER NOT NULL,
       outcome TEXT,
       PRIMARY KEY (job_id, part)
