@@ -139,11 +139,22 @@ export const Origin = Schema.Struct({
 }).annotate({ identifier: "Bancada.Origin" })
 export type Origin = typeof Origin.Type
 
+/**
+ * What comes in a message never becomes a command option: a commit is a full SHA (SHA-1 or SHA-256), a remote has the
+ * shape of a remote (`scheme://…` or `user@host:path`), and neither can start with `-`.
+ */
+export const Commit = Schema.String.check(Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)).annotate({
+  identifier: "Bancada.Commit",
+})
+export const RemoteURL = Schema.String.check(
+  Schema.isPattern(/^(?:[a-z][a-z0-9+.-]*:\/\/[^\s]+|[^\s@/:-][^\s@/:]*@[^\s:/]+:[^\s]+)$/i),
+).annotate({ identifier: "Bancada.RemoteURL" })
+
 /** The frozen code: the project, the commit, the project's remotes (no credentials) and whether one has the commit. */
 export const Code = Schema.Struct({
   project: Schema.String,
-  commit: Schema.String,
-  remotes: Schema.Array(Schema.String),
+  commit: Commit,
+  remotes: Schema.Array(RemoteURL),
   inRemote: Schema.Boolean,
 }).annotate({ identifier: "Bancada.Code" })
 export type Code = typeof Code.Type
@@ -340,7 +351,7 @@ export const CodeSource = Schema.Struct({
   type: Schema.Literal("code.source"),
   job: JobID,
   source: Schema.Union([
-    Schema.Struct({ remote: Schema.Struct({ url: Schema.String, commit: Schema.String }) }),
+    Schema.Struct({ remote: Schema.Struct({ url: RemoteURL, commit: Commit }) }),
     Schema.Struct({ transfer: Transfer }),
   ]),
 })

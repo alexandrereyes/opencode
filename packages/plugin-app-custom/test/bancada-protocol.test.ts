@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
+import { Schema } from "effect"
 import { CoreError, createCore, type Machine } from "../src/bancada/daemon/core"
 import type { Launcher } from "../src/bancada/daemon/executor"
 import { makeMessages, type Stream } from "../src/bancada/daemon/messages"
@@ -64,7 +65,7 @@ const spec: BancadaProtocol.PartSpec = {
   unsafe: false,
   args: [],
 }
-const code = { project: "exemplo", commit: "3417b7e3", remotes: [], inRemote: false }
+const code = { project: "exemplo", commit: "3417b7e3c0ffee5d1c2b3a4f5e6d7c8b9a0f1e2d", remotes: [], inRemote: false }
 /** Every row of every table: what a repeated message must leave as it was. */
 const dump = (db: Database) =>
   db
@@ -353,6 +354,25 @@ describe("core", () => {
     expect(
       refusal(() => hub.core.sync({ ...input, out: { ...input.out, messages: [{ seq: 1, body: { type: "x" } }] } })),
     ).toMatchObject({ type: "invalid" })
+  })
+})
+
+describe("message schemas", () => {
+  test("a commit is a full SHA and a remote has a remote's shape: nothing in a message can be a command option", () => {
+    const valid = (schema: Schema.Schema<string>, values: string[]) => values.map((value) => Schema.is(schema)(value))
+    expect(
+      valid(BancadaProtocol.Commit, ["3417b7e3c0ffee5d1c2b3a4f5e6d7c8b9a0f1e2d", "a".repeat(64), "3417b7e3", "--all"]),
+    ).toEqual([true, true, false, false])
+    expect(
+      valid(BancadaProtocol.RemoteURL, [
+        "https://github.com/alexandrereyes/opencode",
+        "git@github.com:alexandrereyes/AbacatoV3.git",
+        "ssh://git@host:2222/grupo/projeto",
+        "/workspace/Dev/AbacatoV3",
+        "-oProxyCommand=touch@x:y",
+        "--upload-pack=x",
+      ]),
+    ).toEqual([true, true, true, false, false, false])
   })
 })
 

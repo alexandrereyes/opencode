@@ -3,9 +3,15 @@ import path from "node:path"
 import { normalizeRemote, parseContract, partSpec, type Contract } from "../src/bancada/contract"
 
 const example = path.join(import.meta.dir, "fixture/bancada-exemplo")
-const files = new Set(["scripts/build", "scripts/plan", "scripts/run", "scripts/por-fora"])
-const exists = (file: string) => files.has(file)
-const read = (text: string) => parseContract(text, { project: "pasta", exists })
+const modes = new Map([
+  ["scripts/build", "100755"],
+  ["scripts/plan", "100755"],
+  ["scripts/run", "100755"],
+  ["scripts/por-fora", "100755"],
+  ["scripts/link", "120000"],
+  ["scripts/sem-x", "100644"],
+])
+const read = (text: string) => parseContract(text, { project: "pasta", mode: (file) => modes.get(file) })
 const valid = async (): Promise<Contract> => {
   const parsed = read(await Bun.file(path.join(example, ".bancada.toml")).text())
   if (!parsed.ok) throw new Error(parsed.problems.join("\n"))
@@ -69,6 +75,12 @@ describe("project contract", () => {
     ])
   })
 
+  test("a symlinked command is left to run time; docker alone is fine for a test without devices", () => {
+    expect(
+      read(`versao = 1\n[teste.a]\nprecisa = ["docker"]\naparelhos = { min = 0, max = 0 }\nrun = "scripts/link"`),
+    ).toMatchObject({ ok: true, contract: { tests: { a: { needs: ["docker"], run: ["scripts/link"] } } } })
+  })
+
   test("without projeto the caller's name (the normalized remote or the folder) is the project", () => {
     expect(read(`versao = 1\n[teste.a]\naparelhos = { min = 0, max = 0 }\nrun = "scripts/run"`)).toMatchObject({
       ok: true,
@@ -115,6 +127,11 @@ describe("project contract", () => {
       test1(`plan = ["scripts/plano", "--x"]`),
       'teste.a.plan: "scripts/plano" não existe neste commit',
     ],
+    [
+      "comando sem permissão de execução no commit",
+      test1(`build = "scripts/sem-x"`),
+      'teste.a.build: "scripts/sem-x" não é executável neste commit (chmod +x e commit)',
+    ],
     ["comando vazio", test1(`build = []`), "teste.a.build: um caminho, ou uma lista"],
     ["api", test1(`aparelho = { api = "36+" }`), 'teste.a.aparelho.api: use ">=36" ou "36"'],
     ["enxuto", test1(`aparelho = { enxuto = "talvez" }`), 'teste.a.aparelho.enxuto: "aceita", "exige" ou "recusa"'],
@@ -132,7 +149,17 @@ describe("project contract", () => {
     [
       "aparelho sem precisa",
       `versao = 1\n[teste.a]\nrun = "scripts/run"`,
-      "teste.a.precisa: diga do que o teste precisa",
+      "sem aparelho, escreva aparelhos = { min = 0, max = 0 }",
+    ],
+    [
+      "aparelho sem tipo",
+      `versao = 1\n[teste.a]\nprecisa = ["docker"]\nrun = "scripts/run"`,
+      'teste.a.precisa: um teste com aparelho precisa de "android", "android-fisico", "ios" ou "ios-fisico"',
+    ],
+    [
+      "Android e iOS no mesmo teste",
+      `versao = 1\n[teste.a]\nprecisa = ["android", "ios-fisico"]\naparelhos = { min = 1, max = 1 }\nrun = "scripts/run"`,
+      "teste.a.precisa: um teste usa aparelhos de um tipo só; separe Android e iOS em dois testes",
     ],
     [
       "precisa com nome inválido",

@@ -1,5 +1,6 @@
 export * as BancadaResults from "./results.js"
 
+import os from "node:os"
 import { Option, Schema } from "effect"
 import type { BancadaProtocol } from "./protocol.js"
 
@@ -35,14 +36,17 @@ const decodeSummary = Schema.decodeUnknownOption(Summary)
 export type Verdict = BancadaProtocol.Outcome["verdict"]
 
 /**
- * What the runner knows when a command stops: which stage, its exit code (absent when it never ended by itself) or the
- * cause, the project's two files as parsed JSON (undefined when missing), the scenarios asked again on a new attempt,
- * the devices the Bancada saw fall during the attempt and the end of the command's log.
+ * What the runner knows when a command stops: which stage, its exit code (absent when it never ended by itself) and the
+ * signal that killed it, or the cause, with the runner's reason; the project's two files as parsed JSON (undefined when
+ * missing), the scenarios asked again on a new attempt, the devices the Bancada saw fall during the attempt and the end
+ * of the command's log.
  */
 export type Ending = {
   readonly stage: "build" | "plan" | "run"
   readonly exit?: number
-  readonly cause?: "prazo" | "runner_morto" | "cancelado"
+  readonly signal?: string
+  readonly cause?: "prazo" | "runner_morto" | "runner_erro" | "cancelado"
+  readonly reason?: string
   readonly planned?: unknown
   readonly summary?: unknown
   readonly only?: ReadonlyArray<string>
@@ -79,13 +83,21 @@ export function judge(ending: Ending): BancadaProtocol.Outcome {
   })
 
   if (ending.cause === "cancelado") return outcome("cancelado", "cancelado")
-  if (ending.cause === "prazo") return outcome("infraestrutura", "prazo estourado")
+  if (ending.cause === "prazo")
+    return outcome("infraestrutura", ending.reason ? `prazo estourado: ${ending.reason}` : "prazo estourado")
   if (ending.cause === "runner_morto") return outcome("infraestrutura", "a execução morreu")
+  if (ending.cause === "runner_erro")
+    return outcome("infraestrutura", `o runner falhou: ${ending.reason ?? "sem motivo"}`)
   const exit = ending.exit ?? 75
+  // Killed by a signal (seen by the runner, or passed on by a shell as 128 + the signal): the system ended it (memory,
+  // most often), which says nothing about the code. The same for a command that never started.
+  const killed = ending.signal ?? (exit > 128 && exit < 256 ? signalName(exit - 128) : undefined)
+  if (killed) return outcome("infraestrutura", `o comando morreu pelo sinal ${killed} (no ${ending.stage})`)
+  if (exit === 126) return outcome("infraestrutura", ending.reason ?? `o comando não partiu (no ${ending.stage})`)
   if (exit === 2) return outcome("invalido", `pedido inválido (saída 2 no ${ending.stage})`)
   if (ending.stage === "build")
     return exit === 75
-      ? outcome("infraestrutura", "infraestrutura (saída 75 no build)")
+      ? outcome("infraestrutura", ending.reason ?? "infraestrutura (saída 75 no build)")
       : outcome("compilacao", "a compilação falhou")
   if (ending.stage === "plan") return outcome("infraestrutura", `infraestrutura (saída ${exit} no plan)`)
   // A run that did not finish is infrastructure even with failures inside: those stay failed, the rest is lost.
@@ -97,6 +109,8 @@ export function judge(ending: Ending): BancadaProtocol.Outcome {
   if (!summary) return outcome("incompleto", "faltou o summary.json")
   if (expected.length === 0) return outcome("incompleto", "nenhum cenário planejado")
   if (lost.length) return outcome("incompleto", `${lost.length} cenário(s) sem resultado`)
+  // Only ignored scenarios proved nothing (a filter that matched none, most often).
+  if (!scenarios.some((item) => item.result === "passou")) return outcome("incompleto", "nenhum cenário rodou")
   return outcome("aprovado")
 }
 
@@ -110,7 +124,17 @@ export function join(previous: BancadaProtocol.Outcome, retry: BancadaProtocol.O
   const answered = new Set(scenarios.map((item) => item.id))
   const lost = previous.planned.filter((id) => !answered.has(id))
   const failed = scenarios.some((item) => item.result === "falhou")
-  const verdict: Verdict = failed ? "falhou" : lost.length === 0 ? "aprovado" : retry.verdict
+  const passed = scenarios.some((item) => item.result === "passou")
+  // Approved only with every planned scenario answered and one passed, whatever the new attempt alone said.
+  const [verdict, reason]: [Verdict, string | undefined] = failed
+    ? ["falhou", undefined]
+    : lost.length > 0 && retry.verdict === "aprovado"
+      ? ["incompleto", `${lost.length} cenário(s) sem resultado`]
+      : lost.length > 0
+        ? [retry.verdict, retry.reason]
+        : passed
+          ? ["aprovado", undefined]
+          : ["incompleto", "nenhum cenário rodou"]
   return {
     ...(retry.exit === undefined ? {} : { exit: retry.exit }),
     planned: previous.planned,
@@ -118,10 +142,14 @@ export function join(previous: BancadaProtocol.Outcome, retry: BancadaProtocol.O
     lost,
     ...(retry.logTail ? { logTail: retry.logTail } : {}),
     verdict,
-    // Why scenarios still lack a result: the new attempt's reason, when it is the one that left them without.
-    ...(verdict === retry.verdict && retry.reason ? { reason: retry.reason } : {}),
+    ...(reason ? { reason } : {}),
     approved: verdict === "aprovado",
   }
+}
+
+/** `SIGKILL` for 9: the name of a signal number, as the shell's `128 + n` exit gives it. */
+function signalName(number: number) {
+  return Object.entries(os.constants.signals).find(([, value]) => value === number)?.[0] ?? `número ${number}`
 }
 
 type Reported = (typeof Summary.Type)["cenarios"][number]

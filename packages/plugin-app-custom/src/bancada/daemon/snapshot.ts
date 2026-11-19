@@ -1,6 +1,8 @@
 import fs from "node:fs/promises"
 import path from "node:path"
+import { Schema } from "effect"
 import { normalizeRemote, parseContract, type Contract } from "../contract.js"
+import { BancadaProtocol } from "../protocol.js"
 import type { Git } from "./git.js"
 
 /** A file of the session's working tree that entered the frozen commit, against `HEAD`. */
@@ -77,7 +79,8 @@ export async function freeze(input: {
       files: chosen.files,
       ...(chosen.notIncluded ? { notIncluded: chosen.notIncluded } : {}),
       project: contract.contract.project,
-      remotes: remotes.map(secretless),
+      // A remote that is a local path never reaches another machine.
+      remotes: remotes.map(secretless).filter((url) => Schema.is(BancadaProtocol.RemoteURL)(url)),
       inRemote: contains.code === 0 && contains.stdout.trim() !== "",
       contract: contract.contract,
     },
@@ -147,9 +150,15 @@ async function existing(git: Git, root: string, name: string): Promise<Chosen> {
 export async function contractAt(git: Git, root: string, commit: string, project: string) {
   const text = await git(["show", `${commit}:.bancada.toml`], { cwd: root })
   if (text.code !== 0) return refused(`o commit ${commit.slice(0, 8)} não tem .bancada.toml na raiz do repositório`)
-  const listed = await git(["ls-tree", "-r", "--name-only", "-z", commit], { cwd: root })
-  const files = new Set(listed.stdout.split("\0").filter(Boolean))
-  return parseContract(text.stdout, { project, exists: (file) => files.has(file) })
+  // `<mode> <type> <object>\t<path>`, one per NUL.
+  const listed = await git(["ls-tree", "-r", "-z", commit], { cwd: root })
+  const modes = new Map(
+    listed.stdout
+      .split("\0")
+      .filter(Boolean)
+      .map((line) => [line.slice(line.indexOf("\t") + 1), line.slice(0, line.indexOf(" "))] as const),
+  )
+  return parseContract(text.stdout, { project, mode: (file) => modes.get(file) })
 }
 
 /** The repository's remote URLs, `origin` first. */

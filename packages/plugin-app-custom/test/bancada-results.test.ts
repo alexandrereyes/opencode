@@ -87,6 +87,22 @@ describe("false green", () => {
       "aprovado",
       [],
     ],
+    [
+      "exit 0 with every scenario ignored: nothing ran",
+      run(0, { summary: summary({ id: "c1", resultado: "ignorado" }, { id: "c2", resultado: "ignorado" }) }),
+      "incompleto",
+      [],
+    ],
+    ["build killed by a signal", { stage: "build", exit: 137, signal: "SIGKILL" }, "infraestrutura", []],
+    ["build exit 137: a shell passing on a SIGKILL", { stage: "build", exit: 137 }, "infraestrutura", []],
+    [
+      "run exit 143: a shell passing on a SIGTERM",
+      run(143, { summary: summary(passed("c1")) }),
+      "infraestrutura",
+      ["c2"],
+    ],
+    ["a command that never started", { stage: "build", exit: 126, reason: "EACCES" }, "infraestrutura", []],
+    ["the runner failed", run(undefined, { cause: "runner_erro", reason: "ENOSPC" }), "infraestrutura", ["c1", "c2"]],
   ] satisfies [string, Ending, Verdict, string[]][])("%s", (_name, ending, verdict, lost) => {
     const outcome = judge(ending)
     expect({ verdict: outcome.verdict, lost: outcome.lost, approved: outcome.approved }).toEqual({
@@ -94,6 +110,26 @@ describe("false green", () => {
       lost,
       approved: verdict === "aprovado",
     })
+  })
+
+  test("the reason names the signal, the command that never started, the runner's error and the deadline's cause", () => {
+    expect(
+      [
+        { stage: "build", exit: 137 },
+        { stage: "run", exit: 1, signal: "SIGSEGV" },
+        { stage: "run", exit: 126, reason: "o comando não partiu: EACCES" },
+        { stage: "run", cause: "runner_erro", reason: "ENOSPC" },
+        { stage: "run", cause: "prazo", reason: "os aparelhos não ficaram prontos" },
+        { stage: "build", exit: 75, reason: "o checkout falhou" },
+      ].map((ending) => judge(ending as Ending).reason),
+    ).toEqual([
+      "o comando morreu pelo sinal SIGKILL (no build)",
+      "o comando morreu pelo sinal SIGSEGV (no run)",
+      "o comando não partiu: EACCES",
+      "o runner falhou: ENOSPC",
+      "prazo estourado: os aparelhos não ficaram prontos",
+      "o checkout falhou",
+    ])
   })
 
   test("a scenario reported twice failed if any report says so; evidence outside the output folder is dropped", () => {
@@ -137,6 +173,28 @@ describe("false green", () => {
     const withFailure = judge(run(75, { planned: planned("c1", "c2"), summary: summary(failed("c1")) }))
     const retry = judge(run(0, { only: ["c2"], summary: summary(passed("c2")) }))
     expect(join(withFailure, retry)).toMatchObject({ verdict: "falhou", lost: [], approved: false })
+  })
+
+  test("a join approves only with every planned scenario answered and one passed", () => {
+    const first = judge(run(75, { planned: planned("c1", "c2", "c3"), summary: summary(passed("c1")) }))
+    // The new attempt alone was approved, but c3 still has no result.
+    const some = judge(run(0, { only: ["c2"], summary: summary(passed("c2")) }))
+    expect(some.verdict).toBe("aprovado")
+    expect(join(first, some)).toMatchObject({
+      verdict: "incompleto",
+      reason: "1 cenário(s) sem resultado",
+      lost: ["c3"],
+      approved: false,
+    })
+    const ignored = judge(
+      run(75, { planned: planned("c1", "c2"), summary: summary({ id: "c1", resultado: "ignorado" }) }),
+    )
+    const again = judge(run(0, { only: ["c2"], summary: summary({ id: "c2", resultado: "ignorado" }) }))
+    expect(join(ignored, again)).toMatchObject({
+      verdict: "incompleto",
+      reason: "nenhum cenário rodou",
+      approved: false,
+    })
   })
 })
 

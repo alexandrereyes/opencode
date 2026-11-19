@@ -13,7 +13,7 @@ const spec = (part: string, platform: BancadaProtocol.Platform): BancadaProtocol
   unsafe: false,
   args: [],
 })
-const code = { project: "exemplo", commit: "3417b7e3", remotes: [], inRemote: false }
+const code = { project: "exemplo", commit: "3417b7e3c0ffee5d1c2b3a4f5e6d7c8b9a0f1e2d", remotes: [], inRemote: false }
 const passed = (ids: string[]) => ids.map((id) => ({ id, result: "passou" as const }))
 
 /** The production layout: the hub (Linux) offers no device; the Mac offers Android and iOS, `slots` of each. */

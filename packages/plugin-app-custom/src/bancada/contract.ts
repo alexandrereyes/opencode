@@ -65,11 +65,12 @@ const deviceKeys = new Set(["api", "ios", "modelo", "google_play", "enxuto", "et
 
 /**
  * Reads a `.bancada.toml`. `project` is the name to use when the file names none (the normalized remote, or the
- * folder's name); `exists` says whether a path exists in the commit being read (commands must).
+ * folder's name); `mode` gives the git mode of a path in the commit being read (`100755`), undefined when it is not
+ * there: a command must exist and be executable in that commit.
  */
 export function parseContract(
   text: string,
-  options: { readonly project: string; readonly exists?: (path: string) => boolean },
+  options: { readonly project: string; readonly mode?: (path: string) => string | undefined },
 ): Parsed {
   const raw = toml(text)
   if (typeof raw === "string") return { ok: false, problems: [`.bancada.toml não é TOML válido: ${raw}`] }
@@ -90,7 +91,7 @@ export function parseContract(
       }
       const merged = inherit(name, declared, problems)
       if (!merged) return []
-      const test = resolve(name, merged, options.exists, problems)
+      const test = resolve(name, merged, options.mode, problems)
       return test ? [[name, test] as const] : []
     }),
   )
@@ -194,7 +195,7 @@ function inherit(name: string, declared: Raw, problems: string[]): Raw | undefin
   return Object.assign({}, ...chain.toReversed())
 }
 
-function resolve(name: string, raw: Raw, exists: ((path: string) => boolean) | undefined, problems: string[]) {
+function resolve(name: string, raw: Raw, mode: Mode | undefined, problems: string[]) {
   const at = `teste.${name}`
   const before = problems.length
   unknownKeys(raw, testKeys, at, problems)
@@ -207,13 +208,19 @@ function resolve(name: string, raw: Raw, exists: ((path: string) => boolean) | u
     .forEach((need) => problems.push(`${at}.precisa: "${need}" precisa casar com [a-z0-9:-]+`))
   const devices = count(raw.aparelhos, `${at}.aparelhos`, problems)
   const isPhysical = needs.some((need) => physical.includes(need))
-  if (devices.max > 0 && needs.length === 0)
-    problems.push(`${at}.precisa: diga do que o teste precisa (por exemplo "android")`)
+  // One kind of device per test: the hub reserves and the runner hands over devices of a single platform.
+  const kinds = ["android", "ios"].filter((kind) => needs.includes(kind) || needs.includes(`${kind}-fisico`))
+  if (devices.max > 0 && kinds.length === 0)
+    problems.push(
+      `${at}.precisa: um teste com aparelho precisa de "android", "android-fisico", "ios" ou "ios-fisico"; sem aparelho, escreva aparelhos = { min = 0, max = 0 }`,
+    )
+  if (devices.max > 0 && kinds.length > 1)
+    problems.push(`${at}.precisa: um teste usa aparelhos de um tipo só; separe Android e iOS em dois testes`)
   if (isPhysical && devices.max > 1) problems.push(`${at}.aparelhos: um teste com celular usa no máximo 1 aparelho`)
   const device = deviceSpec(raw.aparelho, `${at}.aparelho`, isPhysical, problems)
-  const build = raw.build === undefined ? undefined : command(raw.build, `${at}.build`, exists, problems)
-  const plan = raw.plan === undefined ? undefined : command(raw.plan, `${at}.plan`, exists, problems)
-  const run = raw.run === undefined ? undefined : command(raw.run, `${at}.run`, exists, problems)
+  const build = raw.build === undefined ? undefined : command(raw.build, `${at}.build`, mode, problems)
+  const plan = raw.plan === undefined ? undefined : command(raw.plan, `${at}.plan`, mode, problems)
+  const run = raw.run === undefined ? undefined : command(raw.run, `${at}.run`, mode, problems)
   if (raw.run === undefined) problems.push(`${at}.run: obrigatório`)
   const args = list(raw.args, `${at}.args`, problems)
   const deadline = raw.prazo_min
@@ -295,7 +302,12 @@ function count(value: unknown, at: string, problems: string[]) {
   return { min: min as number, max: max as number }
 }
 
-function command(value: unknown, at: string, exists: ((path: string) => boolean) | undefined, problems: string[]) {
+type Mode = (path: string) => string | undefined
+
+/** A symlink's target decides at run time; anything else must carry git's executable mode. */
+const runnable = new Set(["100755", "120000"])
+
+function command(value: unknown, at: string, mode: Mode | undefined, problems: string[]) {
   const argv = typeof value === "string" ? [value] : Array.isArray(value) ? value : undefined
   if (!argv || argv.length === 0 || argv.some((item) => typeof item !== "string" || item.length === 0)) {
     problems.push(`${at}: um caminho, ou uma lista [caminho, argumento…]`)
@@ -303,8 +315,13 @@ function command(value: unknown, at: string, exists: ((path: string) => boolean)
   }
   const [file] = argv as string[]
   if (!relative(file!, at, problems)) return undefined
-  if (exists && !exists(file!)) {
+  const found = mode?.(file!)
+  if (mode && found === undefined) {
     problems.push(`${at}: "${file}" não existe neste commit`)
+    return undefined
+  }
+  if (found !== undefined && !runnable.has(found)) {
+    problems.push(`${at}: "${file}" não é executável neste commit (chmod +x e commit)`)
     return undefined
   }
   return argv as string[]
