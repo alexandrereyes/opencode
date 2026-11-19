@@ -85,7 +85,23 @@ export function createWorld(options: {
         return elapsed < run.script.vanishMs ? { state: "rodando" } : { state: "gone", reason: "a execução morreu" }
       if (elapsed < run.script.buildMs) return { state: "compilando" }
       if (elapsed < run.script.buildMs + run.script.runMs) return { state: "rodando" }
-      return { state: "done", exit: run.script.exit, planned: run.script.planned, scenarios: run.script.scenarios }
+      // The project's two files, as a real run writes them.
+      return {
+        state: "done",
+        ending: {
+          stage: "run",
+          exit: run.script.exit,
+          planned: { versao: 1, cenarios: run.script.planned.map((id) => ({ id })) },
+          summary: {
+            versao: 1,
+            cenarios: run.script.scenarios.map((item) => ({
+              id: item.id,
+              resultado: item.result,
+              ...(item.message ? { mensagem: item.message } : {}),
+            })),
+          },
+        },
+      }
     },
   })
 

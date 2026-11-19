@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# `plan` do projeto de exemplo: grava o planned.json antes de qualquer aparelho. --cenarios N; --plan-vazio (seleção
+# vazia: sai 2); --plan-sai <código>; --plan-aparelhos N (quantos aparelhos o projeto consegue usar). Bash 3.2.
+set -eu
+cenarios=2
+vazio=""
+sai=""
+aparelhos=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --cenarios) cenarios=$2; shift 2 ;;
+    --plan-vazio) vazio=1; shift ;;
+    --plan-sai) sai=$2; shift 2 ;;
+    --plan-aparelhos) aparelhos=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+out=${BANCADA_OUT:?BANCADA_OUT não definido}
+if [ -n "$vazio" ]; then
+  echo "nenhum cenário selecionado" >&2
+  exit 2
+fi
+if [ -n "$sai" ]; then exit "$sai"; fi
+mkdir -p "$out"
+{
+  printf '{ "versao": 1, '
+  if [ -n "$aparelhos" ]; then printf '"aparelhos": %s, ' "$aparelhos"; fi
+  printf '"cenarios": ['
+  sep=""
+  i=1
+  while [ "$i" -le "$cenarios" ]; do
+    printf '%s{ "id": "c%s", "nome": "Exemplo › cenário c%s" }' "$sep" "$i" "$i"
+    sep=", "
+    i=$((i + 1))
+  done
+  printf '] }\n'
+} > "$out/planned.json"

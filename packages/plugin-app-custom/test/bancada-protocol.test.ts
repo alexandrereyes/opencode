@@ -241,7 +241,15 @@ describe("core", () => {
       start: async () => {},
       status: async () => {
         await gate.promise
-        return { state: "done", exit: 0, planned: ["a1"], scenarios: [{ id: "a1", result: "passou" }] }
+        return {
+          state: "done",
+          ending: {
+            stage: "run",
+            exit: 0,
+            planned: { versao: 1, cenarios: [{ id: "a1" }] },
+            summary: { versao: 1, cenarios: [{ id: "a1", resultado: "passou" }] },
+          },
+        }
       },
     })
     mac.core.incoming(offers("android"))

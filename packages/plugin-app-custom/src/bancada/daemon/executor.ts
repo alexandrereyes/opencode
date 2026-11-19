@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import { BancadaProtocol } from "../protocol.js"
+import { judge, type Ending } from "../results.js"
 
 /** The key of an attempt: a part of a job, and its number. */
 export type AttemptKey = { readonly job: string; readonly part: string; readonly attempt: number }
@@ -12,15 +13,13 @@ export type Launch = AttemptKey & {
   readonly only?: ReadonlyArray<string>
 }
 
-/** What an execution reports, read from its folder: still preparing or running, ended, or gone without a trace. */
+/**
+ * What an execution reports, read from its folder: still building or running, or ended (how, with the project's files,
+ * judged by `results.ts`). `gone`: the launcher has no trace of it.
+ */
 export type Status =
   | { readonly state: "compilando" | "rodando" }
-  | {
-      readonly state: "done"
-      readonly exit: number
-      readonly planned: ReadonlyArray<string>
-      readonly scenarios: ReadonlyArray<BancadaProtocol.Scenario>
-    }
+  | { readonly state: "done"; readonly ending: Ending }
   | { readonly state: "gone"; readonly reason: string }
 
 /** Starts executions away from the server and reads how they go; idempotent per attempt. */
@@ -191,8 +190,8 @@ export function makeExecutor(input: {
   const finish = (row: AttemptRow, status: Extract<Status, { state: "done" | "gone" }>) => {
     const outcome: BancadaProtocol.Outcome =
       status.state === "gone"
-        ? { reason: status.reason, planned: [], scenarios: [], lost: [], approved: false }
-        : judge(status)
+        ? { verdict: "infraestrutura", reason: status.reason, planned: [], scenarios: [], lost: [], approved: false }
+        : judge(status.ending)
     const state = status.state === "gone" ? "perdido" : "concluido"
     db.transaction(() => {
       const changed = db.run(
@@ -216,23 +215,3 @@ export function makeExecutor(input: {
 }
 
 export type Executor = ReturnType<typeof makeExecutor>
-
-/**
- * Against false green: approved only with exit 0, a result for every planned scenario and none failed. The full
- * table (`docs/bancada.md`, "False green") arrives with the project contract.
- */
-function judge(status: Extract<Status, { state: "done" }>): BancadaProtocol.Outcome {
-  const answered = new Set(status.scenarios.map((scenario) => scenario.id))
-  const lost = status.planned.filter((id) => !answered.has(id))
-  return {
-    exit: status.exit,
-    planned: [...status.planned],
-    scenarios: [...status.scenarios],
-    lost,
-    approved:
-      status.exit === 0 &&
-      status.planned.length > 0 &&
-      lost.length === 0 &&
-      status.scenarios.every((scenario) => scenario.result !== "falhou"),
-  }
-}

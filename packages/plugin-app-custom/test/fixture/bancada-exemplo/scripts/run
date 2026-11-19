@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# `run` do projeto de exemplo: o comportamento vem dos argumentos, para os testes da Bancada injetarem cada caso.
+# --cenarios N; --falha <id> (falha com mensagem e evidência); --perde <id> (não grava o resultado); --dorme <s>;
+# --sai <código>; --sem-summary; --sem-planned; --marca <arquivo> (copia um arquivo do checkout para a saída: prova de
+# que rodou naquele commit). Com BANCADA_APENAS, roda só aqueles cenários. Bash 3.2 (o do macOS).
+set -eu
+cenarios=2
+falhas=" "
+perdas=" "
+dorme=0
+sai=""
+sem_summary=""
+sem_planned=""
+marca=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --cenarios) cenarios=$2; shift 2 ;;
+    --falha) falhas="$falhas$2 "; shift 2 ;;
+    --perde) perdas="$perdas$2 "; shift 2 ;;
+    --dorme) dorme=$2; shift 2 ;;
+    --sai) sai=$2; shift 2 ;;
+    --sem-summary) sem_summary=1; shift ;;
+    --sem-planned) sem_planned=1; shift ;;
+    --marca) marca=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+out=${BANCADA_OUT:?BANCADA_OUT não definido}
+mkdir -p "$out"
+ids=""
+if [ -n "${BANCADA_APENAS:-}" ]; then
+  ids=$(tr '\n' ' ' < "$BANCADA_APENAS")
+else
+  i=1
+  while [ "$i" -le "$cenarios" ]; do
+    ids="$ids c$i"
+    i=$((i + 1))
+  done
+fi
+# O planned.json vem antes de tocar em qualquer aparelho (a menos que o `plan` já o tenha gravado).
+if [ -z "$sem_planned" ] && [ ! -f "$out/planned.json" ]; then
+  {
+    printf '{ "versao": 1, "cenarios": ['
+    sep=""
+    for id in $ids; do
+      printf '%s{ "id": "%s", "nome": "Exemplo › cenário %s" }' "$sep" "$id" "$id"
+      sep=", "
+    done
+    printf '] }\n'
+  } > "$out/planned.json"
+fi
+if [ -n "$marca" ]; then cp "$marca" "$out/marca"; fi
+echo "rodando:$ids"
+sleep "$dorme"
+falhou=""
+if [ -z "$sem_summary" ]; then
+  {
+    printf '{ "versao": 1, "cenarios": ['
+    sep=""
+    for id in $ids; do
+      case "$perdas" in *" $id "*) continue ;; esac
+      case "$falhas" in
+        *" $id "*)
+          echo "captura de $id" > "$out/$id.txt"
+          printf '%s{ "id": "%s", "resultado": "falhou", "duracao_ms": 12, "mensagem": "Esperava \\"ok\\"; achou \\"erro\\"", "evidencias": ["%s.txt"] }' "$sep" "$id" "$id"
+          falhou=1
+          ;;
+        *) printf '%s{ "id": "%s", "resultado": "passou", "duracao_ms": 10 }' "$sep" "$id" ;;
+      esac
+      sep=", "
+    done
+    printf '] }\n'
+  } > "$out/summary.json.tmp"
+  mv "$out/summary.json.tmp" "$out/summary.json"
+fi
+if [ -n "$sai" ]; then exit "$sai"; fi
+if [ -n "$falhou" ]; then exit 1; fi
+exit 0

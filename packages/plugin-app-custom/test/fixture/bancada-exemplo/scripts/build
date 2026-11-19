@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# `build` do projeto de exemplo: compila de mentira. --falha-build sai 1 com um erro no log; --build-sai <código>
+# sai com aquele código; --build-dorme <s> demora. O que fica em cache/ sobrevive ao `git clean` da Bancada.
+# Bash 3.2 (o do macOS).
+set -eu
+falha=""
+sai=""
+dorme=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --falha-build) falha=1; shift ;;
+    --build-sai) sai=$2; shift 2 ;;
+    --build-dorme) dorme=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+echo "compilando $(git rev-parse --short HEAD 2>/dev/null || echo sem-git)"
+sleep "$dorme"
+mkdir -p cache
+date > cache/ultimo-build
+if [ -n "$sai" ]; then exit "$sai"; fi
+if [ -n "$falha" ]; then
+  echo "Program.cs(12,5): error CS0103: o nome 'x' não existe no contexto atual" >&2
+  exit 1
+fi
+echo "compilado"

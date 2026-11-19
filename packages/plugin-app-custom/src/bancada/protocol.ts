@@ -148,16 +148,31 @@ export const Scenario = Schema.Struct({
 export type Scenario = typeof Scenario.Type
 
 /**
- * How an attempt ended, as its executor judged it against false green: `approved` only with exit 0, every planned
- * scenario with a result and none failed. `lost`: planned scenarios without a result.
+ * How an attempt ended, as its executor judged it against false green (`results.ts`): `approved` only with exit 0,
+ * every planned scenario with a result and none failed. `planned`: the scenarios expected of this attempt (those asked
+ * again, on a new attempt); `lost`: those without a result. `verdict` says why it is not approved: `compilacao` (the
+ * build failed), `sem_relatorio` (exit 1 with no failed scenario), `incompleto` (exit 0 without every result),
+ * `infraestrutura` (exit 75, another code, a deadline or a dead runner), `invalido` (exit 2), `cancelado`.
  */
 export const Outcome = Schema.Struct({
   exit: optional(Schema.Int),
+  verdict: Schema.Literals([
+    "aprovado",
+    "falhou",
+    "incompleto",
+    "sem_relatorio",
+    "compilacao",
+    "infraestrutura",
+    "invalido",
+    "cancelado",
+  ]),
   reason: optional(Schema.String),
   planned: Schema.Array(Schema.String),
   scenarios: Schema.Array(Scenario),
   lost: Schema.Array(Schema.String),
   approved: Schema.Boolean,
+  /** The end of the command's log, for a failure the scenarios do not explain. */
+  logTail: optional(Schema.String),
 }).annotate({ identifier: "Bancada.Outcome" })
 export type Outcome = typeof Outcome.Type
 
