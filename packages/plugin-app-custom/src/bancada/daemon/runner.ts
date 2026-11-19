@@ -64,7 +64,10 @@ export type Claim =
   | { readonly pid: number; readonly startedAt: string }
   | { readonly revoked: true; readonly at: number }
 
-/** One event of `events.jsonl`; `command.start` and `command.end` are what the process reads to end orphans. */
+/**
+ * One event of `events.jsonl`. `command.start` (written the moment a command starts), `command.identity` (its start
+ * time, when the system answers) and `command.end` are what the process reads to end orphans.
+ */
 export type Event = { readonly type: string; readonly pid?: number; readonly startedAt?: string }
 
 type Ended =
@@ -149,9 +152,13 @@ export async function runAttempt(dir: string) {
       event("command.fail", { argv, reason: child })
       return { exit: 126, reason: `o comando não partiu: ${child}` }
     }
-    const identity = await startOf(child.pid)
-    event("command.start", { pid: child.pid, ...(identity ? { startedAt: identity } : {}), argv })
+    // Recorded before anything can wait: a runner that dies now leaves a command the process still knows.
+    event("command.start", { pid: child.pid, argv })
+    const identity = startOf(child.pid).then((started) => {
+      if (started) event("command.identity", { pid: child.pid, startedAt: started })
+    })
     const result = await follow(child, options.deadlineMs)
+    await identity
     signal(child.pid, "SIGKILL")
     event("command.end", { pid: child.pid })
     return result

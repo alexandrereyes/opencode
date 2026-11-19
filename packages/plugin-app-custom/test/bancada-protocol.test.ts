@@ -12,6 +12,7 @@ const idle: Launcher = {
   status: async () => ({ state: "rodando" }),
   cancel: async () => {},
   reap: async () => {},
+  held: () => false,
   cleanup: async () => {},
 }
 const machine = (name: string, hub: boolean, android = 0): Machine => ({
@@ -333,6 +334,31 @@ describe("core", () => {
     readable.value = true
     await again.core.tick()
     expect(again.core.reconciling()).toBe(false)
+  })
+
+  test("an ended attempt's reservation goes back only once the machine gave back what it held", async () => {
+    const holds = { value: true }
+    const mac = core(machine("Mac", false, 1), {
+      ...idle,
+      status: async () => ({
+        state: "done",
+        ending: {
+          stage: "run",
+          exit: 0,
+          planned: { versao: 1, cenarios: [{ id: "a1" }] },
+          summary: { versao: 1, cenarios: [{ id: "a1", resultado: "passou" }] },
+        },
+      }),
+      held: () => holds.value,
+    })
+    mac.core.incoming(offers("android"))
+    await mac.core.tick()
+    // The hub hears of the end at once; the device it reserved still counts, an orphan may still use it.
+    expect(sent(mac)).toContainEqual(expect.objectContaining({ type: "attempt", part: "android", state: "concluido" }))
+    expect(mac.core.outgoing().pulse.free.android).toBe(0)
+    holds.value = false
+    await mac.core.tick()
+    expect(mac.core.outgoing().pulse.free.android).toBe(1)
   })
 
   test("sync is the hub's alone and refuses another protocol by name", () => {

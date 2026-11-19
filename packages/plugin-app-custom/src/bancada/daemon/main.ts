@@ -182,6 +182,8 @@ export async function main() {
   await fs.rename(`${info}.tmp`, info)
   log(`started pid=${process.pid} machine=${machineID}`)
 
+  // A loose rejection ends a Bun process: this one follows every execution of the machine, so it logs and goes on.
+  process.on("unhandledRejection", (error) => log(`unhandled rejection: ${String(error)}`))
   process.on("SIGTERM", () => void stop("SIGTERM"))
   process.on("SIGINT", () => void stop("SIGINT"))
   if (parent <= 0) return

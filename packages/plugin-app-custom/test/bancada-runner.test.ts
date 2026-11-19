@@ -6,7 +6,7 @@ import path from "node:path"
 import { partSpec } from "../src/bancada/contract"
 import type { AttemptKey, Launcher, Status } from "../src/bancada/daemon/executor"
 import { runGit } from "../src/bancada/daemon/git"
-import { liveness, makeProcessLauncher, orphan } from "../src/bancada/daemon/launcher/process"
+import { liveness, makeProcessLauncher, openCommands, orphan } from "../src/bancada/daemon/launcher/process"
 import { awake, startOf } from "../src/bancada/daemon/runner"
 import { migrate } from "../src/bancada/daemon/schema"
 import { freeze } from "../src/bancada/daemon/snapshot"
@@ -25,7 +25,14 @@ afterEach(async () => {
 })
 
 /** The example project as a repository, a machine folder, and a launcher with short times. */
-async function setup(options: { readonly runMs?: number; readonly runner?: string; readonly graceMs?: number } = {}) {
+async function setup(
+  options: {
+    readonly runMs?: number
+    readonly runner?: string
+    readonly graceMs?: number
+    readonly heartbeatMs?: number
+  } = {},
+) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-runner-"))
   folders.push(root)
   const repository = path.join(root, "projeto")
@@ -40,7 +47,14 @@ async function setup(options: { readonly runMs?: number; readonly runner?: strin
   const state = path.join(root, "state")
   const workdirs = makeWorkdirs({ db, root: path.join(state, "work"), now: Date.now, random, git: runGit })
   /** A launcher of this machine; another one is the Bancada process after a restart (nothing in memory). */
-  const launcher = (more: { readonly runner?: string; readonly now?: () => number } = {}) =>
+  const launcher = (
+    more: {
+      readonly runner?: string
+      readonly now?: () => number
+      readonly platform?: NodeJS.Platform
+      readonly wake?: () => void
+    } = {},
+  ) =>
     makeProcessLauncher({
       state,
       workdirs,
@@ -48,7 +62,9 @@ async function setup(options: { readonly runMs?: number; readonly runner?: strin
       now: more.now ?? Date.now,
       random,
       deadlines: { prepareMs: 30_000, buildMs: 30_000, runMs: options.runMs ?? 60_000 },
-      timing: { pollMs: 50, heartbeatMs: 200, killGraceMs: 500 },
+      timing: { pollMs: 50, heartbeatMs: options.heartbeatMs ?? 200, killGraceMs: 500 },
+      ...(more.platform ? { platform: more.platform } : {}),
+      ...(more.wake ? { wake: more.wake } : {}),
       ...(options.graceMs ? { startGraceMs: options.graceMs } : {}),
       ...((more.runner ?? options.runner) ? { runner: more.runner ?? options.runner } : {}),
     })
@@ -204,13 +220,16 @@ describe("detached execution", () => {
     expect(environment).toContain("BANCADA_OUT")
     expect(environment.filter((name) => name.startsWith("OPENCODE_BANCADA") || name === "BUN_BE_BUN")).toEqual([])
     expect(await Bun.file(path.join(dir, "build.log")).text()).toContain("compilado")
-    // Every command recorded its start time and its end; nothing of their groups is left.
+    // Every command was recorded as it started, then its start time, then its end; nothing of their groups is left.
     const all = await events(dir)
-    const started = all.filter((event) => event.type === "command.start")
-    expect(started.every((event) => typeof event.startedAt === "string")).toBe(true)
-    expect(all.filter((event) => event.type === "command.end").map((event) => event.pid)).toEqual(
-      started.map((event) => event.pid),
-    )
+    const of = (type: string) => all.filter((event) => event.type === type).map((event) => event.pid)
+    expect(of("command.identity")).toEqual(of("command.start"))
+    expect(of("command.end")).toEqual(of("command.start"))
+    expect(all.filter((event) => event.type === "command.identity").every((event) => event.startedAt)).toBe(true)
+    const first = all.findIndex((event) => event.type === "command.start")
+    expect(
+      all.findIndex((event) => event.type === "command.identity" && event.pid === all[first]!.pid),
+    ).toBeGreaterThan(first)
     expect((await commands(dir)).some(groupAlive)).toBe(false)
   }, 20_000)
 
@@ -285,6 +304,85 @@ describe("detached execution", () => {
     await Bun.write(path.join(dir, "heartbeat"), JSON.stringify({ at: Date.now() - 1_000, awakeMs: 0 }))
     expect(await context.launcher.status(key)).toMatchObject({ state: "done", ending: { cause: "runner_morto" } })
   })
+
+  test("a line of events.jsonl that is not whole JSON never keeps a folder: the others are read", async () => {
+    expect(
+      openCommands(
+        [
+          '{"type":"command.start","pid":11,"argv":["x"]}',
+          '{"type":"command.identity","pid":11,"startedAt":"77"}',
+          '{"type":"command.start","pid":12}',
+          '{"type":"command.end","pid":12}',
+          '{"type":"command.start","pid":13,"ar',
+          "",
+        ].join("\n"),
+      ),
+    ).toEqual([{ pid: 11, startedAt: "77" }])
+    const context = await setup()
+    const { key, dir } = await launch(context, { job: "j-ssssssss" })
+    await until(context.launcher, key, ended)
+    await commands(dir)
+    await fs.appendFile(path.join(dir, "events.jsonl"), '{"type":"command.start","pid":')
+    await reaped(context)
+  }, 20_000)
+
+  // Heartbeats every 10 s: a just-ended runner's beat stays fresh far longer than the giving back may take.
+  test("giving back asks the system whether the runner left, whatever its fresh heartbeat says", async () => {
+    const context = await setup({ heartbeatMs: 10_000 })
+    const { key, dir } = await launch(context, { job: "j-tttttttt" })
+    await until(context.launcher, key, ended)
+    const runner = (await Bun.file(path.join(dir, "runner.json")).json()) as { pid: number }
+    await waitFor(async () => (await liveness(runner.pid)).state === "dead", 5_000)
+    const started = Date.now()
+    await reaped(context)
+    expect(Date.now() - started).toBeLessThan(3_000)
+    await commands(dir)
+  }, 20_000)
+
+  // The Mac's way (`ps` off the round), asked on this machine; its clock moved by hand.
+  test("an answer about a runner is that attempt's and that runner's, and goes stale after 30 s", async () => {
+    const context = await setup()
+    const clock = { now: Date.now() }
+    const woke: { next?: () => void } = {}
+    const answered = () => new Promise<void>((resolve) => (woke.next = resolve))
+    const mac = context.restarted({ platform: "darwin", now: () => clock.now, wake: () => woke.next?.() })
+    const runner = Bun.spawn(["sleep", "30"], { detached: true })
+    groups.push(runner.pid)
+    const dir = path.join(context.state, "attempts", "j-vvvvvvvv", "simples-1")
+    await fs.mkdir(dir, { recursive: true })
+    const beat = (at: number) => Bun.write(path.join(dir, "heartbeat"), JSON.stringify({ at, awakeMs: 0 }))
+    await Bun.write(
+      path.join(dir, "attempt.json"),
+      JSON.stringify({
+        format: 1,
+        parts: [{ part: "simples", run: ["scripts/run"], args: [] }],
+        timing: { heartbeatMs: 200 },
+      }),
+    )
+    await Bun.write(
+      path.join(dir, "runner.json"),
+      JSON.stringify({ pid: runner.pid, startedAt: await startOf(runner.pid, "darwin") }),
+    )
+    const key = { job: "j-vvvvvvvv", part: "simples", attempt: 1 }
+    const status = () => mac.status(key).catch(() => "não sei" as const)
+    // A stale beat: the round asks and does not wait.
+    await beat(clock.now - 5_000)
+    const first = answered()
+    expect(await status()).toBe("não sei")
+    await first
+    // The runner beats again before a round takes the answer ("alive"), which nobody uses.
+    await beat(clock.now)
+    expect(await status()).toEqual({ state: "compilando" })
+    // It dies; a round 31 s later never takes that old answer for it.
+    process.kill(-runner.pid, "SIGKILL")
+    await waitFor(async () => (await liveness(runner.pid)).state === "dead", 5_000)
+    clock.now += 31_000
+    await beat(clock.now - 5_000)
+    const second = answered()
+    expect(await status()).toBe("não sei")
+    await second
+    expect(await status()).toMatchObject({ state: "done", ending: { cause: "runner_morto" } })
+  }, 20_000)
 
   test("orphans: a leader with another start time, or without a recorded one, is never touched", async () => {
     const child = Bun.spawn(["sleep", "30"], { detached: true })

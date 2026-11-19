@@ -2,6 +2,7 @@ import { closeSync, existsSync, openSync } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
+import { Option, Schema } from "effect"
 import type { Ending } from "../../results.js"
 import type { AttemptKey, Launch, Launcher, Status } from "../executor.js"
 import type { Git } from "../git.js"
@@ -137,6 +138,8 @@ export const defaults = {
   killGraceMs: 10_000,
   /** Orphans that cannot be proven ours (or gone) for this long raise an alert in the log. */
   stuckAlertMs: 10 * 60_000,
+  /** How long an answer about a runner asked off the round stays good for the round that takes it. */
+  answerMs: 30_000,
   logTailLines: 30,
 }
 
@@ -161,6 +164,8 @@ export function makeProcessLauncher(input: {
   readonly runner?: string
   /** Asks for a round: an answer about a process came, or a reaping ended. */
   readonly wake?: () => void
+  /** Whose way of asking about a process: `/proc` on Linux, `ps` off the round elsewhere. */
+  readonly platform?: NodeJS.Platform
   readonly log?: (line: string) => void
 }): Launcher {
   const folder = (key: AttemptKey) => path.join(input.state, "attempts", key.job, `${key.part}-${key.attempt}`)
@@ -169,7 +174,8 @@ export function makeProcessLauncher(input: {
   const given = new Map<string, number>()
   const reaping = new Set<string>()
   const stuck = new Map<string, { since: number; alerted: boolean }>()
-  const asked = new Map<number, { result?: Liveness }>()
+  /** Answers about runners asked off the round, by attempt and `runner.json` (a pid alone may be someone else's later). */
+  const asked = new Map<string, { result?: Liveness; at?: number }>()
   const json = async <T>(file: string) =>
     (await Bun.file(file)
       .json()
@@ -188,30 +194,50 @@ export function makeProcessLauncher(input: {
 
   /**
    * On the Mac a `ps` may take seconds under load, and the round never waits: the question runs on its own and the
-   * next round takes the answer. On Linux it is a read of `/proc`.
+   * next round takes the answer, if it is that attempt's and that runner's and younger than `answerMs`; it goes when
+   * used, when old, or when the attempt ends. On Linux it is a read of `/proc`.
    */
-  const ask = async (pid: number, wait: boolean): Promise<Liveness> => {
-    if (wait || process.platform === "linux") return liveness(pid)
-    const entry = asked.get(pid)
-    if (entry?.result) {
-      asked.delete(pid)
+  const platform = input.platform ?? process.platform
+  const ask = async (key: AttemptKey, claim: { pid: number; startedAt: string }): Promise<Liveness> => {
+    if (platform === "linux") return liveness(claim.pid, platform)
+    const id = `${name(key)}:${claim.pid}:${claim.startedAt}`
+    const entry = asked.get(id)
+    if (entry?.result && entry.at !== undefined && input.now() - entry.at <= defaults.answerMs) {
+      asked.delete(id)
       return entry.result
     }
-    if (entry) return unknown
-    const fresh: { result?: Liveness } = {}
-    asked.set(pid, fresh)
-    void liveness(pid).then((answer) => {
-      fresh.result = answer
-      input.wake?.()
-    })
+    if (entry && !entry.result) return unknown
+    const fresh: { result?: Liveness; at?: number } = {}
+    asked.set(id, fresh)
+    void liveness(claim.pid, platform)
+      .then((answer) => {
+        fresh.result = answer
+        fresh.at = input.now()
+        input.wake?.()
+      })
+      .catch((error: unknown) => {
+        asked.delete(id)
+        input.log?.(`asking about runner ${claim.pid} failed: ${String(error)}`)
+      })
     return unknown
   }
-  /** The runner of a folder: a fresh heartbeat proves it alive; only a stale one asks the system. */
-  const runner = async (dir: string, attempt: Stored, claim: { pid: number; startedAt: string }, wait = false) => {
-    const beat = await json<{ at: number }>(path.join(dir, "heartbeat"))
+  const forget = (key: AttemptKey) =>
+    [...asked.keys()].filter((id) => id.startsWith(`${name(key)}:`)).forEach((id) => asked.delete(id))
+  /**
+   * The runner of a live attempt: a fresh heartbeat proves it alive; only a stale one asks the system. Giving back
+   * (`reap`) asks the system at once: after a normal end the heartbeat stays fresh for three beats.
+   */
+  const runner = async (
+    key: AttemptKey,
+    dir: string,
+    attempt: Stored,
+    claim: { pid: number; startedAt: string },
+    from: "round" | "reap",
+  ) => {
+    const beat = from === "round" ? await json<{ at: number }>(path.join(dir, "heartbeat")) : undefined
     const every = attempt.timing?.heartbeatMs ?? defaults.heartbeatMs
     if (beat && input.now() - beat.at < defaults.beats * every) return "alive"
-    const life = await ask(claim.pid, wait)
+    const life = from === "reap" ? await liveness(claim.pid, platform) : await ask(key, claim)
     if (life.state === "unknown") return "unknown"
     return life.state === "alive" && life.started === claim.startedAt ? "alive" : "dead"
   }
@@ -238,6 +264,11 @@ export function makeProcessLauncher(input: {
   }
 
   const status = async (key: AttemptKey): Promise<Status> => {
+    const answer = await follow(key)
+    if (answer.state === "done" || answer.state === "gone") forget(key)
+    return answer
+  }
+  const follow = async (key: AttemptKey): Promise<Status> => {
     const dir = folder(key)
     const read = () => json<PartStatus>(path.join(dir, "parts", key.part, "status.json"))
     const attempt = await stored(dir)
@@ -247,7 +278,7 @@ export function makeProcessLauncher(input: {
     if (!claim) return unclaimed(key, dir)
     if ("revoked" in claim) return { state: "gone", reason: "a execução não começou" }
     if (!attempt) throw new Error("o attempt.json de uma tentativa em curso não pôde ser lido")
-    const life = await runner(dir, attempt, claim)
+    const life = await runner(key, dir, attempt, claim, "round")
     if (life === "unknown") throw new Error("não foi possível saber se a execução segue")
     if (life === "alive")
       return {
@@ -269,7 +300,7 @@ export function makeProcessLauncher(input: {
     if (createOnce(path.join(dir, "runner.json"), { revoked: true, at: input.now() } satisfies Claim))
       return { state: "gone", reason: "a execução não começou" }
     // A runner took it just now.
-    return status(key)
+    return follow(key)
   }
 
   /**
@@ -280,16 +311,11 @@ export function makeProcessLauncher(input: {
     const dir = folder(key)
     const attempt = await stored(dir)
     const claim = await json<Claim>(path.join(dir, "runner.json"))
-    if (attempt && claim && "pid" in claim && (await runner(dir, attempt, claim, true)) !== "dead")
+    if (attempt && claim && "pid" in claim && (await runner(key, dir, attempt, claim, "reap")) !== "dead")
       return { free: false, commit: attempt.commit }
-    const events = (await text(path.join(dir, "events.jsonl")))
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as Event)
-    const ended = new Set(events.flatMap((event) => (event.type === "command.end" && event.pid ? [event.pid] : [])))
-    const open = events.filter((event) => event.type === "command.start" && event.pid && !ended.has(event.pid))
+    const open = openCommands(await text(path.join(dir, "events.jsonl")))
     const grace = attempt?.timing?.killGraceMs ?? defaults.killGraceMs
-    const results = await Promise.all(open.map((command) => orphan(command.pid!, command.startedAt, grace)))
+    const results = await Promise.all(open.map((command) => orphan(command.pid, command.startedAt, grace)))
     return { free: results.every(Boolean), ...(attempt ? { commit: attempt.commit } : {}) }
   }
 
@@ -332,6 +358,7 @@ export function makeProcessLauncher(input: {
         const [job, part, attempt] = held.owner.split("/")
         if (alive.has(held.owner) || reaping.has(held.owner) || !job || !part || !attempt) continue
         reaping.add(held.owner)
+        // Off the round, and never a loose rejection (it would end this process): a failure is tried next round.
         void sweep({ job, part, attempt: Number(attempt) })
           .then((result) => {
             if (result.free) {
@@ -346,6 +373,7 @@ export function makeProcessLauncher(input: {
               `alert: ${held.owner} still holds ${held.path}: processes it started could not be proven gone or ours`,
             )
           })
+          .catch((error: unknown) => input.log?.(`giving back what ${held.owner} holds failed: ${String(error)}`))
           .finally(() => {
             reaping.delete(held.owner)
             input.wake?.()
@@ -353,9 +381,12 @@ export function makeProcessLauncher(input: {
       }
     },
 
+    held: (key) => reaping.has(name(key)) || input.workdirs.held().some((held) => held.owner === name(key)),
+
     cleanup: async (key) => {
       if (input.workdirs.held().some((held) => held.owner === name(key)))
         throw new Error("a pasta de trabalho ainda está presa à tentativa")
+      forget(key)
       const dir = folder(key)
       const attempt = await stored(dir)
       if (attempt)
@@ -422,6 +453,33 @@ export function makeProcessLauncher(input: {
     await Bun.write(path.join(dir, "attempt.json.tmp"), JSON.stringify(attempt, null, 2))
     await fs.rename(path.join(dir, "attempt.json.tmp"), path.join(dir, "attempt.json"))
   }
+}
+
+const decodeEvent = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      type: Schema.String,
+      pid: Schema.optional(Schema.Number),
+      startedAt: Schema.optional(Schema.String),
+    }),
+  ),
+)
+
+/**
+ * The commands of `events.jsonl` without `command.end`, with the start time a `command.identity` line gave. A line
+ * that is not whole JSON (a disk that filled up midway) is skipped: one bad line never hides the others.
+ */
+export function openCommands(text: string) {
+  const events = text.split("\n").flatMap((line) => Option.toArray(decodeEvent(line))) as Event[]
+  const ended = new Set(events.flatMap((event) => (event.type === "command.end" && event.pid ? [event.pid] : [])))
+  const identity = new Map(
+    events.flatMap((event) =>
+      event.type === "command.identity" && event.pid && event.startedAt ? [[event.pid, event.startedAt] as const] : [],
+    ),
+  )
+  return events
+    .flatMap((event) => (event.type === "command.start" && event.pid && !ended.has(event.pid) ? [event.pid] : []))
+    .map((pid) => ({ pid, startedAt: identity.get(pid) }))
 }
 
 /**

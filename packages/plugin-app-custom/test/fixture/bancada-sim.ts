@@ -122,6 +122,7 @@ export function createWorld(options: {
       if (run) run.cancelled = true
     },
     reap: async () => {},
+    held: () => false,
     cleanup: async () => {},
   })
 

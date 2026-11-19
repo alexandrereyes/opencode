@@ -41,6 +41,8 @@ export interface Launcher {
    * launcher ends what they left with proof it is theirs, on its own time.
    */
   readonly reap: (live: ReadonlyArray<AttemptKey>) => Promise<void>
+  /** Whether an attempt still holds anything here (its folder, or the giving back still runs). */
+  readonly held: (key: AttemptKey) => boolean
   /** After delivery: nothing of the attempt stays (its folder, the commit's ref); rejects while it still holds any. */
   readonly cleanup: (key: AttemptKey) => Promise<void>
 }
@@ -85,7 +87,13 @@ export function makeExecutor(input: {
   const live = db.query<AttemptRow, []>(
     "SELECT * FROM attempt WHERE state IN ('aceito', 'compilando', 'rodando') ORDER BY accepted_at",
   )
-  const delivered = db.query<AttemptRow, []>("SELECT * FROM attempt WHERE state = 'limpar'")
+  const delivered = db.query<AttemptRow, []>(
+    "SELECT a.* FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE a.state = 'limpar' AND l.state <> 'active'",
+  )
+  /** Ended attempts whose reservation still counts: it goes back with their folder (and devices), in the giving back. */
+  const holding = db.query<AttemptRow, []>(
+    "SELECT a.* FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE a.state NOT IN ('aceito', 'compilando', 'rodando') AND l.state = 'active'",
+  )
   /**
    * Back after a restart with attempts it had started: until one round has read each of them again, this executor
    * takes no new offer (`docs/bancada.md`, "Reconciliation"), and its pulse says `reconciling`.
@@ -262,6 +270,13 @@ export function makeExecutor(input: {
     }
     if (unread.count === 0) reconciling.value = false
     await input.launcher.reap(live.all().map(keyOf)).catch(() => undefined)
+    // Until then an orphan of a dead runner may still use the machine: the budget would take another part on top.
+    for (const row of holding.all())
+      if (!input.launcher.held(keyOf(row)))
+        db.run("UPDATE lease SET state = 'released', released_at = ? WHERE id = ? AND state = 'active'", [
+          input.now(),
+          row.lease_id,
+        ])
     for (const row of delivered.all()) {
       const id = `cleanup:${row.job_id}/${row.part}/${row.n}`
       const task = tasks.get(id)
@@ -282,8 +297,8 @@ export function makeExecutor(input: {
   }
 
   /**
-   * The execution ended (or never started): its reservation is released and the hub hears how it went, in one step.
-   * What it held on the machine goes back by `reap`, once nothing it started runs. Infrastructure (a dead runner, a
+   * The execution ended (or never started): the hub hears how it went at once. What it held here (its folder, its
+   * reservation of the budget) goes back by `reap`, once nothing it started runs. Infrastructure (a dead runner, a
    * deadline, exit 75) loses the attempt; a cancel cancels it.
    */
   const finish = (row: AttemptRow, status: Extract<Status, { state: "done" | "gone" }>) => {
@@ -299,7 +314,6 @@ export function makeExecutor(input: {
         [state, input.now(), JSON.stringify(outcome), row.job_id, row.part, row.n, row.state],
       ).changes
       if (!changed) return
-      db.run("UPDATE lease SET state = 'released', released_at = ? WHERE id = ?", [input.now(), row.lease_id])
       input.send({ type: "attempt", job: row.job_id, part: row.part, attempt: row.n, state, outcome })
     })()
   }
