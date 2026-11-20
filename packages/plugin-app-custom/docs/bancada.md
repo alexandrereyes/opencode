@@ -150,6 +150,8 @@ up and checks nothing is left.
   its `reservado`.
 - **Deploy order:** the machine file (`~/.config/opencode/bancada.toml`) on host-6 (`modo = "docker"`,
   `[android.docker]`) and on the Mac; the Linux image first, then `custom:update` on the Mac. In core-infra's compose:
-  `OPENCODE_BANCADA=1` and `OPENCODE_BANCADA_SELF`. The schema's first step freezes at the first deploy.
+  `OPENCODE_BANCADA=1` and `OPENCODE_BANCADA_SELF`; host-6's server gets its own password from the private environment
+  (`OPENCODE_SERVER_PASSWORD` in `private-env-linux`), the Mac's from `service-custom.json`. The schema's first step
+  freezes at the first deploy.
 - **Turning it off:** `OPENCODE_BANCADA=0` (the Mac's `manual.json`, the Linux compose) and a server restart: the
   tools, the hook and the process go; devices the Bancada made can be removed by their prefix (`bancada-`).
