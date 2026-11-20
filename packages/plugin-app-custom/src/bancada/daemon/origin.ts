@@ -25,9 +25,14 @@ export type PartView = {
   readonly reason?: BancadaProtocol.Reason
 }
 
+/** Where a request is queued: the hub's queue, or this machine's own while the hub was out (`docs/bancada.md`, "Hub out"). */
+export type Scope = "hub" | "local"
+
 type JobRow = {
   readonly id: string
   readonly session_id: string
+  readonly scope: Scope
+  readonly origin: string
   readonly code: string
   readonly parts: string
   readonly acked_at: number | null
@@ -52,8 +57,15 @@ export function makeOrigin(input: {
   readonly db: Database
   readonly now: () => number
   readonly identity: { readonly instanceID: string; readonly machineID: string; readonly name: string }
-  /** Writes a message to the hub; returns its sequence number. */
-  readonly send: (body: BancadaProtocol.FromMachine) => number
+  /** Writes a message to the queue of `scope`; returns its sequence number. */
+  readonly send: (body: BancadaProtocol.FromMachine, scope: Scope) => number
+  /**
+   * Where a new request goes: `local` while the hub is out, for a request this machine can run alone (every part's
+   * needs here, no exclusive lock: a global lock has no owner without the hub); otherwise the hub's, where it waits.
+   */
+  readonly scope: (parts: ReadonlyArray<BancadaProtocol.PartSpec>) => Scope
+  /** Whether the hub is out now (a request for it waits "aguardando o hub"). */
+  readonly away: () => boolean
   /** How long a request the hub acknowledged receiving may wait for its `submit.ack` before it closes here. */
   readonly unregisteredMs: number
   readonly log: (line: string) => void
@@ -64,8 +76,8 @@ export function makeOrigin(input: {
   const ready = db.query<JobRow, []>(
     "SELECT * FROM job WHERE state = 'concluido' AND delivered_at IS NULL ORDER BY notice_ready_at",
   )
-  const waiting = db.query<JobRow, [number]>(
-    "SELECT * FROM job WHERE state = 'aguardando_confirmacao' AND submit_seq IS NOT NULL AND submit_seq <= ?",
+  const waiting = db.query<JobRow, [Scope, number]>(
+    "SELECT * FROM job WHERE scope = ? AND state = 'aguardando_confirmacao' AND submit_seq IS NOT NULL AND submit_seq <= ?",
   )
 
   const submit = (request: NewJob) =>
@@ -79,18 +91,15 @@ export function makeOrigin(input: {
         ...(request.sessionTitle ? { sessionTitle: request.sessionTitle } : {}),
         ...(request.rootTitle ? { rootTitle: request.rootTitle } : {}),
       }
+      const scope = input.scope(request.parts)
+      const reason: BancadaProtocol.Reason = input.away()
+        ? { code: "aguardando_hub", text: "aguardando o hub" }
+        : { code: "aguardando_confirmacao", text: "aguardando confirmação do hub" }
       const view: Record<string, PartView> = Object.fromEntries(
-        request.parts.map((spec) => [
-          spec.part,
-          {
-            state: "na_fila",
-            attempt: 0,
-            reason: { code: "aguardando_confirmacao", text: "aguardando confirmação do hub" },
-          },
-        ]),
+        request.parts.map((spec) => [spec.part, { state: "na_fila", attempt: 0, reason }]),
       )
       db.run(
-        "INSERT INTO job (id, session_id, repo_dir, root_session_id, origin, code, parts, scope, state, view, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'hub', 'aguardando_confirmacao', ?, ?)",
+        "INSERT INTO job (id, session_id, repo_dir, root_session_id, origin, code, parts, scope, state, view, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando_confirmacao', ?, ?)",
         [
           request.id,
           request.sessionID,
@@ -99,18 +108,22 @@ export function makeOrigin(input: {
           JSON.stringify(origin),
           JSON.stringify(request.code),
           JSON.stringify(request.parts),
+          scope,
           JSON.stringify(view),
           input.now(),
         ],
       )
-      const seq = input.send({
-        type: "submit",
-        job: request.id,
-        origin,
-        code: request.code,
-        parts: [...request.parts],
-        createdAt: input.now(),
-      })
+      const seq = input.send(
+        {
+          type: "submit",
+          job: request.id,
+          origin,
+          code: request.code,
+          parts: [...request.parts],
+          createdAt: input.now(),
+        },
+        scope,
+      )
       db.run("UPDATE job SET submit_seq = ? WHERE id = ?", [seq, request.id])
       return find.get(request.id)!
     })()
@@ -169,6 +182,25 @@ export function makeOrigin(input: {
         input.now(),
         row.id,
       ])
+      // Served here while the hub was out: the hub hears it as a fact, for its panel and history, when it is back.
+      if (row.scope === "local")
+        input.send(
+          {
+            type: "local.job",
+            job: row.id,
+            origin: JSON.parse(row.origin),
+            code: JSON.parse(row.code),
+            parts: (JSON.parse(row.parts) as BancadaProtocol.PartSpec[]).map((spec) => {
+              const result = message.parts.find((item) => item.part === spec.part)
+              return {
+                spec,
+                state: result?.state ?? "perdido",
+                ...(result?.outcome ? { outcome: result.outcome } : {}),
+              }
+            }),
+          },
+          "hub",
+        )
     }
   }
 
@@ -177,8 +209,8 @@ export function makeOrigin(input: {
    * message went to its `dead_letter`) and that still has no `submit.ack` `unregisteredMs` later closes as `invalido`,
    * with an alert (`docs/bancada.md`, "Request"). Called in a round, with what the hub acknowledged of this stream.
    */
-  const unregistered = (acknowledged: number) => {
-    for (const row of waiting.all(acknowledged)) {
+  const unregistered = (acknowledged: (scope: Scope) => number) => {
+    for (const row of (["hub", "local"] as const).flatMap((scope) => waiting.all(scope, acknowledged(scope)))) {
       if (row.acked_at === null) {
         db.run("UPDATE job SET acked_at = ? WHERE id = ?", [input.now(), row.id])
         continue
@@ -214,19 +246,22 @@ export function makeOrigin(input: {
   const resubmit = () =>
     db
       .query<JobRow & { origin: string; created_at: number }, []>(
-        "SELECT * FROM job WHERE state IN ('aguardando_confirmacao', 'na_fila')",
+        "SELECT * FROM job WHERE scope = 'hub' AND state IN ('aguardando_confirmacao', 'na_fila')",
       )
       .all()
       .forEach((row) => {
-        const seq = input.send({
-          type: "submit",
-          job: row.id,
-          origin: JSON.parse(row.origin),
-          code: JSON.parse(row.code),
-          parts: JSON.parse(row.parts),
-          createdAt: row.created_at,
-          again: true,
-        })
+        const seq = input.send(
+          {
+            type: "submit",
+            job: row.id,
+            origin: JSON.parse(row.origin),
+            code: JSON.parse(row.code),
+            parts: JSON.parse(row.parts),
+            createdAt: row.created_at,
+            again: true,
+          },
+          "hub",
+        )
         db.run("UPDATE job SET submit_seq = ?, acked_at = NULL WHERE id = ?", [seq, row.id])
       })
 
@@ -239,7 +274,7 @@ export function makeOrigin(input: {
     db.transaction(() => {
       const row = find.get(jobID)
       if (!row || row.state === "concluido" || row.state === "entregue") return false
-      input.send({ type: "cancel", job: jobID })
+      input.send({ type: "cancel", job: jobID }, row.scope)
       return true
     })()
 
@@ -250,6 +285,8 @@ export function makeOrigin(input: {
     unregistered,
     resubmit,
     forget,
+    /** The queue of a request of this origin: the hub's, unless it was served here while the hub was out. */
+    scope: (job: string): Scope => find.get(job)?.scope ?? "hub",
     repository: (job: string) =>
       db.query<{ repo_dir: string | null }, [string]>("SELECT repo_dir FROM job WHERE id = ?").get(job)?.repo_dir ??
       undefined,
@@ -265,7 +302,7 @@ export function makeOrigin(input: {
           input.now(),
           job,
         ])
-        input.send({ type: "delivered", job })
+        input.send({ type: "delivered", job }, row.scope)
       })(),
     /** The request as this server knows it. */
     status: (job: string) => {

@@ -181,6 +181,40 @@ describe("message streams", () => {
     expect(take(receiver, stream)).toEqual(["a", "x"])
   })
 
+  test("a call carries at most 200 messages or 1 MiB, in order; the rest goes in the next (rule 8)", () => {
+    const db = new Database(":memory:")
+    migrate(db)
+    const messages = makeMessages(
+      db,
+      () => "s-1",
+      () => 0,
+      () => undefined,
+    )
+    Array.from({ length: 250 }, (_, index) => messages.send("hub", { type: "delivered", job: `j-${index}` }))
+    const first = messages.outgoing("hub")
+    expect(first.messages.map((message) => message.seq)).toEqual(Array.from({ length: 200 }, (_, index) => index + 1))
+    messages.acked("hub", { stream: "s-1", seq: 200 })
+    expect(messages.outgoing("hub").messages.map((message) => message.seq)).toEqual(
+      Array.from({ length: 50 }, (_, index) => index + 201),
+    )
+    // Large ones: as many as fit in 1 MiB, and always one, however large.
+    const big = "x".repeat(400 * 1024)
+    const fresh = new Database(":memory:")
+    migrate(fresh)
+    const large = makeMessages(
+      fresh,
+      () => "s-2",
+      () => 0,
+      () => undefined,
+    )
+    large.send("hub", { blob: "x".repeat(2 * 1024 * 1024) })
+    large.send("hub", { blob: big })
+    large.send("hub", { blob: big })
+    expect(large.outgoing("hub").messages.map((message) => message.seq)).toEqual([1])
+    large.acked("hub", { stream: "s-2", seq: 1 })
+    expect(large.outgoing("hub").messages.map((message) => message.seq)).toEqual([2, 3])
+  })
+
   test("a message its handler cannot apply goes to dead_letter and the stream goes on (rule 6)", () => {
     const { sender, receiver, receiverDb, logs } = pair()
     ;["a", "poison", "c"].forEach((body) => sender.send("receiver", body))

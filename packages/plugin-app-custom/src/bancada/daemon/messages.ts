@@ -43,8 +43,8 @@ export function makeMessages(
     ])
     return read.get(peer)!
   }
-  const pending = db.query<{ seq: number; body: string }, [string]>(
-    "SELECT seq, body FROM outbox WHERE peer = ? ORDER BY seq",
+  const pending = db.query<{ seq: number; body: string }, [string, number]>(
+    "SELECT seq, body FROM outbox WHERE peer = ? ORDER BY seq LIMIT ?",
   )
 
   return {
@@ -61,15 +61,23 @@ export function makeMessages(
       return seq
     },
     /**
-     * Everything `peer` has not acknowledged yet, in order. `M` is the type this side gave `send` for that peer: the
-     * bodies are its own messages, stored as JSON.
+     * What `peer` has not acknowledged yet, in order, at most `batch.messages` messages or `batch.bytes` (always one at
+     * least): the rest goes in the next call, after `base` (rule 8). `M` is the type this side gave `send` for that
+     * peer: the bodies are its own messages, stored as JSON.
      */
     outgoing<M>(peer: string): Stream<M> {
       const current = row(peer)
+      const rows = pending.all(peer, batch.messages)
+      // Running totals only grow: those within the limit are a prefix, so nothing is skipped.
+      const totals = rows.reduce<number[]>(
+        (sums, message) => [...sums, (sums.at(-1) ?? 0) + Buffer.byteLength(message.body)],
+        [],
+      )
+      const taken = rows.slice(0, Math.max(1, totals.filter((total) => total <= batch.bytes).length))
       return {
         stream: current.out_stream,
         base: current.out_acked,
-        messages: pending.all(peer).map((message) => ({ seq: message.seq, body: JSON.parse(message.body) as M })),
+        messages: taken.map((message) => ({ seq: message.seq, body: JSON.parse(message.body) as M })),
       }
     },
     /**
@@ -155,6 +163,9 @@ export function makeMessages(
 }
 
 export type Messages = ReturnType<typeof makeMessages>
+
+/** The most one call carries each way (rule 8). */
+export const batch = { messages: 200, bytes: 1024 * 1024 }
 
 /** Runs `run`; returns the error's message when it throws. */
 function attempt(run: () => void) {

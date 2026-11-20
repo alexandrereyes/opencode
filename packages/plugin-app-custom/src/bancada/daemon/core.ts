@@ -10,6 +10,7 @@ import type { Reading } from "./brake.js"
 import { makeExecutor, type Launcher } from "./executor.js"
 import { makeMessages } from "./messages.js"
 import { makeOrigin, type NewJob } from "./origin.js"
+import { needs } from "./scheduler.js"
 import { migrate } from "./schema.js"
 
 /** This machine as the core sees it. `hub`: the queue of every machine runs here too. */
@@ -66,11 +67,13 @@ export const timings = {
   unregisteredMs: 60_000,
   /** A part waiting this long for a machine that nobody offers raises an alert. */
   noMachineMs: 10 * 60_000,
+  /** This long without a call to the hub that went through, a machine serves its own new requests alone. */
+  hubAwayMs: 45_000,
 }
 
 export class CoreError extends Error {
   constructor(
-    readonly type: "not_hub" | "protocol_mismatch" | "invalid",
+    readonly type: "not_hub" | "protocol_mismatch" | "invalid" | "machine_taken",
     message: string,
     readonly data?: Readonly<Record<string, unknown>>,
   ) {
@@ -80,6 +83,17 @@ export class CoreError extends Error {
 
 /** The hub, as a peer of a machine's messages; every machine is a peer of the hub by its `machineID`. */
 const hub = "hub"
+/**
+ * This machine's own queue, as a peer of its origin and executor while the hub is out (`docs/bancada.md`, "Hub out"):
+ * the same queue the hub runs, over this machine alone, for the requests of its own sessions.
+ */
+const local = "local"
+
+/** Why the link to the hub refused, as it tells the core; a refusal by version or schema puts the machine alone. */
+export type Refusal = {
+  readonly type: "protocol_mismatch" | "invalid" | "not_hub" | "machine_taken" | "unauthorized"
+  readonly message: string
+}
 
 const decodeInput = Schema.decodeUnknownResult(BancadaProtocol.SyncInput)
 const decodeOutput = Schema.decodeUnknownResult(BancadaProtocol.SyncOutput)
@@ -93,6 +107,7 @@ export function createCore(ports: Ports) {
   const db = ports.db
   migrate(db)
   const self = ports.machine
+  const times = { ...timings, ...ports.timings }
   const alerts = makeAlerts(db, ports.now, ports.log)
   const messages = makeMessages(db, ports.random, ports.now, ports.log, (peer, seq, error) =>
     alerts.raise(
@@ -101,17 +116,35 @@ export function createCore(ports: Ports) {
       `uma mensagem de ${peer === hub ? "o hub" : peer} não pôde ser aplicada e foi guardada à parte: ${error}`,
     ),
   )
-  const toHub = (body: BancadaProtocol.FromMachine) => messages.send(hub, body)
-  const times = { ...timings, ...ports.timings }
+  /** Calls waiting for a message to a machine (the hub's long poll): woken when one is written. */
+  const listeners = new Set<(peer: string) => void>()
+  /**
+   * The link to the hub, as the link tells it: when a call last went through, and a refusal that puts this machine
+   * alone at once (another protocol, a schema the hub cannot read). In memory: a restart counts from its start.
+   */
+  const link: { okAt: number; refused?: Refusal; away: boolean } = { okAt: ports.now(), away: false }
+  const away = () =>
+    !self.hub &&
+    (link.refused?.type === "protocol_mismatch" ||
+      link.refused?.type === "invalid" ||
+      ports.now() - link.okAt >= times.hubAwayMs)
   const origin = makeOrigin({
     db,
     now: ports.now,
     identity: { instanceID: self.instanceID, machineID: self.machineID, name: self.name },
-    send: toHub,
+    send: (body, scope) => messages.send(scope === "local" ? local : hub, body),
+    scope: (parts) =>
+      link.away &&
+      parts.every((spec) => spec.exclusive.length === 0 && needs(spec).every((need) => need in self.capabilities))
+        ? "local"
+        : "hub",
+    away: () => link.away,
     unregisteredMs: times.unregisteredMs,
     log: ports.log,
     alerts,
   })
+  /** A message about a request goes to the queue that has it: the hub's, or this machine's own (`local`). */
+  const peerOf = (job: string) => (origin.scope(job) === "local" ? local : hub)
   const executor = makeExecutor({
     db,
     now: ports.now,
@@ -127,29 +160,37 @@ export function createCore(ports: Ports) {
       docker: self.docker ?? false,
     },
     launcher: ports.launcher,
-    send: toHub,
+    send: (body) => messages.send("job" in body ? peerOf(body.job) : hub, body),
     repository: origin.repository,
     // A task of an attempt ended: its result should not wait for the next second.
     wake: () => void tick(),
   })
-  const coordinator = self.hub
-    ? makeCoordinator({
-        db,
-        now: ports.now,
-        times,
-        startedAt: ports.now(),
-        log: ports.log,
-        send: (machineID, body) => messages.send(machineID, body),
-        acknowledged: (machineID) => messages.acknowledged(machineID),
-        alerts,
-      })
-    : undefined
+  /** The queue: every machine's on the hub; elsewhere, this machine's own, for its requests while the hub is out. */
+  const queue = makeCoordinator({
+    db,
+    now: ports.now,
+    times,
+    startedAt: ports.now(),
+    log: ports.log,
+    send: (machineID, body) => {
+      const seq = messages.send(machineID, body)
+      listeners.forEach((listener) => listener(machineID))
+      return seq
+    },
+    acknowledged: (machineID) => messages.acknowledged(machineID),
+    alerts,
+  })
+  /** How this machine reaches the queue in this process: as the hub's own machine, or its own queue. */
+  const queuePeer = self.hub ? hub : local
 
   const meta = db.query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?")
   const setMeta = (key: string, value: string) =>
     db.run("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [key, value])
 
-  /** Tells the hub who this machine is, when that changed or when the hub may have forgotten it (`force`). */
+  /**
+   * Tells the queues who this machine is, when that changed or when the hub may have forgotten it (`force`): the hub,
+   * and on a machine that is not the hub its own queue, which schedules on what this machine offers.
+   */
   const hello = (force: boolean) => {
     const body: BancadaProtocol.FromMachine = {
       type: "hello",
@@ -158,16 +199,19 @@ export function createCore(ports: Ports) {
       speed: self.speed,
     }
     const text = JSON.stringify(body)
-    if (!force && meta.get("hello")?.value === text) return
-    db.transaction(() => {
-      toHub(body)
-      setMeta("hello", text)
-    })()
+    const peers = self.hub ? [hub] : [hub, local]
+    db.transaction(() =>
+      peers.forEach((peer) => {
+        if (!force && meta.get(`hello:${peer}`)?.value === text) return
+        messages.send(peer, body)
+        setMeta(`hello:${peer}`, text)
+      }),
+    )()
   }
   hello(false)
 
-  /** A message of the hub, inside the transaction that applies it. */
-  const fromHub = (message: BancadaProtocol.FromHub) => {
+  /** A message of a queue, inside the transaction that applies it. */
+  const fromQueue = (message: BancadaProtocol.FromHub) => {
     if (message.type === "offer") return executor.offer(message)
     if (message.type === "attempt.cancel") return executor.cancel(message)
     if (message.type === "cleanup") return executor.cleanup(message)
@@ -175,7 +219,8 @@ export function createCore(ports: Ports) {
       return origin.apply(message)
   }
 
-  const outgoing = (waitMs = 0): BancadaProtocol.SyncInput =>
+  /** This machine's call to a queue: what it has for it, what it applied of it, and its pulse. */
+  const call = (peer: string, waitMs: number, leaving?: "restart" | "stop"): BancadaProtocol.SyncInput =>
     db.transaction(() => {
       const seq = Number(meta.get("pulse_seq")?.value ?? 0) + 1
       setMeta("pulse_seq", String(seq))
@@ -184,8 +229,8 @@ export function createCore(ports: Ports) {
         machineID: self.machineID,
         instanceID: self.instanceID,
         name: self.name,
-        out: messages.outgoing<BancadaProtocol.FromMachine>(hub),
-        ack: messages.ack(hub),
+        out: messages.outgoing<BancadaProtocol.FromMachine>(peer),
+        ack: messages.ack(peer),
         pulse: {
           seq,
           state: executor.reconciling() ? "reconciling" : "ok",
@@ -194,28 +239,62 @@ export function createCore(ports: Ports) {
           presence: executor.present(),
           running: executor.running(),
         },
+        ...(leaving ? { leaving } : {}),
         waitMs,
       } satisfies BancadaProtocol.SyncInput
     })()
 
+  /** This machine's call to the hub; `leaving` when the process stops (the hub shows "reconciliando"). */
+  const outgoing = (waitMs = 0, leaving?: "restart" | "stop") => call(hub, waitMs, leaving)
+
+  /** The hub's answer: a call that went through (the machine is not alone), or a refusal the link decoded. */
   const incoming = (raw: unknown) => {
     const output = decodeOutput(raw)
     if (Result.isFailure(output)) throw new CoreError("invalid", output.failure.message)
-    if (output.success.protocol !== BancadaProtocol.version)
+    if (output.success.protocol !== BancadaProtocol.version) {
+      refused({ type: "protocol_mismatch", message: `o hub fala o protocolo ${output.success.protocol}` })
       throw new CoreError("protocol_mismatch", "the hub speaks another protocol", {
         expected: BancadaProtocol.version,
       })
+    }
+    link.okAt = ports.now()
+    link.refused = undefined
     messages.acked(hub, output.success.ack)
     // A hub that changed stream (another database) may have forgotten this machine and its requests.
-    if (messages.receive(hub, output.success.out, (body) => fromHub(body as BancadaProtocol.FromHub)) === "changed") {
+    if (messages.receive(hub, output.success.out, (body) => fromQueue(body as BancadaProtocol.FromHub)) === "changed") {
       hello(true)
       db.transaction(() => origin.resubmit())()
     }
   }
 
+  /**
+   * The hub refused this machine's call (`docs/bancada.md`, "sync"): another protocol or a call it could not read puts
+   * the machine alone at once; every refusal raises an alert, which the next call that goes through clears.
+   */
+  const refused = (refusal: Refusal) => {
+    link.refused = refusal
+    alerts.raise(`hub:${refusal.type}`, "hub", refusalText(refusal))
+  }
+
+  /** The queue's side of a call: applies what the machine sent and answers with what waits for it. */
+  const serve = (input: BancadaProtocol.SyncInput): BancadaProtocol.SyncOutput => {
+    db.transaction(() => queue.seen(input))()
+    messages.receive(input.machineID, input.out, (body) =>
+      queue.apply(input.machineID, body as BancadaProtocol.FromMachine),
+    )
+    messages.acked(input.machineID, input.ack)
+    db.transaction(() => queue.schedule())()
+    return reply(input.machineID)
+  }
+  const reply = (machineID: string): BancadaProtocol.SyncOutput => ({
+    protocol: BancadaProtocol.version,
+    out: messages.outgoing<BancadaProtocol.FromHub>(machineID),
+    ack: messages.ack(machineID),
+  })
+
   /** The hub's side of `custom.bancada/sync`: applies what the machine sent and answers with what waits for it. */
   const sync = (raw: unknown): BancadaProtocol.SyncOutput => {
-    if (!coordinator) throw new CoreError("not_hub", "this server does not keep the queue")
+    if (!self.hub) throw new CoreError("not_hub", "this server does not keep the queue")
     const decoded = decodeInput(raw)
     if (Result.isFailure(decoded)) throw new CoreError("invalid", decoded.failure.message)
     const input = decoded.success
@@ -223,40 +302,57 @@ export function createCore(ports: Ports) {
       throw new CoreError("protocol_mismatch", "this hub speaks another protocol", {
         expected: BancadaProtocol.version,
       })
-    db.transaction(() => coordinator.seen(input))()
-    messages.receive(input.machineID, input.out, (body) =>
-      coordinator.apply(input.machineID, body as BancadaProtocol.FromMachine),
-    )
-    messages.acked(input.machineID, input.ack)
-    db.transaction(() => coordinator.schedule())()
-    return {
-      protocol: BancadaProtocol.version,
-      out: messages.outgoing<BancadaProtocol.FromHub>(input.machineID),
-      ack: messages.ack(input.machineID),
+    const taken = queue.taken(input)
+    if (taken)
+      throw new CoreError("machine_taken", `the machine ${input.machineID} is ${taken.name}'s`, {
+        instanceID: taken.instanceID,
+        name: taken.name,
+      })
+    return serve(input)
+  }
+
+  /** This machine reaches its queue in this process, until neither side has anything new. */
+  const loop = () => {
+    for (const _ of Array.from({ length: 8 })) {
+      const input = call(queuePeer, 0)
+      const output = serve(input)
+      messages.acked(queuePeer, output.ack)
+      messages.receive(queuePeer, output.out, (body) => fromQueue(body as BancadaProtocol.FromHub))
+      if (input.out.messages.length === 0 && output.out.messages.length === 0) return
     }
   }
 
-  /** On the hub this machine reaches the queue in this process, until neither side has anything new. */
-  const loop = () => {
-    for (const _ of Array.from({ length: 8 })) {
-      const input = outgoing()
-      const output = sync(input)
-      incoming(output)
-      if (input.out.messages.length === 0 && output.out.messages.length === 0) return
+  /** Whether this machine is alone now; the change goes to the log and to an alert. */
+  const follow = () => {
+    const now = away()
+    if (now === link.away) return
+    link.away = now
+    if (now) {
+      ports.log("the hub is out: serving this machine's own new requests alone")
+      return alerts.raise(
+        "hub:fora",
+        "hub",
+        "o hub não responde: esta máquina atende sozinha os pedidos novos das próprias sessões",
+      )
     }
+    ports.log("the hub is back")
+    alerts
+      .active()
+      .filter((alert) => alert.kind === "hub")
+      .forEach((alert) => alerts.clear(alert.id))
   }
 
   /** One round: executions starting and ending, then the queue (and, on the hub, this machine's loop to it). */
   const round = async () => {
     await executor.tick()
+    follow()
     db.transaction(() => {
-      origin.unregistered(messages.acknowledged(hub))
+      origin.unregistered((scope) => messages.acknowledged(scope === "local" ? local : hub))
       origin.forget(times.tombstoneMs)
     })()
-    if (!coordinator) return
     db.transaction(() => {
-      coordinator.watch()
-      coordinator.schedule()
+      queue.watch()
+      queue.schedule()
     })()
     loop()
   }
@@ -294,16 +390,44 @@ export function createCore(ports: Ports) {
       return brake
     },
     status: origin.status,
-    /** The alerts up now. */
-    alerts: alerts.active,
     notices: origin.notices,
     delivered: origin.delivered,
+    /** The alerts up now. */
+    alerts: alerts.active,
+    /** The hub as this machine sees it: reachable, or out since when and why (`queue.hub`). */
+    hub: () =>
+      self.hub
+        ? { state: "hub" as const }
+        : link.away
+          ? {
+              state: "unavailable" as const,
+              since: link.okAt,
+              ...(link.refused ? { reason: refusalText(link.refused) } : {}),
+            }
+          : { state: "ok" as const },
     outgoing,
     incoming,
+    refused,
     sync,
+    /** What waits for a machine now (the hub's answer to a long poll that waited). */
+    reply,
+    /** Calls `listener` with the machine whenever the queue writes to one; returns how to stop. */
+    listen: (listener: (peer: string) => void) => {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
     /** Advances what depends on time or on the outside: executions starting and ending, the queue. */
     tick,
   }
 }
 
 export type Core = ReturnType<typeof createCore>
+
+function refusalText(refusal: Refusal) {
+  if (refusal.type === "protocol_mismatch") return `o hub fala outra versão do protocolo (${refusal.message})`
+  if (refusal.type === "invalid") return `o hub não entendeu a chamada desta máquina: ${refusal.message}`
+  if (refusal.type === "not_hub") return "o servidor configurado como hub não é o hub"
+  if (refusal.type === "machine_taken")
+    return `o hub já tem esta máquina registrada por outro servidor: ${refusal.message}`
+  return "o hub recusou a senha desta máquina"
+}

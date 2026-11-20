@@ -3,7 +3,7 @@
 // invariants; `settle` checks the ones that hold only at the end.
 import { Database } from "bun:sqlite"
 import type { Reading } from "../../src/bancada/daemon/brake"
-import { createCore, type Core, type Machine, type timings } from "../../src/bancada/daemon/core"
+import { CoreError, createCore, type Core, type Machine, type timings } from "../../src/bancada/daemon/core"
 import type { AttemptKey, Launch, Launcher, Placed, Status } from "../../src/bancada/daemon/executor"
 import type { NewJob } from "../../src/bancada/daemon/origin"
 import type { BancadaProtocol } from "../../src/bancada/protocol"
@@ -47,6 +47,8 @@ export function createWorld(options: {
   /** Virtual-time windows during which everything between a machine and the hub is lost. */
   readonly partitions?: ReadonlyArray<{ readonly machine: string; readonly from: number; readonly to: number }>
   readonly timings?: Partial<typeof timings>
+  /** A machine whose calls say another protocol version (an older or newer release). */
+  readonly versions?: Readonly<Record<string, number>>
 }) {
   const clock = { now: 1_000_000 }
   const random = rng(options.seed)
@@ -209,14 +211,22 @@ export function createWorld(options: {
   /** One call of a machine to the hub, through the faulty network. */
   const exchange = (machine: SimMachine) => {
     if (!hub) throw new Error("no hub")
-    const input = wire(machine.core.outgoing())
+    const input = { ...wire(machine.core.outgoing()), protocol: options.versions?.[machine.name] ?? 1 }
     for (const delay of faults(options.toHub, machine.name))
       later(delay, () => {
         if (!hub?.awake) return
         input.out.messages
           .filter((message) => message.body.type === "offer.reply" && !message.body.accepted)
           .forEach((message) => facts.refusals.add(`${machine.name}:${message.seq}`))
-        const output = wire(hub.core.sync(input))
+        // A refusal comes back as the link reads it from the hub's RPC error.
+        const answer = attempt(() => wire(hub!.core.sync(input)))
+        if (answer instanceof CoreError) {
+          const refusal = { type: answer.type, message: answer.message }
+          for (const back of faults(options.toMachine, machine.name))
+            later(back, () => machine.awake && machine.core.refused(refusal))
+          return
+        }
+        const output = answer
         for (const back of faults(options.toMachine, machine.name))
           later(back, () => {
             if (!machine.awake) return
@@ -419,6 +429,16 @@ export function createWorld(options: {
 }
 
 export type World = ReturnType<typeof createWorld>
+
+/** The value, or the core's refusal it threw. */
+function attempt<T>(run: () => T): T | CoreError {
+  try {
+    return run()
+  } catch (error) {
+    if (error instanceof CoreError) return error
+    throw error
+  }
+}
 
 /** mulberry32: a small deterministic generator, so a failing seed can be replayed. */
 function rng(seed: number) {

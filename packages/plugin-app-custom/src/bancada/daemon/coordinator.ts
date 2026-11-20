@@ -38,6 +38,7 @@ type PartRow = {
 type MachineRow = {
   readonly machine_id: string
   readonly name: string
+  readonly instance_id: string
   readonly capabilities: string
   readonly speed: string
   readonly free: string | null
@@ -74,6 +75,8 @@ const rank: Record<BancadaProtocol.PartState, number> = {
   invalido: 5,
 }
 const live = ["aceito", "compilando", "rodando"] as const
+/** A machine another server called with this recently stays that server's. */
+const takenMs = 60_000
 
 /** The times of the queue (`docs/bancada.md`, "State machine"); the hub's own `[tempos]`. */
 export type QueueTimes = {
@@ -480,6 +483,15 @@ export function makeCoordinator(input: {
       if (message.state === "concluido" && outcome.verdict !== "compilacao") sample(row, outcome)
       ended(row, outcome, true)
     },
+    /**
+     * A request a machine served alone while the hub was out (`docs/bancada.md`, "Hub out"): only a fact, for the
+     * panel and the history; it never enters the queue. Its id stays known for `tombstoneMs`, like a delivered one.
+     */
+    "local.job": (from: string, message: typeof BancadaProtocol.LocalJob.Type) =>
+      db.run(
+        "INSERT OR IGNORE INTO hub_job (id, origin_machine, origin, code, state, created_at, closed_at) VALUES (?, ?, ?, ?, 'local', ?, ?)",
+        [message.job, from, JSON.stringify(message.origin), JSON.stringify(message.code), input.now(), input.now()],
+      ),
     delivered: (from: string, message: typeof BancadaProtocol.Delivered.Type) => {
       const owner = job.get(message.job)
       if (!owner || owner.origin_machine !== from || owner.state !== "fechado") return
@@ -578,6 +590,7 @@ export function makeCoordinator(input: {
     if (message.type === "offer.reply") return handlers["offer.reply"](from, message)
     if (message.type === "attempt") return handlers.attempt(from, message)
     if (message.type === "delivered") return handlers.delivered(from, message)
+    if (message.type === "local.job") return handlers["local.job"](from, message)
   }
 
   /**
@@ -601,11 +614,13 @@ export function makeCoordinator(input: {
     ])
     const stream = sync.out.stream
     if (known && known.pulse_stream === stream && (known.pulse_seq ?? -1) >= sync.pulse.seq) return
+    // Its process restarts: "reconciliando" until it is back, not "silenciosa" (`docs/bancada.md`, "Process").
+    const state = sync.leaving === "restart" ? "reconciling" : sync.pulse.state
     db.run(
       "UPDATE hub_machine SET state = ?, state_since = CASE WHEN state = ? THEN state_since ELSE ? END, last_sync_at = ?, free = ?, brake = ?, pulse_stream = ?, pulse_seq = ?, running = ? WHERE machine_id = ?",
       [
-        sync.pulse.state,
-        sync.pulse.state,
+        state,
+        state,
         input.now(),
         input.now(),
         JSON.stringify(sync.pulse.free),
@@ -646,6 +661,16 @@ export function makeCoordinator(input: {
       // Not a confirmed end: an unsafe part does not run again.
       ended(row, lostOutcome("a máquina não conhece mais esta tentativa"), false)
     }
+  }
+
+  /**
+   * Another server's machine (`docs/bancada.md`, "Several servers"): a `machineID` a different server called with in
+   * the last minute is refused; after that, the new one takes it over.
+   */
+  const taken = (sync: BancadaProtocol.SyncInput) => {
+    const known = machine.get(sync.machineID)
+    if (!known || known.instance_id === sync.instanceID || input.now() - known.last_sync_at >= takenMs) return undefined
+    return { instanceID: known.instance_id, name: known.name }
   }
 
   /**
@@ -702,7 +727,7 @@ export function makeCoordinator(input: {
       if (!received || row.acked_at === null || now - row.acked_at < times.replyMs) continue
       withdraw(row)
     }
-    db.run("DELETE FROM hub_job WHERE state = 'entregue' AND closed_at < ?", [now - times.tombstoneMs])
+    db.run("DELETE FROM hub_job WHERE state IN ('entregue', 'local') AND closed_at < ?", [now - times.tombstoneMs])
     alertNoMachine(now)
   }
 
@@ -963,7 +988,7 @@ export function makeCoordinator(input: {
     }
   }
 
-  return { apply, seen, schedule, watch }
+  return { apply, seen, schedule, watch, taken }
 }
 
 export type Coordinator = ReturnType<typeof makeCoordinator>
