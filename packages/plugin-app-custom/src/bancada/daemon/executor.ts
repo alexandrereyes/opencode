@@ -179,6 +179,14 @@ export function makeExecutor(input: {
     group: row.group_id ?? `${row.part}-${row.n}`,
   })
   const keyOf = (row: AttemptRow): AttemptKey => ({ job: row.job_id, part: row.part, attempt: row.n })
+  /** The lease that holds the build of a request's group not started yet, if any. */
+  const carrier = db.query<{ id: string }, [string]>(
+    "SELECT l.id FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE a.job_id = ? AND a.state = 'aceito' AND a.group_id IS NULL AND a.cancel_at IS NULL AND l.builds > 0 AND l.state = 'active'",
+  )
+  /** A sibling that would build but holds no build: the one the build passes to when its carrier leaves first. */
+  const heir = db.query<AttemptRow & { lease: string }, [string]>(
+    "SELECT a.*, l.id AS lease FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE a.job_id = ? AND a.state = 'aceito' AND a.group_id IS NULL AND a.cancel_at IS NULL AND l.builds = 0 AND l.state = 'active' ORDER BY a.part",
+  )
   const startOf = (job: string, group: string) => `start:${job}/${group}`
   /**
    * Starts a group (`docs/bancada.md`, "Requests with several parts"): the attempts of one request accepted together,
@@ -238,7 +246,9 @@ export function makeExecutor(input: {
    */
   const admit = (message: typeof BancadaProtocol.Offer.Type) => {
     const spec = message.spec
-    const build = costOf(`build:${message.code.project}`, buildCost)
+    // One build per group: a sibling accepted and not started yet already holds it (`docs/bancada.md`, "Groups").
+    const building = spec.build && !carrier.get(message.job)
+    const build = building ? costOf(`build:${message.code.project}`, buildCost) : zero
     const unit = device(spec.platform, spec.device)
     const measuredExtra = samplesOf.all(`extra:${message.code.project}/${spec.part}`, samples.kept)
     const extra = (n: number) =>
@@ -249,6 +259,7 @@ export function makeExecutor(input: {
           : zero
     const devices = largestFit({
       room: current(),
+      builds: building ? 1 : 0,
       platform: spec.platform,
       min: message.devices.min,
       proposed: message.devices.proposed,
@@ -258,7 +269,7 @@ export function makeExecutor(input: {
     })
     return devices === undefined
       ? undefined
-      : { devices, build, peak: add(build, times(unit, devices), extra(devices)) }
+      : { devices, build, builds: building ? 1 : 0, peak: add(build, times(unit, devices), extra(devices)) }
   }
 
   /** A block of the project's ports for each granted device, none shared with a live reservation. */
@@ -302,7 +313,7 @@ export function makeExecutor(input: {
     const devices = admission.devices
     const lease = input.random()
     db.run(
-      "INSERT INTO lease (id, kind, owner, android, ios, mem_mb, cpu_milli, builds, build_mem_mb, build_cpu_milli, state, created_at) VALUES (?, 'job', ?, ?, ?, ?, ?, 1, ?, ?, 'active', ?)",
+      "INSERT INTO lease (id, kind, owner, android, ios, mem_mb, cpu_milli, builds, build_mem_mb, build_cpu_milli, state, created_at) VALUES (?, 'job', ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)",
       [
         lease,
         `${message.job}/${message.part}/${message.attempt}`,
@@ -310,6 +321,7 @@ export function makeExecutor(input: {
         kind === "ios" ? devices : 0,
         admission.peak.memMb,
         admission.peak.cpuMilli,
+        admission.builds,
         admission.build.memMb,
         admission.build.cpuMilli,
         input.now(),
@@ -424,7 +436,11 @@ export function makeExecutor(input: {
         ]),
       )
     }
-    // New groups: what one request has here not started yet (a cancelled attempt never starts).
+    // A cancelled attempt that never started ends first: its build may pass to a sibling of the group about to form.
+    for (const row of live.all())
+      if (row.started_at === null && row.group_id === null && row.cancel_at !== null)
+        finish(row, { state: "done", ending: { stage: "build", cause: "cancelado" } })
+    // New groups: what one request has here not started yet.
     const fresh = live.all().filter((row) => row.group_id === null && row.cancel_at === null)
     new Set(fresh.map((row) => row.job_id)).forEach((job) => {
       const rows = fresh.filter((row) => row.job_id === job).toSorted((a, b) => a.part.localeCompare(b.part))
@@ -539,8 +555,30 @@ export function makeExecutor(input: {
         [state, input.now(), JSON.stringify(final), row.job_id, row.part, row.n, row.state],
       ).changes
       if (!changed) return
+      // It held its group's build and leaves before the start: the build passes to a sibling that builds.
+      if (row.group_id === null) handOver(row)
       input.send({ type: "attempt", job: row.job_id, part: row.part, attempt: row.n, state, outcome: final })
     })()
+  }
+
+  /** Moves a not-started attempt's build reservation to a sibling of its request that would build and holds none. */
+  function handOver(row: AttemptRow) {
+    const lease = db
+      .query<
+        { builds: number; build_mem_mb: number; build_cpu_milli: number },
+        [string]
+      >("SELECT builds, build_mem_mb, build_cpu_milli FROM lease WHERE id = ?")
+      .get(row.lease_id)
+    const next = heir.all(row.job_id).find((item) => (JSON.parse(item.spec) as BancadaProtocol.PartSpec).build)
+    if (!lease || lease.builds === 0 || !next) return
+    db.run(
+      "UPDATE lease SET mem_mb = mem_mb - build_mem_mb, cpu_milli = cpu_milli - build_cpu_milli, builds = 0, build_mem_mb = 0, build_cpu_milli = 0 WHERE id = ?",
+      [row.lease_id],
+    )
+    db.run(
+      "UPDATE lease SET mem_mb = mem_mb + ?, cpu_milli = cpu_milli + ?, builds = 1, build_mem_mb = ?, build_cpu_milli = ? WHERE id = ?",
+      [lease.build_mem_mb, lease.build_cpu_milli, lease.build_mem_mb, lease.build_cpu_milli, next.lease],
+    )
   }
 
   return {

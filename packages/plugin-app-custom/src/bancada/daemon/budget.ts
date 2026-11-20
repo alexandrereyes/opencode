@@ -45,10 +45,12 @@ export function room(capacity: BancadaProtocol.Vector, used: BancadaProtocol.Vec
 
 /**
  * The most devices between `min` and `proposed` an attempt can reserve now, with its build and its extra; undefined
- * when not even `min` fits (or no build is free).
+ * when not even `min` fits (or the build slot it needs is not free).
  */
 export function largestFit(input: {
   readonly room: BancadaProtocol.Vector
+  /** Build slots it takes: 1, or none for a test without build or one whose group already holds one. */
+  readonly builds?: number
   readonly platform: BancadaProtocol.Platform
   readonly min: number
   readonly proposed: number
@@ -56,7 +58,7 @@ export function largestFit(input: {
   readonly device: Cost
   readonly extra: (devices: number) => Cost
 }) {
-  if (input.room.builds < 1) return undefined
+  if (input.room.builds < (input.builds ?? 1)) return undefined
   const fits = (n: number) => {
     if (input.platform !== "none" && n > input.room[input.platform]) return false
     const peak = add(input.build, times(input.device, n), input.extra(n))

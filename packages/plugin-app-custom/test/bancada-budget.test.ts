@@ -225,6 +225,7 @@ describe("admission", () => {
     devices: { min: 1, max: 3 },
     exclusive: [],
     unsafe: false,
+    build: true,
     args: [],
   }
   const mac = (more: Partial<Machine> = {}): Machine => ({

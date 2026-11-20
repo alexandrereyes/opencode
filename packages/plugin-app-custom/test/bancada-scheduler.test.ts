@@ -15,6 +15,7 @@ const spec = (
   devices,
   exclusive: [],
   unsafe: false,
+  build: true,
   args: [],
   ...more,
 })
@@ -146,6 +147,27 @@ describe("queue", () => {
       { job: "j-old", reason: { code: "orcamento" }, position: 1 },
       { job: "j-new", reason: { code: "fila", text: "na fila" }, position: 2 },
     ])
+  })
+
+  test("the parts of one request on one machine take one build slot; a part without build takes none", () => {
+    const mac = machine("mac", { android: 2, ios: 2, builds: 1 }, ["android", "ios"])
+    const job = "j-a"
+    const decision = run(
+      [part(job, spec("android")), { ...part(job, spec("ios")), index: 1 }, part("j-b", spec("android"))],
+      [mac],
+    )
+    expect(offered(decision)).toEqual(["j-a→mac", "j-a→mac"])
+    // A sibling already offered there (an earlier decision): no slot needed; nor for a part that does not build.
+    const later = run(
+      [part(job, spec("ios"), { siblingsOn: ["mac"] })],
+      [{ ...mac, free: { ...mac.free!, builds: 0 } }],
+    )
+    expect(offered(later)).toEqual(["j-a→mac"])
+    const lint = run(
+      [part("j-c", spec("none", { min: 0, max: 0 }, { build: false }))],
+      [{ ...mac, free: { ...mac.free!, builds: 0 } }],
+    )
+    expect(offered(lint)).toEqual(["j-c→mac"])
   })
 
   test("a machine that refused a part is a candidate again only from a newer pulse", () => {

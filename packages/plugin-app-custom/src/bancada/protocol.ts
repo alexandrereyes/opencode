@@ -123,6 +123,8 @@ export const PartSpec = Schema.Struct({
   exclusive: Schema.Array(Schema.String),
   secrets: optional(Schema.String),
   unsafe: Schema.Boolean,
+  /** The test has a `build`: its attempt reserves a build (one per group: the group builds once). */
+  build: Schema.Boolean,
   args: Schema.Array(Schema.String),
 }).annotate({ identifier: "Bancada.PartSpec" })
 export type PartSpec = typeof PartSpec.Type

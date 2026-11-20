@@ -60,6 +60,7 @@ describe("project contract", () => {
       devices: { min: 1, max: 2 },
       exclusive: [],
       unsafe: false,
+      build: true,
       args: ["--server", "--filtro", "Voz"],
     })
     expect(

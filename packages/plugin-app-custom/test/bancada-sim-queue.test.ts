@@ -13,6 +13,7 @@ const spec = (part: string, more: Partial<BancadaProtocol.PartSpec> = {}): Banca
   devices: { min: 1, max: 1 },
   exclusive: [],
   unsafe: false,
+  build: true,
   args: [],
   ...more,
 })
@@ -239,5 +240,38 @@ describe("simulation: the queue", () => {
     await sim.advance(2 * 60_000)
     sim.settle()
     expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBe(1)
+  })
+
+  test("S19: two parts of a request on a Mac with one build slot are one group; a part without build reserves none", async () => {
+    const sim = createWorld({ seed: 19 })
+    sim.addMachine({ name: "Linux", hub: true, platform: "linux" })
+    sim.addMachine({ name: "Mac", capabilities: { android: {}, ios: {} }, capacity: { ...room, builds: 1 } })
+    const long = { ...ok(20_000), buildMs: 15_000 }
+    sim.script("j-aaaaaaaa", "android", long)
+    sim.script("j-aaaaaaaa", "ios", long)
+    sim.script("j-bbbbbbbb", "lint", ok(5_000))
+    await sim.advance(1_000)
+    ask(sim, "Linux", "j-aaaaaaaa", [spec("android"), spec("ios", { platform: "ios", needs: ["ios"] })])
+    await sim.advance(3_000)
+    const mac = sim.machines.get("Mac")!.db
+    expect(mac.query("SELECT SUM(builds) AS builds FROM lease WHERE state = 'active'").get()).toEqual({ builds: 1 })
+    // Building: no build slot left, yet a part without build is taken.
+    // Only the Mac has Xcode: a check without devices nor build.
+    ask(sim, "Linux", "j-bbbbbbbb", [
+      spec("lint", { platform: "none", needs: ["ios"], devices: { min: 0, max: 0 }, build: false }),
+    ])
+    await sim.advance(2_000)
+    expect(
+      mac.query("SELECT a.part, l.builds FROM attempt a JOIN lease l ON l.id = a.lease_id ORDER BY a.part").all(),
+    ).toEqual([
+      { part: "android", builds: 1 },
+      { part: "ios", builds: 0 },
+      { part: "lint", builds: 0 },
+    ])
+    await sim.advance(60_000)
+    sim.settle()
+    expect(sim.facts.launches.filter((launch) => launch.job === "j-aaaaaaaa")).toEqual([
+      { machine: "Mac", job: "j-aaaaaaaa", group: "android-1+ios-1", parts: ["android", "ios"] },
+    ])
   })
 })

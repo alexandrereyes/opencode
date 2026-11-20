@@ -15,6 +15,7 @@ const spec = (part: string, more: Partial<BancadaProtocol.PartSpec> = {}): Banca
   devices: { min: 1, max: 1 },
   exclusive: [],
   unsafe: false,
+  build: true,
   args: [],
   ...more,
 })

@@ -74,6 +74,8 @@ export function createWorld(options: {
     states: new Map<string, string[]>(),
     /** The most devices each machine had reserved at once. */
     peak: new Map<string, number>(),
+    /** Every group started: on which machine, with which parts. */
+    launches: [] as { machine: string; job: string; group: string; parts: string[] }[],
   }
   /** Starts still bringing their code, released when the virtual clock reaches them. */
   const starting: { readonly at: number; readonly resolve: () => void }[] = []
@@ -94,6 +96,12 @@ export function createWorld(options: {
 
   const launcher = (machine: string): Launcher => ({
     start: async (launch: Launch) => {
+      facts.launches.push({
+        machine,
+        job: launch.job,
+        group: launch.group,
+        parts: launch.parts.map((part) => part.part),
+      })
       const found = launch.parts.map((part) => {
         const script = scriptOf(launch.job, part.part, part.attempt)
         if (!script) throw new Error(`no script for ${launch.job}/${part.part}`)

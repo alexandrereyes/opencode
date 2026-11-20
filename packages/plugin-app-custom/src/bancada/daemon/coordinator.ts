@@ -646,6 +646,12 @@ export function makeCoordinator(input: {
       const pending = offered.filter(
         (offer) => offer.machine_id === row.machine_id && (offer.offer_seq ?? 0) > input.acknowledged(row.machine_id),
       )
+      // A build slot per request's group among the offers it has not received yet.
+      const groups = new Set(
+        pending
+          .filter((offer) => (JSON.parse(offer.spec) as BancadaProtocol.PartSpec).build)
+          .map((offer) => offer.job_id),
+      )
       return {
         machineID: row.machine_id,
         name: row.name,
@@ -655,16 +661,18 @@ export function makeCoordinator(input: {
         capabilities: JSON.parse(row.capabilities),
         ...(free
           ? {
-              free: pending.reduce((vector, offer) => {
-                const spec: BancadaProtocol.PartSpec = JSON.parse(offer.spec)
-                return {
-                  ...vector,
-                  builds: vector.builds - 1,
-                  ...(spec.platform === "none"
-                    ? {}
-                    : { [spec.platform]: vector[spec.platform] - (offer.devices_granted ?? 0) }),
-                }
-              }, free),
+              free: pending.reduce(
+                (vector, offer) => {
+                  const spec: BancadaProtocol.PartSpec = JSON.parse(offer.spec)
+                  return {
+                    ...vector,
+                    ...(spec.platform === "none"
+                      ? {}
+                      : { [spec.platform]: vector[spec.platform] - (offer.devices_granted ?? 0) }),
+                  }
+                },
+                { ...free, builds: free.builds - groups.size },
+              ),
             }
           : {}),
       }
@@ -683,6 +691,15 @@ export function makeCoordinator(input: {
           index: row.idx,
           reserved: row.reserved === 1,
           ...(row.refused_by ? { refused: { machineID: row.refused_by, pulse: row.refused_pulse ?? 0 } } : {}),
+          siblingsOn: parts
+            .all(row.job_id)
+            .flatMap((sibling) =>
+              sibling.part !== row.part &&
+              sibling.machine_id &&
+              (sibling.state === "oferecido" || sibling.state === "aceito")
+                ? [sibling.machine_id]
+                : [],
+            ),
         } satisfies QueuedPart,
       }
     })

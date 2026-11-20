@@ -17,6 +17,8 @@ export type QueuedPart = {
   readonly reserved: boolean
   /** The machine that refused its last offer, at which pulse: a candidate again only from a newer pulse. */
   readonly refused?: { readonly machineID: string; readonly pulse: number }
+  /** Machines where a sibling of the same request is offered or accepted, not started: their group builds once. */
+  readonly siblingsOn?: ReadonlyArray<string>
 }
 
 export type MachineView = {
@@ -86,9 +88,16 @@ export function schedule(input: {
           (room.get(b.machine.machineID)?.memMb ?? 0) - (room.get(a.machine.machineID)?.memMb ?? 0) ||
           a.machine.machineID.localeCompare(b.machine.machineID),
       )[0]
+  /** Siblings offered in this decision, by request and machine: a group takes one build slot. */
+  const grouped = new Set<string>()
+  /** The build slots a part takes on a machine: none without `build`, or where its group already holds one. */
+  const builds = (part: QueuedPart, machine: MachineView) =>
+    !part.spec.build || part.siblingsOn?.includes(machine.machineID) || grouped.has(`${part.job}@${machine.machineID}`)
+      ? 0
+      : 1
   const fits = (part: QueuedPart, machine: MachineView) => {
     const free = room.get(machine.machineID)
-    if (!free || machine.braked || free.builds < 1) return false
+    if (!free || machine.braked || free.builds < builds(part, machine)) return false
     return part.spec.platform === "none" || free[part.spec.platform] >= part.spec.devices.min
   }
 
@@ -156,9 +165,11 @@ export function schedule(input: {
     }
     const proposed = grant(part, choice.machine)
     const free = room.get(choice.machine.machineID)!
+    const taken = builds(part, choice.machine)
+    grouped.add(`${part.job}@${choice.machine.machineID}`)
     room.set(choice.machine.machineID, {
       ...free,
-      builds: free.builds - 1,
+      builds: free.builds - taken,
       ...(part.spec.platform === "none" ? {} : { [part.spec.platform]: free[part.spec.platform] - proposed }),
     })
     part.spec.exclusive.forEach((name) => locks.add(name))

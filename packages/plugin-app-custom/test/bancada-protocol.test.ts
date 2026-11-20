@@ -67,6 +67,7 @@ const spec: BancadaProtocol.PartSpec = {
   devices: { min: 2, max: 2 },
   exclusive: [],
   unsafe: false,
+  build: true,
   args: [],
 }
 const code = { project: "exemplo", commit: "3417b7e3c0ffee5d1c2b3a4f5e6d7c8b9a0f1e2d", remotes: [], inRemote: false }
@@ -379,6 +380,42 @@ describe("core", () => {
     expect(launches.map((launch) => [launch.group, launch.parts.map((part) => part.part)])).toEqual([
       ["android-1+ios-1", ["android", "ios"]],
     ])
+  })
+
+  test("the part holding its group's build leaves before the start: the build passes to the sibling", async () => {
+    const launches: Launch[] = []
+    // Still building: the build's share stays reserved.
+    const mac = core(machine("Mac", false, 3), {
+      ...idle,
+      start: async (launch) => void launches.push(launch),
+      status: async () => ({ state: "compilando" }),
+    })
+    const both = offers("android", "ios")
+    mac.core.incoming({
+      ...both,
+      out: {
+        ...both.out,
+        messages: [
+          ...both.out.messages,
+          {
+            seq: 3,
+            body: { type: "attempt.cancel", job: "j-7qk2m9xa", part: "android", attempt: 1, reason: "cancelado" },
+          },
+        ],
+      },
+    })
+    const leases = () =>
+      mac.db.query("SELECT a.part, l.builds FROM attempt a JOIN lease l ON l.id = a.lease_id ORDER BY a.part").all()
+    expect(leases()).toEqual([
+      { part: "android", builds: 1 },
+      { part: "ios", builds: 0 },
+    ])
+    await mac.core.tick()
+    expect(leases()).toEqual([
+      { part: "android", builds: 0 },
+      { part: "ios", builds: 1 },
+    ])
+    expect(launches.map((launch) => launch.group)).toEqual(["ios-1"])
   })
 
   test("an offer cancelled in the same batch never starts; it is reported cancelled", async () => {

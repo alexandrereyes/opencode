@@ -11,6 +11,7 @@ const android: BancadaProtocol.PartSpec = {
   devices: { min: 1, max: 1 },
   exclusive: [],
   unsafe: false,
+  build: true,
   args: [],
 }
 const code = { project: "exemplo", commit: "3417b7e3c0ffee5d1c2b3a4f5e6d7c8b9a0f1e2d", remotes: [], inRemote: false }
