@@ -21,8 +21,8 @@ simulator.
 
 ## Project contract
 
-`.bancada.toml` at the repository root: `[teste.<name>]` with `precisa`, `aparelho`, `aparelhos`, `build`, `plan`,
-`run`, `args`; `caches`; `fora`. The commands get `BANCADA_JOB`, `BANCADA_TESTE`, `BANCADA_TENTATIVA`,
+`.bancada.toml` at the repository root: `[teste.<name>]` with `precisa`, `aparelho`, `aparelhos`, `celular`, `build`,
+`plan`, `run`, `args`; `caches`; `fora`. The commands get `BANCADA_JOB`, `BANCADA_TESTE`, `BANCADA_TENTATIVA`,
 `BANCADA_COMMIT`, `BANCADA_OUT`, and the `run` gets `BANCADA_DEVICES` (the `devices.json`, one device per line) and,
 on a new attempt, `BANCADA_APENAS`. The `run` writes `planned.json` before touching a device and `summary.json` at the
 end; nothing is approved without both. The example project (`test/fixture/bancada-exemplo/`) is the reference: its
@@ -55,8 +55,10 @@ end; nothing is approved without both. The example project (`test/fixture/bancad
   also behind `mac`.
 - **Tests:** a part with `precisa = ["android-fisico"]` (or `ios-fisico`) and `aparelho.etiquetas` goes to a machine
   with such a phone, takes it before anything else (a free, connected, reservable phone with the tags, not kept for
-  someone) and none of the emulator budget; its `devices.json` has the phone (`serial`, `adb`, `contasReais`). While
-  the test runs no session's command may use it. The Bancada never clears, uninstalls, restarts, stops or sends
+  someone) and none of the emulator budget; its `devices.json` has the phone (`serial`, `adb`, `contasReais`). A test
+  that needs emulators (or simulators) and a phone asks for both: `precisa = ["android"]`, `aparelho`, `aparelhos` for
+  the emulators and `celular = { etiquetas = [...] }`; the phone is taken first, the emulators come from the budget,
+  and `devices.json` lists the emulators, then the phone. While the test runs no session's command may use it. The Bancada never clears, uninstalls, restarts, stops or sends
   anything on a phone; at the end only the hold ends.
 
 ## App surface

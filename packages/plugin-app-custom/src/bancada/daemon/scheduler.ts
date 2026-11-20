@@ -256,7 +256,13 @@ export function schedule(input: {
  * phone's test never waits for room for an emulator.
  */
 export function seat(spec: BancadaProtocol.PartSpec): BancadaProtocol.Platform {
-  return spec.needs.some((need) => need === "android-fisico" || need === "ios-fisico") ? "none" : spec.platform
+  return phoneTags(spec) && !spec.phone ? "none" : spec.platform
+}
+
+/** The tags of the phone a part asks for (alone, or besides its devices with `phone`); undefined without one. */
+export function phoneTags(spec: BancadaProtocol.PartSpec) {
+  if (!spec.needs.some((need) => need === "android-fisico" || need === "ios-fisico")) return undefined
+  return spec.phone?.tags ?? spec.device.tags ?? []
 }
 
 /** What a part needs from a machine: its capabilities, and the policy of its secrets. */

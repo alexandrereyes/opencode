@@ -371,7 +371,7 @@ export function unmet(spec: BancadaProtocol.PartSpec, capabilities: Readonly<Rec
     const phones = (
       capabilities[`${platform}-fisico`] as { aparelhos?: { etiquetas: string[]; conectado?: boolean }[] }
     )?.aparelhos
-    const tags = device.tags ?? []
+    const tags = spec.phone?.tags ?? device.tags ?? []
     if (
       phones &&
       !phones.some((phone) => phone.conectado !== false && tags.every((tag) => phone.etiquetas.includes(tag)))

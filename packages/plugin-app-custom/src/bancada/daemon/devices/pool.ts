@@ -153,8 +153,7 @@ export function makeDevicePool(input: {
         [string, string, number]
       >("SELECT spec, devices, lease_id, phone_hold FROM attempt WHERE job_id = ? AND part = ? AND n = ?")
       .get(key.job, key.part, key.attempt)
-    if (row?.phone_hold) return phone(key, dir, row.phone_hold, row.lease_id)
-    if (!row || row.devices === 0) return
+    if (!row || (row.devices === 0 && !row.phone_hold)) return
     const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
     if (spec.platform === "none") return
     const blocks = db
@@ -167,6 +166,18 @@ export function makeDevicePool(input: {
       input.log(`devices of ${attemptOf(key)} not ready: ${reason}`)
       await Bun.write(path.join(dir, "devices.error"), `${reason}\n`)
     }
+    const write = async (views: ReadonlyArray<Record<string, unknown>>) => {
+      // One device per line: a project's `run` in plain shell can read it.
+      await Bun.write(
+        path.join(dir, "devices.json.tmp"),
+        `{ "versao": 1, "aparelhos": [\n${views.map((view) => `  ${JSON.stringify(view)}`).join(",\n")}\n] }\n`,
+      )
+      await fs.rename(path.join(dir, "devices.json.tmp"), path.join(dir, "devices.json"))
+    }
+    // The phone its hold took at the offer (the last block of ports), then the devices it asks for besides.
+    const held = row.phone_hold ? phone(key, dir, row.phone_hold, blocks[row.devices] ?? blocks[0]) : undefined
+    if (typeof held === "string") return fail(held)
+    if (row.devices === 0) return write(held ? [held] : [])
     const driver = input.drivers()[spec.platform]
     const chosen = deviceFor(spec.platform, spec.device, { docker: input.docker ?? false, simslim: input.simslim() })
     if (!driver || !chosen) return fail(`esta máquina não liga aparelhos ${spec.platform}`)
@@ -191,35 +202,23 @@ export function makeDevicePool(input: {
     }
     ids.forEach((id) => set(id, { state: "em_uso" }))
     const views = started.flatMap((item) => (item.status === "fulfilled" ? [item.value] : []))
-    // One device per line: a project's `run` in plain shell can read it.
-    await Bun.write(
-      path.join(dir, "devices.json.tmp"),
-      `{ "versao": 1, "aparelhos": [\n${views.map((view) => `  ${JSON.stringify(view)}`).join(",\n")}\n] }\n`,
+    await write([...views, ...(held ? [held] : [])])
+    input.log(
+      `devices of ${attemptOf(key)} ready: ${ids.join(", ")}${held ? ` and the phone ${String(held.apelido)}` : ""}`,
     )
-    await fs.rename(path.join(dir, "devices.json.tmp"), path.join(dir, "devices.json"))
-    input.log(`devices of ${attemptOf(key)} ready: ${ids.join(", ")}`)
   }
 
   /**
-   * A test's phone (`docs/bancada.md`, "Phones"): the one its hold took, as it is connected now, written to its
-   * `devices.json`. Nothing is done on the phone: not cleared, restarted nor stopped, before or after.
+   * A test's phone (`docs/bancada.md`, "Phones"): the one its hold took, as it is connected now, for its
+   * `devices.json`; why not, when it is not connected. Nothing is done on the phone: not cleared, restarted nor
+   * stopped, before or after.
    */
-  const phone = async (key: Placed, dir: string, hold: string, lease: string) => {
+  const phone = (key: Placed, dir: string, hold: string, slot: Range | undefined) => {
     const target = db.query<{ target: string }, [string]>("SELECT target FROM hold WHERE id = ?").get(hold)
     const alias = target ? (JSON.parse(target.target) as { device: string }).device : undefined
     const found = alias ? input.phone?.find(alias) : undefined
     const serial = alias ? input.phone?.serial(alias) : undefined
-    if (!found || !serial) {
-      input.log(`the phone of ${attemptOf(key)} is not connected`)
-      await Bun.write(path.join(dir, "devices.error"), `o celular ${alias ?? ""} não está conectado\n`)
-      return
-    }
-    const slot = db
-      .query<
-        { start: number; end: number },
-        [string]
-      >("SELECT port_start AS start, port_end AS end FROM lease_device WHERE lease_id = ? ORDER BY rowid")
-      .get(lease)
+    if (!found || !serial) return `o celular ${alias ?? ""} não está conectado`
     db.run(
       "INSERT INTO device (id, kind, profile, choice, spec, state, running, attempt, part_dir, falls, last_used_at) VALUES (?, ?, 'estoque', 'fisico', ?, 'em_uso', ?, ?, ?, 0, ?) ON CONFLICT (id) DO UPDATE SET state = 'em_uso', running = excluded.running, attempt = excluded.attempt, part_dir = excluded.part_dir, mute_since = NULL, last_used_at = excluded.last_used_at",
       [
@@ -247,12 +246,8 @@ export function makeDevicePool(input: {
       host: null,
       maquina: input.phone!.machine(),
     }
-    await Bun.write(
-      path.join(dir, "devices.json.tmp"),
-      `{ "versao": 1, "aparelhos": [\n  ${JSON.stringify(view)}\n] }\n`,
-    )
-    await fs.rename(path.join(dir, "devices.json.tmp"), path.join(dir, "devices.json"))
     input.log(`the phone ${found.alias} (${serial}) is ${attemptOf(key)}'s`)
+    return view
   }
 
   /** Gives back every device of an attempt, stopped and clean; two falls in a row put one 30 min aside. */

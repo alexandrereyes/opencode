@@ -76,6 +76,21 @@ describe("project contract", () => {
     ])
   })
 
+  test("an emulator and a phone in one test: the phone's tags apart, and the need that takes it to a phone's machine", () => {
+    const parsed = read(
+      `versao = 1\n[teste.real]\nprecisa = ["android"]\naparelho = { api = ">=36" }\naparelhos = { min = 1, max = 1 }\ncelular = { etiquetas = ["whatsapp-business"] }\nrun = "scripts/run"`,
+    )
+    if (!parsed.ok) throw new Error(parsed.problems.join("\n"))
+    expect(partSpec(parsed.contract.tests.real!)).toMatchObject({
+      platform: "android",
+      needs: ["android", "android-fisico"],
+      device: { api: ">=36" },
+      devices: { min: 1, max: 1 },
+      phone: { tags: ["whatsapp-business"] },
+      unsafe: true,
+    })
+  })
+
   test("a symlinked command is left to run time; docker alone is fine for a test without devices", () => {
     expect(
       read(`versao = 1\n[teste.a]\nprecisa = ["docker"]\naparelhos = { min = 0, max = 0 }\nrun = "scripts/link"`),
@@ -177,6 +192,21 @@ describe("project contract", () => {
     ["rotulo em duas linhas", test1(`rotulo = "a\\nb"`), "teste.a.rotulo: de 1 a 40 caracteres, numa linha só"],
     ["prazo_min", test1(`prazo_min = 0`), "teste.a.prazo_min: precisa ser um número de minutos maior que zero"],
     ["segredos", test1(`segredos = "minha policy"`), "teste.a.segredos: nome de policy inválido"],
+    [
+      "celular num teste só de celular",
+      `versao = 1\n[teste.a]\nprecisa = ["android-fisico"]\ncelular = { etiquetas = ["x"] }\nrun = "scripts/run"`,
+      "teste.a.celular: é para um teste com emulador ou simulador e celular",
+    ],
+    [
+      "celular sem aparelhos",
+      `versao = 1\n[teste.a]\nprecisa = ["android"]\naparelhos = { min = 0, max = 0 }\ncelular = {}\nrun = "scripts/run"`,
+      'teste.a.celular: o teste precisa de "android" ou "ios" e de aparelhos com max de pelo menos 1',
+    ],
+    [
+      "celular com chave desconhecida",
+      test1(`celular = { apelido = "poco" }`),
+      "teste.a.celular.apelido: chave desconhecida",
+    ],
   ])("refuses: %s", (_name, text, problem) => {
     const parsed = read(text)
     expect(parsed.ok).toBe(false)

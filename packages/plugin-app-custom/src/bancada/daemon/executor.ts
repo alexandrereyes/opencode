@@ -5,7 +5,7 @@ import { BancadaProtocol } from "../protocol.js"
 import { evidence, judge, type Ending } from "../results.js"
 import { open, step, type Brake, type Reading } from "./brake.js"
 import { unmet } from "./capabilities.js"
-import { seat } from "./scheduler.js"
+import { phoneTags, seat } from "./scheduler.js"
 import { add, free as budgetFree, largestFit, measured, room, samples, times, zero, type Cost } from "./budget.js"
 import { deviceFor } from "./devices/types.js"
 import { block } from "./devices/ports.js"
@@ -432,13 +432,14 @@ export function makeExecutor(input: {
     if (secrets && !limits.secrets.includes(secrets))
       return refuse({ code: "sem_maquina", text: `a policy ${secrets} não está na lista segredos desta máquina` })
     // A phone first (`docs/bancada.md`, "Phones"): the part's other devices only once it has one.
-    const physical = seat(message.spec) === "none" && message.spec.platform !== "none"
+    const tags = phoneTags(message.spec)
+    const physical = tags !== undefined
     const phoneHold = physical ? `p-${input.random()}` : undefined
     if (
       phoneHold &&
       !input.phone?.take({
         platform: message.spec.platform as "android" | "ios",
-        tags: message.spec.device.tags ?? [],
+        tags: tags ?? [],
         origin: message.origin,
         attempt: `${message.job}/${message.part}/${message.attempt}`,
         hold: phoneHold,

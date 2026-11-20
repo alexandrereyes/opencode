@@ -6,7 +6,7 @@ import path from "node:path"
 import { inspect } from "../src/bancada/commands"
 import { createCore, type Machine } from "../src/bancada/daemon/core"
 import { makePhones, type Run } from "../src/bancada/daemon/devices/physical"
-import { makeDevicePool } from "../src/bancada/daemon/devices/pool"
+import { makeDevicePool, type Driver } from "../src/bancada/daemon/devices/pool"
 import type { Launcher } from "../src/bancada/daemon/executor"
 import { migrate } from "../src/bancada/daemon/schema"
 import type { Phone } from "../src/bancada/machine-config"
@@ -117,7 +117,7 @@ const idle: Launcher = {
 }
 
 /** The Mac as the hub, with the catalog above and its phones as the fake adb shows them. */
-async function mac(more: Partial<Phone>[] = []) {
+async function mac(more: Partial<Phone>[] = [], android = 0) {
   const it = fakes()
   await it.phones.refresh()
   const clock = { now: 1_000_000 }
@@ -142,8 +142,8 @@ async function mac(more: Partial<Phone>[] = []) {
           })),
       },
     },
-    // Room for no emulator: a phone's test never waits for one.
-    capacity: { memMb: 64_000, cpuMilli: 16_000, builds: 1, android: 0, ios: 0 },
+    // By default room for no emulator: a phone's test never waits for one.
+    capacity: { memMb: 64_000, cpuMilli: 16_000, builds: 1, android, ios: 0 },
     phones,
     prefix: "bancada-",
   }
@@ -172,6 +172,15 @@ const physical: BancadaProtocol.PartSpec = {
   unsafe: true,
   build: true,
   args: [],
+}
+/** An emulator and a phone in one test (`celular`). */
+const both: BancadaProtocol.PartSpec = {
+  ...physical,
+  part: "real",
+  label: "Conta real",
+  needs: ["android", "android-fisico"],
+  device: {},
+  phone: { tags: ["whatsapp-business"] },
 }
 const code = { project: "exemplo", commit: "3417b7e3c0ffee5d1c2b3a4f5e6d7c8b9a0f1e2d", remotes: [], inRemote: false }
 
@@ -295,6 +304,66 @@ describe("a phone in devices.json", () => {
     expect(done).toEqual(["j-33333333/whatsapp/1"])
     // Nothing was run on the phone to give it back.
     expect(it.asked.slice(before)).toEqual([])
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+})
+
+describe("an emulator and a phone in one test", () => {
+  test("the phone first, the emulator from the budget; without room for the emulator the phone goes back", async () => {
+    const cramped = await mac()
+    cramped.core.submit({ id: "j-44444444", sessionID: "ses_a", rootSessionID: "ses_a", code, parts: [both] })
+    await cramped.core.tick()
+    expect(cramped.db.query("SELECT * FROM attempt").all()).toEqual([])
+    expect(cramped.db.query("SELECT id FROM hold WHERE state = 'concedida'").all()).toEqual([])
+
+    const it = await mac([], 1)
+    it.core.submit({ id: "j-55555555", sessionID: "ses_a", rootSessionID: "ses_a", code, parts: [both] })
+    await it.core.tick()
+    const attempt = it.db
+      .query<{ phone_hold: string; devices: number }, []>("SELECT phone_hold, devices FROM attempt")
+      .get()
+    expect(attempt?.devices).toBe(1)
+    expect(JSON.parse(it.core.holds.decided(attempt!.phone_hold)!.target)).toEqual({ kind: "fisico", device: "poco" })
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-phone-"))
+    const emulator: Driver = {
+      kind: "android-emulador",
+      choose: async () => ({ key: "a36", spec: {}, name: (n) => `bancada-a36-${n}` }),
+      ready: async (device, slot) => ({
+        view: {
+          id: device.id,
+          tipo: "android-emulador",
+          serial: "emulator-5740",
+          portas: { inicio: slot.start, fim: slot.end },
+        },
+        run: { serial: "emulator-5740" },
+      }),
+      health: async () => "ok",
+      giveBack: async () => {},
+    }
+    const pool = makeDevicePool({
+      db: it.db,
+      now: () => it.clock.now,
+      drivers: () => ({ android: emulator }),
+      emulatorPorts: { start: 5740, end: 5799 },
+      simslim: () => false,
+      phone: {
+        find: (alias) => catalog.find((item) => item.alias === alias),
+        serial: it.phones.serial,
+        connected: it.phones.connected,
+        done: () => {},
+        machine: () => "Mac de Alexandre",
+      },
+      log: () => {},
+    })
+    pool.prepare({ job: "j-55555555", part: "real", attempt: 1, group: "g" }, dir)
+    await pool.settled()
+    const view = JSON.parse(await Bun.file(path.join(dir, "devices.json")).text())
+    expect(view.aparelhos.map((item: { id: string; tipo: string }) => [item.id, item.tipo])).toEqual([
+      ["bancada-a36-1", "android-emulador"],
+      ["IBHUYT85ZTYH5XDM", "android-fisico"],
+    ])
+    // Each its own block of the project's ports.
+    expect(view.aparelhos[0].portas).not.toEqual(view.aparelhos[1].portas)
     await fs.rm(dir, { recursive: true, force: true })
   })
 })

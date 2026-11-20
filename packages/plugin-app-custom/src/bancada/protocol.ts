@@ -125,6 +125,8 @@ export const PartSpec = Schema.Struct({
   needs: Schema.Array(Schema.String),
   device: DeviceSpec,
   devices: Schema.Struct({ min: Count, max: Count }),
+  /** A phone besides the devices (`celular`); a test with a phone only asks for it by `needs` and `device.tags`. */
+  phone: optional(Schema.Struct({ tags: Schema.Array(Schema.String) })),
   exclusive: Schema.Array(Schema.String),
   secrets: optional(Schema.String),
   unsafe: Schema.Boolean,

@@ -19,6 +19,8 @@ export type Test = {
   readonly needs: ReadonlyArray<string>
   readonly device: BancadaProtocol.DeviceSpec
   readonly devices: { readonly min: number; readonly max: number }
+  /** A phone besides the emulators or simulators (`celular`): the platform's, with these tags. */
+  readonly phone?: { readonly tags: ReadonlyArray<string> }
   readonly build?: Command
   readonly plan?: Command
   readonly run: Command
@@ -61,6 +63,7 @@ const testKeys = new Set([
   "prazo_min",
   "exclusivo",
   "segredos",
+  "celular",
 ])
 const deviceKeys = new Set(["api", "ios", "modelo", "google_play", "enxuto", "etiquetas"])
 
@@ -109,6 +112,7 @@ export function partSpec(test: Test, args: ReadonlyArray<string> = []): BancadaP
     needs: [...test.needs],
     device: test.device,
     devices: test.devices,
+    ...(test.phone ? { phone: { tags: [...test.phone.tags] } } : {}),
     exclusive: [...test.exclusive],
     ...(test.secrets ? { secrets: test.secrets } : {}),
     // A physical device, an exclusive lock or secrets: never run again without a confirmed end (`docs/bancada.md`).
@@ -209,6 +213,13 @@ function resolve(name: string, raw: Raw, mode: Mode | undefined, problems: strin
     problems.push(`${at}.precisa: um teste usa aparelhos de um tipo só; separe Android e iOS em dois testes`)
   if (isPhysical && devices.max > 1) problems.push(`${at}.aparelhos: um teste com celular usa no máximo 1 aparelho`)
   const device = deviceSpec(raw.aparelho, `${at}.aparelho`, isPhysical, problems)
+  const phone = phoneSpec(raw.celular, `${at}.celular`, problems)
+  if (phone && isPhysical)
+    problems.push(
+      `${at}.celular: é para um teste com emulador ou simulador e celular; só com celular, use precisa = ["${kinds[0] ?? "android"}-fisico"]`,
+    )
+  if (phone && !isPhysical && (kinds.length !== 1 || devices.max === 0))
+    problems.push(`${at}.celular: o teste precisa de "android" ou "ios" e de aparelhos com max de pelo menos 1`)
   const build = raw.build === undefined ? undefined : command(raw.build, `${at}.build`, mode, problems)
   const plan = raw.plan === undefined ? undefined : command(raw.plan, `${at}.plan`, mode, problems)
   const run = raw.run === undefined ? undefined : command(raw.run, `${at}.run`, mode, problems)
@@ -227,9 +238,11 @@ function resolve(name: string, raw: Raw, mode: Mode | undefined, problems: strin
   return {
     name,
     label,
-    needs,
+    // The phone takes the hub to a machine that has one.
+    needs: phone ? [...needs, `${kinds[0]}-fisico`] : needs,
     device,
     devices,
+    ...(phone ? { phone } : {}),
     ...(build ? { build } : {}),
     ...(plan ? { plan } : {}),
     run,
@@ -273,6 +286,17 @@ function deviceSpec(value: unknown, at: string, isPhysical: boolean, problems: s
     slim: slim === "exige" || slim === "recusa" ? slim : "aceita",
     ...(tags ? { tags } : {}),
   }
+}
+
+/** `celular = { etiquetas = [...] }`: a phone besides the emulators. */
+function phoneSpec(value: unknown, at: string, problems: string[]) {
+  if (value === undefined) return undefined
+  if (!isTable(value)) {
+    problems.push(`${at}: precisa ser uma tabela ({ etiquetas = ["whatsapp-business"] }, por exemplo)`)
+    return undefined
+  }
+  unknownKeys(value, new Set(["etiquetas"]), at, problems)
+  return { tags: list(value.etiquetas, `${at}.etiquetas`, problems) }
 }
 
 function count(value: unknown, at: string, problems: string[]) {
