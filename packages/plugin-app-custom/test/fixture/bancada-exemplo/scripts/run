@@ -2,7 +2,8 @@
 # `run` do projeto de exemplo: o comportamento vem dos argumentos, para os testes da Bancada injetarem cada caso.
 # --cenarios N; --falha <id> (falha com mensagem e evidência); --perde <id> (não grava o resultado); --dorme <s>;
 # --sai <código>; --sem-summary; --sem-planned; --marca <arquivo> (copia um arquivo do checkout para a saída: prova de
-# que rodou naquele commit); --ambiente (grava em ambiente.txt os nomes das variáveis que recebeu). Com BANCADA_APENAS,
+# que rodou naquele commit); --ambiente (grava em ambiente.txt os nomes das variáveis que recebeu); --conteiner (deixa
+# rodando um contêiner com o rótulo BANCADA_DOCKER_LABEL, que a Bancada apaga no fim). Com BANCADA_APENAS,
 # roda só aqueles cenários. Com aparelhos no BANCADA_DEVICES, prova que cada um chegou pronto, um cenário por item
 # (Android: ligado, limpo, Wi-Fi desligado, alcança a porta concedida na máquina; iOS: ligado, limpo, captura de tela,
 # porta livre; e faixas de porta que não se repetem), com captura de tela do aparelho como evidência do que falha.
@@ -17,6 +18,7 @@ sem_summary=""
 sem_planned=""
 marca=""
 ambiente=""
+conteiner=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --cenarios) cenarios=$2; shift 2 ;;
@@ -28,6 +30,7 @@ while [ "$#" -gt 0 ]; do
     --sem-planned) sem_planned=1; shift ;;
     --marca) marca=$2; shift 2 ;;
     --ambiente) ambiente=1; shift ;;
+    --conteiner) conteiner=1; shift ;;
     *) shift ;;
   esac
 done
@@ -89,6 +92,7 @@ if [ -z "$sem_planned" ] && [ ! -f "$out/planned.json" ]; then
 fi
 if [ -n "$marca" ]; then cp "$marca" "$out/marca"; fi
 if [ -n "$ambiente" ]; then env | sed 's/=.*//' | sort > "$out/ambiente.txt"; fi
+if [ -n "$conteiner" ]; then docker run -d --label "$BANCADA_DOCKER_LABEL" alpine:latest sleep 600 > "$out/conteiner.txt"; fi
 echo "rodando:$ids"
 sleep "$dorme"
 

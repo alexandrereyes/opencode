@@ -70,7 +70,6 @@ const config = (text = ""): MachineConfig => {
   const parsed = parseMachineConfig(`versao = 1\n[execucao]\nmodo = "processo"\n${text}`, {
     memMb: 131_072,
     cores: 16,
-    inDocker: false,
     platform: "darwin",
   })
   if (!parsed.ok) throw new Error(parsed.problems.join("\n"))

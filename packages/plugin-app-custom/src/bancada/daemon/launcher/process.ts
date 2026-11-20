@@ -6,7 +6,6 @@ import { Option, Schema } from "effect"
 import type { Ending } from "../../results.js"
 import { CodeMissing, type Launch, type Launcher, type Placed, type Status } from "../executor.js"
 import type { Git } from "../git.js"
-import type { DockerExecutions } from "./docker.js"
 import { seat } from "../scheduler.js"
 import { createOnce, runFlag, type Attempt, type Claim, type Event, type PartStatus } from "../runner.js"
 import { sha256 } from "../blobs.js"
@@ -169,8 +168,8 @@ export function makeProcessLauncher(input: {
   readonly wake?: () => void
   /** Whose way of asking about a process: `/proc` on Linux, `ps` off the round elsewhere. */
   readonly platform?: NodeJS.Platform
-  /** The Docker mode: each runner in a sibling container (`launcher/docker.ts`), known by the container's state. */
-  readonly container?: DockerExecutions
+  /** The `docker` command where its daemon answers: what a test started with its label goes when it ends. */
+  readonly docker?: () => string | undefined
   readonly log?: (line: string) => void
 }): Launcher {
   const folder = (key: { job: string; group: string }) => path.join(input.state, "attempts", key.job, key.group)
@@ -243,25 +242,13 @@ export function makeProcessLauncher(input: {
     const beat = from === "round" ? await json<{ at: number }>(path.join(dir, "heartbeat")) : undefined
     const every = attempt.timing?.heartbeatMs ?? defaults.heartbeatMs
     if (beat && input.now() - beat.at < defaults.beats * every) return "alive"
-    // In a container its pid is another namespace's: the container's state says.
-    if (input.container) {
-      const container = await input.container.state(key)
-      if (container === "unknown") return "unknown"
-      return container !== "absent" && container.running ? "alive" : "dead"
-    }
     const life = from === "reap" ? await liveness(claim.pid, platform) : await ask(key, claim)
     if (life.state === "unknown") return "unknown"
     return life.state === "alive" && life.started === claim.startedAt ? "alive" : "dead"
   }
 
   /** How an attempt ended, from its folder: the status the runner wrote, the project's two files, the log's end. */
-  const ending = async (
-    dir: string,
-    attempt: Stored,
-    part: string,
-    status: PartStatus | undefined,
-    key: { job: string; group: string },
-  ) => {
+  const ending = async (dir: string, attempt: Stored, part: string, status: PartStatus | undefined) => {
     const events = await text(path.join(dir, "events.jsonl"))
     const stage = status?.stage ?? (events.includes('"type":"run.start"') ? "run" : "build")
     const out = path.join(dir, "parts", part, "out")
@@ -270,20 +257,12 @@ export function makeProcessLauncher(input: {
     const only = attempt.parts.find((item) => item.part === part)?.only
     const summary = await json(path.join(out, "summary.json"))
     const failedRun = status?.cause !== undefined || status?.exit !== 0 || status === undefined
-    // A runner gone without a status, in a container: the container says why (memory, a signal).
-    const died = !status && input.container ? await input.container.state(key) : undefined
-    const why =
-      died && died !== "absent" && died !== "unknown"
-        ? died.oom
-          ? "estourou a memória do contêiner"
-          : `o contêiner da execução terminou com o código ${died.exit}`
-        : undefined
     return {
       stage,
       ...(status?.exit === undefined ? {} : { exit: status.exit }),
       ...(status?.signal ? { signal: status.signal } : {}),
       ...(status ? (status.cause ? { cause: status.cause } : {}) : { cause: "runner_morto" as const }),
-      ...(status?.reason ? { reason: status.reason } : why ? { reason: why } : {}),
+      ...(status?.reason ? { reason: status.reason } : {}),
       ...(status?.sleptMs ? { sleptMs: status.sleptMs } : {}),
       // The devices the Bancada saw fall while it ran (`devices/pool.ts`).
       ...((await text(path.join(dir, "parts", part, "caiu")))
@@ -336,7 +315,7 @@ export function makeProcessLauncher(input: {
     const read = () => json<PartStatus>(path.join(dir, "parts", key.part, "status.json"))
     const attempt = await stored(dir)
     const written = await read()
-    if (attempt && written) return { state: "done", ending: await ending(dir, attempt, key.part, written, key) }
+    if (attempt && written) return { state: "done", ending: await ending(dir, attempt, key.part, written) }
     const claim = await json<Claim>(path.join(dir, "runner.json"))
     if (!claim) return unclaimed(key, dir)
     if ("revoked" in claim) return { state: "gone", reason: "a execução não começou" }
@@ -348,7 +327,7 @@ export function makeProcessLauncher(input: {
         state: (await text(path.join(dir, "events.jsonl"))).includes('"type":"run.start"') ? "rodando" : "compilando",
       }
     // The runner is gone (or another process took its pid): it may have written the status just before.
-    return { state: "done", ending: await ending(dir, attempt, key.part, await read(), key) }
+    return { state: "done", ending: await ending(dir, attempt, key.part, await read()) }
   }
 
   /**
@@ -381,12 +360,39 @@ export function makeProcessLauncher(input: {
       (await runner({ ...key, part: "", attempt: 0 }, dir, attempt, claim, "reap")) !== "dead"
     )
       return { free: false, commit: attempt.commit }
-    // Whatever ran in the container ended with it.
-    if (input.container) return { free: true, ...(attempt ? { commit: attempt.commit } : {}) }
     const open = openCommands(await text(path.join(dir, "events.jsonl")))
     const grace = attempt?.timing?.killGraceMs ?? defaults.killGraceMs
     const results = await Promise.all(open.map((command) => orphan(command.pid, command.startedAt, grace)))
-    return { free: results.every(Boolean), ...(attempt ? { commit: attempt.commit } : {}) }
+    const free = results.every(Boolean)
+    if (free) await containers(key)
+    return { free, ...(attempt ? { commit: attempt.commit } : {}) }
+  }
+
+  /** What the attempt's commands started in Docker with `BANCADA_DOCKER_LABEL`: removed once they all ended. */
+  const containers = async (key: { job: string; group: string }) => {
+    const docker = input.docker?.()
+    if (!docker) return
+    const filter = `label=${dockerLabel(key)}`
+    const run = async (argv: string[]) => {
+      const child = Bun.spawn([docker, ...argv], { stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 })
+      const [out, err, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ])
+      if (code !== 0) input.log?.(`docker ${argv.slice(0, 2).join(" ")} for ${name(key)} failed: ${err.trim()}`)
+      return out.split("\n").filter(Boolean)
+    }
+    for (const [kind, remove] of [
+      ["container", ["rm", "-f"]],
+      ["network", ["rm"]],
+      ["volume", ["rm", "-f"]],
+    ] as const) {
+      const left = await run([kind, "ls", ...(kind === "container" ? ["-a"] : []), "-q", "--filter", filter])
+      if (left.length === 0) continue
+      input.log?.(`removing what ${name(key)} left in Docker: ${left.length} ${kind}(s)`)
+      await run(kind === "container" ? [...remove, ...left] : [kind, ...remove, ...left])
+    }
   }
 
   return {
@@ -400,12 +406,6 @@ export function makeProcessLauncher(input: {
         const aside = `${copy}.${input.random()}.tmp`
         await fs.copyFile(source, aside)
         await fs.rename(aside, copy)
-      }
-      if (input.container) {
-        const attempt = await stored(dir)
-        await input.container.start(launch, [copy, runFlag, dir], dir, attempt?.workdir ?? dir)
-        given.set(name(launch), input.now())
-        return
       }
       const log = openSync(path.join(dir, "runner.log"), "a", 0o600)
       const child = Bun.spawn([process.execPath, copy, runFlag, dir], {
@@ -431,7 +431,6 @@ export function makeProcessLauncher(input: {
     stop: async (key) => {
       const dir = folder(key)
       const attempt = await stored(dir)
-      if (input.container) return input.container.stop(key)
       const claim = await json<Claim>(path.join(dir, "runner.json"))
       if (!claim || !("pid" in claim)) return
       await orphan(claim.pid, claim.startedAt, attempt?.timing?.killGraceMs ?? defaults.killGraceMs, platform)
@@ -474,7 +473,6 @@ export function makeProcessLauncher(input: {
       if (input.workdirs.held().some((held) => held.owner === name(key)))
         throw new Error("a pasta de trabalho ainda está presa à tentativa")
       forget(key)
-      await input.container?.remove(key)
       const dir = folder(key)
       const attempt = await stored(dir)
       if (attempt)
@@ -541,7 +539,7 @@ export function makeProcessLauncher(input: {
       ...(input.timing ? { timing: input.timing } : {}),
       lowPriority: input.lowPriority === true,
       // Containers the project starts carry it (`docs/bancada.md`, "Project contract"), on every machine.
-      env: { BANCADA_DOCKER_LABEL: `bancada.job=${launch.job}` },
+      env: { BANCADA_DOCKER_LABEL: dockerLabel(launch) },
     }
     for (const part of launch.parts) {
       await fs.mkdir(path.join(dir, "parts", part.part, "out"), { recursive: true })
@@ -635,3 +633,8 @@ function group(pid: number, name: "SIGTERM" | "SIGKILL") {
 
 /** `attempt.json` as this process writes it: the runner's fields and where its working folder is. */
 type Stored = Attempt & { readonly workdirID: string; readonly project: string }
+
+/** The label of what a group's commands start in Docker (`BANCADA_DOCKER_LABEL`): one per runner. */
+export function dockerLabel(key: { job: string; group: string }) {
+  return `bancada.job=${key.job}/${key.group}`
+}

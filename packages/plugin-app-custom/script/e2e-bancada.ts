@@ -7,7 +7,8 @@
 //     real devices: a session of the hub asks android and ios, which run on the other server's real emulator and
 //     simulator `bancada-test-…`, ready and given back; one notice.
 //   bun e2e-bancada.ts linux --binary <opencode> --plugin <index.js> --scratch <folder> --example <bancada-exemplo>
-//     host-6: android in a sibling container with an emulator in a container, with limits, everything removed;
+//     host-6: android + docker as a process of this container with an emulator in a container, reaching the run at
+//     this container's address; what the run left in Docker with its label, removed;
 //     the executor's server restarted mid-run: one result; the origin's process killed between the message and the
 //     ack: one message.
 //
@@ -329,7 +330,7 @@ async function linux() {
     name: "lhub",
     port: 47_521,
     hub: true,
-    machine: `versao = 1\nprefixo = "bancada-test-lhub-"\nrotulos = ["purpose=bancada-test"]\n[orcamento]\nmemoria_gb = 32\ncpu = 16\nmax_android = 1\n[execucao]\nmodo = "docker"\ncpus = 4\nmemoria_gb = 6\n[android.docker]\nimagem = "opencode-android:emu37.2.13-api36-google-r7"\nrede = "opencode-android-private"\ncpus_por_emulador = 4\nmemoria_por_emulador_gb = 6\n[portas]\nemulador = "5760-5779"\nprojeto = "48300-48399"\n${times}`,
+    machine: `versao = 1\nprefixo = "bancada-test-lhub-"\nrotulos = ["purpose=bancada-test"]\n[orcamento]\nmemoria_gb = 32\ncpu = 16\nmax_android = 1\n[execucao]\nmodo = "processo"\n[android.docker]\nimagem = "opencode-android:emu37.2.13-api36-google-r7"\nrede = "opencode-android-private"\ncpus_por_emulador = 4\nmemoria_por_emulador_gb = 6\naquecido_min = 0\n[portas]\nemulador = "5760-5779"\nprojeto = "48300-48399"\n${times}`,
   })
   await start(
     {
@@ -349,11 +350,12 @@ async function linux() {
   }, 120_000)
   await Bun.sleep(10_000)
 
-  // host-6: android from the machine's session runs on the hub, in a sibling container, with an emulator container.
+  // host-6: android + docker from the machine's session runs on the hub as a process of this container, with an
+  // emulator container; the container its run leaves behind with its label goes at the end.
   {
     const sessionID = await session("lmaq", "Android em contêiner")
-    const job = await submit("lmaq", sessionID, ["android"])
-    const seen = { run: "", emulator: "", done: false }
+    const job = await submit("lmaq", sessionID, ["servidor"], { servidor: ["--conteiner"] })
+    const seen = { run: "", emulator: "", labelled: "", done: false }
     const watcher = (async () => {
       while (!seen.done) {
         const listed = Bun.spawnSync([
@@ -377,7 +379,20 @@ async function linux() {
           if (name.includes("-run-")) seen.run ||= `${name}: ${inspected}`
           if (name.includes("-emu-")) seen.emulator ||= `${name}: ${inspected}`
         }
-        if (seen.run && seen.emulator) return
+        seen.labelled ||= Bun.spawnSync([
+          "docker",
+          "ps",
+          "-a",
+          "--filter",
+          `label=bancada.job`,
+          "--format",
+          "{{.Names}} {{.Labels}}",
+        ])
+          .stdout.toString()
+          .split("\n")
+          .filter((line) => line.includes(job))
+          .join("; ")
+        if (seen.emulator && seen.labelled) return
         await Bun.sleep(2_000)
       }
     })()
@@ -387,14 +402,23 @@ async function linux() {
     await watcher.catch(() => undefined)
     await Bun.sleep(20_000)
     const containers = (await leftovers()).filter((item) => item.startsWith("container:"))
+    const labelled = Bun.spawnSync(["docker", "ps", "-aq", "--filter", "label=bancada.job"])
+      .stdout.toString()
+      .split("\n")
+      .filter(Boolean)
+      .filter((id) =>
+        Bun.spawnSync(["docker", "inspect", id, "--format", "{{json .Config.Labels}}"]).stdout.toString().includes(job),
+      )
     record(
       "host-6 de verdade",
       texts.length === 1 &&
         texts[0]!.startsWith(`[Bancada] ${job} terminou: aprovado`) &&
-        seen.run.includes(" 4000000000 6442450944 2048 ") &&
+        seen.run === "" &&
         seen.emulator !== "" &&
+        seen.labelled !== "" &&
+        labelled.length === 0 &&
         containers.length === 0,
-      `${texts.length} aviso(s): ${texts.map((text) => text.split("\n").slice(0, 2).join(" / ")).join(" | ")}; execução: ${seen.run}; emulador: ${seen.emulator.split(" ")[0]}; contêineres depois: ${containers.length}`,
+      `${texts.length} aviso(s): ${texts.map((text) => text.split("\n").slice(0, 2).join(" / ")).join(" | ")}; contêiner de execução: ${seen.run || "nenhum"}; emulador: ${seen.emulator.split(" ")[0]}; deixado pelo run: ${seen.labelled}; depois: ${labelled.length} com o rótulo, ${containers.length} da Bancada`,
     )
   }
 

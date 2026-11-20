@@ -32,6 +32,7 @@ async function setup(
     readonly graceMs?: number
     readonly heartbeatMs?: number
     readonly sleepGapMs?: number
+    readonly docker?: string
   } = {},
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-runner-"))
@@ -73,6 +74,7 @@ async function setup(
       ...(more.wake ? { wake: more.wake } : {}),
       ...(options.graceMs ? { startGraceMs: options.graceMs } : {}),
       ...((more.runner ?? options.runner) ? { runner: more.runner ?? options.runner } : {}),
+      ...(options.docker ? { docker: () => options.docker } : {}),
     })
   return { root, repository, state, workdirs, launcher: launcher(), restarted: launcher }
 }
@@ -333,6 +335,43 @@ describe("detached execution", () => {
   }, 20_000)
 
   // Heartbeats every 10 s: a just-ended runner's beat stays fresh far longer than the giving back may take.
+  test("what the run left in Docker with BANCADA_DOCKER_LABEL goes once the attempt's commands ended", async () => {
+    // A `docker` that records what it is asked: `run` starts c-1; listing by the label finds it once it ran.
+    const root = await scratch()
+    const docker = path.join(root, "bin", "docker")
+    const asked = path.join(root, "docker.log")
+    await Bun.write(
+      docker,
+      [
+        "#!/usr/bin/env bash",
+        `printf '%s\\n' "$*" >> ${JSON.stringify(asked)}`,
+        'if [ "$1" = run ]; then echo c-1; exit 0; fi',
+        'if [ "$1 $2" = "container ls" ]; then last=${!#}; grep -q -- "--label ${last#label=} " ' +
+          JSON.stringify(asked) +
+          " && echo c-1; fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+    )
+    await fs.chmod(docker, 0o755)
+    const context = await setup({ docker })
+    const path0 = process.env.PATH
+    process.env.PATH = `${path.dirname(docker)}:${path0}`
+    const { key } = await launch(context, { job: "j-dddddddd", args: ["--conteiner"] }).finally(() => {
+      process.env.PATH = path0
+    })
+    await until(context.launcher, key, ended)
+    await reaped(context)
+    const lines = (await Bun.file(asked).text()).trim().split("\n")
+    expect(lines[0]).toBe("run -d --label bancada.job=j-dddddddd/simples-1 alpine:latest sleep 600")
+    expect(lines.slice(1)).toEqual([
+      "container ls -a -q --filter label=bancada.job=j-dddddddd/simples-1",
+      "rm -f c-1",
+      "network ls -q --filter label=bancada.job=j-dddddddd/simples-1",
+      "volume ls -q --filter label=bancada.job=j-dddddddd/simples-1",
+    ])
+  }, 20_000)
+
   test("giving back asks the system whether the runner left, whatever its fresh heartbeat says", async () => {
     const context = await setup({ heartbeatMs: 10_000 })
     const { key, dir } = await launch(context, { job: "j-tttttttt" })

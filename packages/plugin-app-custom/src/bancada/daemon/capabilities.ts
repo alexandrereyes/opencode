@@ -42,6 +42,8 @@ export type Discovery = {
   readonly android?: AndroidTools
   /** `simslim`, by absolute path, where there is one. */
   readonly simslim?: string
+  /** The `docker` command, by absolute path, where its daemon answers. */
+  readonly docker?: string
 }
 
 export async function discover(
@@ -50,14 +52,14 @@ export async function discover(
   /** Whether a phone is connected now, from what the Bancada keeps of them (`devices/physical.ts`). */
   connected?: (alias: string) => boolean,
 ): Promise<Discovery> {
-  const docker = config.execution.mode === "docker"
   const android = await androidTools(probe, config)
   const [emulators, ios, phones, dotnet, others] = await Promise.all([
-    docker ? dockerAndroid(probe, config) : androidCapability(probe, android),
+    // `[android.docker]`: the emulators are containers of that image (host-6); otherwise the SDK's.
+    config.android.docker ? dockerAndroid(probe, config) : androidCapability(probe, android),
     probe.platform === "darwin" ? iosCapability(probe) : undefined,
     phonesCapability(probe, config.phones, android, connected),
     dotnetCapabilities(probe),
-    versions(probe, android, docker),
+    versions(probe, android),
   ])
   return {
     found: {
@@ -65,10 +67,11 @@ export async function discover(
       ...(ios ? { ios: ios.capability } : {}),
       ...phones,
       ...dotnet,
-      ...others,
+      ...others.found,
     },
     ...(android ? { android } : {}),
     ...(ios?.path ? { simslim: ios.path } : {}),
+    ...(others.docker ? { docker: others.docker } : {}),
   }
 }
 
@@ -162,7 +165,7 @@ async function androidCapability(probe: Probe, tools: AndroidTools | undefined) 
   }
 }
 
-/** In the Docker mode: the machine file's emulator image exists; its API from its name (`…api36…`). */
+/** With `[android.docker]`: the machine file's emulator image exists; its API from its name (`…api36…`). */
 async function dockerAndroid(probe: Probe, config: MachineConfig) {
   const image = config.android.docker?.image
   if (!image) return undefined
@@ -318,11 +321,11 @@ async function dotnetCapabilities(probe: Probe) {
   }
 }
 
-/** `docker` (not in the Docker mode: an execution there has no socket), `xcode`, `node` and `java`, by version. */
-async function versions(probe: Probe, android: AndroidTools | undefined, docker: boolean) {
+/** `docker` (where its daemon answers), `xcode`, `node` and `java`, by version; and the `docker` command found. */
+async function versions(probe: Probe, android: AndroidTools | undefined) {
   const [dockerPath, nodePath] = await Promise.all([which(probe, "docker"), which(probe, "node")])
   const [engine, xcode, node, jdk] = await Promise.all([
-    docker || !dockerPath ? undefined : probe.run([dockerPath, "version", "--format", "{{.Server.Version}}"]),
+    dockerPath ? probe.run([dockerPath, "version", "--format", "{{.Server.Version}}"]) : undefined,
     probe.platform === "darwin" ? probe.run(["/usr/bin/xcodebuild", "-version"]) : undefined,
     nodePath ? probe.run([nodePath, "--version"]) : undefined,
     android?.javaHome ? probe.run([path.join(android.javaHome, "bin/java"), "-version"]) : undefined,
@@ -335,9 +338,12 @@ async function versions(probe: Probe, android: AndroidTools | undefined, docker:
     node: version(node, /v?(\d+\.\d+\.\d+)/),
     java: version(jdk, /version "?(\d+(?:\.\d+)*)/),
   }
-  return Object.fromEntries(
-    Object.entries(found).flatMap(([name, value]) => (value ? [[name, { versao: value }]] : [])),
-  )
+  return {
+    found: Object.fromEntries(
+      Object.entries(found).flatMap(([name, value]) => (value ? [[name, { versao: value }]] : [])),
+    ),
+    ...(found.docker && dockerPath ? { docker: dockerPath } : {}),
+  }
 }
 
 /**

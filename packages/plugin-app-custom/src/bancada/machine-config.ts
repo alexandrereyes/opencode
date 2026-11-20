@@ -47,13 +47,8 @@ export type MachineConfig = {
     readonly presence: { readonly idleMs: number; readonly factor: number }
   }
   readonly brake: BrakeConfig
-  readonly execution: {
-    readonly mode: "processo" | "docker"
-    readonly lowPriority: boolean
-    readonly cpus: number
-    readonly memMb: number
-    readonly pids: number
-  }
+  /** Executions are detached processes of this machine; at a low priority (`nice`) when the owner says. */
+  readonly execution: { readonly lowPriority: boolean }
   readonly link: { readonly waitMs: number; readonly blockBytes: number }
   readonly android: {
     readonly sdk?: string
@@ -100,11 +95,10 @@ export type Times = {
   readonly runMs: number
 }
 
-/** What the machine itself says, for the defaults: its memory, its cores, and whether this runs in a container with Docker. */
+/** What the machine itself says, for the defaults: its memory and its cores. */
 export type Host = {
   readonly memMb: number
   readonly cores: number
-  readonly inDocker: boolean
   /** Where the machine file is read: a Mac identifies itself with `ioreg` by default. */
   readonly platform?: NodeJS.Platform
 }
@@ -197,18 +191,45 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
     .filter((name) => !policy.test(name))
     .forEach((name) => problems.push(`segredos: "${name}" não é um nome de policy (letra ou número, depois . _ -)`))
 
-  const executionRaw = section(raw, "execucao", ["modo", "prioridade", "cpus", "memoria_gb", "processos"], problems)
-  const execution = {
-    mode: read.choice(
-      executionRaw.modo,
-      "execucao.modo",
-      ["processo", "docker"],
-      host.inDocker ? "docker" : "processo",
+  const androidRaw = section(raw, "android", ["sdk", "java_home", "docker"], problems)
+  const dockerRaw =
+    androidRaw.docker === undefined
+      ? undefined
+      : section(
+          androidRaw,
+          "docker",
+          ["imagem", "rede", "cpus_por_emulador", "memoria_por_emulador_gb", "aquecido_min"],
+          problems,
+          "android.",
+        )
+  const absolute = (value: unknown, at: string) => {
+    if (value === undefined) return undefined
+    const path = text1(value, at, problems)
+    if (path !== undefined && !path.startsWith("/")) problems.push(`${at}: precisa ser um caminho absoluto`)
+    return path
+  }
+  const sdk = absolute(androidRaw.sdk, "android.sdk")
+  const javaHome = absolute(androidRaw.java_home, "android.java_home")
+  const required = (value: unknown, at: string) => {
+    if (value === undefined) problems.push(`${at}: obrigatório`)
+    return value === undefined ? undefined : text1(value, at, problems)
+  }
+  const docker = dockerRaw && {
+    image: required(dockerRaw.imagem, "android.docker.imagem") ?? "",
+    network: required(dockerRaw.rede, "android.docker.rede") ?? "",
+    // An emulator in a container took 4 GB and ~2.7 cores (AbacatoV3's `linux.md`): its limits leave it room.
+    cpusPerEmulator: read.number(dockerRaw.cpus_por_emulador, "android.docker.cpus_por_emulador", { above: 0 }, 3),
+    memMbPerEmulator: Math.round(
+      read.number(dockerRaw.memoria_por_emulador_gb, "android.docker.memoria_por_emulador_gb", { above: 0 }, 6) * gb,
     ),
+    warmMs: read.number(dockerRaw.aquecido_min, "android.docker.aquecido_min", { min: 0 }, 15) * minute,
+  }
+
+  // Executions run as processes of this machine (on host-6, in the server's own container); `modo` stays readable.
+  const executionRaw = section(raw, "execucao", ["modo", "prioridade"], problems)
+  read.choice(executionRaw.modo, "execucao.modo", ["processo"], "processo")
+  const execution = {
     lowPriority: read.choice(executionRaw.prioridade, "execucao.prioridade", ["normal", "baixa"], "normal") === "baixa",
-    cpus: read.number(executionRaw.cpus, "execucao.cpus", { above: 0 }, Math.min(8, host.cores)),
-    memMb: Math.round(read.number(executionRaw.memoria_gb, "execucao.memoria_gb", { above: 0 }, 16) * gb),
-    pids: read.number(executionRaw.processos, "execucao.processos", { min: 1, integer: true }, 2048),
   }
 
   const budgetRaw = section(
@@ -229,10 +250,7 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
       "orcamento.max_android",
       { min: 0, integer: true },
       // As many as are worth it (measured), never more than one per two cores.
-      Math.min(
-        execution.mode === "docker" ? worthRunning.androidDocker : worthRunning.android,
-        Math.floor(host.cores / 2),
-      ),
+      Math.min(docker ? worthRunning.androidDocker : worthRunning.android, Math.floor(host.cores / 2)),
     ),
     maxIos: read.number(
       budgetRaw.max_ios,
@@ -300,40 +318,6 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
       read.number(linkRaw.bloco_kib, "link.bloco_kib", { min: 64, max: 32_768, integer: true }, 1_024) * 1_024,
   }
 
-  const androidRaw = section(raw, "android", ["sdk", "java_home", "docker"], problems)
-  const dockerRaw =
-    androidRaw.docker === undefined
-      ? undefined
-      : section(
-          androidRaw,
-          "docker",
-          ["imagem", "rede", "cpus_por_emulador", "memoria_por_emulador_gb", "aquecido_min"],
-          problems,
-          "android.",
-        )
-  const absolute = (value: unknown, at: string) => {
-    if (value === undefined) return undefined
-    const path = text1(value, at, problems)
-    if (path !== undefined && !path.startsWith("/")) problems.push(`${at}: precisa ser um caminho absoluto`)
-    return path
-  }
-  const sdk = absolute(androidRaw.sdk, "android.sdk")
-  const javaHome = absolute(androidRaw.java_home, "android.java_home")
-  const required = (value: unknown, at: string) => {
-    if (value === undefined) problems.push(`${at}: obrigatório`)
-    return value === undefined ? undefined : text1(value, at, problems)
-  }
-  const docker = dockerRaw && {
-    image: required(dockerRaw.imagem, "android.docker.imagem") ?? "",
-    network: required(dockerRaw.rede, "android.docker.rede") ?? "",
-    // An emulator in a container took 4 GB and ~2.7 cores (AbacatoV3's `linux.md`): its limits leave it room.
-    cpusPerEmulator: read.number(dockerRaw.cpus_por_emulador, "android.docker.cpus_por_emulador", { above: 0 }, 3),
-    memMbPerEmulator: Math.round(
-      read.number(dockerRaw.memoria_por_emulador_gb, "android.docker.memoria_por_emulador_gb", { above: 0 }, 6) * gb,
-    ),
-    warmMs: read.number(dockerRaw.aquecido_min, "android.docker.aquecido_min", { min: 0 }, 15) * minute,
-  }
-
   const portsRaw = section(raw, "portas", ["emulador", "projeto"], problems)
   const emulator = read.range(portsRaw.emulador, "portas.emulador", 2, defaults.ports.emulator)
   const project = read.range(portsRaw.projeto, "portas.projeto", 20, defaults.ports.project)
@@ -392,11 +376,11 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
 }
 
 /**
- * What this machine publishes to the hub: what it found, its free tags and, outside the Docker mode (where an
- * execution has no `mycred`), `segredos:<policy>` for each policy it resolves; minus what the owner withholds.
+ * What this machine publishes to the hub: what it found, its free tags and `segredos:<policy>` for each policy it
+ * resolves; minus what the owner withholds.
  */
 export function offered(config: MachineConfig, found: Readonly<Record<string, unknown>>): Record<string, unknown> {
-  const secrets = config.execution.mode === "docker" ? [] : config.secrets.map((name) => `segredos:${name}`)
+  const secrets = config.secrets.map((name) => `segredos:${name}`)
   return Object.fromEntries(
     [...Object.entries(found), ...[...config.tags, ...secrets].map((name) => [name, {}] as const)].filter(
       ([name]) => !config.withheld.includes(name),

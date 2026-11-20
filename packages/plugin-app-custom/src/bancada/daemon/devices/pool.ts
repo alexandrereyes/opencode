@@ -95,7 +95,7 @@ export function makeDevicePool(input: {
     readonly done: (attempt: string) => void
     readonly machine: () => string
   }
-  /** The Docker mode: Android devices are emulators in containers. */
+  /** `[android.docker]` (host-6): Android devices are emulators in containers. */
   readonly docker?: boolean
   /**
    * How long a device given back clean stays running for the next part (`aquecido_min`, host-6's emulators in

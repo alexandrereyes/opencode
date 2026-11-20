@@ -24,7 +24,7 @@ import { makePhones } from "./devices/physical.js"
 import { androidLocal } from "./devices/android-local.js"
 import { iosSimulators } from "./devices/ios.js"
 import { androidDocker } from "./devices/android-docker.js"
-import { dockerExecutions, makeDocker, type DockerExecutions } from "./launcher/docker.js"
+import { makeDocker } from "./devices/docker.js"
 import { systemShell } from "./devices/shell.js"
 import { makeAndroidLifecycle, type Image } from "../../resources/adapters/android-lifecycle.js"
 import { makeIosLifecycle } from "../../resources/adapters/ios-lifecycle.js"
@@ -192,39 +192,16 @@ export async function main() {
         return done ? { code: done.code, stdout: done.stdout } : undefined
       },
     })
-    // The Docker mode: each execution in a sibling container (`launcher/docker.ts`).
-    const executions =
-      config.execution.mode === "docker"
-        ? dockerExecutions({
-            docker: makeDocker({ docker: Bun.which("docker") ?? "/usr/bin/docker" }),
-            state,
-            prefix: config.prefix,
-            machineID,
-            labels: config.labels,
-            limits: {
-              cpus: config.execution.cpus,
-              memMb: config.execution.memMb,
-              pids: config.execution.pids,
-              low: config.execution.lowPriority,
-            },
-            ...(config.android.docker ? { network: config.android.docker.network } : {}),
-            entrypoint: process.execPath,
-          })
-        : undefined
     const found: { current?: Discovery } = {}
     const pool = makeDevicePool({
       db,
       now,
-      drivers: () =>
-        deviceDrivers(found.current, config, state, () => owner.current?.name ?? "", pool, {
-          machineID,
-          ...(executions ? { executions } : {}),
-        }),
+      drivers: () => deviceDrivers(found.current, config, state, () => owner.current?.name ?? "", pool, { machineID }),
       emulatorPorts: config.ports.emulator,
-      docker: config.execution.mode === "docker",
+      docker: config.android.docker !== undefined,
       shrink: (key, devices) => current.core?.shrink(key, devices),
       // host-6's emulators in containers stay running a while for the next part (`aquecido_min`).
-      ...(config.execution.mode === "docker" && config.android.docker ? { warmMs: config.android.docker.warmMs } : {}),
+      ...(config.android.docker?.warmMs ? { warmMs: config.android.docker.warmMs } : {}),
       warmFits: (platform, count) => current.core?.warmFits(platform, count) ?? false,
       simslim: () => found.current?.simslim !== undefined,
       phone: {
@@ -299,11 +276,11 @@ export async function main() {
               ios: config.budget.maxIos,
             }
           : { memMb: 0, cpuMilli: 0, builds: 0, android: 0, ios: 0 },
-        secrets: config.execution.mode === "docker" ? [] : config.secrets,
+        secrets: config.secrets,
         presence: config.budget.presence,
         brake: config.brake,
         ports: config.ports.project,
-        docker: config.execution.mode === "docker",
+        docker: config.android.docker !== undefined,
         phones: offering ? config.phones : [],
         prefix: config.prefix,
         ...(hardware ? { hardware } : {}),
@@ -333,8 +310,8 @@ export async function main() {
           deadlines: { prepareMs: config.times.prepareMs, buildMs: config.times.buildMs, runMs: config.times.runMs },
           lowPriority: config.execution.lowPriority,
           wake: advance,
+          docker: () => found.current?.docker,
           log,
-          ...(executions ? { container: executions } : {}),
         }),
         pool,
         (key) => path.join(state, "attempts", key.job, key.group, "parts", key.part),
@@ -807,7 +784,6 @@ async function readMachineFile() {
   const host = {
     memMb: Math.round(os.totalmem() / 1_048_576),
     cores: os.availableParallelism(),
-    inDocker: (await Bun.file("/.dockerenv").exists()) && (await fs.exists("/var/run/docker.sock")),
     platform: process.platform,
   }
   const parsed = parseMachineConfig(text, host)
@@ -857,8 +833,8 @@ async function answered(core: Core, holds: ReadonlyArray<string>, ms: number) {
 }
 
 /**
- * The device drivers of this machine, from what discovery found: local emulators where the SDK has an emulator and
- * executions are processes (the Docker mode has its own), simulators on a Mac with Xcode.
+ * The device drivers of this machine, from what discovery found: emulators in containers with `[android.docker]`
+ * (host-6), else local ones where the SDK has an emulator; simulators on a Mac with Xcode.
  */
 export function deviceDrivers(
   found: Discovery | undefined,
@@ -866,47 +842,45 @@ export function deviceDrivers(
   state: string,
   machine: () => string,
   pool: DevicePool,
-  host: { readonly machineID: string; readonly executions?: DockerExecutions } = { machineID: "" },
+  host: { readonly machineID: string } = { machineID: "" },
 ): Partial<Record<"android" | "ios", Driver>> {
   const docker = config.android.docker
-  if (config.execution.mode === "docker")
-    return docker && host.executions
-      ? {
-          android: androidDocker({
-            docker: makeDocker({ docker: Bun.which("docker") ?? "/usr/bin/docker" }),
-            adb: found?.android?.adb ?? "adb",
-            prefix: config.prefix,
-            machineID: host.machineID,
-            labels: config.labels,
-            image: docker.image,
-            network: docker.network,
-            cpus: docker.cpusPerEmulator,
-            memMb: docker.memMbPerEmulator,
-            host: host.executions.address,
-            machine,
-            log,
-          }),
-        }
-      : {}
   const shell = systemShell()
   const tools = found?.android
   const images = (found?.found.android as { imagens?: Image[] } | undefined)?.imagens ?? []
   const logs = path.join(state, "devices")
-  const android = tools?.emulator
-    ? androidLocal({
-        lifecycle: makeAndroidLifecycle(shell, {
-          ...tools,
-          emulator: tools.emulator,
-          avdHome: process.env.ANDROID_AVD_HOME || path.join(os.homedir(), ".android/avd"),
-        }),
+  const containers = docker ? makeDocker({ docker: found?.docker ?? "/usr/bin/docker" }) : undefined
+  const android = docker
+    ? androidDocker({
+        docker: containers!,
+        adb: found?.android?.adb ?? "adb",
         prefix: config.prefix,
-        images: () => images,
-        port: pool.consolePort,
-        logs,
+        machineID: host.machineID,
+        labels: config.labels,
+        image: docker.image,
+        network: docker.network,
+        cpus: docker.cpusPerEmulator,
+        memMb: docker.memMbPerEmulator,
+        // The execution runs in this process's own container (host-6's server): its address on the emulators' network.
+        host: () => containers!.address(os.hostname(), docker.network),
         machine,
         log,
       })
-    : undefined
+    : tools?.emulator
+      ? androidLocal({
+          lifecycle: makeAndroidLifecycle(shell, {
+            ...tools,
+            emulator: tools.emulator,
+            avdHome: process.env.ANDROID_AVD_HOME || path.join(os.homedir(), ".android/avd"),
+          }),
+          prefix: config.prefix,
+          images: () => images,
+          port: pool.consolePort,
+          logs,
+          machine,
+          log,
+        })
+      : undefined
   const profile = path.join(state, "simslim-profile.json")
   const ios =
     found?.found.ios !== undefined

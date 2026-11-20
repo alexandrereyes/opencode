@@ -1,6 +1,6 @@
 import { emulatorScript } from "../../catalog/android-docker.js"
 import { satisfies } from "../capabilities.js"
-import type { Docker } from "../launcher/docker.js"
+import type { Docker } from "./docker.js"
 import type { Driver } from "./pool.js"
 
 /**

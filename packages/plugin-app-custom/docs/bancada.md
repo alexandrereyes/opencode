@@ -24,9 +24,18 @@ simulator.
 `.bancada.toml` at the repository root: `[teste.<name>]` with `precisa`, `aparelho`, `aparelhos`, `celular`, `build`,
 `plan`, `run`, `args`; `caches`; `fora`. The commands get `BANCADA_JOB`, `BANCADA_TESTE`, `BANCADA_TENTATIVA`,
 `BANCADA_COMMIT`, `BANCADA_OUT`, and the `run` gets `BANCADA_DEVICES` (the `devices.json`, one device per line) and,
-on a new attempt, `BANCADA_APENAS`. The `run` writes `planned.json` before touching a device and `summary.json` at the
+on a new attempt, `BANCADA_APENAS`; every command gets `BANCADA_DOCKER_LABEL`, which what it starts in Docker carries
+(the Bancada removes those containers, networks and volumes once the attempt's commands ended). The `run` writes `planned.json` before touching a device and `summary.json` at the
 end; nothing is approved without both. The example project (`test/fixture/bancada-exemplo/`) is the reference: its
 `run` proves each device arrived ready.
+
+## Execution
+
+Every attempt runs as a detached process of the machine, with the environment of the server's agents there (on the
+Mac, the custom service's; on host-6, the server's own container `opencode_opencode-svc`: the `dotnet` wrapper with
+GitHub Packages, `mycred`, the SDKs, the NuGet cache, the Docker socket, so `docker` is offered). Its folder lives in
+the state folder (on host-6 in the `/workspace` volume): a redeploy kills the runner with the server, and back the
+process finds the runner dead there (infrastructure: the part runs once more, on any machine).
 
 ## Devices
 
@@ -34,10 +43,10 @@ end; nothing is approved without both. The example project (`test/fixture/bancad
   the SDK's `avdmanager`, booted detached from their clean snapshot (made on the first boot, after trimming), Wi-Fi
   off and the Mac reached by `eth0` at `10.0.2.2`, stopped after proving the serial runs that AVD. Simulators
   `<prefixo><modelo>-<n>`, booted trimmed by `simslim`, given back shut down and erased.
-- **host-6** (`devices/android-docker.ts`, `launcher/docker.ts`): each execution in a sibling container (the server's
-  image and binary, the attempt's folders mounted at the same paths, limits, labels, no Docker socket) and each
-  emulator in its own container (`<prefixo>emu-<n>`, KVM, the emulators' network; Wi-Fi stays on, it is its only
-  network, and the device is delivered once it routes to the execution), given back with third-party packages
+- **host-6** (`devices/android-docker.ts`, `[android.docker]`): each emulator in its own container (`<prefixo>emu-<n>`,
+  KVM, the emulators' network, which the server's container is on too; Wi-Fi stays on, it is its only network, the
+  device's `host` is the server container's address there and the device is delivered once it routes to it), given
+  back with third-party packages
   uninstalled and kept running for `aquecido_min` (`[android.docker]`), for the next part, which gets it without
   booting; it counts in the budget, so the oldest stops first when what is reserved needs the room. Then the
   container is removed; the AVD volume stays.
@@ -139,8 +148,8 @@ WaitingPart { teste; label; platform; position?; etaMs?; reason: Reason; since }
 ## Acceptance
 
 `script/e2e-bancada.ts` runs pairs of sandbox servers (release binary, this branch's plugin bundle, folders, ports
-and passwords of their own) through four scenarios: real devices on the Mac, an execution and an emulator in
-containers on host-6, the executor's server restarted mid-run, and the origin's process killed between the session's
+and passwords of their own) through four scenarios: real devices on the Mac, on host-6 an execution with Docker (what
+its run leaves with its label removed) and an emulator in a container, the executor's server restarted mid-run, and the origin's process killed between the session's
 message and its acknowledgement (the file `teste-morre-no-ack` in the process folder triggers that, once). It cleans
 up and checks nothing is left.
 
@@ -156,8 +165,9 @@ up and checks nothing is left.
   global skills `aparelhos-fisicos` and `emuladores-android` and the `device-lease` script are retired with nothing
   in their place: the tools' descriptions and answers are the only explanation. A long run already on a phone becomes
   its `reservado`.
-- **Deploy order:** the machine file (`~/.config/opencode/bancada.toml`) on host-6 (`modo = "docker"`,
-  `[android.docker]`) and on the Mac; the Linux image first, then `custom:update` on the Mac. In core-infra's compose:
+- **Deploy order:** the machine file (`~/.config/opencode/bancada.toml`) on host-6 (`[android.docker]`; `execucao` only
+  takes `modo = "processo"` and `prioridade`: a file with the old `modo = "docker"`, `cpus`, `memoria_gb` or
+  `processos` is invalid and the machine offers nothing) and on the Mac; the Linux image first, then `custom:update` on the Mac. In core-infra's compose:
   `OPENCODE_BANCADA=1` and `OPENCODE_BANCADA_SELF`; host-6's server gets its own password from the private environment
   (`OPENCODE_SERVER_PASSWORD` in `private-env-linux`), the Mac's from `service-custom.json`. The schema's first step
   freezes at the first deploy.

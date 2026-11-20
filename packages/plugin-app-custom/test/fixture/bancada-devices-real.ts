@@ -22,7 +22,6 @@ await Bun.write(path.join(state, "simslim-profile.json"), JSON.stringify(iosSlim
 const parsed = parseMachineConfig(`versao = 1\nprefixo = "bancada-test-"\n[execucao]\nmodo = "processo"\n`, {
   memMb: 64_000,
   cores: 16,
-  inDocker: false,
   platform: process.platform,
 })
 if (!parsed.ok) throw new Error(parsed.problems.join("\n"))

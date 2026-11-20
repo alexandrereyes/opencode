@@ -60,7 +60,7 @@ export interface DeviceDriver {
 
 /**
  * The device a part would get here and its cost subject (`<kind>:<profile>`): an emulator of the machine (or a
- * container's, in the Docker mode), or a simulator, trimmed when the part accepts it and the machine can (`simslim`
+ * container's, with `[android.docker]`), or a simulator, trimmed when the part accepts it and the machine can (`simslim`
  * for iOS). `undefined` for a part without devices.
  */
 export function deviceFor(

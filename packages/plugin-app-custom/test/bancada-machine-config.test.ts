@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { offered, parseMachineConfig, type Host, type MachineConfig } from "../src/bancada/machine-config"
 
-const mac: Host = { memMb: 131_072, cores: 16, inDocker: false, platform: "darwin" }
+const mac: Host = { memMb: 131_072, cores: 16, platform: "darwin" }
 const valid = (text: string | undefined, host = mac): MachineConfig => {
   const parsed = parseMachineConfig(text, host)
   if (!parsed.ok) throw new Error(parsed.problems.join("\n"))
@@ -31,7 +31,7 @@ describe("machine file", () => {
         presence: { idleMs: 300_000, factor: 0.6 },
       },
       brake: { memFreeMinPct: 20, swapGrowthMb: 256, loadPerCoreMax: 3, cpuIdleMinPct: 5, samplesToReopen: 6 },
-      execution: { mode: "processo", lowPriority: false, cpus: 8, memMb: 16_384, pids: 2_048 },
+      execution: { lowPriority: false },
       link: { waitMs: 25_000, blockBytes: 1_048_576 },
       android: {},
       ports: { emulator: { start: 5_700, end: 5_799 }, project: { start: 48_000, end: 49_999 } },
@@ -56,12 +56,10 @@ describe("machine file", () => {
         own: ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
       },
     })
-    // In a container with Docker's socket, executions run in sibling containers by default.
-    expect(valid(undefined, { ...mac, inDocker: true })).toMatchObject({
-      execution: { mode: "docker" },
-      // In containers on host-6, 4 emulators at once (6 failed a scenario by accessibility timeouts).
-      budget: { maxAndroid: 4 },
-    })
+    // Emulators in containers (host-6): 4 at once by default (6 failed a scenario by accessibility timeouts).
+    expect(
+      valid(`versao = 1\n[android.docker]\nimagem = "emu:api36"\nrede = "android"`, { ...mac, platform: "linux" }),
+    ).toMatchObject({ budget: { maxAndroid: 4 } })
     // Elsewhere nothing identifies the machine unless [pontes] says how.
     expect(valid(undefined, { ...mac, platform: "linux" }).bridges).toEqual({
       mac: ["mac", "/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
@@ -104,11 +102,8 @@ cpu_ociosa_min_pct    = 5
 amostras_para_reabrir = 6
 
 [execucao]
-modo       = "docker"
+modo       = "processo"
 prioridade = "baixa"
-cpus       = 8
-memoria_gb = 16
-processos  = 2048
 
 [link]
 espera_s  = 10
@@ -159,7 +154,7 @@ politica   = "negar"
       labels: ["purpose=bancada-test"],
       secrets: ["opencode-skills"],
       budget: { memMb: 98_304, cpuMilli: 13_000, builds: 1, maxAndroid: 8, maxIos: 6 },
-      execution: { mode: "docker", lowPriority: true, memMb: 16_384 },
+      execution: { lowPriority: true },
       link: { waitMs: 10_000, blockBytes: 524_288 },
       android: {
         sdk: "/Users/u/Library/Android/sdk",
@@ -229,15 +224,15 @@ lento_min = 1
       'prefixo: letras minúsculas, números e hífens, terminando em "-" (por exemplo "bancada-")',
       'rotulos: "sem valor" precisa ser chave=valor',
       'segredos: "-x" não é um nome de policy (letra ou número, depois . _ -)',
-      'execucao.modo: "processo" ou "docker"',
+      "android.sdk: precisa ser um caminho absoluto",
+      "android.docker.imagem: obrigatório",
+      "android.docker.rede: obrigatório",
+      'execucao.modo: "processo"',
       "orcamento.memoria_gb: precisa ser um número, > 0",
       "orcamento.max_android: precisa ser um número inteiro, ≥ 0",
       "orcamento.presenca.fator: precisa ser um número, ≥ 0, ≤ 1",
       "freio.amostras_para_reabrir: precisa ser um número inteiro, ≥ 1",
       "link.espera_s: precisa ser um número, ≥ 0, ≤ 25",
-      "android.sdk: precisa ser um caminho absoluto",
-      "android.docker.imagem: obrigatório",
-      "android.docker.rede: obrigatório",
       'portas.projeto: use "início-fim" entre 1024 e 65535, com pelo menos 20 portas',
       "portas: as faixas emulador e projeto não podem se sobrepor",
       "tempos.lento_min: chave desconhecida",
@@ -285,8 +280,14 @@ plataforma = "windows"
       gpu: {},
       "segredos:opencode-skills": {},
     })
-    // An execution in a container has no mycred: no policy is resolved there.
-    const docker = valid(`versao = 1\nsegredos = ["opencode-skills"]\n[execucao]\nmodo = "docker"`)
-    expect(offered(docker, {})).toEqual({})
+  })
+
+  test("executions only run as processes: the old Docker mode and its limits are refused", () => {
+    expect(problems(`versao = 1\n[execucao]\nmodo = "docker"\ncpus = 4\nmemoria_gb = 6\nprocessos = 2048`)).toEqual([
+      "execucao.cpus: chave desconhecida",
+      "execucao.memoria_gb: chave desconhecida",
+      "execucao.processos: chave desconhecida",
+      'execucao.modo: "processo"',
+    ])
   })
 })

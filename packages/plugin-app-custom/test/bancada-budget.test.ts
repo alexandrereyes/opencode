@@ -173,7 +173,7 @@ describe("devices and ports", () => {
     expect(emulatorPair({ start: 5_700, end: 5_701 }, new Set([5_701]))).toBeUndefined()
   })
 
-  test("a trimmed device when the part accepts it and the machine can; an emulator in a container in the Docker mode", () => {
+  test("a trimmed device when the part accepts it and the machine can; an emulator in a container with [android.docker]", () => {
     const pick = (
       platform: BancadaProtocol.Platform,
       slim: "aceita" | "exige" | "recusa",

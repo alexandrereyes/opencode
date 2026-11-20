@@ -107,6 +107,34 @@ describe("execution through the Bancada process", () => {
   }, 40_000)
 })
 
+describe("a redeploy of host-6's server container", () => {
+  // Starts the process from source; kills it and the runner at once, as a redeploy does to all a container runs.
+  test("the process and the runner die together: back, the attempt's folder shows the runner dead, the part runs once more", async () => {
+    const context = await setup()
+    const submitted = await context.client.call<Bancada.Submitted>("submit", {
+      id: BancadaProtocol.jobID("reimplantado"),
+      sessionID: "ses_a",
+      diretorio: context.repository,
+      testes: [{ teste: "simples", args: ["--dorme", "6"] }],
+    })
+    await until(async () => (await view(context.client, submitted.job))?.parts.simples?.state === "rodando", 20_000)
+    const bancada = await read(context.state)
+    // The runner and every command it started, and the process: nothing of the container is left.
+    ;(await groups(context.state)).forEach((pid) => kill(pid))
+    process.kill(bancada!.pid, "SIGKILL")
+    await until(async () => (await liveness(bancada!.pid)).state === "dead", 5_000)
+    // The next call starts a new process on the same folder (the volume), which reconciles and runs the part again.
+    await until(async () => {
+      const part = (await view(context.client, submitted.job))?.parts.simples
+      return part?.state === "rodando" && part.attempt === 2
+    }, 30_000)
+    await until(async () => (await view(context.client, submitted.job))?.state === "concluido", 30_000)
+    expect((await view(context.client, submitted.job))?.result).toMatchObject([
+      { part: "simples", state: "concluido", attempts: 2, outcome: { approved: true } },
+    ])
+  }, 90_000)
+})
+
 describe("requests the process refuses or joins", () => {
   // Starts the process from source.
   test("no id, a test asked twice, a command without execute permission: refused before anything is queued", async () => {
