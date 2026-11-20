@@ -745,6 +745,8 @@ export function createCore(ports: Ports) {
     cancel: (job: string) => origin.cancel(job),
     /** Whether this machine is still reading again what it started before a restart. */
     reconciling: executor.reconciling,
+    /** An attempt uses fewer devices than granted (its plan): the rest goes back. */
+    shrink: executor.shrink,
     /** A reading of the machine for the brake and the owner's presence; the brake's changes go to the log. */
     observe: (reading: Reading) => {
       const brake = executor.observe(reading)

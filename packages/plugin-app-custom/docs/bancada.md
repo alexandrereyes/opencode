@@ -39,6 +39,9 @@ end; nothing is approved without both. The example project (`test/fixture/bancad
   emulator in its own container (`<prefixo>emu-<n>`, KVM, the emulators' network; Wi-Fi stays on, it is its only
   network, and the device is delivered once it routes to the execution), given back with third-party packages
   uninstalled and the container removed; the AVD volume stays.
+- A part with a `plan` starts its minimum (at least one) while it builds and, once `planned.json` says how many it
+  can use (`aparelhos`, else one per scenario), only that many more; what it was granted beyond goes back unstarted
+  (budget and ports), so two scenarios never get four emulators. Without a plan, every device granted starts.
 - Only devices of the `device` table, named with the machine's prefix, are ever stopped. A device dead, or mute for
   60 s, during a run fell: the scenarios it lost run again once elsewhere; two falls in a row put it 30 min aside.
 

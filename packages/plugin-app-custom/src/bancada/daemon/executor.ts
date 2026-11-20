@@ -789,12 +789,46 @@ export function makeExecutor(input: {
     )
   }
 
+  /**
+   * An attempt uses fewer devices than it was granted (its plan, `devices/pool.ts`): the rest of its reservation goes
+   * back (their share of memory and CPU, their count, their ports), for the next part.
+   */
+  const shrink = (key: { job: string; part: string; attempt: number }, devices: number) =>
+    db.transaction(() => {
+      const row = findAttempt.get(key.job, key.part, key.attempt)
+      if (!row || devices >= row.devices) return
+      const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+      const back = times(device(seat(spec), spec.device), row.devices - devices)
+      db.run(
+        "UPDATE lease SET android = MAX(0, android - ?), ios = MAX(0, ios - ?), mem_mb = MAX(0, mem_mb - ?), cpu_milli = MAX(0, cpu_milli - ?) WHERE id = ?",
+        [
+          spec.platform === "android" ? row.devices - devices : 0,
+          spec.platform === "ios" ? row.devices - devices : 0,
+          back.memMb,
+          back.cpuMilli,
+          row.lease_id,
+        ],
+      )
+      // The devices' blocks of ports come first (a phone's, when there is one, after them).
+      db.query<{ rowid: number }, [string]>("SELECT rowid FROM lease_device WHERE lease_id = ? ORDER BY rowid")
+        .all(row.lease_id)
+        .slice(devices, row.devices)
+        .forEach((block) => db.run("DELETE FROM lease_device WHERE rowid = ?", [block.rowid]))
+      db.run("UPDATE attempt SET devices = ? WHERE job_id = ? AND part = ? AND n = ?", [
+        devices,
+        key.job,
+        key.part,
+        key.attempt,
+      ])
+    })()
+
   return {
     offer,
     cancel,
     cleanup,
     reserveSlot,
     releaseLease,
+    shrink,
     tick,
     free,
     running: (): BancadaProtocol.Pulse["running"] =>

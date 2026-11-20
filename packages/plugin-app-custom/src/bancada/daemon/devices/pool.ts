@@ -91,6 +91,10 @@ export function makeDevicePool(input: {
   }
   /** The Docker mode: Android devices are emulators in containers. */
   readonly docker?: boolean
+  /** Gives back what an attempt was granted beyond the devices its plan can use (`executor.ts`). */
+  readonly shrink?: (key: Placed, devices: number) => void
+  /** How often the pool looks for a part's plan while its first devices start. */
+  readonly planPollMs?: number
   readonly log: (line: string) => void
 }) {
   const db = input.db
@@ -149,9 +153,17 @@ export function makeDevicePool(input: {
   const prepare = async (key: Placed, dir: string) => {
     const row = db
       .query<
-        { spec: string; devices: number; lease_id: string; phone_hold: string | null },
+        {
+          spec: string
+          devices: number
+          lease_id: string
+          phone_hold: string | null
+          only_scenarios: string | null
+        },
         [string, string, number]
-      >("SELECT spec, devices, lease_id, phone_hold FROM attempt WHERE job_id = ? AND part = ? AND n = ?")
+      >(
+        "SELECT spec, devices, lease_id, phone_hold, only_scenarios FROM attempt WHERE job_id = ? AND part = ? AND n = ?",
+      )
       .get(key.job, key.part, key.attempt)
     if (!row || (row.devices === 0 && !row.phone_hold)) return
     const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
@@ -183,17 +195,30 @@ export function makeDevicePool(input: {
     if (!driver || !chosen) return fail(`esta máquina não liga aparelhos ${spec.platform}`)
     const choice = await driver.choose(spec.device, chosen.profile)
     if (typeof choice === "string") return fail(choice)
-    const ids = take(choice, chosen.kind, chosen.profile, row.devices, attemptOf(key), dir)
-    const started = await Promise.allSettled(
-      ids.map(async (id, index) => {
+    const start = (ids: ReadonlyArray<string>, offset: number) =>
+      ids.map(async (id, at) => {
+        const index = offset + at
         const slot = blocks[index] ?? blocks[0]!
         const one = byAttempt.all(attemptOf(key)).find((item) => item.id === id)!
         const ready = await driver.ready(device(one), slot, key)
         set(id, { running: JSON.stringify(ready.run) })
         db.run("UPDATE lease_device SET device_id = ? WHERE rowid = ?", [id, blocks[index]?.rowid ?? -1])
         return ready.view
-      }),
-    )
+      })
+    // With a plan, its minimum starts while the part builds and the rest only as many as the plan can use
+    // (`planned.json`); what it was granted beyond that goes back before it starts.
+    const early = (await planned(dir)) ? Math.min(row.devices, Math.max(1, spec.devices.min)) : row.devices
+    const first = take(choice, chosen.kind, chosen.profile, early, attemptOf(key), dir)
+    const starting = start(first, 0)
+    const useful = early < row.devices ? await usefulDevices(key, dir, row.only_scenarios) : 0
+    const wanted = useful === undefined ? early : Math.min(row.devices, Math.max(early, useful))
+    if (wanted < row.devices) {
+      input.shrink?.(key, wanted)
+      input.log(`${attemptOf(key)} uses ${wanted} of the ${row.devices} devices granted (its plan)`)
+    }
+    const more = wanted > early ? take(choice, chosen.kind, chosen.profile, wanted - early, attemptOf(key), dir) : []
+    const ids = [...first, ...more]
+    const started = await Promise.allSettled([...starting, ...start(more, early)])
     const failed = started.flatMap((item) => (item.status === "rejected" ? [String(item.reason)] : []))
     if (failed.length > 0) {
       // What did start goes back with the attempt (`release`); the part ends with the reason.
@@ -248,6 +273,36 @@ export function makeDevicePool(input: {
     }
     input.log(`the phone ${found.alias} (${serial}) is ${attemptOf(key)}'s`)
     return view
+  }
+
+  /**
+   * How many devices a part's plan can use, once it said (`planned.json`: `aparelhos`, else one per scenario; a run
+   * again of some scenarios, at most one per scenario): undefined when the part ended or its attempt is gone first,
+   * all it was granted when it reached its run without a plan's word.
+   */
+  const usefulDevices = async (key: Placed, dir: string, only: string | null) => {
+    const group = path.dirname(path.dirname(dir))
+    const live = db.query<{ state: string }, [string, string, number]>(
+      "SELECT state FROM attempt WHERE job_id = ? AND part = ? AND n = ? AND state IN ('aceito', 'compilando', 'rodando')",
+    )
+    for (;;) {
+      const plan = await Bun.file(path.join(dir, "out", "planned.json"))
+        .json()
+        .catch(() => undefined)
+      const scenarios: unknown = plan?.cenarios
+      if (Array.isArray(scenarios)) {
+        const asked = only ? (JSON.parse(only) as unknown[]).length : scenarios.length
+        const said = Number.isInteger(plan.aparelhos) && plan.aparelhos > 0 ? (plan.aparelhos as number) : Infinity
+        return Math.min(said, scenarios.length, asked)
+      }
+      if (await Bun.file(path.join(dir, "status.json")).exists()) return undefined
+      if (!live.get(key.job, key.part, key.attempt)) return undefined
+      const events = await Bun.file(path.join(group, "events.jsonl"))
+        .text()
+        .catch(() => "")
+      if (events.includes('"devices.wait"')) return Infinity
+      await Bun.sleep(input.planPollMs ?? 500)
+    }
   }
 
   /** Gives back every device of an attempt, stopped and clean; two falls in a row put one 30 min aside. */
@@ -401,6 +456,15 @@ export function withDevices(launcher: Launcher, pool: DevicePool, folder: (key: 
     },
     held: (key) => launcher.held(key) || pool.busy(key),
   }
+}
+
+/** Whether the part in `dir` has a plan, as its attempt's runner was told (`attempt.json` of its group). */
+async function planned(dir: string) {
+  const attempt = await Bun.file(path.join(path.dirname(path.dirname(dir)), "attempt.json"))
+    .json()
+    .catch(() => undefined)
+  const parts: { part: string; plan?: unknown }[] = Array.isArray(attempt?.parts) ? attempt.parts : []
+  return parts.some((part) => part.part === path.basename(dir) && part.plan !== undefined)
 }
 
 function free(port: number) {

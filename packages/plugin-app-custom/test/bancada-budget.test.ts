@@ -1,8 +1,12 @@
 import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
 import { open, step, type Brake, type Reading } from "../src/bancada/daemon/brake"
 import { free, largestFit, measured, room, times, type Cost } from "../src/bancada/daemon/budget"
 import { createCore, type Machine } from "../src/bancada/daemon/core"
+import { makeDevicePool, type Driver } from "../src/bancada/daemon/devices/pool"
 import { block, emulatorPair } from "../src/bancada/daemon/devices/ports"
 import { deviceCosts } from "../src/bancada/catalog/costs"
 import { deviceFor } from "../src/bancada/daemon/devices/types"
@@ -339,6 +343,65 @@ describe("admission", () => {
     await it.core.tick()
     expect(it.leases()).toMatchObject([{ state: "released" }])
     expect(it.ports()).toEqual([])
+  })
+
+  test("granted 3 and the plan has 2 scenarios: 1 starts while it builds, 1 more after the plan; the third goes back unstarted", async () => {
+    const it = machine()
+    expect(it.offer()).toMatchObject({ accepted: true, devices: 3 })
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-useful-"))
+    const dir = path.join(root, "attempts", "j-7qk2m9xa", "g", "parts", "android")
+    await fs.mkdir(path.join(dir, "out"), { recursive: true })
+    await Bun.write(
+      path.join(root, "attempts", "j-7qk2m9xa", "g", "attempt.json"),
+      JSON.stringify({ parts: [{ part: "android", plan: ["scripts/plan"], run: ["scripts/run"] }] }),
+    )
+    const started: string[] = []
+    const fake: Driver = {
+      kind: "android-emulador",
+      choose: async () => ({ key: "android:36", spec: {}, name: (n) => `bancada-a36-${n}` }),
+      ready: async (device, slot) => {
+        started.push(device.id)
+        return { view: { id: device.id, portas: { inicio: slot.start, fim: slot.end } }, run: {} }
+      },
+      health: async () => "ok",
+      giveBack: async () => {},
+    }
+    const pool = makeDevicePool({
+      db: it.db,
+      now: () => 1_000,
+      drivers: () => ({ android: fake }),
+      emulatorPorts: { start: 5700, end: 5799 },
+      simslim: () => false,
+      shrink: (key, devices) => it.core.shrink(key, devices),
+      planPollMs: 10,
+      log: () => {},
+    })
+    pool.prepare({ job: "j-7qk2m9xa", part: "android", attempt: 1, group: "g" }, dir)
+    await Bun.sleep(100)
+    expect(started).toEqual(["bancada-a36-1"])
+    await Bun.write(
+      path.join(dir, "out", "planned.json"),
+      JSON.stringify({ versao: 1, cenarios: [{ id: "c1" }, { id: "c2" }] }),
+    )
+    await pool.settled()
+    expect(started).toEqual(["bancada-a36-1", "bancada-a36-2"])
+    const written = JSON.parse(await Bun.file(path.join(dir, "devices.json")).text())
+    expect(written.aparelhos.map((item: { id: string }) => item.id)).toEqual(["bancada-a36-1", "bancada-a36-2"])
+    const emulator = deviceCosts["android-emulador"]
+    expect(it.leases()).toEqual([
+      {
+        memMb: 8_192 + emulator.memMb * 2,
+        cpuMilli: 6_000 + emulator.cpuMilli * 2,
+        builds: 1,
+        android: 2,
+        state: "active",
+      },
+    ])
+    expect(it.ports()).toEqual([
+      { start: 48_000, end: 48_019 },
+      { start: 48_020, end: 48_039 },
+    ])
+    await fs.rm(root, { recursive: true, force: true })
   })
 
   test("what this machine measured counts instead of the default from 3 samples on", () => {

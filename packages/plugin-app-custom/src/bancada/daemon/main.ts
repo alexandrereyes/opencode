@@ -222,6 +222,7 @@ export async function main() {
         }),
       emulatorPorts: config.ports.emulator,
       docker: config.execution.mode === "docker",
+      shrink: (key, devices) => current.core?.shrink(key, devices),
       simslim: () => found.current?.simslim !== undefined,
       phone: {
         find: (alias) => (offering ? config.phones : []).find((phone) => phone.alias === alias),
