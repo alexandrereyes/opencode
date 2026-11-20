@@ -6,6 +6,7 @@ import { Effect, Schedule } from "effect"
 import type { Context } from "../context.js"
 import { identity } from "../instance/index.js"
 import { hubPassword, linkSettings } from "../live-activity/link.js"
+import { privateEnv } from "../private-env.js"
 import { BancadaError, makeBancadaClient, stateDirectory } from "./client.js"
 import { Bancada } from "./rpc.js"
 import { registerBancadaTools } from "./tools.js"
@@ -245,10 +246,11 @@ const rootOf = Effect.fnUntraced(function* (ctx: Pick<Context, "session">, sessi
 })
 
 /**
- * This server's own password, to wake itself (`OPENCODE_BANCADA_SELF`): the managed service's, else the runtime's
- * `password` file; never another server's.
+ * This server's own password, to wake itself (`OPENCODE_BANCADA_SELF`): the managed service's, else a manually run
+ * server's (host-6's, whose launcher removes it from the environment and hands it in the private environment), else
+ * the runtime's `password` file; never another server's.
  */
-async function ownPassword(env: Readonly<Record<string, string | undefined>>) {
+export async function ownPassword(env: Readonly<Record<string, string | undefined>>) {
   if (env.OPENCODE_CONFIG_DIR) {
     const service: unknown = await Bun.file(path.join(env.OPENCODE_CONFIG_DIR, "service-custom.json"))
       .json()
@@ -261,6 +263,12 @@ async function ownPassword(env: Readonly<Record<string, string | undefined>>) {
     )
       if (service.password.trim()) return service.password.trim()
   }
+  const given = (
+    privateEnv("OPENCODE_SERVER_PASSWORD") ||
+    env.OPENCODE_PASSWORD ||
+    env.OPENCODE_SERVER_PASSWORD
+  )?.trim()
+  if (given) return given
   if (!env.OPENCODE_CUSTOM_HOME) return undefined
   const own = await Bun.file(path.join(env.OPENCODE_CUSTOM_HOME, "password"))
     .text()

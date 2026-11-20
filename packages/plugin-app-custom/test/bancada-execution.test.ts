@@ -9,6 +9,7 @@ import { BancadaProtocol } from "../src/bancada/protocol"
 import type { Bancada } from "../src/bancada/rpc"
 import { registerBancadaTools } from "../src/bancada/tools"
 import { makeBancadaHook } from "../src/bancada/hook"
+import { ownPassword } from "../src/bancada/index"
 import type { Tool } from "@opencode/schema/tool"
 import { Effect } from "effect"
 import { initGit } from "../../core/test/fixture/git"
@@ -529,3 +530,26 @@ async function until(condition: () => Promise<boolean>, ms: number) {
   }
   throw new Error(`condition not met within ${ms} ms`)
 }
+
+describe("waking its own server", () => {
+  test("the managed service's password first, then a manually run server's environment, then the runtime's file", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-own-"))
+    const custom = path.join(dir, "custom")
+    const config = path.join(dir, "config")
+    await Bun.write(path.join(custom, "password"), "do-arquivo\n")
+    expect(await ownPassword({ OPENCODE_CUSTOM_HOME: custom })).toBe("do-arquivo")
+    expect(await ownPassword({ OPENCODE_SERVER_PASSWORD: "do-ambiente", OPENCODE_CUSTOM_HOME: custom })).toBe(
+      "do-ambiente",
+    )
+    await Bun.write(path.join(config, "service-custom.json"), JSON.stringify({ password: "do-servico" }))
+    expect(await ownPassword({ OPENCODE_CONFIG_DIR: config, OPENCODE_SERVER_PASSWORD: "do-ambiente" })).toBe(
+      "do-servico",
+    )
+    // host-6's file has no password: its server takes it from the environment.
+    await Bun.write(path.join(config, "service-custom.json"), JSON.stringify({ disabled: true }))
+    expect(await ownPassword({ OPENCODE_CONFIG_DIR: config, OPENCODE_SERVER_PASSWORD: "do-ambiente" })).toBe(
+      "do-ambiente",
+    )
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+})
