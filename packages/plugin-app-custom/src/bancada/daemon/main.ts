@@ -357,11 +357,7 @@ async function admin(
   const requests = context.requests()
   if (method === "submit" && requests) {
     const answer = await requests.submit(input).then(
-      (submitted) => {
-        // Asked to wait for the end: the tool's own calls bring the notice back (`status`).
-        if (field("esperar") === true) context.deliveries.inline.set(submitted.job, Date.now())
-        return Response.json(submitted)
-      },
+      (submitted) => Response.json(submitted),
       (error: unknown) =>
         error instanceof Invalid
           ? Response.json({ type: "invalid", problems: error.problems }, { status: 400 })
@@ -374,9 +370,10 @@ async function admin(
     const job = typeof field("job") === "string" ? String(field("job")) : undefined
     const root = typeof field("rootSessionID") === "string" ? String(field("rootSessionID")) : undefined
     if (!job) return Response.json({ jobs: root ? core.family(root) : [] })
-    // A tool that waits for the end (`esperar`): its notice comes back here, not as a message, while it keeps asking.
+    // Only the tool that waits for the end says so (`inline`): its notice comes back here, not as a message, while
+    // it keeps asking. Any other client's wait holds nothing.
     const waitMs = Math.min(Math.max(Number(field("waitMs") ?? 0), 0), 25_000)
-    if (waitMs > 0) context.deliveries.inline.set(job, Date.now())
+    if (waitMs > 0 && field("inline") === true) context.deliveries.inline.set(job, Date.now())
     const deadline = Date.now() + waitMs
     while (Date.now() < deadline && core.status(job)?.state !== "concluido") await Bun.sleep(250)
     const view = core.status(job)
@@ -384,9 +381,15 @@ async function admin(
   }
   if (method === "cancel") {
     const job = String(field("job") ?? "")
+    const known = core.status(job)
+    if (!known) return Response.json({ state: "desconhecido" })
+    // The agent's tool cancels only its own family's requests (the app, the owner's, any).
+    const root = field("rootSessionID")
+    if (typeof root === "string" && known.rootSessionID !== root) return Response.json({ state: "outra_familia" })
+    if (["recebido", "concluido", "entregue"].includes(known.state)) return Response.json({ state: known.state })
     core.cancel(job)
     context.advance()
-    return Response.json({ state: core.status(job)?.state ?? "desconhecido" })
+    return Response.json({ state: "cancelado" })
   }
   // The plugin's instances ask for the notices to deliver; each goes to one of them, again after 30 s without `ack`.
   if (method === "events") {
@@ -409,6 +412,7 @@ async function admin(
         sessionID: notice.sessionID,
         id: notice.id,
         text: notice.text,
+        resume: notice.resume,
       })),
     })
   }

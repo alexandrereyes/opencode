@@ -126,7 +126,7 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
   // Notices: each goes to one instance, which puts it in its session with a fixed id (a second delivery never makes a
   // second message) and then says so; without that, it goes again in 30 s (`docs/bancada.md`, "Notice").
   yield* Effect.tryPromise(() =>
-    client.call<{ notices: { job: string; sessionID: string; id: string; text: string }[] }>(
+    client.call<{ notices: { job: string; sessionID: string; id: string; text: string; resume: boolean }[] }>(
       "events",
       { waitMs: 25_000 },
       35_000,
@@ -137,7 +137,7 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
     Effect.repeat(Schedule.forever),
     Effect.forkScoped({ startImmediately: true }),
   )
-  function deliver(notice: { job: string; sessionID: string; id: string; text: string }) {
+  function deliver(notice: { job: string; sessionID: string; id: string; text: string; resume: boolean }) {
     return ctx.session
       .synthetic({
         sessionID: Session.ID.make(notice.sessionID),
@@ -145,12 +145,18 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
         text: notice.text,
         description: `Bancada ${notice.job}`,
         metadata: { custom: { bancada: { job: notice.job } } },
+        // A request cancelled whole has nothing to act on: its notice does not wake the session.
+        ...(notice.resume ? {} : { resume: false }),
       })
       .pipe(
         Effect.as(false),
-        // A session that no longer exists: the notice is dropped, and said in the process's log.
+        // A session that no longer exists: the notice is dropped, and said in the process's log. The core's error is
+        // `Session.NotFoundError`; the HTTP API's name is accepted too.
         Effect.catch((error: unknown) =>
-          typeof error === "object" && error !== null && "_tag" in error && error._tag === "SessionNotFoundError"
+          typeof error === "object" &&
+          error !== null &&
+          "_tag" in error &&
+          (error._tag === "Session.NotFoundError" || error._tag === "SessionNotFoundError")
             ? Effect.succeed(true)
             : Effect.fail(error),
         ),

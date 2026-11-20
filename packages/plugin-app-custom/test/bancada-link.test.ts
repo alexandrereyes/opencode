@@ -145,8 +145,36 @@ describe("two servers' Bancadas over custom.bancada", () => {
       20_000,
     )
     expect((await synthetic()).map((message) => message.text?.split("\n")[0])).toEqual([
-      `[Bancada] ${submitted.job} terminou (commit ${submitted.commit.slice(0, 8)})`,
+      `[Bancada] ${submitted.job} terminou: aprovado (commit ${submitted.base.slice(0, 8)})`,
     ])
+  }, 90_000)
+
+  test("a notice for a session that no longer exists is dropped once, and its request is cleaned up", async () => {
+    const machine = world.machine!
+    // A session id of the right shape that this server never had (one deleted meanwhile, as far as it knows).
+    const submitted = await rpc<Bancada.Submitted>(machine, "custom.bancada/submit", {
+      id: BancadaProtocol.jobID("sessão apagada"),
+      sessionID: "ses_0000000000000000000000000000",
+      diretorio: world.repository!,
+      testes: [{ teste: "simples" }],
+    })
+    const log = path.join(world.root!, "machine", "state", "bancada.log")
+    await until(
+      async () =>
+        (await Bun.file(log).text()).includes(
+          `the session of ${submitted.job} no longer exists; its notice was dropped`,
+        ),
+      60_000,
+    )
+    await until(
+      async () =>
+        (await rpc<{ jobs: { state: string }[] }>(machine, "custom.bancada/status", { job: submitted.job })).jobs[0]
+          ?.state === "entregue",
+      20_000,
+    )
+    // Once: the notice did not come back to the queue.
+    await Bun.sleep(1_500)
+    expect((await Bun.file(log).text()).split(`the session of ${submitted.job} no longer exists`)).toHaveLength(2)
   }, 90_000)
 
   test("a wrong password is refused by the hub's server; a server that is not the hub refuses by name", async () => {

@@ -207,9 +207,15 @@ describe("notices and tools", () => {
   }, 60_000)
 
   // The tools as an agent calls them, against a real process (the plugin's server is played by a small fake).
-  test("bancada_run answers with the request and its place; with esperar, with the notice itself; status and cancel", async () => {
+  test("bancada_run tests the working tree, answers with each test's place and, in a subagent, with the result; status and cancel", async () => {
     const context = await setup()
     const added: Tool.Info[] = []
+    // `ses_child` is a subagent of `ses_tool`; `ses_other`, another family.
+    const sessions: Record<string, { parentID?: string; title: string }> = {
+      ses_tool: { title: "Sessão de teste" },
+      ses_child: { parentID: "ses_tool", title: "Testar o checkout" },
+      ses_other: { title: "Outra" },
+    }
     const ctx = {
       tool: {
         transform: (edit: (editor: { add: (tool: Tool.Info) => void }) => void) =>
@@ -220,7 +226,7 @@ describe("notices and tools", () => {
           Effect.succeed({
             id: input.sessionID,
             location: { directory: context.repository },
-            title: "Sessão de teste",
+            ...sessions[input.sessionID],
           }),
       },
     } as unknown as Parameters<typeof registerBancadaTools>[0]
@@ -231,38 +237,93 @@ describe("notices and tools", () => {
       ["bancada_cancel", false],
     ])
     const tool = (name: string) => added.find((item) => item.name === name)!
-    const call = (name: string, input: unknown, id: string) =>
+    const call = (name: string, input: unknown, id: string, sessionID = "ses_tool") =>
       Effect.runPromise(
         tool(name).execute(input, {
-          sessionID: "ses_tool",
+          sessionID,
           agent: "build",
           messageID: "msg_1",
           id,
           progress: () => Effect.void,
         } as unknown as Tool.Context),
       )
+    // An edit not committed: what is tested is the working tree as it is.
+    await Bun.write(path.join(context.repository, "novo.txt"), "editado agora\n")
     const first = await call("bancada_run", { testes: [{ teste: "simples", args: ["--dorme", "20"] }] }, "call_1")
     const job = BancadaProtocol.jobID("srv-a\ncall_1")
-    expect(first.content).toMatch(new RegExp(`^Pedido ${job} enviado \\(commit [0-9a-f]{8}\\)\\.\nsimples: `))
-    expect(first.content).toContain("O resultado chega sozinho como mensagem nesta sessão: não consulte em laço.")
+    const head = (await runGit(["rev-parse", "HEAD"], { cwd: context.repository })).stdout.trim().slice(0, 8)
+    expect(first.content).toMatch(
+      new RegExp(
+        `^Pedido ${job} enviado\\. Código: commit ${head} mais 1 arquivo não commitado \\(novo\\.txt novo\\)\\.\nSimples: (preparando|compilando|rodando) em Servidor A\n`,
+      ),
+    )
+    expect(first.content?.toString().split("\n").at(-1)).toBe(
+      "O resultado chega sozinho, como mensagem nesta sessão, e ela é retomada na hora. Siga com outro trabalho ou encerre sua resposta. Não espere, não consulte bancada_status e não peça de novo.",
+    )
     // The same call made again is the same request.
     expect((await call("bancada_run", { testes: [{ teste: "simples" }] }, "call_1")).content).toContain(`Pedido ${job}`)
     await until(async () => (await view(context.client, job))?.parts.simples?.state === "rodando", 20_000)
-    expect((await call("bancada_status", {}, "call_2")).content).toContain(`${job} (commit `)
-    expect((await call("bancada_cancel", { job }, "call_3")).content).toBe(
-      `${job}: cancelamento pedido. O aviso do pedido diz como cada teste terminou.`,
+    expect((await call("bancada_status", {}, "call_2")).content).toBe(
+      [
+        `${job}:`,
+        "  Simples: rodando em Servidor A",
+        "",
+        "O resultado chega sozinho como mensagem nesta sessão; não é preciso consultar de novo.",
+      ].join("\n"),
     )
-    // Held until the end: the notice comes back as the tool's result, and is not sent as a message.
-    const waited = await call("bancada_run", { testes: [{ teste: "simples" }], esperar: true }, "call_4")
-    const second = BancadaProtocol.jobID("srv-a\ncall_4")
+    // Another family cannot cancel it; this one can.
+    expect((await call("bancada_cancel", { job }, "call_3", "ses_other")).content).toBe(
+      `${job} é de outra sessão; esta tool só cancela pedidos desta sessão e dos subagentes dela.`,
+    )
+    expect((await call("bancada_cancel", { job }, "call_4")).content).toBe(
+      `${job} cancelado. O que esperava saiu da fila; o que rodava está sendo parado.`,
+    )
+    expect((await call("bancada_cancel", { job: "j-00000000" }, "call_5")).content).toBe(
+      "Nenhum pedido j-00000000 neste servidor.",
+    )
+    // Cancelled whole: its notice does not wake the session (nothing to act on).
+    await until(async () => (await view(context.client, job))?.state === "concluido", 30_000)
+    type Notices = { notices: { job: string; text: string; resume: boolean }[] }
+    const cancelled = (await context.client.call<Notices>("events", { waitMs: 0 })).notices.find(
+      (notice) => notice.job === job,
+    )
+    expect(cancelled).toMatchObject({
+      resume: false,
+      text: expect.stringMatching(new RegExp(`^\\[Bancada\\] ${job} foi cancelado`)),
+    })
+    await context.client.call("notice.ack", { job })
+    // In a subagent the call waits: the notice comes back as the tool's result, and no message is made.
+    const waited = await call("bancada_run", { testes: [{ teste: "simples" }] }, "call_6", "ses_child")
+    const second = BancadaProtocol.jobID("srv-a\ncall_6")
     expect(waited.content).toMatch(
-      new RegExp(`^\\[Bancada\\] ${second} terminou \\(commit [0-9a-f]{8}\\)\nSimples: 2 aprovados\\.`),
+      new RegExp(
+        `^\\[Bancada\\] ${second} terminou: aprovado \\(commit ${head} mais 1 arquivo não commitado\\)\nSimples: 2 aprovados\\.`,
+      ),
     )
-    // Delivered by the tool: no message goes to the session for it.
     expect((await view(context.client, second))?.state).toBe("entregue")
     const notices = await context.client.call<{ notices: { job: string }[] }>("events", { waitMs: 0 })
     expect(notices.notices.map((notice) => notice.job)).not.toContain(second)
+    expect((await call("bancada_cancel", { job }, "call_7")).content).toBe(
+      `${job} já tinha terminado; nada a cancelar.`,
+    )
   }, 90_000)
+
+  test("only the tool that waits holds a notice back: another client's status with waitMs holds nothing", async () => {
+    const context = await setup()
+    const submitted = await context.client.call<Bancada.Submitted>("submit", {
+      id: BancadaProtocol.jobID("W2"),
+      sessionID: "ses_a",
+      diretorio: context.repository,
+      testes: [{ teste: "simples" }],
+    })
+    // An app asking with a wait, as the public RPC allows.
+    await context.client.call("status", { job: submitted.job, waitMs: 25_000 }, 30_000)
+    await until(async () => (await view(context.client, submitted.job))?.state === "concluido", 30_000)
+    type Notices = { notices: { job: string }[] }
+    expect((await context.client.call<Notices>("events", { waitMs: 0 })).notices.map((item) => item.job)).toEqual([
+      submitted.job,
+    ])
+  }, 60_000)
 })
 
 /** The example project as the session's repository, and a client of a process that is the hub. */
