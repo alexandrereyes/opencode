@@ -1,5 +1,6 @@
 export * as BancadaMachineConfig from "./machine-config.js"
 
+import { worthRunning } from "./catalog/costs.js"
 import { isTable, list, table, text1, toml, unknownKeys, type Raw } from "./toml.js"
 
 /**
@@ -196,6 +197,20 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
     .filter((name) => !policy.test(name))
     .forEach((name) => problems.push(`segredos: "${name}" não é um nome de policy (letra ou número, depois . _ -)`))
 
+  const executionRaw = section(raw, "execucao", ["modo", "prioridade", "cpus", "memoria_gb", "processos"], problems)
+  const execution = {
+    mode: read.choice(
+      executionRaw.modo,
+      "execucao.modo",
+      ["processo", "docker"],
+      host.inDocker ? "docker" : "processo",
+    ),
+    lowPriority: read.choice(executionRaw.prioridade, "execucao.prioridade", ["normal", "baixa"], "normal") === "baixa",
+    cpus: read.number(executionRaw.cpus, "execucao.cpus", { above: 0 }, Math.min(8, host.cores)),
+    memMb: Math.round(read.number(executionRaw.memoria_gb, "execucao.memoria_gb", { above: 0 }, 16) * gb),
+    pids: read.number(executionRaw.processos, "execucao.processos", { min: 1, integer: true }, 2048),
+  }
+
   const budgetRaw = section(
     raw,
     "orcamento",
@@ -213,13 +228,17 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
       budgetRaw.max_android,
       "orcamento.max_android",
       { min: 0, integer: true },
-      Math.floor(host.cores / 2),
+      // As many as are worth it (measured), never more than one per two cores.
+      Math.min(
+        execution.mode === "docker" ? worthRunning.androidDocker : worthRunning.android,
+        Math.floor(host.cores / 2),
+      ),
     ),
     maxIos: read.number(
       budgetRaw.max_ios,
       "orcamento.max_ios",
       { min: 0, integer: true },
-      Math.floor(host.cores * 0.4),
+      Math.min(worthRunning.ios, Math.floor(host.cores * 0.4)),
     ),
     presence: {
       idleMs:
@@ -274,20 +293,6 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
     ),
   }
 
-  const executionRaw = section(raw, "execucao", ["modo", "prioridade", "cpus", "memoria_gb", "processos"], problems)
-  const execution = {
-    mode: read.choice(
-      executionRaw.modo,
-      "execucao.modo",
-      ["processo", "docker"],
-      host.inDocker ? "docker" : "processo",
-    ),
-    lowPriority: read.choice(executionRaw.prioridade, "execucao.prioridade", ["normal", "baixa"], "normal") === "baixa",
-    cpus: read.number(executionRaw.cpus, "execucao.cpus", { above: 0 }, Math.min(8, host.cores)),
-    memMb: Math.round(read.number(executionRaw.memoria_gb, "execucao.memoria_gb", { above: 0 }, 16) * gb),
-    pids: read.number(executionRaw.processos, "execucao.processos", { min: 1, integer: true }, 2048),
-  }
-
   const linkRaw = section(raw, "link", ["espera_s", "bloco_kib"], problems)
   const link = {
     waitMs: read.number(linkRaw.espera_s, "link.espera_s", { min: 0, max: 25 }, 25) * 1_000,
@@ -321,9 +326,10 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
   const docker = dockerRaw && {
     image: required(dockerRaw.imagem, "android.docker.imagem") ?? "",
     network: required(dockerRaw.rede, "android.docker.rede") ?? "",
-    cpusPerEmulator: read.number(dockerRaw.cpus_por_emulador, "android.docker.cpus_por_emulador", { above: 0 }, 4),
+    // An emulator in a container took 4 GB and ~2.7 cores (AbacatoV3's `linux.md`): its limits leave it room.
+    cpusPerEmulator: read.number(dockerRaw.cpus_por_emulador, "android.docker.cpus_por_emulador", { above: 0 }, 3),
     memMbPerEmulator: Math.round(
-      read.number(dockerRaw.memoria_por_emulador_gb, "android.docker.memoria_por_emulador_gb", { above: 0 }, 8) * gb,
+      read.number(dockerRaw.memoria_por_emulador_gb, "android.docker.memoria_por_emulador_gb", { above: 0 }, 6) * gb,
     ),
     warmMs: read.number(dockerRaw.aquecido_min, "android.docker.aquecido_min", { min: 0 }, 15) * minute,
   }

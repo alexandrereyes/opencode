@@ -208,11 +208,11 @@ describe("simulation: executions outlive the Bancada process", () => {
   test("S10: seven sessions ask at once on a Mac with room for three emulators: the budget never breaks, all are served", async () => {
     const sim = createWorld({ seed: 10 })
     sim.addMachine({ name: "Linux", hub: true, platform: "linux" })
-    // 40 GB and 10 cores: a build (8 GB, 6 cores) beside up to three emulators (8 GB, 1 core each), one build at once.
+    // 40 GB and 12 cores: a build (8 GB, 6 cores) beside up to three emulators (7.8 GB, 2 cores each), one build at once.
     sim.addMachine({
       name: "Mac",
       capabilities: { android: {} },
-      capacity: { memMb: 40_960, cpuMilli: 10_000, builds: 1, android: 3, ios: 0 },
+      capacity: { memMb: 40_960, cpuMilli: 12_000, builds: 1, android: 3, ios: 0 },
     })
     const ids = ["j-11111111", "j-22222222", "j-33333333", "j-44444444", "j-55555555", "j-66666666", "j-77777777"]
     ids.forEach((id, index) => {

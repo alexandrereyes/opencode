@@ -26,12 +26,12 @@ describe("estimate", () => {
     ).toBe(9 * minute)
   })
 
-  test("duration: without history here the others' median (× 2.5 on a slow machine); without any, 5 minutes", () => {
+  test("duration: without history here the others' median (× 3 on a slow machine); without any, 5 minutes", () => {
     const elsewhere = [sample(2 * minute, 0), sample(4 * minute, 0)]
     expect(duration({ here: [], elsewhere, slow: false, devices: 1, built: false })).toBe(3 * minute)
-    expect(duration({ here: [], elsewhere, slow: true, devices: 1, built: false })).toBe(7.5 * minute)
+    expect(duration({ here: [], elsewhere, slow: true, devices: 1, built: false })).toBe(9 * minute)
     expect(duration({ here: [], elsewhere: [], slow: false, devices: 1, built: false })).toBe(5 * minute)
-    expect(duration({ here: [], elsewhere: [], slow: true, devices: 1, built: false })).toBe(12.5 * minute)
+    expect(duration({ here: [], elsewhere: [], slow: true, devices: 1, built: false })).toBe(15 * minute)
     // A slow machine with its own history needs no factor.
     expect(duration({ here: [sample(2 * minute, 0)], elsewhere, slow: true, devices: 1, built: false })).toBe(
       2 * minute,

@@ -60,7 +60,8 @@ describe("simulation: the queue", () => {
     sim.addMachine({
       name: "Mac",
       capabilities: { android: {}, ios: {}, "android-fisico": {} },
-      capacity: { ...room, builds: 3 },
+      // Room for the three builds at once, with an emulator and a simulator.
+      capacity: { ...room, cpuMilli: 24_000, builds: 3 },
       phones: [poco],
     })
     sim.script("j-aaaaaaaa", "android", ok(120_000))

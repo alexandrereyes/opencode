@@ -15,8 +15,8 @@ export type Sample = {
 export const defaults = {
   /** Without any history. */
   durationMs: 5 * 60_000,
-  /** A machine the owner called slow, without history of its own. */
-  slow: 2.5,
+  /** A machine the owner called slow, without history of its own: host-6 ran AbacatoV3's suite ~3× slower than the Mac. */
+  slow: 3,
   /** Samples kept per project, test and machine. */
   kept: 10,
 }
@@ -25,7 +25,7 @@ export const defaults = {
  * The duration of a part here: the median run of the last executions of that project and test on this machine, plus
  * the median build (none when a sibling part of the same request is already here: its build serves both). With the
  * planned scenarios known and history that counted them, time per scenario × scenarios ÷ devices. Without history
- * here, the other machines' median (× 2.5 on a slow machine); without any, 5 minutes (× 2.5 on a slow machine).
+ * here, the other machines' median (× 3 on a slow machine); without any, 5 minutes (× 3 on a slow machine).
  */
 export function duration(input: {
   readonly here: ReadonlyArray<Sample>

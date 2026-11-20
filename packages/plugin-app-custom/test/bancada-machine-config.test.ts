@@ -25,7 +25,8 @@ describe("machine file", () => {
         memMb: 98_304,
         cpuMilli: 12_800,
         builds: 1,
-        maxAndroid: 8,
+        // Measured: past 6 emulators the suite stops getting shorter (AbacatoV3).
+        maxAndroid: 6,
         maxIos: 6,
         presence: { idleMs: 300_000, factor: 0.6 },
       },
@@ -56,7 +57,11 @@ describe("machine file", () => {
       },
     })
     // In a container with Docker's socket, executions run in sibling containers by default.
-    expect(valid(undefined, { ...mac, inDocker: true }).execution.mode).toBe("docker")
+    expect(valid(undefined, { ...mac, inDocker: true })).toMatchObject({
+      execution: { mode: "docker" },
+      // In containers on host-6, 4 emulators at once (6 failed a scenario by accessibility timeouts).
+      budget: { maxAndroid: 4 },
+    })
     // Elsewhere nothing identifies the machine unless [pontes] says how.
     expect(valid(undefined, { ...mac, platform: "linux" }).bridges).toEqual({
       mac: ["mac", "/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
@@ -224,11 +229,11 @@ lento_min = 1
       'prefixo: letras minúsculas, números e hífens, terminando em "-" (por exemplo "bancada-")',
       'rotulos: "sem valor" precisa ser chave=valor',
       'segredos: "-x" não é um nome de policy (letra ou número, depois . _ -)',
+      'execucao.modo: "processo" ou "docker"',
       "orcamento.memoria_gb: precisa ser um número, > 0",
       "orcamento.max_android: precisa ser um número inteiro, ≥ 0",
       "orcamento.presenca.fator: precisa ser um número, ≥ 0, ≤ 1",
       "freio.amostras_para_reabrir: precisa ser um número inteiro, ≥ 1",
-      'execucao.modo: "processo" ou "docker"',
       "link.espera_s: precisa ser um número, ≥ 0, ≤ 25",
       "android.sdk: precisa ser um caminho absoluto",
       "android.docker.imagem: obrigatório",

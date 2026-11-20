@@ -4,6 +4,7 @@ import { open, step, type Brake, type Reading } from "../src/bancada/daemon/brak
 import { free, largestFit, measured, room, times, type Cost } from "../src/bancada/daemon/budget"
 import { createCore, type Machine } from "../src/bancada/daemon/core"
 import { block, emulatorPair } from "../src/bancada/daemon/devices/ports"
+import { deviceCosts } from "../src/bancada/catalog/costs"
 import { deviceFor } from "../src/bancada/daemon/devices/types"
 import type { Launcher, Status } from "../src/bancada/daemon/executor"
 import { darwinPressure, darwinSwap, hidIdle, linuxPressure, linuxSwap } from "../src/bancada/daemon/probes"
@@ -236,7 +237,7 @@ describe("admission", () => {
     hub: false,
     speed: "normal",
     capabilities: { android: {}, "segredos:opencode-skills": {} },
-    capacity: { memMb: 40_960, cpuMilli: 10_000, builds: 1, android: 3, ios: 0 },
+    capacity: { memMb: 40_960, cpuMilli: 12_000, builds: 1, android: 3, ios: 0 },
     secrets: ["opencode-skills"],
     ...more,
   })
@@ -312,7 +313,16 @@ describe("admission", () => {
   test("the peak is reserved with as many devices as fit; the build's share goes back when the run starts", async () => {
     const it = machine()
     expect(it.offer()).toMatchObject({ accepted: true, devices: 3 })
-    expect(it.leases()).toEqual([{ memMb: 8_192 * 4, cpuMilli: 9_000, builds: 1, android: 3, state: "active" }])
+    const emulator = deviceCosts["android-emulador"]
+    expect(it.leases()).toEqual([
+      {
+        memMb: 8_192 + emulator.memMb * 3,
+        cpuMilli: 6_000 + emulator.cpuMilli * 3,
+        builds: 1,
+        android: 3,
+        state: "active",
+      },
+    ])
     expect(it.ports()).toEqual([
       { start: 48_000, end: 48_019 },
       { start: 48_020, end: 48_039 },
@@ -322,7 +332,9 @@ describe("admission", () => {
     expect(it.core.outgoing().pulse.free).toMatchObject({ builds: 0, android: 0 })
     it.execution.status = { state: "rodando" }
     await it.core.tick()
-    expect(it.leases()).toEqual([{ memMb: 8_192 * 3, cpuMilli: 3_000, builds: 0, android: 3, state: "active" }])
+    expect(it.leases()).toEqual([
+      { memMb: emulator.memMb * 3, cpuMilli: emulator.cpuMilli * 3, builds: 0, android: 3, state: "active" },
+    ])
     it.execution.status = { state: "done", ending: { stage: "run", exit: 0 } }
     await it.core.tick()
     expect(it.leases()).toMatchObject([{ state: "released" }])
@@ -343,8 +355,8 @@ describe("admission", () => {
   })
 
   test("with the owner at the Mac fewer devices fit; with the brake closed nothing is accepted until it reopens", () => {
-    // 40 GB and 16 cores: three emulators beside a build; 60% of it while the owner is at the Mac, two.
-    const capacity = { memMb: 40_960, cpuMilli: 16_000, builds: 1, android: 3, ios: 0 }
+    // 40 GB and 20 cores: three emulators beside a build; 60% of it while the owner is at the Mac, two.
+    const capacity = { memMb: 40_960, cpuMilli: 20_000, builds: 1, android: 3, ios: 0 }
     expect(machine({ capacity }).offer()).toMatchObject({ accepted: true, devices: 3 })
     const present = machine({ capacity })
     present.core.observe({ at: 0, idleMs: 30_000 })

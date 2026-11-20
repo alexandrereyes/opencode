@@ -78,11 +78,15 @@ export function makeIosLifecycle(shell: Shell, tools: { readonly simslim?: strin
       const answers = await shell.run(simctl("spawn", udid, "launchctl", "print", "system"), { timeoutMs: 10_000 })
       return answers.code === 0 ? ("ok" as const) : ("mudo" as const)
     },
-    /** Shut down and erased, only after proving the UDID is the simulator named `name`. */
+    /**
+     * Shut down and erased, only after proving the UDID is the simulator named `name`. The WebDriverAgent an Appium
+     * left building for it (`xcodebuild … id=<udid>`) ignores TERM and boots it again once shut down: killed first.
+     */
     giveBack: async (udid: string, name: string) => {
       const listed = (await devices()).find((item) => item.udid === udid)
       if (!listed) return
       if (listed.name !== name) throw new Error(`${udid} é ${listed.name}, não ${name}: não desligo`)
+      await shell.run(["/usr/bin/pkill", "-KILL", "-f", `xcodebuild.*${udid}`], { timeoutMs: 10_000 })
       if (listed.state !== "Shutdown") await shell.run(simctl("shutdown", udid), { timeoutMs: 120_000 })
       const erased = await shell.run(simctl("erase", udid), { timeoutMs: 120_000 })
       if (erased.code !== 0) throw new Error(`o simulador ${name} não foi apagado: ${erased.stderr.trim()}`)

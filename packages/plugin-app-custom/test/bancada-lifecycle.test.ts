@@ -255,6 +255,8 @@ describe("iOS lifecycle", () => {
       log: () => {},
     }).giveBack(device, ready.run)
     expect(back.transcript.filter((line) => !/ list /.test(line))).toEqual([
+      // The WebDriverAgent left building for it would boot it again.
+      "/usr/bin/pkill -KILL -f xcodebuild.*U-1",
       "/usr/bin/xcrun simctl shutdown U-1",
       "/usr/bin/xcrun simctl erase U-1",
     ])
