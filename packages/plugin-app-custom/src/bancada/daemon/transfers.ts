@@ -311,6 +311,8 @@ export function makeTransfers(input: {
       db.run("DELETE FROM code_in WHERE job_id = ?", [job])
       if (row.file && input.files) void input.files.remove(row.file).catch(() => undefined)
     },
+    /** The origin: the request was delivered; what it sent for it is history no more. */
+    sent: (job: string) => void db.run("DELETE FROM code_out WHERE job_id = ? AND state <> 'enviar'", [job]),
     /** Starts what each side has to do; never waits for it. */
     tick: () => {
       if (input.files && input.link) {

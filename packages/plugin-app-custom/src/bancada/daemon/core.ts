@@ -435,7 +435,11 @@ export function createCore(ports: Ports) {
     },
     status: origin.status,
     notices: origin.notices,
-    delivered: origin.delivered,
+    /** The session received the notice of a request: once; the hub may clean up, and nothing of its code stays. */
+    delivered: (job: string) => {
+      origin.delivered(job)
+      transfers.sent(job)
+    },
     /** The alerts up now. */
     alerts: alerts.active,
     /** The hub as this machine sees it: reachable, or out since when and why (`queue.hub`). */

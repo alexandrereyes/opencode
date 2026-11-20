@@ -61,6 +61,28 @@ describe("simulation: code through the hub (S13)", () => {
     expect(sim.machines.get("Linux")!.db.query("SELECT COUNT(*) AS n FROM hub_blob").get()).toEqual({ n: 0 })
   })
 
+  test("a request of the hub's own session runs on the Mac with the hub's bundle", async () => {
+    const sim = createWorld({ seed: 47, codeTravels: { bundleBytes } })
+    sim.addMachine({ name: "Linux", hub: true, platform: "linux", capabilities: {}, capacity: room })
+    sim.addMachine({ name: "Mac", capabilities: { android: {} }, capacity: room })
+    sim.script("j-aaaaaaaa", "android", ok)
+    await sim.advance(1_000)
+    sim.submit("Linux", {
+      id: "j-aaaaaaaa",
+      sessionID: "ses_a",
+      rootSessionID: "ses_a",
+      code,
+      parts: [spec],
+      repository: "/workspace/exemplo",
+    })
+    await sim.advance(3 * 60_000)
+    sim.settle()
+    expect(sim.facts.bundles).toEqual([{ machine: "Mac", job: "j-aaaaaaaa" }])
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([{ state: "concluido", outcome: { approved: true } }])
+    expect([...sim.disk.keys()]).toEqual([])
+    expect(sim.machines.get("Linux")!.db.query("SELECT COUNT(*) AS n FROM code_out").get()).toEqual({ n: 0 })
+  })
+
   test("only the transfer's sender writes it and only its receiver reads it", async () => {
     const sim = createWorld({ seed: 45, codeTravels: { bundleBytes } })
     sim.addMachine({ name: "Linux", hub: true, platform: "linux", capabilities: {}, capacity: room })
