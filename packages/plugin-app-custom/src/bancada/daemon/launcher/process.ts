@@ -7,6 +7,7 @@ import type { Ending } from "../../results.js"
 import { CodeMissing, type Launch, type Launcher, type Placed, type Status } from "../executor.js"
 import type { Git } from "../git.js"
 import type { DockerExecutions } from "./docker.js"
+import { seat } from "../scheduler.js"
 import { createOnce, runFlag, type Attempt, type Claim, type Event, type PartStatus } from "../runner.js"
 import { sha256 } from "../blobs.js"
 import { contractAt } from "../snapshot.js"
@@ -542,7 +543,8 @@ export function makeProcessLauncher(input: {
     }
     for (const part of launch.parts) {
       await fs.mkdir(path.join(dir, "parts", part.part, "out"), { recursive: true })
-      if (part.devices === 0)
+      // A phone's test gets its phone from the devices (`devices/pool.ts`), like any other with devices.
+      if (part.devices === 0 && seat(part.spec) === part.spec.platform)
         await Bun.write(
           path.join(dir, "parts", part.part, "devices.json"),
           JSON.stringify({ versao: 1, aparelhos: [] }),

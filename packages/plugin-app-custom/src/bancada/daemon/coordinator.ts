@@ -3,7 +3,7 @@ import { BancadaProtocol } from "../protocol.js"
 import type { Alerts } from "./alerts.js"
 import { join } from "../results.js"
 import { duration, defaults as estimates, wait, type Sample } from "./estimate.js"
-import { needs, reserveAfter, schedule as choose, type MachineView, type QueuedPart } from "./scheduler.js"
+import { needs, reserveAfter, schedule as choose, seat, type MachineView, type QueuedPart } from "./scheduler.js"
 
 type PartRow = {
   readonly job_id: string
@@ -1196,9 +1196,10 @@ export function makeCoordinator(input: {
                   const spec: BancadaProtocol.PartSpec = JSON.parse(offer.spec)
                   return {
                     ...vector,
-                    ...(spec.platform === "none"
-                      ? {}
-                      : { [spec.platform]: vector[spec.platform] - (offer.devices_granted ?? 0) }),
+                    ...((platform) =>
+                      platform === "none" ? {} : { [platform]: vector[platform] - (offer.devices_granted ?? 0) })(
+                      seat(spec),
+                    ),
                   }
                 },
                 { ...free, builds: free.builds - groups.size },
@@ -1271,12 +1272,12 @@ export function makeCoordinator(input: {
       wait: (item, at, line) => {
         // Only devices of the part's kind count for it; builds count for every part.
         const kind = (spec: BancadaProtocol.PartSpec, devices: number) =>
-          spec.platform !== "none" && spec.platform === item.spec.platform ? devices : 0
+          seat(spec) !== "none" && seat(spec) === seat(item.spec) ? devices : 0
         return wait({
           now,
           free: {
             builds: line.free.builds,
-            devices: item.spec.platform === "none" ? 0 : line.free[item.spec.platform],
+            devices: ((platform) => (platform === "none" ? 0 : line.free[platform]))(seat(item.spec)),
           },
           ceiling: Number.POSITIVE_INFINITY,
           min: kind(item.spec, item.spec.devices.min),

@@ -38,6 +38,8 @@ export type HoldRow = {
   readonly last_activity_at: number | null
   readonly last_seen_at: number
   readonly reason: string | null
+  /** A test's hold of a phone (`job/part/n`): it lasts as long as the attempt, never expiring by idleness. */
+  readonly attempt: string | null
 }
 
 /** What the machine says of a hold: the body of `hold.state`, also when the session is this machine's own. */
@@ -76,6 +78,9 @@ export function makeHolds(input: {
   readonly now: () => number
   readonly machineID: string
   readonly phones: () => ReadonlyArray<Phone>
+  /** A phone's serial now, and whether it is connected (`devices/physical.ts`). */
+  readonly serial?: (alias: string) => string | undefined
+  readonly connected?: (alias: string) => boolean
   readonly times: Times
   /** A light slot of `platform` reserved now, if one fits (the lease's id); the next room goes to waiting ones. */
   readonly reserve: (platform: "android" | "ios") => string | undefined
@@ -142,9 +147,12 @@ export function makeHolds(input: {
       ...(current.reason ? { reason: { code: "orcamento", text: current.reason } } : {}),
     })
   }
-  /** What the session can use now: a phone's id (its serial comes with P12's devices), the slot's name. */
-  const device = (target: Target): Record<string, string> =>
-    target.kind === "fisico" ? { id: phoneOf(target)?.id ?? target.device } : { nome: target.name }
+  /** What the session can use now: a phone's id and its serial now (Wi-Fi: its `ip:porta`), the slot's name. */
+  const device = (target: Target): Record<string, string> => {
+    if (target.kind !== "fisico") return { nome: target.name }
+    const serial = input.serial?.(target.device)
+    return { id: phoneOf(target)?.id ?? target.device, ...(serial ? { serial } : {}) }
+  }
   const waitReason = (target: Target): BancadaProtocol.Reason => {
     if (target.kind === "vaga") return { code: "orcamento", text: "sem folga para mais um aparelho agora" }
     const current = holder(target)
@@ -228,12 +236,13 @@ export function makeHolds(input: {
     tick: () =>
       db.transaction(() => {
         const now = input.now()
+        // A slot's place lasts while the hook keeps asking; a phone's, until it is the session's (it is told).
         for (const row of open.all()) {
-          if (row.state === "esperando" && now - row.last_seen_at >= input.times.placeMs)
+          if (row.state === "esperando" && row.kind === "vaga" && now - row.last_seen_at >= input.times.placeMs)
             end(row, "solta", "o lugar na fila venceu")
         }
         for (const row of open.all()) {
-          if (row.state !== "concedida") continue
+          if (row.state !== "concedida" || row.attempt) continue
           const why = expiry(timing(row), now, queue(targetOf(row)).length > 0, input.times)
           if (why) end(row, "vencida", why)
         }
@@ -250,6 +259,57 @@ export function makeHolds(input: {
         ios: rows.filter((row) => row.platform === "ios").length,
       }
     },
+    /**
+     * A phone for a test's attempt, before its other devices (`docs/bancada.md`, "Phones"): one of this catalog of the
+     * platform, with the tags asked, that may be reserved, is connected, is not kept for someone (`reservado`), and
+     * nobody holds or waits for. Its hold lasts until the attempt gives it back.
+     */
+    take: (want: {
+      readonly platform: "android" | "ios"
+      readonly tags: ReadonlyArray<string>
+      readonly origin: BancadaProtocol.Origin
+      readonly attempt: string
+      readonly hold: string
+    }) =>
+      db.transaction(() => {
+        const now = input.now()
+        const phone = input
+          .phones()
+          .filter(
+            (item) =>
+              item.platform === want.platform &&
+              item.policy === "reservavel" &&
+              want.tags.every((tag) => item.tags.includes(tag)) &&
+              !(item.reserved && item.reserved.until > now) &&
+              (input.connected?.(item.alias) ?? true),
+          )
+          .find((item) => {
+            const target: Target = { kind: "fisico", device: item.alias }
+            return !holder(target) && queue(target).length === 0
+          })
+        if (!phone) return undefined
+        db.run(
+          "INSERT INTO hold (id, origin_machine, origin, root_session_id, kind, platform, target, state, requested_at, acquired_at, last_activity_at, last_seen_at, attempt) VALUES (?, ?, ?, ?, 'fisico', NULL, ?, 'concedida', ?, ?, ?, ?, ?)",
+          [
+            want.hold,
+            want.origin.machineID,
+            JSON.stringify(want.origin),
+            want.origin.rootSessionID,
+            JSON.stringify({ kind: "fisico", device: phone.alias }),
+            now,
+            now,
+            now,
+            now,
+            want.attempt,
+          ],
+        )
+        return phone
+      })(),
+    /** A test's attempt ended: its phone goes back. */
+    done: (attempt: string) =>
+      db.transaction(() => {
+        for (const row of open.all().filter((item) => item.attempt === attempt)) end(row, "solta")
+      })(),
     /** Holds in force, for the hook: whose each device is. */
     held: () => open.all().filter((row) => row.state === "concedida"),
     find: (hold: string) => find.get(hold) ?? undefined,

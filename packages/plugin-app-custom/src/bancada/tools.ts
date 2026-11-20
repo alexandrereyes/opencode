@@ -274,7 +274,11 @@ export function holdText(hold: Hold, now = Date.now()) {
   if (hold.state === "esperando")
     return [
       `Reserva ${hold.hold} na fila: ${what}, ${hold.position ?? 1}º na fila (${hold.reason ?? "ocupado"}).`,
-      `${ends ? `A reserva atual vence no pior caso em ${ends}. ` : ""}Você será avisado por mensagem quando sair; o lugar dura 15 min, e pedir de novo antes disso o mantém.`,
+      `${ends ? `A reserva atual vence no pior caso em ${ends}. ` : ""}Você será avisado por mensagem quando sair; ${
+        JSON.parse(hold.target).kind === "fisico"
+          ? "o lugar fica guardado até lá."
+          : "o lugar dura 15 min, e pedir de novo antes disso o mantém."
+      }`,
     ].join("\n")
   if (hold.state === "pedida")
     return `Reserva ${hold.hold} pedida: ${what}; a resposta ainda não chegou. Você será avisado por mensagem quando sair.`

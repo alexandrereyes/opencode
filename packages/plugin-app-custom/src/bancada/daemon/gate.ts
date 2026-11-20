@@ -66,7 +66,9 @@ export function makeGate(input: {
         const machine = part.where === "here" ? input.machineID : input.bridge()
         const local = machine === input.machineID
         // 2. Phones of the catalog: never one not to be reserved; otherwise only with the family's hold.
-        for (const phone of input.phones().filter((item) => cites(part.command, item.id))) {
+        for (const phone of input
+          .phones()
+          .filter((item) => [item.id, ...(item.serials ?? [])].some((name) => cites(part.command, name)))) {
           if (phone.policy === "negar")
             return {
               allow: false,

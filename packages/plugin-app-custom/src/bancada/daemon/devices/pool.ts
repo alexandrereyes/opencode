@@ -5,6 +5,8 @@ import path from "node:path"
 import type { Range } from "../../machine-config.js"
 import type { BancadaProtocol } from "../../protocol.js"
 import type { Launcher, Placed } from "../executor.js"
+import type { Phone } from "../../machine-config.js"
+import { seat } from "../scheduler.js"
 import { deviceFor, type DeviceKind, type Profile } from "./types.js"
 
 /**
@@ -79,6 +81,14 @@ export function makeDevicePool(input: {
   /** The console ports of local emulators (`portas.emulador`), in pairs. */
   readonly emulatorPorts: Range
   readonly simslim: () => boolean
+  /** The phones of this machine (`devices/physical.ts`) and giving a test's phone back (its hold, `holds.ts`). */
+  readonly phone?: {
+    readonly find: (alias: string) => Phone | undefined
+    readonly serial: (alias: string) => string | undefined
+    readonly connected: (alias: string) => boolean
+    readonly done: (attempt: string) => void
+    readonly machine: () => string
+  }
   /** The Docker mode: Android devices are emulators in containers. */
   readonly docker?: boolean
   readonly log: (line: string) => void
@@ -139,10 +149,11 @@ export function makeDevicePool(input: {
   const prepare = async (key: Placed, dir: string) => {
     const row = db
       .query<
-        { spec: string; devices: number; lease_id: string },
+        { spec: string; devices: number; lease_id: string; phone_hold: string | null },
         [string, string, number]
-      >("SELECT spec, devices, lease_id FROM attempt WHERE job_id = ? AND part = ? AND n = ?")
+      >("SELECT spec, devices, lease_id, phone_hold FROM attempt WHERE job_id = ? AND part = ? AND n = ?")
       .get(key.job, key.part, key.attempt)
+    if (row?.phone_hold) return phone(key, dir, row.phone_hold, row.lease_id)
     if (!row || row.devices === 0) return
     const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
     if (spec.platform === "none") return
@@ -189,8 +200,68 @@ export function makeDevicePool(input: {
     input.log(`devices of ${attemptOf(key)} ready: ${ids.join(", ")}`)
   }
 
+  /**
+   * A test's phone (`docs/bancada.md`, "Phones"): the one its hold took, as it is connected now, written to its
+   * `devices.json`. Nothing is done on the phone: not cleared, restarted nor stopped, before or after.
+   */
+  const phone = async (key: Placed, dir: string, hold: string, lease: string) => {
+    const target = db.query<{ target: string }, [string]>("SELECT target FROM hold WHERE id = ?").get(hold)
+    const alias = target ? (JSON.parse(target.target) as { device: string }).device : undefined
+    const found = alias ? input.phone?.find(alias) : undefined
+    const serial = alias ? input.phone?.serial(alias) : undefined
+    if (!found || !serial) {
+      input.log(`the phone of ${attemptOf(key)} is not connected`)
+      await Bun.write(path.join(dir, "devices.error"), `o celular ${alias ?? ""} não está conectado\n`)
+      return
+    }
+    const slot = db
+      .query<
+        { start: number; end: number },
+        [string]
+      >("SELECT port_start AS start, port_end AS end FROM lease_device WHERE lease_id = ? ORDER BY rowid")
+      .get(lease)
+    db.run(
+      "INSERT INTO device (id, kind, profile, choice, spec, state, running, attempt, part_dir, falls, last_used_at) VALUES (?, ?, 'estoque', 'fisico', ?, 'em_uso', ?, ?, ?, 0, ?) ON CONFLICT (id) DO UPDATE SET state = 'em_uso', running = excluded.running, attempt = excluded.attempt, part_dir = excluded.part_dir, mute_since = NULL, last_used_at = excluded.last_used_at",
+      [
+        `fisico:${found.alias}`,
+        `${found.platform}-fisico`,
+        JSON.stringify({ alias: found.alias }),
+        JSON.stringify({ serial }),
+        attemptOf(key),
+        dir,
+        input.now(),
+      ],
+    )
+    const view = {
+      id: found.id,
+      tipo: `${found.platform}-fisico`,
+      plataforma: found.platform,
+      nome: found.name,
+      apelido: found.alias,
+      serial: found.platform === "android" ? serial : null,
+      udid: found.platform === "ios" ? found.id : null,
+      adb: found.platform === "android" ? { host: "127.0.0.1", porta: 5037 } : null,
+      etiquetas: [...found.tags],
+      contasReais: found.realAccounts,
+      ...(slot ? { portas: { inicio: slot.start, fim: slot.end } } : {}),
+      host: null,
+      maquina: input.phone!.machine(),
+    }
+    await Bun.write(
+      path.join(dir, "devices.json.tmp"),
+      `{ "versao": 1, "aparelhos": [\n  ${JSON.stringify(view)}\n] }\n`,
+    )
+    await fs.rename(path.join(dir, "devices.json.tmp"), path.join(dir, "devices.json"))
+    input.log(`the phone ${found.alias} (${serial}) is ${attemptOf(key)}'s`)
+  }
+
   /** Gives back every device of an attempt, stopped and clean; two falls in a row put one 30 min aside. */
   const release = async (attempt: string) => {
+    for (const row of byAttempt.all(attempt).filter((item) => item.kind.endsWith("-fisico"))) {
+      // A phone goes back as it is: only its hold ends.
+      input.phone?.done(attempt)
+      set(row.id, { state: "criado", running: null, attempt: null, part_dir: null })
+    }
     for (const row of byAttempt.all(attempt)) {
       set(row.id, { state: "devolvendo" })
       const driver = input.drivers()[row.kind.startsWith("ios") ? "ios" : "android"]
@@ -248,6 +319,21 @@ export function makeDevicePool(input: {
     /** Every 10 s: a device in use that is dead, or mute for 60 s, fell; its part's `caiu` file names it. */
     watch: async () => {
       for (const row of using.all()) {
+        if (row.kind.endsWith("-fisico")) {
+          const alias = (JSON.parse(row.spec) as { alias: string }).alias
+          if (input.phone?.connected(alias)) {
+            if (row.mute_since !== null) set(row.id, { mute_since: null })
+            continue
+          }
+          if (row.mute_since === null || input.now() - row.mute_since < muteMs) {
+            if (row.mute_since === null) set(row.id, { mute_since: input.now() })
+            continue
+          }
+          set(row.id, { state: "caiu" })
+          input.log(`${row.id} disconnected during ${row.attempt}`)
+          if (row.part_dir) await fs.appendFile(path.join(row.part_dir, "caiu"), `${alias}\n`).catch(() => undefined)
+          continue
+        }
         const driver = input.drivers()[row.kind.startsWith("ios") ? "ios" : "android"]
         if (!driver || !row.running) continue
         const health = await driver.health(device(row), JSON.parse(row.running)).catch(() => "mudo" as const)
@@ -305,7 +391,7 @@ export function withDevices(launcher: Launcher, pool: DevicePool, folder: (key: 
     start: async (launch) => {
       await launcher.start(launch)
       launch.parts
-        .filter((part) => part.devices > 0)
+        .filter((part) => part.devices > 0 || seat(part.spec) !== part.spec.platform)
         .forEach((part) => ensure({ job: launch.job, part: part.part, attempt: part.attempt, group: launch.group }))
     },
     // After a restart the attempt goes on: devices not ready yet are prepared again by this process.

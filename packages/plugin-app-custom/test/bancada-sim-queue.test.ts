@@ -26,6 +26,16 @@ const ok = (runMs: number, planned = ["c1"]) => ({
   scenarios: passed(planned),
 })
 const room = { memMb: 64_000, cpuMilli: 16_000, builds: 2, android: 2, ios: 2 }
+const poco = {
+  alias: "poco",
+  name: "POCO X7",
+  id: "IBHUYT85ZTYH5XDM",
+  platform: "android",
+  transport: "usb",
+  tags: [],
+  realAccounts: false,
+  policy: "reservavel",
+} as const
 const ask = (
   sim: ReturnType<typeof createWorld>,
   at: string,
@@ -51,6 +61,7 @@ describe("simulation: the queue", () => {
       name: "Mac",
       capabilities: { android: {}, ios: {}, "android-fisico": {} },
       capacity: { ...room, builds: 3 },
+      phones: [poco],
     })
     sim.script("j-aaaaaaaa", "android", ok(120_000))
     sim.script("j-bbbbbbbb", "ios", ok(120_000))
@@ -249,7 +260,7 @@ describe("simulation: the queue", () => {
     // The Mac runs both and is cut off just before they end, until after the hub's database is replaced.
     const sim = createWorld({ seed: 24, partitions: [{ machine: "Mac", from: 1_020_000, to: 1_120_000 }] })
     sim.addMachine({ name: "Linux", hub: true, platform: "linux", speed: "lento", capabilities: {}, capacity: room })
-    sim.addMachine({ name: "Mac", capabilities: { android: {}, "android-fisico": {} }, capacity: room })
+    sim.addMachine({ name: "Mac", capabilities: { android: {}, "android-fisico": {} }, capacity: room, phones: [poco] })
     sim.script("j-aaaaaaaa", "android", ok(30_000))
     sim.script("j-bbbbbbbb", "celular", ok(30_000))
     await sim.advance(1_000)

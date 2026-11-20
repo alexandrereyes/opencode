@@ -249,6 +249,8 @@ export const CatalogPhone = Schema.Struct({
   id: Schema.String,
   platform: Schema.Literals(["android", "ios"]),
   policy: Schema.Literals(["reservavel", "negar"]),
+  /** What adb calls it now besides its id (a Wi-Fi phone's `ip:porta` or mDNS name): commands cite it so too. */
+  serials: optional(Schema.Array(Schema.String)),
 })
 export const Hello = Schema.Struct({
   type: Schema.Literal("hello"),

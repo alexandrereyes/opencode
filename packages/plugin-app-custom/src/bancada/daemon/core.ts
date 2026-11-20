@@ -69,6 +69,12 @@ export interface Ports {
   readonly blobs?: Blobs
   /** An offer was refused for a capability this machine published: discovery should look again. */
   readonly rediscover?: () => void
+  /** This machine's phones as connected now (`devices/physical.ts`). */
+  readonly phones?: {
+    readonly serial: (alias: string) => string | undefined
+    readonly serials: (alias: string) => ReadonlyArray<string>
+    readonly connected: (alias: string) => boolean
+  }
 }
 
 /** The times of the protocol (`docs/bancada.md`, "State machine"). */
@@ -223,6 +229,7 @@ export function createCore(ports: Ports) {
     },
     launcher: ports.launcher,
     ...(ports.rediscover ? { missed: ports.rediscover } : {}),
+    phone: { take: (want) => holds.take(want), drop: (hold) => holds.drop(hold) },
     send: (body) => messages.send("job" in body ? peerOf(body.job) : hub, body),
     repository: origin.repository,
     // A task of an attempt ended: its result should not wait for the next second.
@@ -255,6 +262,7 @@ export function createCore(ports: Ports) {
     now: ports.now,
     machineID: self.machineID,
     phones: () => self.phones ?? [],
+    ...(ports.phones ? { serial: ports.phones.serial, connected: ports.phones.connected } : {}),
     times: {
       idleQueuedMs: times.holdIdleQueuedMs,
       idleMs: times.holdIdleMs,
@@ -297,6 +305,7 @@ export function createCore(ports: Ports) {
       id: phone.id,
       platform: phone.platform,
       policy: phone.policy,
+      serials: [...(ports.phones?.serials(phone.alias) ?? [])],
       machineID: self.machineID,
     }))
     return {
@@ -456,12 +465,16 @@ export function createCore(ports: Ports) {
       speed: self.speed,
       ...(self.phones?.length
         ? {
-            phones: self.phones.map((phone) => ({
-              alias: phone.alias,
-              id: phone.id,
-              platform: phone.platform,
-              policy: phone.policy,
-            })),
+            phones: self.phones.map((phone) => {
+              const serials = (ports.phones?.serials(phone.alias) ?? []).filter((serial) => serial !== phone.id)
+              return {
+                alias: phone.alias,
+                id: phone.id,
+                platform: phone.platform,
+                policy: phone.policy,
+                ...(serials.length ? { serials: [...serials] } : {}),
+              }
+            }),
           }
         : {}),
       ...(self.hardware ? { hardware: self.hardware } : {}),
@@ -760,6 +773,8 @@ export function createCore(ports: Ports) {
      * against the hub's catalog from then on.
      */
     bridge: (hardware: string) => setMeta("bridge", hardware),
+    /** The phones' serials changed (a Wi-Fi phone came back on another `ip:porta`): the hub hears it in the hello. */
+    phonesChanged: () => hello(false),
     /** What discovery found (with the machine file's tags and secrets): published to the queues when it changed. */
     offer: (capabilities: Readonly<Record<string, unknown>>) => {
       offered.current = capabilities
@@ -769,7 +784,14 @@ export function createCore(ports: Ports) {
     /** The machines and phones the hub said (`catalog`), with this machine's own phones. */
     catalog,
     /** The holds of a session's family; every hold in force, for the hook; the holds this machine decides. */
-    holds: { family: mirror.family, granted: mirror.granted, find: mirror.find, here: holds.held, decided: holds.find },
+    holds: {
+      family: mirror.family,
+      granted: mirror.granted,
+      find: mirror.find,
+      here: holds.held,
+      decided: holds.find,
+      done: holds.done,
+    },
     /** Notes for the sessions (a hold came out, one expired), and their delivery. */
     notes: mirror.notes,
     noted: mirror.noted,

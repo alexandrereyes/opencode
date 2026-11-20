@@ -141,25 +141,24 @@ describe("holds on the machine that has the device", () => {
     ])
   })
 
-  test("a place not asked again in 15 min is lost; a phone not to be reserved is refused; one kept for someone never expires", async () => {
+  test("a slot's place not asked again in 15 min is lost, a phone's is kept; a phone not to be reserved is refused; one kept for someone never expires", async () => {
     const until = 1_000_000 + 24 * 60 * minute
-    const it = mac([
-      phone("poco"),
-      phone("pessoal", { policy: "negar" }),
-      phone("fixo", { reserved: { until, for: "QA" } }),
-    ])
-    it.ask("h-a", "ses_a", { kind: "fisico", device: "poco" })
-    it.ask("h-b", "ses_b", { kind: "fisico", device: "poco" })
-    await it.later(16 * minute)
-    expect(it.core.holds.find("h-b")).toMatchObject({ state: "solta", reason: "o lugar na fila venceu" })
+    const it = mac(
+      [phone("poco"), phone("pessoal", { policy: "negar" }), phone("fixo", { reserved: { until, for: "QA" } })],
+      0,
+    )
+    it.ask("h-v", "ses_v", { kind: "vaga", platform: "android", name: "Pixel_9" })
     expect(it.ask("h-c", "ses_c", { kind: "fisico", device: "pessoal" })).toMatchObject({
       state: "negada",
       reason: "pessoal não é reservável",
     })
     it.ask("h-d", "ses_d", { kind: "fisico", device: "fixo" })
     it.ask("h-e", "ses_e", { kind: "fisico", device: "fixo" })
+    await it.later(16 * minute)
+    expect(it.core.holds.find("h-v")).toMatchObject({ state: "solta", reason: "o lugar na fila venceu" })
     await it.later(120 * minute)
     expect(it.core.holds.find("h-d")?.state).toBe("concedida")
+    expect(it.core.holds.find("h-e")?.state).toBe("esperando")
   })
 })
 

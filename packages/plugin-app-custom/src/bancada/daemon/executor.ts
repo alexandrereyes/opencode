@@ -5,6 +5,7 @@ import { BancadaProtocol } from "../protocol.js"
 import { evidence, judge, type Ending } from "../results.js"
 import { open, step, type Brake, type Reading } from "./brake.js"
 import { unmet } from "./capabilities.js"
+import { seat } from "./scheduler.js"
 import { add, free as budgetFree, largestFit, measured, room, samples, times, zero, type Cost } from "./budget.js"
 import { deviceFor } from "./devices/types.js"
 import { block } from "./devices/ports.js"
@@ -105,6 +106,7 @@ type AttemptRow = {
   readonly only_scenarios: string | null
   readonly state: string
   readonly lease_id: string
+  readonly phone_hold: string | null
   readonly group_id: string | null
   readonly cancel_at: number | null
   readonly cancel_reason: string | null
@@ -139,6 +141,17 @@ export function makeExecutor(input: {
   readonly keepMs: number
   /** An offer was refused for a capability this machine published: discovery runs again. */
   readonly missed?: () => void
+  /** A phone for a test's attempt, and giving it back on a refused offer (`holds.ts`). */
+  readonly phone?: {
+    readonly take: (want: {
+      readonly platform: "android" | "ios"
+      readonly tags: ReadonlyArray<string>
+      readonly origin: BancadaProtocol.Origin
+      readonly attempt: string
+      readonly hold: string
+    }) => unknown
+    readonly drop: (hold: string) => void
+  }
   /** Light slots waiting for room, per kind (`holds.ts`). */
   readonly slots?: () => { readonly android: number; readonly ios: number }
   /** The code through the hub; without it, a start without code loses its attempt. */
@@ -357,7 +370,8 @@ export function makeExecutor(input: {
     // One build per group: a sibling accepted and not started yet already holds it (`docs/bancada.md`, "Groups").
     const building = spec.build && !carrier.get(message.job)
     const build = building ? costOf(`build:${message.code.project}`, buildCost) : zero
-    const unit = device(spec.platform, spec.device)
+    const platform = seat(spec)
+    const unit = device(platform, spec.device)
     const measuredExtra = samplesOf.all(`extra:${message.code.project}/${spec.part}`, samples.kept)
     const extra = (n: number) =>
       measuredExtra.length >= samples.trusted
@@ -368,7 +382,7 @@ export function makeExecutor(input: {
     const devices = largestFit({
       room: current(),
       builds: building ? 1 : 0,
-      platform: spec.platform,
+      platform,
       min: message.devices.min,
       proposed: message.devices.proposed,
       build,
@@ -417,10 +431,30 @@ export function makeExecutor(input: {
     const secrets = message.spec.secrets
     if (secrets && !limits.secrets.includes(secrets))
       return refuse({ code: "sem_maquina", text: `a policy ${secrets} não está na lista segredos desta máquina` })
+    // A phone first (`docs/bancada.md`, "Phones"): the part's other devices only once it has one.
+    const physical = seat(message.spec) === "none" && message.spec.platform !== "none"
+    const phoneHold = physical ? `p-${input.random()}` : undefined
+    if (
+      phoneHold &&
+      !input.phone?.take({
+        platform: message.spec.platform as "android" | "ios",
+        tags: message.spec.device.tags ?? [],
+        origin: message.origin,
+        attempt: `${message.job}/${message.part}/${message.attempt}`,
+        hold: phoneHold,
+      })
+    )
+      return refuse({ code: "aparelho_ocupado", text: "nenhum celular livre com o que o teste pede" })
     const admission = admit(message)
-    if (!admission) return refuse({ code: "orcamento", text: "aguardando folga" })
-    const blocks = portsFor(admission.devices)
-    if (!blocks) return refuse({ code: "orcamento", text: "sem portas livres para os aparelhos" })
+    const blocks = admission ? portsFor(admission.devices + (physical ? 1 : 0)) : undefined
+    if (!admission || !blocks) {
+      if (phoneHold) input.phone?.drop(phoneHold)
+      return refuse(
+        admission
+          ? { code: "orcamento", text: "sem portas livres para os aparelhos" }
+          : { code: "orcamento", text: "aguardando folga" },
+      )
+    }
     const kind = message.spec.platform
     const devices = admission.devices
     const lease = input.random()
@@ -447,7 +481,7 @@ export function makeExecutor(input: {
       ]),
     )
     db.run(
-      "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, only_scenarios, state, lease_id, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aceito', ?, ?)",
+      "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, only_scenarios, state, lease_id, phone_hold, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aceito', ?, ?, ?)",
       [
         message.job,
         message.part,
@@ -458,6 +492,7 @@ export function makeExecutor(input: {
         devices,
         message.only ? JSON.stringify(message.only) : null,
         lease,
+        phoneHold ?? null,
         input.now(),
       ],
     )
@@ -649,6 +684,7 @@ export function makeExecutor(input: {
             row.lease_id,
           ])
           db.run("DELETE FROM lease_device WHERE lease_id = ?", [row.lease_id])
+          if (row.phone_hold) input.phone?.drop(row.phone_hold)
         })()
     for (const row of delivered.all()) {
       const id = `cleanup:${row.job_id}/${row.part}/${row.n}`

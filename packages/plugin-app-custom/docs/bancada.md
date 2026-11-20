@@ -41,6 +41,23 @@ end; nothing is approved without both. The example project (`test/fixture/bancad
 - Only devices of the `device` table, named with the machine's prefix, are ever stopped. A device dead, or mute for
   60 s, during a run fell: the scenarios it lost run again once elsewhere; two falls in a row put it 30 min aside.
 
+## Phones
+
+- **Catalog:** the machine file's `[[fisico]]`: `apelido`, `nome`, `id` (serial or UDID), `plataforma`, `transporte`
+  (`usb` or `wifi`), `etiquetas`, `contas_reais`, `politica` (`negar`: nobody uses it, the hook refuses any command
+  citing it), `reservado = { ate, para }` (kept for someone until then: its first hold never expires, no test gets
+  it).
+- **Connection** (`devices/physical.ts`, every 30 s and on each hold of the machine's own phones): by USB the id is
+  the serial; by Wi-Fi the phone is whatever `ip:porta` answers its `ro.serialno`, reconnected through its
+  `_adb-tls-connect` mDNS announcement when held and gone; an iPhone is its UDID in `xcrun devicectl list devices`.
+  The serials go to the hub in the hello, so the hook on any machine knows a phone by its id, serial or `ip:porta`,
+  also behind `mac`.
+- **Tests:** a part with `precisa = ["android-fisico"]` (or `ios-fisico`) and `aparelho.etiquetas` goes to a machine
+  with such a phone, takes it before anything else (a free, connected, reservable phone with the tags, not kept for
+  someone) and none of the emulator budget; its `devices.json` has the phone (`serial`, `adb`, `contasReais`). While
+  the test runs no session's command may use it. The Bancada never clears, uninstalls, restarts, stops or sends
+  anything on a phone; at the end only the hold ends.
+
 ## App surface
 
 Two calls and two events, all optional for older apps. Normative fixtures in [`bancada/`](bancada/), produced by
@@ -126,8 +143,11 @@ up and checks nothing is left.
   project: copying to the Mac, device pools and locks, creating and booting emulators and simulators, Wi-Fi and relay
   cleanup (the Bancada does them). Stay: building, listing and sharing scenarios, `adb install`, the fake WhatsApp and
   its relay to the granted port, fixtures, Appium, converting xUnit's XML into `summary.json`. `AGENTS.md` and the
-  `e2e` skill say `bancada_run`. Phones stay with `device-lease` for now (the Bancada's phone driver is not part of
-  this delivery).
+  `e2e` skill say `bancada_run`; the phone tests ask for `android-fisico` with their tags.
+- **Phones:** in the Bancada (catalog in the Mac's machine file, migrated from `device-lease`'s `devices.json`). The
+  global skills `aparelhos-fisicos` and `emuladores-android` and the `device-lease` script are retired with nothing
+  in their place: the tools' descriptions and answers are the only explanation. A long run already on a phone becomes
+  its `reservado`.
 - **Deploy order:** the machine file (`~/.config/opencode/bancada.toml`) on host-6 (`modo = "docker"`,
   `[android.docker]`) and on the Mac; the Linux image first, then `custom:update` on the Mac. In core-infra's compose:
   `OPENCODE_BANCADA=1` and `OPENCODE_BANCADA_SELF`. The schema's first step freezes at the first deploy.

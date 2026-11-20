@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite"
 import { initials } from "../../live-activity/unified.js"
 import type { BancadaProtocol } from "../protocol.js"
 import type { MirrorRow } from "./holds.js"
+import { seat } from "./scheduler.js"
 
 /**
  * What the apps read (`docs/bancada.md`, "App surface"): a session family's devices and waits (`session`), and the
@@ -52,6 +53,12 @@ function what(spec: Spec) {
   const kind: Kind = spec.platform === "none" ? "none" : spec.platform === "ios" ? "ios-simulator" : "android-emulator"
   const count = { min: spec.devices.min, max: spec.devices.max }
   if (kind === "none") return { kind, count, label: spec.label }
+  if (seat(spec) === "none")
+    return {
+      kind: kind === "ios-simulator" ? "ios-device" : "android-device",
+      count: { min: 1, max: 1 },
+      label: "1 celular físico",
+    }
   const noun = (n: number) =>
     kind === "ios-simulator"
       ? n === 1
@@ -65,8 +72,11 @@ function what(spec: Spec) {
   return { kind, count, label }
 }
 
-const kindOf = (device: UsedDevice, platform: Spec["platform"]): Exclude<Kind, "none"> =>
-  device.kind.startsWith("ios") ? "ios-simulator" : platform === "ios" ? "ios-simulator" : "android-emulator"
+const kindOf = (device: UsedDevice, spec: Spec): Exclude<Kind, "none"> => {
+  const ios = device.kind.startsWith("ios") || spec.platform === "ios"
+  if (seat(spec) === "none") return ios ? "ios-device" : "android-device"
+  return ios ? "ios-simulator" : "android-emulator"
+}
 const kindLabel = (kind: Exclude<Kind, "none">) =>
   kind === "android-emulator" ? "Emulador Android" : kind === "ios-simulator" ? "Simulador iOS" : "Celular físico"
 const useState = (state: PartState) => (state === "compilando" || state === "rodando" ? state : ("preparando" as const))
@@ -125,7 +135,7 @@ export function makeSurface(input: {
           const machine = serverOf(view.machine)
           const devices = view.devices?.length ? view.devices : [{ kind: spec.platform, id: "" }]
           devices.forEach((device, index) => {
-            const kind = kindOf(device, spec.platform)
+            const kind = kindOf(device, spec)
             using.push({
               key: `${row.id}/${spec.part}/${device.id || index}`,
               kind,

@@ -108,6 +108,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       only_scenarios TEXT,
       state TEXT NOT NULL,
       lease_id TEXT NOT NULL,
+      phone_hold TEXT,
       group_id TEXT,
       cancel_at INTEGER,
       cancel_reason TEXT,
@@ -281,7 +282,8 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       last_activity_at INTEGER,
       last_seen_at INTEGER NOT NULL,
       ended_at INTEGER,
-      reason TEXT
+      reason TEXT,
+      attempt TEXT
     )`,
     // What this server's sessions hold, here or on another machine, as the machine that has the device said.
     `CREATE TABLE grant_mirror (

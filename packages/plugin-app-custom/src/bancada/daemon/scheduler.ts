@@ -122,7 +122,8 @@ export function schedule(input: {
   const fits = (part: QueuedPart, machine: MachineView) => {
     const free = room.get(machine.machineID)
     if (!free || machine.braked || free.builds < builds(part, machine)) return false
-    return part.spec.platform === "none" || free[part.spec.platform] >= part.spec.devices.min
+    const platform = seat(part.spec)
+    return platform === "none" || free[platform] >= part.spec.devices.min
   }
 
   // Reserved parts first, oldest first; then the soonest to end, then the oldest.
@@ -197,7 +198,7 @@ export function schedule(input: {
     room.set(choice.machine.machineID, {
       ...free,
       builds: free.builds - taken,
-      ...(part.spec.platform === "none" ? {} : { [part.spec.platform]: free[part.spec.platform] - proposed }),
+      ...((platform) => (platform === "none" ? {} : { [platform]: free[platform] - proposed }))(seat(part.spec)),
     })
     part.spec.exclusive.forEach((name) => locks.add(name))
     offered.add(part)
@@ -209,14 +210,14 @@ export function schedule(input: {
    * machine; otherwise a fair share of what is free, between its minimum and maximum.
    */
   function grant(part: QueuedPart, machine: MachineView) {
-    const platform = part.spec.platform
+    const platform = seat(part.spec)
     if (platform === "none") return 0
     const free = room.get(machine.machineID)![platform]
     const others = order.filter(
       (other) =>
         other !== part &&
         !offered.has(other) &&
-        other.spec.platform === platform &&
+        seat(other.spec) === platform &&
         candidates(other).some((candidate) => candidate.machineID === machine.machineID),
     ).length
     const share = others === 0 ? part.spec.devices.max : Math.floor(free / (1 + others))
@@ -248,6 +249,14 @@ export function schedule(input: {
     })),
     bypassed,
   }
+}
+
+/**
+ * The kind of device a part takes from a machine's budget: a phone takes none (it is reserved apart, `holds.ts`), so a
+ * phone's test never waits for room for an emulator.
+ */
+export function seat(spec: BancadaProtocol.PartSpec): BancadaProtocol.Platform {
+  return spec.needs.some((need) => need === "android-fisico" || need === "ios-fisico") ? "none" : spec.platform
 }
 
 /** What a part needs from a machine: its capabilities, and the policy of its secrets. */

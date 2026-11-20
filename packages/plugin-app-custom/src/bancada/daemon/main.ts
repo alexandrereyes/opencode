@@ -20,6 +20,7 @@ import { bundle, release } from "./snapshot.js"
 import { identify } from "./bridge.js"
 import { discover as findCapabilities, systemProbe, type Discovery } from "./capabilities.js"
 import { makeDevicePool, withDevices, type DevicePool, type Driver } from "./devices/pool.js"
+import { makePhones } from "./devices/physical.js"
 import { androidLocal } from "./devices/android-local.js"
 import { iosSimulators } from "./devices/ios.js"
 import { androidDocker } from "./devices/android-docker.js"
@@ -60,6 +61,8 @@ export const limits = {
   discoverMs: 10 * 60_000,
   /** How often the devices in use are checked. */
   watchMs: 10_000,
+  /** How often the phones' connections are read (a Wi-Fi phone's `ip:porta` changes). */
+  phonesMs: 30_000,
 }
 
 /**
@@ -98,6 +101,8 @@ const held: {
     requests?: ReturnType<typeof makeRequests>
     /** The link to the hub, on a machine that is not the hub and knows where it is. */
     link?: Link
+    /** Reads a phone of this machine's catalog now, reconnecting it when it is by Wi-Fi. */
+    phones?: (alias: string) => Promise<void>
   }
 } = {}
 
@@ -176,6 +181,17 @@ export async function main() {
     const offering = machineFile.valid
     const link = owner.current.link && !owner.current.hub ? owner.current.link : undefined
     const discovery = { at: 0 }
+    const phones = makePhones({
+      phones: () => (offering ? config.phones : []),
+      adb: () => found.current?.android?.adb,
+      ios: process.platform === "darwin",
+      run: async (argv, timeoutMs) => {
+        const done = await systemShell()
+          .run(argv, { timeoutMs })
+          .catch(() => undefined)
+        return done ? { code: done.code, stdout: done.stdout } : undefined
+      },
+    })
     // The Docker mode: each execution in a sibling container (`launcher/docker.ts`).
     const executions =
       config.execution.mode === "docker"
@@ -207,17 +223,49 @@ export async function main() {
       emulatorPorts: config.ports.emulator,
       docker: config.execution.mode === "docker",
       simslim: () => found.current?.simslim !== undefined,
+      phone: {
+        find: (alias) => (offering ? config.phones : []).find((phone) => phone.alias === alias),
+        serial: phones.serial,
+        connected: phones.connected,
+        done: (attempt) => current.core?.holds.done(attempt),
+        machine: () => owner.current?.name ?? "",
+      },
       log,
     })
     current.timers.push(setInterval(() => void pool.watch().catch(() => undefined), limits.watchMs))
+    // The phones as connected now, every 30 s; a held one that lost its connection is reconnected (Wi-Fi, mDNS).
+    const watchPhones = () => {
+      const held = (current.core?.holds.here() ?? []).flatMap((row) =>
+        row.kind === "fisico" ? [(JSON.parse(row.target) as { device: string }).device] : [],
+      )
+      const before = JSON.stringify(config.phones.map((phone) => phones.serials(phone.alias)))
+      void phones
+        .refresh({ reconnect: held })
+        .then(() => {
+          if (JSON.stringify(config.phones.map((phone) => phones.serials(phone.alias))) !== before)
+            current.core?.phonesChanged()
+        })
+        .catch((error: unknown) => log(`reading the phones failed: ${String(error)}`))
+    }
+    if (offering && config.phones.length) {
+      watchPhones()
+      current.timers.push(setInterval(watchPhones, limits.phonesMs))
+    }
     void fs
       .mkdir(path.join(state, "devices"), { recursive: true })
       .then(() => Bun.write(path.join(state, "simslim-profile.json"), JSON.stringify(iosSlim)))
+    current.phones = (alias) => {
+      const before = JSON.stringify(phones.serials(alias))
+      return phones.refresh({ reconnect: [alias] }).then(() => {
+        if (JSON.stringify(phones.serials(alias)) !== before) current.core?.phonesChanged()
+      })
+    }
     current.core = createCore({
       db,
       now,
       random,
       log,
+      ...(offering && config.phones.length ? { phones } : {}),
       files: diskFiles(path.join(state, "transfers"), workdirs),
       ...(owner.current.hub ? { blobs } : {}),
       // The link starts with the core it serves; until then nothing calls it.
@@ -297,7 +345,7 @@ export async function main() {
     const discover = () => {
       discovery.at = Date.now()
       if (!offering) return
-      void findCapabilities(systemProbe(), config).then(
+      void findCapabilities(systemProbe(), config, config.phones.length ? phones.connected : undefined).then(
         (discovered) => {
           found.current = discovered
           current.core?.offer(offered(config, discovered.found))
@@ -354,6 +402,7 @@ export async function main() {
         deliveries,
         identifyBridge,
         state,
+        phones: (alias) => held.process?.phones?.(alias) ?? Promise.resolve(),
       }),
   })
   /**
@@ -425,6 +474,7 @@ async function admin(
     readonly deliveries: Deliveries
     readonly identifyBridge: () => void
     readonly state: string
+    readonly phones?: (alias: string) => Promise<void>
   },
 ) {
   if (request.headers.get("authorization") !== `Bearer ${context.secret}`) return new Response(null, { status: 401 })
@@ -532,6 +582,8 @@ async function admin(
     if (!family || !target || typeof field("hold") !== "string")
       return Response.json({ error: "aparelho, or tipo and nome, are required" }, { status: 400 })
     if (field("maquina") === "mac") context.identifyBridge()
+    // A phone of this machine: its connection read now (a Wi-Fi one reconnected), so the answer brings its serial.
+    if (target.kind === "fisico") await context.phones?.(target.device)
     const row = core.hold({
       ...family,
       hold: String(field("hold")),

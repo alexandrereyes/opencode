@@ -44,13 +44,18 @@ export type Discovery = {
   readonly simslim?: string
 }
 
-export async function discover(probe: Probe, config: MachineConfig): Promise<Discovery> {
+export async function discover(
+  probe: Probe,
+  config: MachineConfig,
+  /** Whether a phone is connected now, from what the Bancada keeps of them (`devices/physical.ts`). */
+  connected?: (alias: string) => boolean,
+): Promise<Discovery> {
   const docker = config.execution.mode === "docker"
   const android = await androidTools(probe, config)
   const [emulators, ios, phones, dotnet, others] = await Promise.all([
     docker ? dockerAndroid(probe, config) : androidCapability(probe, android),
     probe.platform === "darwin" ? iosCapability(probe) : undefined,
-    phonesCapability(probe, config.phones, android),
+    phonesCapability(probe, config.phones, android, connected),
     dotnetCapabilities(probe),
     versions(probe, android, docker),
   ])
@@ -210,9 +215,34 @@ async function iosCapability(probe: Probe) {
  * `android-fisico` and `ios-fisico`: the catalog's phones that may be reserved, each said connected when `adb devices`
  * or `devicectl` lists its id now.
  */
-async function phonesCapability(probe: Probe, phones: ReadonlyArray<Phone>, tools: AndroidTools | undefined) {
+async function phonesCapability(
+  probe: Probe,
+  phones: ReadonlyArray<Phone>,
+  tools: AndroidTools | undefined,
+  connected?: (alias: string) => boolean,
+) {
   const offered = phones.filter((phone) => phone.policy !== "negar")
   if (offered.length === 0) return {}
+  if (connected)
+    return Object.fromEntries(
+      (["android", "ios"] as const)
+        .map(
+          (platform) =>
+            [
+              `${platform}-fisico`,
+              offered
+                .filter((phone) => phone.platform === platform)
+                .map((phone) => ({
+                  apelido: phone.alias,
+                  etiquetas: [...phone.tags],
+                  contasReais: phone.realAccounts,
+                  conectado: connected(phone.alias),
+                })),
+            ] as const,
+        )
+        .filter(([, list]) => list.length > 0)
+        .map(([name, list]) => [name, { aparelhos: list }]),
+    )
   const [adb, devicectl] = await Promise.all([
     tools && offered.some((phone) => phone.platform === "android")
       ? probe.run([tools.adb, "devices", "-l"])
