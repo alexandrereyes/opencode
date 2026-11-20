@@ -83,6 +83,8 @@ export type Times = {
   readonly uncertainMs: number
   readonly lostMs: number
   readonly localModeMs: number
+  /** A notice a plugin instance took and did not acknowledge in this long goes to another. */
+  readonly noticeLeaseMs: number
   readonly holdIdleQueuedMs: number
   readonly holdIdleMs: number
   readonly holdTotalQueuedMs: number
@@ -121,6 +123,7 @@ const timeKeys = {
   incerto_s: ["uncertainMs", 1_000, 180],
   perdido_s: ["lostMs", 1_000, 900],
   modo_local_s: ["localModeMs", 1_000, 45],
+  aviso_s: ["noticeLeaseMs", 1_000, 30],
   vaga_parada_com_fila_min: ["holdIdleQueuedMs", minute, 10],
   vaga_parada_sem_fila_min: ["holdIdleMs", minute, 60],
   vaga_total_com_fila_min: ["holdTotalQueuedMs", minute, 30],

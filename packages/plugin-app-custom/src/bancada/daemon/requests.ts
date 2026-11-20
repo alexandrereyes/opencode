@@ -90,6 +90,7 @@ async function submit(core: Core, git: Git, request: Bancada.Request): Promise<B
     },
     parts,
     repository: frozen.frozen.root,
+    ...(request.snapshot ? { snapshot: { files: frozen.frozen.files.length } } : {}),
   })
   const changes = frozen.frozen.files.map((file) => ({ caminho: file.path, mudanca: file.change }))
   return {

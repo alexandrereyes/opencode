@@ -7,6 +7,9 @@ import { runGit } from "../src/bancada/daemon/git"
 import { liveness } from "../src/bancada/daemon/launcher/process"
 import { BancadaProtocol } from "../src/bancada/protocol"
 import type { Bancada } from "../src/bancada/rpc"
+import { registerBancadaTools } from "../src/bancada/tools"
+import type { Tool } from "@opencode/schema/tool"
+import { Effect } from "effect"
 import { initGit } from "../../core/test/fixture/git"
 
 const command = bancadaCommand(path.join(import.meta.dir, "../src/bancada/client.ts"))
@@ -167,8 +170,103 @@ describe("the machine file", () => {
   }, 20_000)
 })
 
+describe("notices and tools", () => {
+  // Starts the process from source and runs the example's `simples` test for real.
+  test("S8: a notice taken and never acknowledged goes again, with the same id; nothing is cleaned before the ack", async () => {
+    const context = await setup("[tempos]\naviso_s = 1\n")
+    const submitted = await context.client.call<Bancada.Submitted>("submit", {
+      id: BancadaProtocol.jobID("S8"),
+      sessionID: "ses_a",
+      diretorio: context.repository,
+      testes: [{ teste: "simples" }],
+    })
+    await until(async () => (await view(context.client, submitted.job))?.state === "concluido", 30_000)
+    type Notices = { notices: { job: string; sessionID: string; id: string; text: string }[] }
+    const events = () => context.client.call<Notices>("events", { waitMs: 0 })
+    const first = await events()
+    expect(first.notices).toMatchObject([
+      {
+        job: submitted.job,
+        sessionID: "ses_a",
+        id: expect.stringMatching(/^msg_/),
+        text: expect.stringContaining(`[Bancada] ${submitted.job} terminou`),
+      },
+    ])
+    // Taken by one instance: no other gets it while it may still be delivering.
+    expect((await events()).notices).toEqual([])
+    // That instance died between its message and its ack: the same notice, the same message id, goes again.
+    await Bun.sleep(1_200)
+    expect((await events()).notices).toEqual(first.notices)
+    const attempts = path.join(context.state, "attempts", submitted.job)
+    expect(await fs.exists(attempts)).toBe(true)
+    await context.client.call("notice.ack", { job: submitted.job })
+    expect((await events()).notices).toEqual([])
+    // Delivered: the hub sends the cleanup, the attempt's folder goes.
+    await until(async () => !(await fs.exists(attempts)), 20_000)
+    expect((await view(context.client, submitted.job))?.state).toBe("entregue")
+  }, 60_000)
+
+  // The tools as an agent calls them, against a real process (the plugin's server is played by a small fake).
+  test("bancada_run answers with the request and its place; with esperar, with the notice itself; status and cancel", async () => {
+    const context = await setup()
+    const added: Tool.Info[] = []
+    const ctx = {
+      tool: {
+        transform: (edit: (editor: { add: (tool: Tool.Info) => void }) => void) =>
+          Effect.sync(() => edit({ add: (tool) => void added.push(tool) })),
+      },
+      session: {
+        get: (input: { sessionID: string }) =>
+          Effect.succeed({
+            id: input.sessionID,
+            location: { directory: context.repository },
+            title: "Sessão de teste",
+          }),
+      },
+    } as unknown as Parameters<typeof registerBancadaTools>[0]
+    await Effect.runPromise(Effect.scoped(registerBancadaTools(ctx, context.client, async () => "srv-a")))
+    expect(added.map((tool) => [tool.name, tool.options?.codemode])).toEqual([
+      ["bancada_run", false],
+      ["bancada_status", false],
+      ["bancada_cancel", false],
+    ])
+    const tool = (name: string) => added.find((item) => item.name === name)!
+    const call = (name: string, input: unknown, id: string) =>
+      Effect.runPromise(
+        tool(name).execute(input, {
+          sessionID: "ses_tool",
+          agent: "build",
+          messageID: "msg_1",
+          id,
+          progress: () => Effect.void,
+        } as unknown as Tool.Context),
+      )
+    const first = await call("bancada_run", { testes: [{ teste: "simples", args: ["--dorme", "20"] }] }, "call_1")
+    const job = BancadaProtocol.jobID("srv-a\ncall_1")
+    expect(first.content).toMatch(new RegExp(`^Pedido ${job} enviado \\(commit [0-9a-f]{8}\\)\\.\nsimples: `))
+    expect(first.content).toContain("O resultado chega sozinho como mensagem nesta sessão: não consulte em laço.")
+    // The same call made again is the same request.
+    expect((await call("bancada_run", { testes: [{ teste: "simples" }] }, "call_1")).content).toContain(`Pedido ${job}`)
+    await until(async () => (await view(context.client, job))?.parts.simples?.state === "rodando", 20_000)
+    expect((await call("bancada_status", {}, "call_2")).content).toContain(`${job} (commit `)
+    expect((await call("bancada_cancel", { job }, "call_3")).content).toBe(
+      `${job}: cancelamento pedido. O aviso do pedido diz como cada teste terminou.`,
+    )
+    // Held until the end: the notice comes back as the tool's result, and is not sent as a message.
+    const waited = await call("bancada_run", { testes: [{ teste: "simples" }], esperar: true }, "call_4")
+    const second = BancadaProtocol.jobID("srv-a\ncall_4")
+    expect(waited.content).toMatch(
+      new RegExp(`^\\[Bancada\\] ${second} terminou \\(commit [0-9a-f]{8}\\)\nSimples: 2 aprovados\\.`),
+    )
+    // Delivered by the tool: no message goes to the session for it.
+    expect((await view(context.client, second))?.state).toBe("entregue")
+    const notices = await context.client.call<{ notices: { job: string }[] }>("events", { waitMs: 0 })
+    expect(notices.notices.map((notice) => notice.job)).not.toContain(second)
+  }, 90_000)
+})
+
 /** The example project as the session's repository, and a client of a process that is the hub. */
-async function setup() {
+async function setup(machine = "") {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-execution-"))
   folders.push(root)
   const repository = path.join(root, "projeto")
@@ -179,7 +277,10 @@ async function setup() {
   const state = path.join(root, "state")
   // A machine file of its own, never the host's: room for the example's build, executions as processes.
   const config = path.join(root, "bancada.toml")
-  await Bun.write(config, `versao = 1\n[orcamento]\nmemoria_gb = 32\ncpu = 16\n[execucao]\nmodo = "processo"\n`)
+  await Bun.write(
+    config,
+    `versao = 1\n[orcamento]\nmemoria_gb = 32\ncpu = 16\n[execucao]\nmodo = "processo"\n${machine}`,
+  )
   const client = makeBancadaClient({
     state,
     owner: async () => ({ instanceID: "srv-a", name: "Servidor A", hub: true }),

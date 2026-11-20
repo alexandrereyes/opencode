@@ -258,6 +258,7 @@ export function createWorld(options: {
           : { state: "done", ending: { stage: "run", cause: "runner_morto" } }
       if (elapsed < run.script.buildMs) return { state: "compilando" }
       if (elapsed < run.script.buildMs + run.script.runMs) return { state: "rodando" }
+      const scenarios = run.script.scenarios
       // The project's two files, as a real run writes them; a failure's evidence in its output folder.
       const out = `${machine}/attempts/${key(attempt)}/out`
       const evidence = Object.fromEntries(
@@ -282,7 +283,7 @@ export function createWorld(options: {
           planned: {
             versao: 1,
             cenarios: run.script.planned.map((id) => {
-              const name = run.script.scenarios.find((item) => item.id === id)?.name
+              const name = scenarios.find((item) => item.id === id)?.name
               return { id, ...(name ? { nome: name } : {}) }
             }),
           },

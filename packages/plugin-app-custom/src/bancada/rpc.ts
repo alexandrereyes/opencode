@@ -81,6 +81,33 @@ export const Submitted = Schema.Struct({
 }).annotate({ identifier: "Bancada.Submitted" })
 export type Submitted = typeof Submitted.Type
 
+/** Where a part of a request stands, as its origin knows it (`docs/bancada.md`, "status"). */
+export const PartView = Schema.Struct({
+  state: BancadaProtocol.PartState,
+  attempt: Schema.Number,
+  machine: optional(BancadaProtocol.MachineRef),
+  position: optional(Schema.Number),
+  etaMs: optional(Schema.Number),
+  reason: optional(BancadaProtocol.Reason),
+}).annotate({ identifier: "Bancada.PartView" })
+export const JobView = Schema.Struct({
+  job: Schema.String,
+  /** `aguardando_confirmacao`, `na_fila`, `recebido` (its notice is being made), `concluido` (notice ready). */
+  state: Schema.String,
+  sessionID: Schema.String,
+  commit: Schema.String,
+  labels: Schema.Record(Schema.String, Schema.String),
+  parts: Schema.Record(Schema.String, PartView),
+  result: optional(Schema.Array(BancadaProtocol.PartResult)),
+  /** The notice's text, once made. */
+  notice: optional(Schema.String),
+}).annotate({ identifier: "Bancada.JobView" })
+export type JobView = typeof JobView.Type
+
+export const Invalid = Schema.Struct({ problems: Schema.Array(Schema.String) }).annotate({
+  identifier: "Bancada.Invalid",
+})
+
 const errors = { unavailable: Schema.toStandardSchemaV1(Unavailable) }
 
 /** Refusals between servers, by name: a call of another version or one the hub cannot read is never half applied. */
@@ -110,6 +137,36 @@ export const Definition = Rpc.define({
     wake: {
       input: Schema.toStandardSchemaV1(Schema.Struct({})),
       output: Schema.toStandardSchemaV1(Wake),
+      errors,
+    },
+    /**
+     * A request of a session of this server (`Request`): its code frozen now, queued at the hub (or here, with the hub
+     * out). The same `id` is the same request.
+     */
+    submit: {
+      input: Schema.toStandardSchemaV1(Request),
+      output: Schema.toStandardSchemaV1(Submitted),
+      errors: { ...errors, invalid: Schema.toStandardSchemaV1(Invalid) },
+    },
+    /**
+     * Requests of this server: one (`job`; with `waitMs`, held until its notice is ready, up to 25 s), or those of a
+     * session's family not delivered yet (`sessionID`).
+     */
+    status: {
+      input: Schema.toStandardSchemaV1(
+        Schema.Struct({
+          job: optional(Schema.String),
+          sessionID: optional(Schema.String),
+          waitMs: optional(Schema.Number),
+        }),
+      ),
+      output: Schema.toStandardSchemaV1(Schema.Struct({ jobs: Schema.Array(JobView) })),
+      errors,
+    },
+    /** Cancels a request of this server: what waits closes now, what runs stops; its notice says so. */
+    cancel: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({ job: Schema.String })),
+      output: Schema.toStandardSchemaV1(Schema.Struct({ state: Schema.String })),
       errors,
     },
     /** Another machine's call to the hub (`BancadaProtocol.SyncInput` → `SyncOutput`); only the hub takes it. */

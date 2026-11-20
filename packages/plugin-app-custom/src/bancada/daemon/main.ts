@@ -39,6 +39,10 @@ export const limits = {
   parentCheckMs: 2_000,
   /** The goodbye to the hub must not hold the exit. */
   farewellMs: 2_000,
+  /** A tool waiting for a request's end that stopped asking for this long: its notice goes as a message. */
+  inlineMs: 60_000,
+  /** A notice waits and no instance asked for events for this long: the server is woken (`OPENCODE_BANCADA_SELF`). */
+  wakeMs: 30_000,
 }
 
 /**
@@ -51,6 +55,8 @@ export const Owner = Schema.Struct({
   name: Schema.String,
   hub: Schema.Boolean,
   link: Schema.optional(Schema.Struct({ target: Schema.String, password: Schema.String })),
+  /** The server itself (`OPENCODE_BANCADA_SELF`): woken when a notice waits and no instance of it asks for events. */
+  self: Schema.optional(Schema.Struct({ url: Schema.String, password: Schema.String })),
 })
 export type Owner = typeof Owner.Type
 const decodeOwner = Schema.decodeUnknownOption(Owner)
@@ -105,6 +111,12 @@ export async function main() {
   const secret = randomBytes(32).toString("base64url")
   const info = path.join(state, "bancada.json")
   const owner: { current?: Owner } = {}
+  const deliveries: Deliveries = {
+    leases: new Map(),
+    inline: new Map(),
+    polledAt: Date.now(),
+    leaseMs: machineFile.config.times.noticeLeaseMs,
+  }
   let stopping = false
 
   const stop = async (why: string) => {
@@ -184,7 +196,12 @@ export async function main() {
         ports: config.ports.project,
         docker: config.execution.mode === "docker",
       },
-      timings: { silentMs: config.times.silentMs, uncertainMs: config.times.uncertainMs, lostMs: config.times.lostMs },
+      timings: {
+        silentMs: config.times.silentMs,
+        uncertainMs: config.times.uncertainMs,
+        lostMs: config.times.lostMs,
+        hubAwayMs: config.times.localModeMs,
+      },
       launcher: makeProcessLauncher({
         state,
         workdirs,
@@ -224,10 +241,39 @@ export async function main() {
     port: 0,
     idleTimeout: 120,
     fetch: (request) =>
-      admin(request, { secret, machineID, owner, stop, serving, advance, requests: () => held.process?.requests }),
+      admin(request, {
+        secret,
+        machineID,
+        owner,
+        stop,
+        serving,
+        advance,
+        requests: () => held.process?.requests,
+        deliveries,
+      }),
   })
+  /**
+   * A notice waits and no instance of the server asked for events in `wakeMs` (no Location loaded since a restart): the
+   * server is woken through its own `custom.bancada/wake` (`docs/bancada.md`, "Who wakes the plugin").
+   */
+  const wake = () => {
+    const self = owner.current?.self
+    const core = held.process?.core
+    if (!self || !core || Date.now() - deliveries.polledAt < limits.wakeMs || core.notices().length === 0) return
+    deliveries.polledAt = Date.now()
+    void fetch(`${self.url}/api/rpc/custom.bancada/wake`, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${Buffer.from(`opencode:${self.password}`).toString("base64")}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ input: {} }),
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => log("waking the server for a notice failed"))
+  }
   const timers: (ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>)[] = [
     setInterval(advance, limits.tickMs),
+    setInterval(wake, 10_000),
   ]
   held.process = { db, server, timers }
   await Bun.write(
@@ -266,6 +312,7 @@ async function admin(
     readonly serving: () => Core | undefined
     readonly advance: () => void
     readonly requests: () => ReturnType<typeof makeRequests> | undefined
+    readonly deliveries: Deliveries
   },
 ) {
   if (request.headers.get("authorization") !== `Bearer ${context.secret}`) return new Response(null, { status: 401 })
@@ -305,10 +352,16 @@ async function admin(
       state: core.reconciling() ? "reconciling" : "ok",
     } satisfies Bancada.Wake)
   const input: unknown = await request.json().catch(() => undefined)
+  const field = (name: string) =>
+    typeof input === "object" && input !== null && name in input ? (input as Record<string, unknown>)[name] : undefined
   const requests = context.requests()
   if (method === "submit" && requests) {
     const answer = await requests.submit(input).then(
-      (submitted) => Response.json(submitted),
+      (submitted) => {
+        // Asked to wait for the end: the tool's own calls bring the notice back (`status`).
+        if (field("esperar") === true) context.deliveries.inline.set(submitted.job, Date.now())
+        return Response.json(submitted)
+      },
       (error: unknown) =>
         error instanceof Invalid
           ? Response.json({ type: "invalid", problems: error.problems }, { status: 400 })
@@ -318,9 +371,55 @@ async function admin(
     return answer
   }
   if (method === "status") {
-    const job = typeof input === "object" && input !== null && "job" in input ? String(input.job) : ""
+    const job = typeof field("job") === "string" ? String(field("job")) : undefined
+    const root = typeof field("rootSessionID") === "string" ? String(field("rootSessionID")) : undefined
+    if (!job) return Response.json({ jobs: root ? core.family(root) : [] })
+    // A tool that waits for the end (`esperar`): its notice comes back here, not as a message, while it keeps asking.
+    const waitMs = Math.min(Math.max(Number(field("waitMs") ?? 0), 0), 25_000)
+    if (waitMs > 0) context.deliveries.inline.set(job, Date.now())
+    const deadline = Date.now() + waitMs
+    while (Date.now() < deadline && core.status(job)?.state !== "concluido") await Bun.sleep(250)
     const view = core.status(job)
     return Response.json({ jobs: view ? [view] : [] })
+  }
+  if (method === "cancel") {
+    const job = String(field("job") ?? "")
+    core.cancel(job)
+    context.advance()
+    return Response.json({ state: core.status(job)?.state ?? "desconhecido" })
+  }
+  // The plugin's instances ask for the notices to deliver; each goes to one of them, again after 30 s without `ack`.
+  if (method === "events") {
+    context.deliveries.polledAt = Date.now()
+    const deadline = Date.now() + Math.min(Math.max(Number(field("waitMs") ?? 0), 0), 25_000)
+    const due = () =>
+      core.notices().filter((notice) => {
+        const waiting = context.deliveries.inline.get(notice.job)
+        return (
+          (context.deliveries.leases.get(notice.job) ?? 0) <= Date.now() &&
+          (waiting === undefined || Date.now() - waiting > limits.inlineMs)
+        )
+      })
+    while (Date.now() < deadline && due().length === 0) await Bun.sleep(250)
+    const notices = due()
+    notices.forEach((notice) => context.deliveries.leases.set(notice.job, Date.now() + context.deliveries.leaseMs))
+    return Response.json({
+      notices: notices.map((notice) => ({
+        job: notice.job,
+        sessionID: notice.sessionID,
+        id: notice.id,
+        text: notice.text,
+      })),
+    })
+  }
+  if (method === "notice.ack") {
+    const job = String(field("job") ?? "")
+    if (field("missing") === true) log(`the session of ${job} no longer exists; its notice was dropped`)
+    core.delivered(job)
+    context.deliveries.leases.delete(job)
+    context.deliveries.inline.delete(job)
+    context.advance()
+    return Response.json({})
   }
   // Another machine's calls to the hub, relayed by the plugin: a refusal goes back by name (422).
   if (method === "sync")
@@ -346,6 +445,12 @@ async function admin(
   if (method === "blob.get") return refusable(() => core.blobGet(input))
   return new Response(null, { status: 404 })
 }
+
+/**
+ * Notices on their way to the sessions (`docs/bancada.md`, "Notice"): the instance that took each, until when; the
+ * tools that wait for a request's end, and when they last asked; when an instance last asked for events.
+ */
+type Deliveries = { leases: Map<string, number>; inline: Map<string, number>; polledAt: number; leaseMs: number }
 
 /** The answer of a call between servers, or its refusal by name (`CoreError`, status 422). */
 async function refusable(run: () => unknown) {

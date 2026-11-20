@@ -1,10 +1,14 @@
+import path from "node:path"
 import type { RpcCallContext } from "@opencode/plugin/effect/rpc"
-import { Effect } from "effect"
+import { Session } from "@opencode/schema/session"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { Effect, Schedule } from "effect"
 import type { Context } from "../context.js"
 import { identity } from "../instance/index.js"
 import { hubPassword, linkSettings } from "../live-activity/link.js"
 import { BancadaError, makeBancadaClient, stateDirectory } from "./client.js"
 import { Bancada } from "./rpc.js"
+import { registerBancadaTools } from "./tools.js"
 
 /**
  * The Bancada of this machine (`docs/bancada.md`). The plugin only relays: every `custom.bancada` call goes to this
@@ -14,7 +18,7 @@ import { Bancada } from "./rpc.js"
  * in the machine's folder. Off, every call answers `unavailable { reason: "off" }`.
  */
 export const registerBancada = Effect.fn("Bancada.register")(function* (
-  ctx: Pick<Context, "rpc" | "storage">,
+  ctx: Pick<Context, "rpc" | "storage" | "tool" | "session">,
   env: Readonly<Record<string, string | undefined>> = process.env,
 ) {
   if (env.OPENCODE_BANCADA?.trim() !== "1") {
@@ -22,6 +26,9 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
     yield* ctx.rpc
       .register(Bancada.Definition, {
         wake: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
+        submit: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
+        status: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
+        cancel: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
         sync: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
         "blob.put": (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
         "blob.get": (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
@@ -37,11 +44,14 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
     owner: async () => {
       const server = await run(identity(ctx.storage, env))
       const password = link.target ? await hubPassword(env) : undefined
+      const self = env.OPENCODE_BANCADA_SELF?.trim().replace(/\/+$/, "")
+      const own = self ? await ownPassword(env) : undefined
       return {
         instanceID: server.instanceID,
         name: server.name,
         hub: server.hub,
         ...(link.target && password ? { link: { target: link.target, password } } : {}),
+        ...(self && own ? { self: { url: self, password: own } } : {}),
       }
     },
   })
@@ -67,11 +77,91 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
         Effect.tryPromise({ try: () => client.call<Bancada.Wake>("wake", input), catch: (error) => error }).pipe(
           Effect.mapError((error) => refusal(error, context)),
         ),
+      submit: (input, context) =>
+        Effect.tryPromise({
+          // Freezing a big repository's tree takes more than an ordinary call (`docs/bancada.md`, "Request").
+          try: () => client.call<Bancada.Submitted>("submit", input, 120_000),
+          catch: (error) => error,
+        }).pipe(
+          Effect.mapError((error) =>
+            error instanceof BancadaError && error.reason === "invalid"
+              ? context.error("invalid", error.message, { problems: [...(error.problems ?? [])] })
+              : context.error("unavailable", unavailable(error).message, unavailable(error).data),
+          ),
+        ),
+      status: (input, context) =>
+        Effect.gen(function* () {
+          const root = input.sessionID ? yield* rootOf(ctx, input.sessionID) : undefined
+          return yield* Effect.tryPromise({
+            try: () =>
+              client.call<{ jobs: Bancada.JobView[] }>(
+                "status",
+                input.job
+                  ? { job: input.job, ...(input.waitMs ? { waitMs: input.waitMs } : {}) }
+                  : root
+                    ? { rootSessionID: root }
+                    : {},
+                (input.waitMs ?? 0) + 10_000,
+              ),
+            catch: (error) => error,
+          })
+        }).pipe(
+          Effect.mapError((error) => context.error("unavailable", unavailable(error).message, unavailable(error).data)),
+        ),
+      cancel: (input, context) =>
+        Effect.tryPromise({
+          try: () => client.call<{ state: string }>("cancel", input),
+          catch: (error) => error,
+        }).pipe(
+          Effect.mapError((error) => context.error("unavailable", unavailable(error).message, unavailable(error).data)),
+        ),
       sync: (input, context) => relay("sync", input, context),
       "blob.put": (input, context) => relay("blob.put", input, context),
       "blob.get": (input, context) => relay("blob.get", input, context),
     })
     .pipe(Effect.orDie)
+
+  yield* registerBancadaTools(ctx, client, () => run(identity(ctx.storage, env)).then((server) => server.instanceID))
+
+  // Notices: each goes to one instance, which puts it in its session with a fixed id (a second delivery never makes a
+  // second message) and then says so; without that, it goes again in 30 s (`docs/bancada.md`, "Notice").
+  yield* Effect.tryPromise(() =>
+    client.call<{ notices: { job: string; sessionID: string; id: string; text: string }[] }>(
+      "events",
+      { waitMs: 25_000 },
+      35_000,
+    ),
+  ).pipe(
+    Effect.flatMap((answer) => Effect.forEach(answer.notices, (notice) => deliver(notice), { discard: true })),
+    Effect.catchCause(() => Effect.sleep("2 seconds")),
+    Effect.repeat(Schedule.forever),
+    Effect.forkScoped({ startImmediately: true }),
+  )
+  function deliver(notice: { job: string; sessionID: string; id: string; text: string }) {
+    return ctx.session
+      .synthetic({
+        sessionID: Session.ID.make(notice.sessionID),
+        id: SessionMessage.ID.make(notice.id),
+        text: notice.text,
+        description: `Bancada ${notice.job}`,
+        metadata: { custom: { bancada: { job: notice.job } } },
+      })
+      .pipe(
+        Effect.as(false),
+        // A session that no longer exists: the notice is dropped, and said in the process's log.
+        Effect.catch((error: unknown) =>
+          typeof error === "object" && error !== null && "_tag" in error && error._tag === "SessionNotFoundError"
+            ? Effect.succeed(true)
+            : Effect.fail(error),
+        ),
+        Effect.flatMap((missing) =>
+          Effect.tryPromise(() => client.call("notice.ack", { job: notice.job, ...(missing ? { missing } : {}) })),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("a Bancada notice was not delivered", { job: notice.job, cause }),
+        ),
+      )
+  }
 
   // The process starts with the plugin, not with the first call: a server that comes back runs its Bancada at once.
   yield* Effect.tryPromise(() => client.call("wake", {})).pipe(
@@ -79,6 +169,43 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
     Effect.forkScoped({ startImmediately: true }),
   )
 })
+
+/** The root of a session's family. */
+const rootOf = Effect.fnUntraced(function* (ctx: Pick<Context, "session">, sessionID: string) {
+  const first = yield* ctx.session.get({ sessionID: Session.ID.make(sessionID) }).pipe(Effect.option)
+  if (first._tag === "None") return sessionID
+  let current = first.value
+  for (let depth = 0; current.parentID && depth < 32; depth++) {
+    const parent = yield* ctx.session.get({ sessionID: current.parentID }).pipe(Effect.option)
+    if (parent._tag === "None") break
+    current = parent.value
+  }
+  return current.id
+})
+
+/**
+ * This server's own password, to wake itself (`OPENCODE_BANCADA_SELF`): the managed service's, else the runtime's
+ * `password` file; never another server's.
+ */
+async function ownPassword(env: Readonly<Record<string, string | undefined>>) {
+  if (env.OPENCODE_CONFIG_DIR) {
+    const service: unknown = await Bun.file(path.join(env.OPENCODE_CONFIG_DIR, "service-custom.json"))
+      .json()
+      .catch(() => undefined)
+    if (
+      typeof service === "object" &&
+      service !== null &&
+      "password" in service &&
+      typeof service.password === "string"
+    )
+      if (service.password.trim()) return service.password.trim()
+  }
+  if (!env.OPENCODE_CUSTOM_HOME) return undefined
+  const own = await Bun.file(path.join(env.OPENCODE_CUSTOM_HOME, "password"))
+    .text()
+    .catch(() => "")
+  return own.trim() || undefined
+}
 
 /** The process's refusal between servers, by name; anything else is this machine's Bancada not answering. */
 function refused(error: unknown, context: RpcCallContext<(typeof Bancada.Definition)["methods"]["sync"]>) {

@@ -480,6 +480,8 @@ export function createCore(ports: Ports) {
       return brake
     },
     status: origin.status,
+    /** The requests of a session's family not delivered yet. */
+    family: origin.family,
     notices: origin.notices,
     /** The session received the notice of a request: once; the hub may clean up, and nothing of its code stays. */
     delivered: (job: string) => {

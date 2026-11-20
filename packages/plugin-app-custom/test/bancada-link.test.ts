@@ -117,6 +117,38 @@ describe("two servers' Bancadas over custom.bancada", () => {
     expect(machineLog).not.toContain("failed")
   }, 90_000)
 
+  test("a session's request through custom.bancada: its notice enters the session once, as one message", async () => {
+    const machine = world.machine!
+    const session = await fetch(new URL("/api/session", machine.base), {
+      method: "POST",
+      headers: { ...machine.headers, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Sessão de teste", location: { directory: machine.project } }),
+    }).then(async (response) => ((await response.json()) as { data: { id: string } }).data.id)
+    const submitted = await rpc<Bancada.Submitted>(machine, "custom.bancada/submit", {
+      id: BancadaProtocol.jobID("aviso uma vez"),
+      sessionID: session,
+      diretorio: world.repository!,
+      testes: [{ teste: "simples" }],
+    })
+    const synthetic = async () => {
+      const url = new URL(`/api/session/${session}/message`, machine.base)
+      const body = (await fetch(url, { headers: machine.headers }).then((response) => response.json())) as {
+        data: { type: string; text?: string }[]
+      }
+      return body.data.filter((message) => message.type === "synthetic")
+    }
+    await until(async () => (await synthetic()).length > 0, 60_000)
+    // Delivered: the process hears the ack and the request leaves the session's list.
+    await until(
+      async () =>
+        (await rpc<{ jobs: unknown[] }>(machine, "custom.bancada/status", { sessionID: session })).jobs.length === 0,
+      20_000,
+    )
+    expect((await synthetic()).map((message) => message.text?.split("\n")[0])).toEqual([
+      `[Bancada] ${submitted.job} terminou (commit ${submitted.commit.slice(0, 8)})`,
+    ])
+  }, 90_000)
+
   test("a wrong password is refused by the hub's server; a server that is not the hub refuses by name", async () => {
     const call = (server: Server, authorization: string) =>
       fetch(new URL("/api/rpc/custom.bancada/sync", server.base), {

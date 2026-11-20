@@ -234,7 +234,6 @@ export function makeTransfers(input: {
   /** The origin sends its bundle, resuming from what the hub already has; then says it is all there. */
   const upload = async (row: CodeOut) => {
     const files = input.files!
-    const link = input.link!
     const repository = input.repository(row.job_id)
     if (!repository) return close(row, "o repositório do pedido não está mais nesta máquina")
     const made = row.file ? { file: row.file, size: row.size!, sha256: row.sha256! } : await bundle(row, repository)
@@ -279,7 +278,6 @@ export function makeTransfers(input: {
   /** The executor downloads the bundle, resuming what it has, and checks it before it counts. */
   const download = async (row: CodeIn) => {
     const files = input.files!
-    const link = input.link!
     const transfer: BancadaProtocol.Transfer = JSON.parse(row.transfer!)
     const file = transfer.files[0]
     if (!file) return retry(row, "a transferência veio sem arquivo", true)

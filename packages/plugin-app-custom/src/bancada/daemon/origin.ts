@@ -293,6 +293,20 @@ export function makeOrigin(input: {
       return true
     })()
 
+  /** A request as this server knows it: where each part stands, its result and, once made, its notice. */
+  const present = (row: JobRow) => ({
+    job: row.id,
+    state: row.state,
+    sessionID: row.session_id,
+    commit: (JSON.parse(row.code) as BancadaProtocol.Code).commit,
+    labels: Object.fromEntries(
+      (JSON.parse(row.parts) as BancadaProtocol.PartSpec[]).map((spec) => [spec.part, spec.label]),
+    ),
+    parts: JSON.parse(row.view) as Record<string, PartView>,
+    ...(row.result ? { result: JSON.parse(row.result) as BancadaProtocol.PartResult[] } : {}),
+    ...(row.notice_text ? { notice: row.notice_text } : {}),
+  })
+
   /** Requests whose result arrived and whose notice is still to be made, with their evidence to bring. */
   const received = () =>
     db
@@ -372,15 +386,17 @@ export function makeOrigin(input: {
     /** The request as this server knows it. */
     status: (job: string) => {
       const row = find.get(job)
-      if (!row) return undefined
-      return {
-        job: row.id,
-        state: row.state,
-        commit: (JSON.parse(row.code) as BancadaProtocol.Code).commit,
-        parts: JSON.parse(row.view) as Record<string, PartView>,
-        ...(row.result ? { result: JSON.parse(row.result) as BancadaProtocol.PartResult[] } : {}),
-      }
+      return row ? present(row) : undefined
     },
+    /** The requests of a session's family not delivered yet, oldest first. */
+    family: (rootSessionID: string) =>
+      db
+        .query<
+          JobRow,
+          [string]
+        >("SELECT * FROM job WHERE root_session_id = ? AND state <> 'entregue' ORDER BY created_at")
+        .all(rootSessionID)
+        .map(present),
   }
 }
 

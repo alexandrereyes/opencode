@@ -39,6 +39,7 @@ describe("machine file", () => {
         uncertainMs: 180_000,
         lostMs: 900_000,
         localModeMs: 45_000,
+        noticeLeaseMs: 30_000,
         holdIdleQueuedMs: 600_000,
         holdIdleMs: 3_600_000,
         holdTotalQueuedMs: 1_800_000,
