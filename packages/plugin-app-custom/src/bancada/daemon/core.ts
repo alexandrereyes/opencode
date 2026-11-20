@@ -106,10 +106,13 @@ export type Refusal = {
   readonly message: string
 }
 
-const decodeInput = Schema.decodeUnknownResult(BancadaProtocol.SyncInput)
+const decodeInput = Schema.decodeUnknownResult(BancadaProtocol.SyncInputEnvelope)
+/** A message's body, decoded alone when it is applied: one that does not decode throws, and goes to `dead_letter`. */
+const fromMachine = Schema.decodeUnknownSync(BancadaProtocol.FromMachine)
+const fromHub = Schema.decodeUnknownSync(BancadaProtocol.FromHub)
 const decodePut = Schema.decodeUnknownResult(BancadaProtocol.BlobPut)
 const decodeGet = Schema.decodeUnknownResult(BancadaProtocol.BlobGet)
-const decodeOutput = Schema.decodeUnknownResult(BancadaProtocol.SyncOutput)
+const decodeOutput = Schema.decodeUnknownResult(BancadaProtocol.SyncOutputEnvelope)
 
 /**
  * The Bancada of one machine: its origin (this server's requests), its executor (what runs here) and, on the hub, the
@@ -284,24 +287,29 @@ export function createCore(ports: Ports) {
   /** This machine's call to the hub; `leaving` when the process stops (the hub shows "reconciliando"). */
   const outgoing = (waitMs = 0, leaving?: "restart" | "stop") => call(hub, waitMs, leaving)
 
-  /** The hub's answer: a call that went through (the machine is not alone), or a refusal the link decoded. */
+  /**
+   * The hub's answer: a call that went through (the machine is not alone). Its `protocol` is read before anything else
+   * (rule 11): another version is a refusal by name. Returns how many of the hub's messages it carried.
+   */
   const incoming = (raw: unknown) => {
-    const output = decodeOutput(raw)
-    if (Result.isFailure(output)) throw new CoreError("invalid", output.failure.message)
-    if (output.success.protocol !== BancadaProtocol.version) {
-      refused({ type: "protocol_mismatch", message: `o hub fala o protocolo ${output.success.protocol}` })
+    const protocol = protocolOf(raw)
+    if (protocol !== undefined && protocol !== BancadaProtocol.version) {
+      refused({ type: "protocol_mismatch", message: `o hub fala o protocolo ${protocol}` })
       throw new CoreError("protocol_mismatch", "the hub speaks another protocol", {
         expected: BancadaProtocol.version,
       })
     }
+    const output = decodeOutput(raw)
+    if (Result.isFailure(output)) throw new CoreError("invalid", output.failure.message)
     link.okAt = ports.now()
     link.refused = undefined
     messages.acked(hub, output.success.ack)
     // A hub that changed stream (another database) may have forgotten this machine and its requests.
-    if (messages.receive(hub, output.success.out, (body) => fromQueue(body as BancadaProtocol.FromHub)) === "changed") {
+    if (messages.receive(hub, output.success.out, (body) => fromQueue(fromHub(body))) === "changed") {
       hello(true)
       db.transaction(() => origin.resubmit())()
     }
+    return output.success.out.messages.length
   }
 
   /**
@@ -314,11 +322,9 @@ export function createCore(ports: Ports) {
   }
 
   /** The queue's side of a call: applies what the machine sent and answers with what waits for it. */
-  const serve = (input: BancadaProtocol.SyncInput): BancadaProtocol.SyncOutput => {
+  const serve = (input: BancadaProtocol.SyncInputEnvelope): BancadaProtocol.SyncOutput => {
     db.transaction(() => queue.seen(input))()
-    messages.receive(input.machineID, input.out, (body) =>
-      queue.apply(input.machineID, body as BancadaProtocol.FromMachine),
-    )
+    messages.receive(input.machineID, input.out, (body) => queue.apply(input.machineID, fromMachine(body)))
     messages.acked(input.machineID, input.ack)
     db.transaction(() => queue.schedule())()
     return reply(input.machineID)
@@ -360,7 +366,7 @@ export function createCore(ports: Ports) {
       const input = call(queuePeer, 0)
       const output = serve(input)
       messages.acked(queuePeer, output.ack)
-      messages.receive(queuePeer, output.out, (body) => fromQueue(body as BancadaProtocol.FromHub))
+      messages.receive(queuePeer, output.out, (body) => fromQueue(fromHub(body)))
       if (input.out.messages.length === 0 && output.out.messages.length === 0) return
     }
   }
@@ -482,11 +488,16 @@ export type Core = ReturnType<typeof createCore>
  * changed too, and "invalid" would hide why.
  */
 function version(raw: unknown) {
-  const protocol = typeof raw === "object" && raw !== null && "protocol" in raw ? raw.protocol : undefined
-  if (typeof protocol === "number" && protocol !== BancadaProtocol.version)
+  const protocol = protocolOf(raw)
+  if (protocol !== undefined && protocol !== BancadaProtocol.version)
     throw new CoreError("protocol_mismatch", `this hub speaks protocol ${BancadaProtocol.version}, not ${protocol}`, {
       expected: BancadaProtocol.version,
     })
+}
+
+function protocolOf(raw: unknown) {
+  const protocol = typeof raw === "object" && raw !== null && "protocol" in raw ? raw.protocol : undefined
+  return typeof protocol === "number" ? protocol : undefined
 }
 
 function refusalText(refusal: Refusal) {

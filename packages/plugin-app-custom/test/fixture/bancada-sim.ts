@@ -97,7 +97,7 @@ export function createWorld(options: {
     /** Every start that fetched its code from a bundle that came through the hub. */
     bundles: [] as { machine: string; job: string }[],
     /** Every chunk a machine sent to the hub, by its offset. */
-    puts: [] as { machine: string; offset: number }[],
+    puts: [] as { machine: string; transfer: string; offset: number }[],
   }
   /** Starts still bringing their code, released when the virtual clock reaches them. */
   const starting: { readonly at: number; readonly resolve: () => void }[] = []
@@ -150,7 +150,7 @@ export function createWorld(options: {
     }
     return {
       put: async (input) => {
-        facts.puts.push({ machine, offset: input.offset })
+        facts.puts.push({ machine, transfer: input.transfer, offset: input.offset })
         if (store.cut > 0 && --store.cut === 0) throw new Error("the connection dropped")
         return wire(await reach().blobPut(wire(input)))
       },
@@ -424,6 +424,20 @@ export function createWorld(options: {
     /** The hub's store spoils the next `count` files it receives (after its own check). */
     spoil: (count: number) => {
       store.spoil = count
+    },
+    /**
+     * Writes a message straight into a machine's outbox to the hub, as a release with another shape would: its body may
+     * be anything.
+     */
+    inject: (name: string, body: unknown) => {
+      const db = machines.get(name)!.db
+      const peer = db.query<{ out_seq: number }, []>("SELECT out_seq FROM peer WHERE peer = 'hub'").get()!
+      db.run("UPDATE peer SET out_seq = ? WHERE peer = 'hub'", [peer.out_seq + 1])
+      db.run("INSERT INTO outbox (peer, seq, body, created_at) VALUES ('hub', ?, ?, ?)", [
+        peer.out_seq + 1,
+        JSON.stringify(body),
+        clock.now,
+      ])
     },
     /** The `nth` chunk sent to the hub from now on is lost on the way (the connection drops). */
     cut: (nth: number) => {

@@ -440,26 +440,35 @@ export const Pulse = Schema.Struct({
 })
 export type Pulse = typeof Pulse.Type
 
-export const SyncInput = Schema.Struct({
-  protocol: Schema.Number,
-  machineID: Schema.String,
-  instanceID: Schema.String,
-  name: Schema.String,
-  out: stream(FromMachine),
-  ack: Ack,
-  pulse: Pulse,
-  leaving: optional(Schema.Literals(["restart", "stop"])),
-  /** 0 answers at once; up to `limits.waitMs`, the hub holds the call until it has something for this machine. */
-  waitMs: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 25_000 })),
-}).annotate({ identifier: "Bancada.SyncInput" })
-export type SyncInput = typeof SyncInput.Type
+const syncInput = <S extends Schema.Top>(message: S) =>
+  Schema.Struct({
+    protocol: Schema.Number,
+    machineID: Schema.String,
+    instanceID: Schema.String,
+    name: Schema.String,
+    out: stream(message),
+    ack: Ack,
+    pulse: Pulse,
+    leaving: optional(Schema.Literals(["restart", "stop"])),
+    /** 0 answers at once; up to `limits.waitMs`, the hub holds the call until it has something for this machine. */
+    waitMs: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 25_000 })),
+  })
+const syncOutput = <S extends Schema.Top>(message: S) =>
+  Schema.Struct({ protocol: Schema.Number, out: stream(message), ack: Ack })
 
-export const SyncOutput = Schema.Struct({
-  protocol: Schema.Number,
-  out: stream(FromHub),
-  ack: Ack,
-}).annotate({ identifier: "Bancada.SyncOutput" })
+export const SyncInput = syncInput(FromMachine).annotate({ identifier: "Bancada.SyncInput" })
+export type SyncInput = typeof SyncInput.Type
+export const SyncOutput = syncOutput(FromHub).annotate({ identifier: "Bancada.SyncOutput" })
 export type SyncOutput = typeof SyncOutput.Type
+
+/**
+ * The call as it is read first (`docs/bancada.md`, "sync", rule 6): the envelope strictly, each message's body alone
+ * when it is applied. One body that does not decode goes to `dead_letter`; it never refuses the call around it.
+ */
+export const SyncInputEnvelope = syncInput(Schema.Unknown).annotate({ identifier: "Bancada.SyncInputEnvelope" })
+export type SyncInputEnvelope = typeof SyncInputEnvelope.Type
+export const SyncOutputEnvelope = syncOutput(Schema.Unknown).annotate({ identifier: "Bancada.SyncOutputEnvelope" })
+export type SyncOutputEnvelope = typeof SyncOutputEnvelope.Type
 
 export type Envelope<M> = { readonly seq: number; readonly body: M }
 

@@ -577,9 +577,12 @@ describe("core", () => {
       type: "protocol_mismatch",
       data: { expected: BancadaProtocol.version },
     })
+    // Only an envelope that cannot be read is refused; a body that cannot is a dead letter, and the call goes on.
+    expect(refusal(() => hub.core.sync({ ...input, pulse: undefined }))).toMatchObject({ type: "invalid" })
     expect(
       refusal(() => hub.core.sync({ ...input, out: { ...input.out, messages: [{ seq: 1, body: { type: "x" } }] } })),
-    ).toMatchObject({ type: "invalid" })
+    ).toBeUndefined()
+    expect(hub.db.query("SELECT peer, seq FROM dead_letter").all()).toEqual([{ peer: "m-Mac", seq: 1 }])
   })
 })
 

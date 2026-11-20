@@ -660,7 +660,7 @@ export function makeCoordinator(input: {
    * repeated or late call never makes a machine "come back". An uncertain part it still runs returns to where it was;
    * one it accepted and has not listed in two pulses in a row, without a final report, is lost.
    */
-  const seen = (sync: BancadaProtocol.SyncInput) => {
+  const seen = (sync: BancadaProtocol.SyncInputEnvelope) => {
     const known = machine.get(sync.machineID)
     if (!known)
       db.run(
@@ -728,7 +728,7 @@ export function makeCoordinator(input: {
    * Another server's machine (`docs/bancada.md`, "Several servers"): a `machineID` a different server called with in
    * the last minute is refused; after that, the new one takes it over.
    */
-  const taken = (sync: BancadaProtocol.SyncInput) => {
+  const taken = (sync: BancadaProtocol.SyncInputEnvelope) => {
     const known = machine.get(sync.machineID)
     if (!known || known.instance_id === sync.instanceID || input.now() - known.last_sync_at >= takenMs) return undefined
     return { instanceID: known.instance_id, name: known.name }

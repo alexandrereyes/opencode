@@ -122,4 +122,24 @@ describe("simulation: the link to the hub", () => {
       ["j-aaaaaaaa", "j-bbbbbbbb", "j-cccccccc"].map((id) => sim.facts.delivered.get(id)?.[0]?.outcome?.approved),
     ).toEqual([true, true, true])
   })
+
+  test("S23: a message the hub cannot decode, ahead of a good request: it goes to dead_letter with an alert, and the request behind it runs", async () => {
+    const sim = createWorld({ seed: 34 })
+    sim.addMachine({ name: "Linux", hub: true, platform: "linux", capabilities: { android: {} }, capacity: room })
+    sim.addMachine({ name: "Mac", capabilities: { android: {} }, capacity: room })
+    sim.script("j-aaaaaaaa", "android", ok(30_000))
+    await sim.advance(1_000)
+    // A report with a field of another shape, then a good request.
+    sim.inject("Mac", { type: "attempt", job: "j-zzzzzzzz", part: "android", attempt: -1, state: "rodando" })
+    ask(sim, "Mac", "j-aaaaaaaa", [spec("android")])
+    await sim.advance(2 * 60_000)
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([{ state: "concluido", outcome: { approved: true } }])
+    const hub = sim.machines.get("Linux")!
+    expect(hub.db.query("SELECT peer, error FROM dead_letter").all()).toMatchObject([
+      { peer: "m-Mac", error: expect.stringContaining("attempt") },
+    ])
+    expect(hub.core.alerts()).toMatchObject([{ kind: "mensagem" }])
+    // The Mac was never cut off from the hub.
+    expect(sim.machines.get("Mac")!.core.hub()).toEqual({ state: "ok" })
+  })
 })
