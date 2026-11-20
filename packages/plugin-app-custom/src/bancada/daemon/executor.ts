@@ -4,6 +4,7 @@ import type { BrakeConfig, Range } from "../machine-config.js"
 import { BancadaProtocol } from "../protocol.js"
 import { evidence, judge, type Ending } from "../results.js"
 import { open, step, type Brake, type Reading } from "./brake.js"
+import { unmet } from "./capabilities.js"
 import { add, free as budgetFree, largestFit, measured, room, samples, times, zero, type Cost } from "./budget.js"
 import { deviceFor } from "./devices/types.js"
 import { block } from "./devices/ports.js"
@@ -81,7 +82,8 @@ export interface Launcher {
 /** What this machine offers and how much of it (`docs/bancada.md`, "Budget"), from its machine file. */
 export type Limits = {
   readonly capacity: BancadaProtocol.Vector
-  readonly capabilities: Readonly<Record<string, unknown>>
+  /** What this machine offers now (discovery runs again every 10 min). */
+  readonly capabilities: () => Readonly<Record<string, unknown>>
   /** MyCredentials policies resolved here: a part with `segredos` is accepted only when its policy is listed. */
   readonly secrets: ReadonlyArray<string>
   readonly presence: { readonly idleMs: number; readonly factor: number }
@@ -135,6 +137,8 @@ export function makeExecutor(input: {
   readonly wake: () => void
   /** An ended attempt no `cleanup` reached in this long is cleaned up here. */
   readonly keepMs: number
+  /** An offer was refused for a capability this machine published: discovery runs again. */
+  readonly missed?: () => void
   /** Light slots waiting for room, per kind (`holds.ts`). */
   readonly slots?: () => { readonly android: number; readonly ios: number }
   /** The code through the hub; without it, a start without code loses its attempt. */
@@ -263,7 +267,7 @@ export function makeExecutor(input: {
   /** What this machine measured of a subject (the last samples), or its default cost before it has enough. */
   const costOf = (subject: string, fallback: Cost) => measured(samplesOf.all(subject, samples.kept), fallback)
   const simslim = () => {
-    const ios = limits.capabilities.ios
+    const ios = limits.capabilities().ios
     return typeof ios === "object" && ios !== null && "simslim" in ios && ios.simslim === true
   }
   const device = (platform: BancadaProtocol.Platform, spec: BancadaProtocol.DeviceSpec) => {
@@ -400,9 +404,13 @@ export function makeExecutor(input: {
       })
     if (reconciling.value) return refuse({ code: "reconciliando", text: "reconciliando" })
     if (watch.brake.closed) return refuse({ code: "freio", text: `freio fechado: ${watch.brake.reasons.join("; ")}` })
-    const missing = message.spec.needs.filter((need) => !(need in limits.capabilities))
-    if (missing.length > 0)
-      return refuse({ code: "sem_maquina", text: `esta máquina não oferece mais ${missing.join(", ")}` })
+    const missing = message.spec.needs.filter((need) => !(need in limits.capabilities()))
+    const short = missing.length > 0 ? missing.join(", ") : unmet(message.spec, limits.capabilities())
+    if (short) {
+      // What it had may have changed since discovery last ran: it looks again.
+      input.missed?.()
+      return refuse({ code: "sem_maquina", text: `esta máquina não oferece mais ${short}` })
+    }
     const secrets = message.spec.secrets
     if (secrets && !limits.secrets.includes(secrets))
       return refuse({ code: "sem_maquina", text: `a policy ${secrets} não está na lista segredos desta máquina` })

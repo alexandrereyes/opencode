@@ -1,5 +1,6 @@
 import type { BancadaProtocol } from "../protocol.js"
 import type { Wait } from "./estimate.js"
+import { unmet } from "./capabilities.js"
 
 /**
  * The queue's choice (`docs/bancada.md`, "Queue"): which waiting part goes to which machine now, with how many
@@ -81,7 +82,8 @@ export function schedule(input: {
   )
   const locks = new Set(input.locks)
   const capable = (part: QueuedPart, machine: MachineView) =>
-    needs(part.spec).every((need) => need in machine.capabilities)
+    needs(part.spec).every((need) => need in machine.capabilities) &&
+    unmet(part.spec, machine.capabilities) === undefined
   const candidates = (part: QueuedPart) =>
     input.machines.filter(
       (machine) =>
@@ -278,5 +280,11 @@ function short(lock: string) {
 /** What no machine offers, for "nenhuma máquina oferece …". */
 function missing(part: QueuedPart, machines: ReadonlyArray<MachineView>) {
   const absent = needs(part.spec).filter((need) => !machines.some((machine) => need in machine.capabilities))
-  return (absent.length ? absent : needs(part.spec)).join(", ") || "o que a parte precisa"
+  if (absent.length) return absent.join(", ")
+  // Every need is offered somewhere, but not with this device (an image, a runtime, a model, a phone).
+  const short = machines
+    .filter((machine) => needs(part.spec).every((need) => need in machine.capabilities))
+    .map((machine) => unmet(part.spec, machine.capabilities))
+    .find((text) => text !== undefined)
+  return short ?? (needs(part.spec).join(", ") || "o que a parte precisa")
 }

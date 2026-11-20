@@ -11,6 +11,7 @@ import { makeExecutor, type Launcher } from "./executor.js"
 import { makeMessages } from "./messages.js"
 import { makeOrigin, type NewJob } from "./origin.js"
 import { needs } from "./scheduler.js"
+import { unmet } from "./capabilities.js"
 import { BancadaNotice } from "../notice.js"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { makeHolds, makeMirror, type Target } from "./holds.js"
@@ -65,6 +66,8 @@ export interface Ports {
   readonly blobLink?: BlobLink
   /** The hub's store of transfers. */
   readonly blobs?: Blobs
+  /** An offer was refused for a capability this machine published: discovery should look again. */
+  readonly rediscover?: () => void
 }
 
 /** The times of the protocol (`docs/bancada.md`, "State machine"). */
@@ -139,6 +142,8 @@ export function createCore(ports: Ports) {
   migrate(db)
   const self = ports.machine
   const times = { ...timings, ...ports.timings }
+  /** What this machine offers: the machine file's at the start, then what discovery finds (`capabilities.ts`). */
+  const offered = { current: self.capabilities }
   const alerts = makeAlerts(db, ports.now, ports.log)
   const messages = makeMessages(db, ports.random, ports.now, ports.log, (peer, seq, error) =>
     alerts.raise(
@@ -167,7 +172,12 @@ export function createCore(ports: Ports) {
     send: (body, scope) => messages.send(scope === "local" ? local : hub, body),
     scope: (parts) =>
       link.away &&
-      parts.every((spec) => spec.exclusive.length === 0 && needs(spec).every((need) => need in self.capabilities))
+      parts.every(
+        (spec) =>
+          spec.exclusive.length === 0 &&
+          needs(spec).every((need) => need in offered.current) &&
+          unmet(spec, offered.current) === undefined,
+      )
         ? "local"
         : "hub",
     away: () => link.away,
@@ -203,7 +213,7 @@ export function createCore(ports: Ports) {
     machineID: self.machineID,
     limits: {
       capacity: self.capacity,
-      capabilities: self.capabilities,
+      capabilities: () => offered.current,
       secrets: self.secrets ?? [],
       presence: self.presence ?? defaults.presence,
       brake: self.brake ?? defaults.brake,
@@ -211,6 +221,7 @@ export function createCore(ports: Ports) {
       docker: self.docker ?? false,
     },
     launcher: ports.launcher,
+    ...(ports.rediscover ? { missed: ports.rediscover } : {}),
     send: (body) => messages.send("job" in body ? peerOf(body.job) : hub, body),
     repository: origin.repository,
     // A task of an attempt ended: its result should not wait for the next second.
@@ -403,7 +414,7 @@ export function createCore(ports: Ports) {
     const body: BancadaProtocol.FromMachine = {
       type: "hello",
       platform: self.platform,
-      capabilities: { ...self.capabilities },
+      capabilities: { ...offered.current },
       speed: self.speed,
       ...(self.phones?.length
         ? {
@@ -711,6 +722,11 @@ export function createCore(ports: Ports) {
      * against the hub's catalog from then on.
      */
     bridge: (hardware: string) => setMeta("bridge", hardware),
+    /** What discovery found (with the machine file's tags and secrets): published to the queues when it changed. */
+    offer: (capabilities: Readonly<Record<string, unknown>>) => {
+      offered.current = capabilities
+      hello(false)
+    },
     bridged,
     /** The machines and phones the hub said (`catalog`), with this machine's own phones. */
     catalog,

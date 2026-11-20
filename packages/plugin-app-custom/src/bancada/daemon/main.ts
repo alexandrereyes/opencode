@@ -18,6 +18,7 @@ import { makeLink, type Link } from "./link.js"
 import { Invalid, makeRequests } from "./requests.js"
 import { bundle, release } from "./snapshot.js"
 import { identify } from "./bridge.js"
+import { discover as findCapabilities, systemProbe, type AndroidTools } from "./capabilities.js"
 import type { Part } from "../commands.js"
 import type { Files } from "./transfers.js"
 import { makeWorkdirs, type Workdirs } from "./workdir.js"
@@ -45,6 +46,8 @@ export const limits = {
   inlineMs: 60_000,
   /** A notice waits and no instance asked for events for this long: the server is woken (`OPENCODE_BANCADA_SELF`). */
   wakeMs: 30_000,
+  /** How often discovery looks at what the machine has. */
+  discoverMs: 10 * 60_000,
 }
 
 /**
@@ -83,6 +86,8 @@ const held: {
     requests?: ReturnType<typeof makeRequests>
     /** The link to the hub, on a machine that is not the hub and knows where it is. */
     link?: Link
+    /** The Android tools discovery resolved to absolute paths: the devices use only these. */
+    android?: AndroidTools
   }
 } = {}
 
@@ -160,6 +165,7 @@ export async function main() {
     // An invalid machine file offers nothing: no budget, no capability (the problems are in the log).
     const offering = machineFile.valid
     const link = owner.current.link && !owner.current.hub ? owner.current.link : undefined
+    const discovery = { at: 0 }
     current.core = createCore({
       db,
       now,
@@ -183,18 +189,8 @@ export async function main() {
         platform: process.platform === "darwin" ? "darwin" : "linux",
         hub: owner.current.hub,
         speed: config.speed,
-        // Discovering what the machine has (Android SDK, Xcode…) comes with the devices; a phone of the catalog that
-        // can be reserved is offered by its alias (`fisico:<apelido>`).
-        capabilities: offering
-          ? offered(
-              config,
-              Object.fromEntries(
-                config.phones
-                  .filter((phone) => phone.policy !== "negar")
-                  .map((phone) => [`fisico:${phone.alias}`, { plataforma: phone.platform }]),
-              ),
-            )
-          : {},
+        // The machine file's tags and secrets at once; what the machine has comes with discovery, right after.
+        capabilities: offering ? offered(config, {}) : {},
         capacity: offering
           ? {
               memMb: config.budget.memMb,
@@ -223,6 +219,10 @@ export async function main() {
         holdTotalQueuedMs: config.times.holdTotalQueuedMs,
         queuePlaceMs: config.times.queuePlaceMs,
       },
+      // An offer refused for a capability published: look again (at most once a minute).
+      rediscover: () => {
+        if (Date.now() - discovery.at >= 60_000) discover()
+      },
       launcher: makeProcessLauncher({
         state,
         workdirs,
@@ -240,6 +240,20 @@ export async function main() {
       current.link = makeLink({ target: link.target, password: link.password, core: current.core, log })
       void current.link.run()
     }
+    // What the machine has, found without starting anything, again every 10 min (`capabilities.ts`).
+    const discover = () => {
+      discovery.at = Date.now()
+      if (!offering) return
+      void findCapabilities(systemProbe(), config).then(
+        (found) => {
+          current.android = found.android
+          current.core?.offer(offered(config, found.found))
+        },
+        (error: unknown) => log(`discovering what the machine has failed: ${String(error)}`),
+      )
+    }
+    discover()
+    current.timers.push(setInterval(discover, limits.discoverMs))
     // The machine is read off the round, every 5 s: the brake and the owner's presence.
     const reading = () =>
       void probe()

@@ -641,8 +641,10 @@ export function makeCoordinator(input: {
         message.machineID === "mac"
           ? all.find((row) => row.platform === "darwin" && row.machine_id !== from)
           : message.machineID === "" && message.target.kind === "fisico"
-            ? all.find(
-                (row) => `fisico:${(message.target as { device: string }).device}` in JSON.parse(row.capabilities),
+            ? all.find((row) =>
+                (JSON.parse(row.phones) as { alias: string }[]).some(
+                  (phone) => phone.alias === (message.target as { device: string }).device,
+                ),
               )
             : machine.get(message.machineID)
       if (!target || target.state !== "ok") {
