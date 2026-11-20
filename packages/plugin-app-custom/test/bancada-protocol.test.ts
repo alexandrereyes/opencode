@@ -452,6 +452,37 @@ describe("core", () => {
     expect(launches.map((launch) => launch.group)).toEqual(["ios-1"])
   })
 
+  test("an ended attempt is kept until cleanup, listed in the pulse; after 7 days without one, the machine cleans it", async () => {
+    const clock = { now: 1_000 }
+    const db = new Database(":memory:")
+    let n = 0
+    const done: Launcher = {
+      ...idle,
+      status: async () => ({ state: "done", ending: { stage: "run", exit: 0, planned: { versao: 1, cenarios: [] } } }),
+    }
+    const mac = createCore({
+      db,
+      now: () => clock.now,
+      random: () => `id-${++n}`,
+      machine: machine("Mac", false, 3),
+      launcher: done,
+      log: () => {},
+    })
+    mac.incoming(offers("android"))
+    await mac.tick()
+    await mac.tick()
+    const kept = [{ job: "j-7qk2m9xa", part: "android", attempt: 1 }]
+    expect(mac.outgoing().pulse).toMatchObject({ running: [], kept })
+    clock.now += 6 * 86_400_000
+    await mac.tick()
+    expect(mac.outgoing().pulse.kept).toEqual(kept)
+    clock.now += 2 * 86_400_000
+    await mac.tick()
+    await mac.tick()
+    expect(mac.outgoing().pulse.kept).toEqual([])
+    expect(db.query("SELECT COUNT(*) AS n FROM attempt").get()).toEqual({ n: 0 })
+  })
+
   test("an offer cancelled in the same batch never starts; it is reported cancelled", async () => {
     const started: string[] = []
     const mac = core(machine("Mac", false, 1), { ...idle, start: async (launch) => void started.push(launch.group) })

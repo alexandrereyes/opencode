@@ -200,6 +200,7 @@ export function createCore(ports: Ports) {
     repository: origin.repository,
     // A task of an attempt ended: its result should not wait for the next second.
     wake: () => void tick(),
+    keepMs: times.tombstoneMs,
     ...(transfers.enabled() ? { code: { ask: transfers.ask, state: transfers.code, forget: transfers.forget } } : {}),
   })
   /** The queue: every machine's on the hub; elsewhere, this machine's own, for its requests while the hub is out. */
@@ -278,6 +279,7 @@ export function createCore(ports: Ports) {
           brake: executor.braked(),
           presence: executor.present(),
           running: executor.running(),
+          kept: executor.kept(),
         },
         ...(leaving ? { leaving } : {}),
         waitMs,

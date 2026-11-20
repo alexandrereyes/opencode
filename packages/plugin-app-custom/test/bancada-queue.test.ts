@@ -73,7 +73,12 @@ function harness() {
   const call = (
     messages: BancadaProtocol.FromMachine[] = [],
     running: BancadaProtocol.Pulse["running"] = [],
-    more: { pulse?: number; free?: Partial<BancadaProtocol.Vector>; state?: BancadaProtocol.Pulse["state"] } = {},
+    more: {
+      pulse?: number
+      free?: Partial<BancadaProtocol.Vector>
+      state?: BancadaProtocol.Pulse["state"]
+      kept?: BancadaProtocol.Pulse["kept"]
+    } = {},
   ) => {
     messages.forEach((body) => mac.outbox.push({ seq: ++mac.seq, body }))
     const output = hub.sync({
@@ -90,6 +95,7 @@ function harness() {
         brake: false,
         presence: false,
         running,
+        kept: more.kept ?? [],
       },
       waitMs: 0,
     })
@@ -128,13 +134,19 @@ function harness() {
     capabilities: { android: {}, "android-fisico": {} },
     speed: "normal",
   }
-  const submit = (job: string, parts: BancadaProtocol.PartSpec[], session = "ses_a"): BancadaProtocol.FromMachine => ({
+  const submit = (
+    job: string,
+    parts: BancadaProtocol.PartSpec[],
+    session = "ses_a",
+    again = false,
+  ): BancadaProtocol.FromMachine => ({
     type: "submit",
     job,
     origin: { ...origin, sessionID: session, rootSessionID: session },
     code,
     parts,
     createdAt: clock.now,
+    ...(again ? { again } : {}),
   })
   return { clock, db, hub, call, later, part, offers, cancels, inbox, hello, submit }
 }
@@ -153,6 +165,7 @@ const report = (
   attempt: number,
   state: BancadaProtocol.AttemptState,
   result?: BancadaProtocol.Outcome,
+  partial = false,
 ): BancadaProtocol.FromMachine => ({
   type: "attempt",
   job,
@@ -160,6 +173,7 @@ const report = (
   attempt,
   state,
   ...(result ? { outcome: result } : {}),
+  ...(partial ? { partial } : {}),
 })
 const phone = spec("celular", { needs: ["android-fisico"], unsafe: true })
 
@@ -313,6 +327,50 @@ describe("queue on the hub", () => {
       expect.objectContaining({ type: "attempt.cancel", job: "j-aaaaaaaa", attempt: 1 }),
     )
     expect(it.offers().map((offer) => offer.attempt)).toEqual([1])
+  })
+
+  test("a hub that forgot adopts an ended attempt the machine keeps; a partial one, whose earlier result it lost, never approves", async () => {
+    const it = harness()
+    // The Mac keeps two ended attempts this hub never heard of: a whole one, and a new attempt of only c2.
+    const kept = [
+      { job: "j-aaaaaaaa", part: "android", attempt: 1 },
+      { job: "j-bbbbbbbb", part: "android", attempt: 2 },
+    ]
+    it.call(
+      [
+        it.hello,
+        it.submit("j-aaaaaaaa", [spec("android")], "ses_a", true),
+        it.submit("j-bbbbbbbb", [spec("android")], "ses_b", true),
+      ],
+      [],
+      { kept },
+    )
+    expect(it.offers().map((offer) => [offer.job, offer.attempt])).toEqual([
+      ["j-aaaaaaaa", 1],
+      ["j-bbbbbbbb", 2],
+    ])
+    // The executor answers with what it has: the acceptance and the final report.
+    it.call(
+      [
+        accept("j-aaaaaaaa", "android"),
+        report("j-aaaaaaaa", "android", 1, "concluido", outcome("aprovado", ["c1", "c2"], ["c1", "c2"])),
+        accept("j-bbbbbbbb", "android", 2),
+        report("j-bbbbbbbb", "android", 2, "concluido", outcome("aprovado", ["c2"], ["c2"]), true),
+      ],
+      [],
+      { kept },
+    )
+    expect(it.part("j-aaaaaaaa", "android")).toMatchObject({ state: "concluido", attempt_n: 1 })
+    expect(it.part("j-bbbbbbbb", "android")).toMatchObject({ state: "concluido" })
+    expect(JSON.parse(it.part("j-bbbbbbbb", "android")!.outcome!)).toMatchObject({
+      verdict: "incompleto",
+      reason: "o hub perdeu o resultado da primeira tentativa",
+      approved: false,
+    })
+    // Nothing runs again.
+    await it.later(60_000)
+    it.call([], [], { kept })
+    expect(it.offers()).toHaveLength(2)
   })
 
   test("a late report of an older attempt stays in its history and stops it; the part goes on", async () => {

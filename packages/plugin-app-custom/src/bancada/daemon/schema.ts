@@ -176,6 +176,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       started_at INTEGER,
       built_at INTEGER,
       adopt_until INTEGER,
+      needs_code INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (job_id, part)
     )`,
     // Every attempt of a part, also the old ones: a late report changes only its own row. By machine too: a hub that

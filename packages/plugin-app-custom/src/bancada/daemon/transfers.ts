@@ -334,6 +334,15 @@ export function makeTransfers(input: {
     },
     /** Starts what each side has to do; never waits for it. */
     tick: () => {
+      // Code asked for a request that no longer runs here (withdrawn, cancelled, ended): nothing waits for it.
+      db.query<{ job_id: string; file: string | null }, []>(
+        "SELECT job_id, file FROM code_in WHERE job_id NOT IN (SELECT job_id FROM attempt WHERE state IN ('aceito', 'compilando', 'rodando'))",
+      )
+        .all()
+        .forEach((row) => {
+          db.run("DELETE FROM code_in WHERE job_id = ?", [row.job_id])
+          if (row.file && input.files) void input.files.remove(row.file).catch(() => undefined)
+        })
       if (input.files && input.link) {
         outgoing.all().forEach((row) => run(`out:${row.transfer}`, () => upload(row)))
         incoming.all().forEach((row) => {

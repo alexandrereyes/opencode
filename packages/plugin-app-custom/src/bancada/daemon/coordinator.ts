@@ -34,6 +34,8 @@ type PartRow = {
   readonly started_at: number | null
   readonly built_at: number | null
   readonly adopt_until: number | null
+  /** Its last attempt could not get the origin's bundle: offered again only with the origin `ok`. */
+  readonly needs_code: number
 }
 type MachineRow = {
   readonly machine_id: string
@@ -497,6 +499,23 @@ export function makeCoordinator(input: {
       const outcome = message.outcome ?? lostOutcome("a execução terminou sem resultado")
       // A failed build says nothing about how long the test takes.
       if (message.state === "concluido" && outcome.verdict !== "compilacao") sample(row, outcome)
+      // A new attempt that ran only some scenarios, adopted by a hub that lost the earlier one's result: it never
+      // approves the part alone, nor runs again (`docs/bancada.md`, "When a side forgot").
+      const forgotten =
+        message.partial === true &&
+        row.previous === null &&
+        (outcome.verdict === "aprovado" || outcome.verdict === "incompleto")
+      if (forgotten)
+        return ended(
+          { ...row, retry_used: 1 },
+          {
+            ...outcome,
+            verdict: "incompleto",
+            reason: "o hub perdeu o resultado da primeira tentativa",
+            approved: false,
+          },
+          true,
+        )
       ended(row, outcome, true)
     },
     /**
@@ -516,20 +535,24 @@ export function makeCoordinator(input: {
     "code.have": (from: string, message: typeof BancadaProtocol.CodeHave.Type) => {
       const owner = job.get(message.job)
       if (!owner || owner.state !== "aberto") return
+      const waiting = parts
+        .all(message.job)
+        .filter((row) => row.machine_id === from && (live as ReadonlyArray<string>).includes(row.state))
+      // Nothing of the request waits there any more: a late ask.
+      if (waiting.length === 0) return
       db.run(
         "UPDATE hub_blob SET state = 'apagar' WHERE job_id = ? AND downloader = ? AND state IN ('aberta', 'pronta')",
         [message.job, from],
       )
+      // The origin cannot send now: the part waits for it in the queue, not the machine with its reservation.
+      if (machine.get(owner.origin_machine)?.state !== "ok") return waiting.forEach(needCode)
       const transfer = input.random()
       db.run(
         "INSERT INTO hub_blob (transfer, job_id, kind, uploader, downloader, state, expires_at, created_at) VALUES (?, ?, 'codigo', ?, ?, 'aberta', ?, ?)",
         [transfer, message.job, owner.origin_machine, from, input.now() + times.transferMs, input.now()],
       )
       input.send(owner.origin_machine, { type: "code.request", job: message.job, have: message.have, transfer })
-      parts
-        .all(message.job)
-        .filter((row) => row.machine_id === from && (live as ReadonlyArray<string>).includes(row.state))
-        .forEach((row) => tell(row, { reason: { code: "aguardando_codigo", text: "aguardando o código" } }))
+      waiting.forEach((row) => tell(row, { reason: { code: "aguardando_codigo", text: "aguardando o código" } }))
     },
     /** The origin sent the whole bundle: once the hub has every file it declared, the executor hears where it is. */
     "blob.ready": (from: string, message: typeof BancadaProtocol.BlobReady.Type) => {
@@ -688,13 +711,19 @@ export function makeCoordinator(input: {
         sync.pulse.brake ? 1 : 0,
         stream,
         sync.pulse.seq,
-        JSON.stringify(sync.pulse.running),
+        // What it runs and what it keeps: a request sent again adopts from either.
+        JSON.stringify([...sync.pulse.running, ...sync.pulse.kept]),
         sync.machineID,
       ],
     )
     sync.pulse.running.forEach((ref) => {
       adopt(sync.machineID, ref)
       stray(sync.machineID, ref)
+    })
+    // An ended attempt it keeps: adopted too (it answers with its final report); of a delivered request, cleaned.
+    sync.pulse.kept.forEach((ref) => {
+      adopt(sync.machineID, ref)
+      if (job.get(ref.job)?.state === "entregue") stray(sync.machineID, ref)
     })
     const running = new Set(sync.pulse.running.map((item) => `${item.job}/${item.part}/${item.attempt}`))
     const acknowledged = input.acknowledged(sync.machineID)
@@ -789,9 +818,36 @@ export function makeCoordinator(input: {
       withdraw(row)
     }
     db.run("DELETE FROM hub_job WHERE state IN ('entregue', 'local') AND closed_at < ?", [now - times.tombstoneMs])
+    stuckCode(now)
     alertNoMachine(now)
     alertNoCode(now)
   }
+
+  /**
+   * An open transfer whose origin stopped being `ok`, or any transfer that expired: what waits for it on its
+   * executor is withdrawn (`needCode`), and the transfer goes.
+   */
+  const stuckCode = (now: number) =>
+    db
+      .query<
+        { transfer: string; job_id: string; uploader: string; downloader: string; state: string; expires_at: number },
+        []
+      >(
+        "SELECT transfer, job_id, uploader, downloader, state, expires_at FROM hub_blob WHERE kind = 'codigo' AND state IN ('aberta', 'pronta')",
+      )
+      .all()
+      .filter((row) => now >= row.expires_at || (row.state === "aberta" && machine.get(row.uploader)?.state !== "ok"))
+      .forEach((row) => {
+        db.run("UPDATE hub_blob SET state = 'apagar' WHERE transfer = ?", [row.transfer])
+        parts
+          .all(row.job_id)
+          .filter(
+            (part) =>
+              part.machine_id === row.downloader &&
+              (part.state === "aceito" || (part.state === "incerto" && part.held_state === "aceito")),
+          )
+          .forEach(needCode)
+      })
 
   /** Code an executor waits for that has not arrived in `noMachineMs` (the origin is away, say): an alert, until it does. */
   const alertNoCode = (now: number) => {
@@ -804,40 +860,45 @@ export function makeCoordinator(input: {
     const ids = new Set(waiting.map((row) => `codigo:${row.job_id}/${row.downloader}`))
     input.alerts
       .active()
-      .filter((alert) => alert.kind === "aguardando_codigo" && !ids.has(alert.id))
+      .filter((alert) => alert.kind === "transferencia" && !ids.has(alert.id))
       .forEach((alert) => input.alerts.clear(alert.id))
     waiting
       .filter((row) => now - row.created_at >= times.noMachineMs)
       .forEach((row) =>
         input.alerts.raise(
           `codigo:${row.job_id}/${row.downloader}`,
-          "aguardando_codigo",
+          "transferencia",
           `o código do pedido ${row.job_id} não chegou a ${machine.get(row.downloader)?.name ?? row.downloader} há ${Math.round((now - row.created_at) / 60_000)} min: a origem ${machine.get(row.uploader)?.name ?? row.uploader} não o enviou`,
         ),
       )
   }
 
   /** A part that no machine offers what it needs, for `noMachineMs`: an alert, until it leaves that wait. */
-  const alertNoMachine = (now: number) => {
-    const waiting = inState
-      .all("na_fila")
-      .filter((row) => row.told !== null && (JSON.parse(row.told) as unknown[])[0] === "sem_maquina")
-    const ids = new Set(waiting.map((row) => `sem_maquina:${row.job_id}/${row.part}`))
-    input.alerts
-      .active()
-      .filter((alert) => alert.kind === "sem_maquina" && !ids.has(alert.id))
-      .forEach((alert) => input.alerts.clear(alert.id))
-    waiting
-      .filter((row) => row.reason_at !== null && now - row.reason_at >= times.noMachineMs)
-      .forEach((row) => {
-        const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
-        input.alerts.raise(
-          `sem_maquina:${row.job_id}/${row.part}`,
-          "sem_maquina",
-          `a parte ${spec.label} do pedido ${row.job_id} espera há ${Math.round((now - row.reason_at!) / 60_000)} min: nenhuma máquina oferece ${needs(spec).join(", ")}`,
-        )
-      })
-  }
+  const alertNoMachine = (now: number) =>
+    (["sem_maquina", "aguardando_codigo"] as const).forEach((code) => {
+      const waiting = inState
+        .all("na_fila")
+        .filter((row) => row.told !== null && (JSON.parse(row.told) as unknown[])[0] === code)
+      const ids = new Set(waiting.map((row) => `${code}:${row.job_id}/${row.part}`))
+      input.alerts
+        .active()
+        .filter((alert) => alert.kind === code && !ids.has(alert.id))
+        .forEach((alert) => input.alerts.clear(alert.id))
+      waiting
+        .filter((row) => row.reason_at !== null && now - row.reason_at >= times.noMachineMs)
+        .forEach((row) => {
+          const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+          const minutes = Math.round((now - row.reason_at!) / 60_000)
+          const origin = machine.get(job.get(row.job_id)?.origin_machine ?? "")?.name ?? "a origem"
+          input.alerts.raise(
+            `${code}:${row.job_id}/${row.part}`,
+            code,
+            code === "sem_maquina"
+              ? `a parte ${spec.label} do pedido ${row.job_id} espera há ${minutes} min: nenhuma máquina oferece ${needs(spec).join(", ")}`
+              : `a parte ${spec.label} do pedido ${row.job_id} espera há ${minutes} min o código, que só ${origin} tem`,
+          )
+        })
+    })
 
   /** A silent machine: its offers go back to the queue (an unsafe one waits as `incerto`), what it runs turns `incerto`. */
   const uncertain = (silent: MachineRow) => {
@@ -858,6 +919,22 @@ export function makeCoordinator(input: {
     }
   }
 
+  /**
+   * The attempt cannot get its code (`docs/bancada.md`, "Frozen code"): the origin is not `ok`, or the transfer
+   * expired. Withdrawn like an offer (the machine lets its reservation go; no new attempt is spent), the part waits in
+   * the queue until the origin is `ok`.
+   */
+  const needCode = (row: PartRow) => {
+    if (row.machine_id)
+      cancelAttempt(
+        row.machine_id,
+        { job: row.job_id, part: row.part, attempt: row.attempt_n },
+        "aguardando o código da origem",
+      )
+    requeue(row, { needs_code: 1 })
+    tell(row)
+  }
+
   /** Withdraws an offer: the machine hears `attempt.cancel` when it calls, and the part goes back to the queue. */
   const withdraw = (row: PartRow) => {
     if (row.machine_id)
@@ -873,8 +950,30 @@ export function makeCoordinator(input: {
   const schedule = () => {
     const now = input.now()
     const all = machines.all()
-    // A part of a request this hub forgot waits for the machines to list what they run (`adopt`).
-    const queued = inState.all("na_fila").filter((row) => row.adopt_until === null)
+    // A part of a request this hub forgot waits for the machines to list what they run (`adopt`); one that needs the
+    // origin's bundle, for the origin to be `ok`.
+    const originOf = (row: PartRow) => machine.get(job.get(row.job_id)?.origin_machine ?? "")
+    const waitingCode = inState
+      .all("na_fila")
+      .filter((row) => row.adopt_until === null && row.needs_code === 1 && originOf(row)?.state !== "ok")
+    waitingCode.forEach((row) => {
+      const told = JSON.stringify(["aguardando_codigo", null, null])
+      if (row.told === told) return
+      const before: unknown[] | null = row.told ? JSON.parse(row.told) : null
+      update(row, { told, ...(before?.[0] === "aguardando_codigo" ? {} : { reason_at: now }) })
+      tell(row, {
+        reason: {
+          code: "aguardando_codigo",
+          text: `aguardando ${originOf(row)?.name ?? "a origem"} voltar para enviar o código`,
+        },
+      })
+    })
+    const queued = inState
+      .all("na_fila")
+      .filter(
+        (row) =>
+          row.adopt_until === null && !waitingCode.some((item) => item.job_id === row.job_id && item.part === row.part),
+      )
     if (queued.length === 0) return
     const offered = inState.all("oferecido")
     const busy = (machineID: string) =>
@@ -1049,6 +1148,7 @@ export function makeCoordinator(input: {
         missing: 0,
         reserved: 0,
         bypassed: 0,
+        needs_code: 0,
         told: null,
         since: now,
       })

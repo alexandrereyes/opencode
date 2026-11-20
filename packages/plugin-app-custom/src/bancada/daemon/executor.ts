@@ -131,6 +131,8 @@ export function makeExecutor(input: {
   readonly repository: (job: string) => string | undefined
   /** Asks for a round: a task of an attempt ended. */
   readonly wake: () => void
+  /** An ended attempt no `cleanup` reached in this long is cleaned up here. */
+  readonly keepMs: number
   /** The code through the hub; without it, a start without code loses its attempt. */
   readonly code?: {
     readonly ask: (job: string, project: string) => void
@@ -153,6 +155,9 @@ export function makeExecutor(input: {
   const watch: { brake: Brake; present: boolean } = { brake: open, present: false }
   const live = db.query<AttemptRow, []>(
     "SELECT * FROM attempt WHERE state IN ('aceito', 'compilando', 'rodando') ORDER BY accepted_at",
+  )
+  const ended = db.query<AttemptRow, []>(
+    "SELECT * FROM attempt WHERE state IN ('concluido', 'perdido', 'cancelado') ORDER BY ended_at",
   )
   const delivered = db.query<AttemptRow, []>(
     "SELECT a.* FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE a.state = 'limpar' AND l.state <> 'active'",
@@ -412,6 +417,7 @@ export function makeExecutor(input: {
       attempt: row.n,
       state: row.state as BancadaProtocol.AttemptState,
       ...(row.outcome ? { outcome: JSON.parse(row.outcome) } : {}),
+      ...(row.only_scenarios ? { partial: true } : {}),
     })
   }
 
@@ -447,6 +453,12 @@ export function makeExecutor(input: {
    */
   const tick = async () => {
     const unread = { count: 0 }
+    // Ended long ago and never cleaned up: the origin delivered it, or never will, and the hub that would say so is
+    // gone (`docs/bancada.md`, "When a side forgot").
+    db.run(
+      "UPDATE attempt SET delivered = 1 WHERE delivered = 0 AND state IN ('concluido', 'perdido', 'cancelado') AND ended_at < ?",
+      [input.now() - input.keepMs],
+    )
     db.run("UPDATE attempt SET state = 'limpar' WHERE delivered = 1 AND state IN ('concluido', 'perdido', 'cancelado')")
     // Groups whose start ended: started, or lost with the reason.
     for (const [id, task] of tasks) {
@@ -609,7 +621,15 @@ export function makeExecutor(input: {
       if (!changed) return
       // It held its group's build and leaves before the start: the build passes to a sibling that builds.
       if (row.group_id === null) handOver(row)
-      input.send({ type: "attempt", job: row.job_id, part: row.part, attempt: row.n, state, outcome: final })
+      input.send({
+        type: "attempt",
+        job: row.job_id,
+        part: row.part,
+        attempt: row.n,
+        state,
+        outcome: final,
+        ...(row.only_scenarios ? { partial: true } : {}),
+      })
     })()
   }
 
@@ -641,6 +661,9 @@ export function makeExecutor(input: {
     free,
     running: (): BancadaProtocol.Pulse["running"] =>
       live.all().map((row) => ({ job: row.job_id, part: row.part, attempt: row.n })),
+    /** Ended attempts still kept (no `cleanup` yet): a hub that forgot adopts them with their final report. */
+    kept: (): BancadaProtocol.Pulse["kept"] =>
+      ended.all().map((row) => ({ job: row.job_id, part: row.part, attempt: row.n })),
     reconciling: () => reconciling.value,
     /**
      * A reading of the machine (the process takes one every 5 s, off the round): the brake moves, and whether the

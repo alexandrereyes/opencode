@@ -266,6 +266,8 @@ export const AttemptReport = Schema.Struct({
   outcome: optional(Outcome),
   /** A device that fell during this attempt (a fault for it; not returned to this attempt). */
   fell: optional(Schema.String),
+  /** It ran only some scenarios (`only`): a new attempt, whose result joins an earlier one's. */
+  partial: optional(Schema.Literal(true)),
 })
 export const CodeHave = Schema.Struct({
   type: Schema.Literal("code.have"),
@@ -436,7 +438,10 @@ export const Pulse = Schema.Struct({
   free: Vector,
   brake: Schema.Boolean,
   presence: Schema.Boolean,
+  /** Live attempts. */
   running: Schema.Array(AttemptRef),
+  /** Ended attempts this machine still keeps (no `cleanup` yet): a hub that forgot adopts them too. */
+  kept: Schema.Array(AttemptRef),
 })
 export type Pulse = typeof Pulse.Type
 

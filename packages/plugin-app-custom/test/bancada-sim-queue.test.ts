@@ -245,6 +245,31 @@ describe("simulation: the queue", () => {
     expect(sim.facts.starts.get("j-aaaaaaaa/celular")).toBe(1)
   })
 
+  test("S24: the hub loses its database with attempts already ended and not delivered: it adopts them by pulse.kept, nothing runs again", async () => {
+    // The Mac runs both and is cut off just before they end, until after the hub's database is replaced.
+    const sim = createWorld({ seed: 24, partitions: [{ machine: "Mac", from: 1_020_000, to: 1_120_000 }] })
+    sim.addMachine({ name: "Linux", hub: true, platform: "linux", speed: "lento", capabilities: {}, capacity: room })
+    sim.addMachine({ name: "Mac", capabilities: { android: {}, "android-fisico": {} }, capacity: room })
+    sim.script("j-aaaaaaaa", "android", ok(30_000))
+    sim.script("j-bbbbbbbb", "celular", ok(30_000))
+    await sim.advance(1_000)
+    ask(sim, "Mac", "j-aaaaaaaa", [spec("android")])
+    ask(sim, "Mac", "j-bbbbbbbb", [spec("celular", { needs: ["android-fisico"], unsafe: true })])
+    await sim.advance(50_000)
+    // Ended on the Mac, whose final reports never left.
+    expect(sim.machines.get("Mac")!.core.status("j-aaaaaaaa")).toMatchObject({ state: "na_fila" })
+    sim.replaceDb("Linux")
+    await sim.advance(3 * 60_000)
+    sim.settle()
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([
+      { state: "concluido", attempts: 1, outcome: { approved: true } },
+    ])
+    expect(sim.facts.delivered.get("j-bbbbbbbb")).toMatchObject([
+      { state: "concluido", attempts: 1, outcome: { approved: true } },
+    ])
+    expect([sim.facts.starts.get("j-aaaaaaaa/android"), sim.facts.starts.get("j-bbbbbbbb/celular")]).toEqual([1, 1])
+  })
+
   test("S14: the Mac's database is wiped mid-run: what the hub had there is lost by the pulse, and runs again", async () => {
     const sim = createWorld({ seed: 15 })
     sim.addMachine({ name: "Linux", hub: true, platform: "linux" })

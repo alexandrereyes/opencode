@@ -115,26 +115,57 @@ describe("simulation: code through the hub (S13)", () => {
     expect(write).toEqual({ ok: false, reason: "unknown" })
   })
 
-  test("the origin is cut off when its code is asked: the part waits for it, an alert at 10 min, and it runs once back", async () => {
-    // The Mac's request reaches the hub, then the Mac is cut off for 12 minutes.
-    const sim = world(42, { partitions: [{ machine: "Mac", from: 1_003_000, to: 1_723_000 }] })
+  test("S22: the origin sleeps after its code is asked: the hub withdraws the attempt, the machine takes other work, and it runs once back", async () => {
+    // The Mac's request reaches the hub, then the Mac is cut off for 12 minutes. The host-6 has one build slot.
+    const sim = createWorld({
+      seed: 42,
+      codeTravels: { bundleBytes },
+      partitions: [{ machine: "Mac", from: 1_003_000, to: 1_723_000 }],
+    })
+    sim.addMachine({
+      name: "Linux",
+      hub: true,
+      platform: "linux",
+      capabilities: { android: {} },
+      capacity: { ...room, builds: 1, android: 1 },
+    })
+    sim.addMachine({ name: "Mac", capabilities: {}, capacity: room })
+    sim.script("j-aaaaaaaa", "android", ok)
+    sim.script("j-bbbbbbbb", "android", ok)
     await sim.advance(1_000)
     ask(sim)
+    await sim.advance(60_000)
+    // Withdrawn once the Mac went silent: nothing of it is reserved on the host-6, which takes its own session's part.
+    const linux = sim.machines.get("Linux")!
+    expect(linux.db.query("SELECT COUNT(*) AS n FROM lease WHERE state = 'active'").get()).toEqual({ n: 0 })
+    expect(linux.db.query("SELECT state, needs_code FROM hub_part WHERE job_id = 'j-aaaaaaaa'").get()).toEqual({
+      state: "na_fila",
+      needs_code: 1,
+    })
+    sim.submit("Linux", {
+      id: "j-bbbbbbbb",
+      sessionID: "ses_b",
+      rootSessionID: "ses_b",
+      code,
+      parts: [spec],
+      repository: "/workspace/exemplo",
+    })
+    await sim.advance(60_000)
+    expect(sim.facts.delivered.get("j-bbbbbbbb")).toMatchObject([{ state: "concluido", outcome: { approved: true } }])
     await sim.advance(9 * 60_000)
-    const hub = sim.machines.get("Linux")!.core
-    expect(hub.alerts()).toEqual([])
-    expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBeUndefined()
-    await sim.advance(2 * 60_000)
-    expect(hub.alerts()).toMatchObject([
+    expect(linux.core.alerts()).toMatchObject([
       {
         kind: "aguardando_codigo",
-        text: expect.stringContaining("o código do pedido j-aaaaaaaa não chegou a Linux há 10 min: a origem Mac"),
+        text: expect.stringContaining("do pedido j-aaaaaaaa espera há 10 min o código, que só Mac tem"),
       },
     ])
+    expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBeUndefined()
     await sim.advance(4 * 60_000)
     sim.settle()
-    expect(hub.alerts()).toEqual([])
-    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([{ state: "concluido", outcome: { approved: true } }])
+    expect(linux.core.alerts()).toEqual([])
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([
+      { state: "concluido", attempts: 2, outcome: { approved: true } },
+    ])
     expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBe(1)
   })
 
