@@ -23,7 +23,8 @@ const machine = (name: string, hub: boolean, android = 0): Machine => ({
   hub,
   speed: "normal",
   capabilities: android ? { android: {} } : {},
-  capacity: { memMb: 0, cpuMilli: 0, builds: 1, android, ios: 0 },
+  // Room for three attempts at once (each holds a build until it runs).
+  capacity: { memMb: 96_000, cpuMilli: 32_000, builds: 4, android, ios: 0 },
 })
 const core = (config: Machine, launcher: Launcher = idle, db = new Database(":memory:")) => {
   let n = 0

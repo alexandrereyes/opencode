@@ -155,4 +155,39 @@ describe("simulation", () => {
     const hub = world.machines.get("Linux")!.db
     expect(hub.query("SELECT COUNT(*) AS n FROM dead_letter").get()).toEqual({ n: 1 })
   })
+
+  test("a part with secrets goes only to a machine that resolves its policy, and never to one with its brake closed", async () => {
+    const world = createWorld({ seed: 4 })
+    world.addMachine({ name: "Linux", hub: true, platform: "linux" })
+    world.addMachine({ name: "Mac", capabilities: { "segredos:opencode-skills": {} }, secrets: ["opencode-skills"] })
+    world.addMachine({ name: "Outro", capabilities: {} })
+    const secret: BancadaProtocol.PartSpec = {
+      ...spec("whatsapp", "none"),
+      needs: [],
+      devices: { min: 0, max: 0 },
+      secrets: "opencode-skills",
+      unsafe: true,
+    }
+    world.script("j-7qk2m9xa", "whatsapp", {
+      buildMs: 1_000,
+      runMs: 2_000,
+      exit: 0,
+      planned: ["w1"],
+      scenarios: passed(["w1"]),
+    })
+    world.observe("Mac", { pressure: 4 })
+    world.submit("Linux", { id: "j-7qk2m9xa", sessionID: "ses_a", rootSessionID: "ses_a", code, parts: [secret] })
+    await world.advance(10_000)
+    // The only machine with the policy is braked: the part waits, it never goes to the other one.
+    expect(world.seen("j-7qk2m9xa", "whatsapp")).toEqual(["na_fila"])
+    for (const _ of [1, 2, 3, 4, 5, 6]) {
+      world.observe("Mac", { pressure: 1 })
+      await world.advance(5_000)
+    }
+    await world.advance(20_000)
+    world.settle()
+    expect(world.facts.delivered.get("j-7qk2m9xa")).toMatchObject([
+      { part: "whatsapp", machine: { name: "Mac" }, outcome: { approved: true } },
+    ])
+  })
 })

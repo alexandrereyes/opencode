@@ -2,6 +2,7 @@
 // clock, a scripted launcher and a network that drops, delays, duplicates and partitions. Every step checks the
 // invariants; `settle` checks the ones that hold only at the end.
 import { Database } from "bun:sqlite"
+import type { Reading } from "../../src/bancada/daemon/brake"
 import { createCore, type Core, type Machine, type timings } from "../../src/bancada/daemon/core"
 import type { AttemptKey, Launch, Launcher, Status } from "../../src/bancada/daemon/executor"
 import type { NewJob } from "../../src/bancada/daemon/origin"
@@ -59,6 +60,8 @@ export function createWorld(options: {
     /** Offers an executor refused, by machine and sequence number: the hub offered more than the machine had. */
     refusals: new Set<string>(),
     states: new Map<string, string[]>(),
+    /** The most devices each machine had reserved at once. */
+    peak: new Map<string, number>(),
   }
   /** Starts still bringing their code, released when the virtual clock reaches them. */
   const starting: { readonly at: number; readonly resolve: () => void }[] = []
@@ -213,12 +216,16 @@ export function createWorld(options: {
     for (const machine of machines.values()) {
       const used = machine.db
         .query<
-          { android: number; ios: number },
+          BancadaProtocol.Vector,
           []
-        >("SELECT COALESCE(SUM(android), 0) AS android, COALESCE(SUM(ios), 0) AS ios FROM lease WHERE state = 'active'")
+        >("SELECT COALESCE(SUM(mem_mb), 0) AS memMb, COALESCE(SUM(cpu_milli), 0) AS cpuMilli, COALESCE(SUM(builds), 0) AS builds, COALESCE(SUM(android), 0) AS android, COALESCE(SUM(ios), 0) AS ios FROM lease WHERE state = 'active'")
         .get()!
-      if (used.android > machine.config.capacity.android || used.ios > machine.config.capacity.ios)
-        throw new Error(`${machine.name} reserved beyond its budget: ${JSON.stringify(used)}`)
+      const over = (Object.keys(used) as (keyof BancadaProtocol.Vector)[]).filter(
+        (key) => used[key] > machine.config.capacity[key],
+      )
+      if (over.length)
+        throw new Error(`${machine.name} reserved beyond its budget (${over.join(", ")}): ${JSON.stringify(used)}`)
+      facts.peak.set(machine.name, Math.max(facts.peak.get(machine.name) ?? 0, used.android + used.ios))
     }
     for (const [job, count] of facts.notices) if (count > 1) throw new Error(`${job} was noticed ${count} times`)
     for (const [job, seqs] of facts.results) if (seqs.size > 1) throw new Error(`${job} closed ${seqs.size} times`)
@@ -240,7 +247,12 @@ export function createWorld(options: {
         hub: input.hub ?? false,
         speed: input.speed ?? "normal",
         capabilities: input.capabilities ?? {},
-        capacity: input.capacity ?? { memMb: 0, cpuMilli: 0, builds: 1, android: 0, ios: 0 },
+        capacity: input.capacity ?? { memMb: 32_768, cpuMilli: 8_000, builds: 1, android: 0, ios: 0 },
+        ...(input.secrets ? { secrets: input.secrets } : {}),
+        ...(input.presence ? { presence: input.presence } : {}),
+        ...(input.brake ? { brake: input.brake } : {}),
+        ...(input.ports ? { ports: input.ports } : {}),
+        ...(input.docker === undefined ? {} : { docker: input.docker }),
       }
       const db = new Database(":memory:")
       const core = build(config, db)
@@ -260,6 +272,9 @@ export function createWorld(options: {
     sleep: (name: string, asleep: boolean) => {
       machines.get(name)!.awake = !asleep
     },
+    /** A reading of a machine (its brake, its owner's presence), as its process takes one every 5 s. */
+    observe: (name: string, reading: Omit<Reading, "at">) =>
+      machines.get(name)!.core.observe({ at: clock.now, ...reading }),
     /** One round of one machine, nothing else: for a state a full step would already undo. */
     round: (name: string) => round(machines.get(name)!),
     /** States a part of the hub's queue went through, in order and without repeats. */

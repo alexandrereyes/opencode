@@ -21,6 +21,7 @@ type MachineRow = {
   readonly name: string
   readonly capabilities: string
   readonly free: string | null
+  readonly brake: number
   readonly state: string
   readonly pulse_seq: number | null
 }
@@ -253,22 +254,30 @@ export function makeCoordinator(input: {
     const room = new Map(
       all.map((row) => [row.machine_id, row.free ? (JSON.parse(row.free) as BancadaProtocol.Vector) : undefined]),
     )
+    /** An offer takes a build and its devices from the machine's room until its next pulse counts them. */
     const take = (machineID: string, platform: BancadaProtocol.Platform, devices: number) => {
       const free = room.get(machineID)
-      if (free && platform !== "none") room.set(machineID, { ...free, [platform]: free[platform] - devices })
+      if (!free) return
+      room.set(machineID, {
+        ...free,
+        builds: free.builds - 1,
+        ...(platform === "none" ? {} : { [platform]: free[platform] - devices }),
+      })
     }
     for (const row of offered.all())
       if (row.machine_id && (row.offer_seq ?? 0) > input.acknowledged(row.machine_id))
         take(row.machine_id, (JSON.parse(row.spec) as BancadaProtocol.PartSpec).platform, row.devices_granted ?? 0)
     for (const row of queued.all()) {
       const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+      // A part with secrets needs a machine that resolves its policy (`segredos:<policy>`).
+      const needs = [...spec.needs, ...(spec.secrets ? [`segredos:${spec.secrets}`] : [])]
       const target = all.find((candidate) => {
         const free = room.get(candidate.machine_id)
-        if (!free) return false
+        if (!free || candidate.brake || free.builds < 1) return false
         if (row.refused_by === candidate.machine_id && (candidate.pulse_seq ?? 0) <= (row.refused_pulse ?? 0))
           return false
         const capabilities: Record<string, unknown> = JSON.parse(candidate.capabilities)
-        if (!spec.needs.every((need) => need in capabilities)) return false
+        if (!needs.every((need) => need in capabilities)) return false
         return spec.platform === "none" || free[spec.platform] >= spec.devices.min
       })
       if (!target) continue

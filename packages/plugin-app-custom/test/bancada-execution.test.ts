@@ -142,6 +142,25 @@ describe("requests the process refuses or joins", () => {
   }, 30_000)
 })
 
+describe("the machine file", () => {
+  // Starts the process from source; the part waits 3 s for an offer that never comes.
+  test("an invalid machine file offers nothing and says why in the log", async () => {
+    const context = await setup()
+    await Bun.write(context.config, `versao = 1\n[orcamento]\nmemoria_gb = "muita"\n`)
+    const submitted = await context.client.call<Bancada.Submitted>("submit", {
+      id: BancadaProtocol.jobID("arquivo inválido"),
+      sessionID: "ses_a",
+      diretorio: context.repository,
+      testes: [{ teste: "simples" }],
+    })
+    await Bun.sleep(3_000)
+    expect((await view(context.client, submitted.job))?.parts.simples?.state).toBe("na_fila")
+    expect(await Bun.file(path.join(context.state, "bancada.log")).text()).toContain(
+      "is invalid; this machine offers nothing:\n  orcamento.memoria_gb: precisa ser um número, > 0",
+    )
+  }, 20_000)
+})
+
 /** The example project as the session's repository, and a client of a process that is the hub. */
 async function setup() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-execution-"))
@@ -152,12 +171,16 @@ async function setup() {
   await runGit(["add", "-A"], { cwd: repository })
   await runGit(["commit", "-q", "-m", "exemplo"], { cwd: repository })
   const state = path.join(root, "state")
+  // A machine file of its own, never the host's: room for the example's build, executions as processes.
+  const config = path.join(root, "bancada.toml")
+  await Bun.write(config, `versao = 1\n[orcamento]\nmemoria_gb = 32\ncpu = 16\n[execucao]\nmodo = "processo"\n`)
   const client = makeBancadaClient({
     state,
     owner: async () => ({ instanceID: "srv-a", name: "Servidor A", hub: true }),
     command,
+    config,
   })
-  return { repository, state, client }
+  return { repository, state, client, config }
 }
 
 type View = {

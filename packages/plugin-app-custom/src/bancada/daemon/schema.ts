@@ -63,10 +63,25 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       mem_mb INTEGER NOT NULL,
       cpu_milli INTEGER NOT NULL,
       builds INTEGER NOT NULL,
+      build_mem_mb INTEGER NOT NULL DEFAULT 0,
+      build_cpu_milli INTEGER NOT NULL DEFAULT 0,
       state TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       released_at INTEGER
     )`,
+    `CREATE TABLE lease_device (
+      lease_id TEXT NOT NULL,
+      device_id TEXT,
+      port_start INTEGER NOT NULL,
+      port_end INTEGER NOT NULL
+    )`,
+    `CREATE TABLE cost_sample (
+      subject TEXT NOT NULL,
+      mem_mb INTEGER NOT NULL,
+      cpu_milli INTEGER NOT NULL,
+      at INTEGER NOT NULL
+    )`,
+    "CREATE INDEX cost_sample_subject ON cost_sample (subject, at)",
     `CREATE TABLE attempt (
       job_id TEXT NOT NULL,
       part TEXT NOT NULL,

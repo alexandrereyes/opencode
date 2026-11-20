@@ -4,6 +4,8 @@ import type { Database } from "bun:sqlite"
 import { Result, Schema } from "effect"
 import { BancadaProtocol } from "../protocol.js"
 import { makeCoordinator } from "./coordinator.js"
+import { defaults, type BrakeConfig, type Range } from "../machine-config.js"
+import type { Reading } from "./brake.js"
 import { makeExecutor, type Launcher } from "./executor.js"
 import { makeMessages } from "./messages.js"
 import { makeOrigin, type NewJob } from "./origin.js"
@@ -18,7 +20,14 @@ export interface Machine {
   readonly hub: boolean
   readonly speed: "normal" | "lento"
   readonly capabilities: Readonly<Record<string, unknown>>
+  /** The budget: memory, CPU and builds, and the ceilings of emulators and simulators. */
   readonly capacity: BancadaProtocol.Vector
+  /** From the machine file; the machine file's defaults when absent (tests, the simulation). */
+  readonly secrets?: ReadonlyArray<string>
+  readonly presence?: { readonly idleMs: number; readonly factor: number }
+  readonly brake?: BrakeConfig
+  readonly ports?: Range
+  readonly docker?: boolean
 }
 
 /**
@@ -87,7 +96,15 @@ export function createCore(ports: Ports) {
     now: ports.now,
     random: ports.random,
     machineID: self.machineID,
-    capacity: self.capacity,
+    limits: {
+      capacity: self.capacity,
+      capabilities: self.capabilities,
+      secrets: self.secrets ?? [],
+      presence: self.presence ?? defaults.presence,
+      brake: self.brake ?? defaults.brake,
+      ports: self.ports ?? defaults.ports.project,
+      docker: self.docker ?? false,
+    },
     launcher: ports.launcher,
     send: toHub,
     repository: origin.repository,
@@ -149,8 +166,8 @@ export function createCore(ports: Ports) {
           seq,
           state: executor.reconciling() ? "reconciling" : "ok",
           free: executor.free(),
-          brake: false,
-          presence: false,
+          brake: executor.braked(),
+          presence: executor.present(),
           running: executor.running(),
         },
         waitMs,
@@ -239,6 +256,12 @@ export function createCore(ports: Ports) {
     submit: (request: NewJob) => origin.submit(request),
     /** Whether this machine is still reading again what it started before a restart. */
     reconciling: executor.reconciling,
+    /** A reading of the machine for the brake and the owner's presence; the brake's changes go to the log. */
+    observe: (reading: Reading) => {
+      const brake = executor.observe(reading)
+      if (brake.changed) ports.log(brake.closed ? `brake closed: ${brake.reasons.join("; ")}` : "brake open")
+      return brake
+    },
     status: origin.status,
     notices: origin.notices,
     delivered: origin.delivered,

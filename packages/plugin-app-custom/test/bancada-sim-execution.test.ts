@@ -82,7 +82,14 @@ describe("simulation: executions outlive the Bancada process", () => {
 
   test("S17: a start that takes two minutes, on the Mac and on the hub, never holds a round", async () => {
     const sim = createWorld({ seed: 11, timings: { silentMs: 45_000 } })
-    sim.addMachine({ name: "Linux", hub: true, platform: "linux", capabilities: { docker: {} } })
+    // Two builds on the hub: C's start holds one while D runs.
+    sim.addMachine({
+      name: "Linux",
+      hub: true,
+      platform: "linux",
+      capabilities: { docker: {} },
+      capacity: { memMb: 32_768, cpuMilli: 16_000, builds: 2, android: 0, ios: 0 },
+    })
     sim.addMachine({
       name: "Mac",
       capabilities: { android: {} },
@@ -144,5 +151,38 @@ describe("simulation: executions outlive the Bancada process", () => {
     expect(sim.facts.delivered.get("j-7qk2m9xa")).toMatchObject([
       { part: "android", state: "concluido", attempts: 1, outcome: { approved: true } },
     ])
+  })
+
+  test("S10: seven sessions ask at once on a Mac with room for three emulators: the budget never breaks, all are served", async () => {
+    const sim = createWorld({ seed: 10 })
+    sim.addMachine({ name: "Linux", hub: true, platform: "linux" })
+    // 40 GB and 10 cores: a build (8 GB, 6 cores) beside up to three emulators (8 GB, 1 core each), one build at once.
+    sim.addMachine({
+      name: "Mac",
+      capabilities: { android: {} },
+      capacity: { memMb: 40_960, cpuMilli: 10_000, builds: 1, android: 3, ios: 0 },
+    })
+    const ids = ["j-11111111", "j-22222222", "j-33333333", "j-44444444", "j-55555555", "j-66666666", "j-77777777"]
+    ids.forEach((id, index) => {
+      sim.script(id, "android", {
+        buildMs: 3_000,
+        runMs: 20_000,
+        exit: 0,
+        planned: ["c1"],
+        scenarios: passed(["c1"]),
+      })
+      sim.submit("Linux", {
+        id,
+        sessionID: `ses_${index}`,
+        rootSessionID: `ses_${index}`,
+        code,
+        parts: [{ ...android, devices: { min: 1, max: 2 } }],
+      })
+    })
+    await sim.advance(10 * 60_000)
+    sim.settle()
+    expect(ids.map((id) => sim.facts.delivered.get(id)?.[0]?.outcome?.approved)).toEqual(ids.map(() => true))
+    // Never above the budget (the world checks every step), and more than one emulator at a time when it fit.
+    expect(sim.facts.peak.get("Mac")).toBe(3)
   })
 })

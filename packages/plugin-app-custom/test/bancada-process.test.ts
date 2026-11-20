@@ -95,7 +95,8 @@ describe("process", () => {
   test("clients racing on one folder start a single process, which refuses another server by name", async () => {
     const root = await folder()
     const state = path.join(root, "state")
-    const clients = [0, 1].map(() => makeBancadaClient({ state, owner: owner("srv-a", "Servidor A"), command }))
+    const config = path.join(root, "bancada.toml")
+    const clients = [0, 1].map(() => makeBancadaClient({ state, owner: owner("srv-a", "Servidor A"), command, config }))
     expect(await Promise.all(clients.map((client) => client.call("wake", {})))).toEqual([
       { protocol: 1, state: "ok" },
       { protocol: 1, state: "ok" },
@@ -109,7 +110,7 @@ describe("process", () => {
     expect(await log()).toContain(`started pid=${info?.pid}`)
     expect((await fs.stat(path.join(state, "bancada.json"))).mode & 0o777).toBe(0o600)
 
-    const other = makeBancadaClient({ state, owner: owner("srv-b", "Servidor B"), command })
+    const other = makeBancadaClient({ state, owner: owner("srv-b", "Servidor B"), command, config })
     const refused = await other.call("wake", {}).catch((error: unknown) => error)
     expect(refused).toBeInstanceOf(BancadaError)
     expect(refused).toMatchObject({ reason: "owner", owner: { instanceID: "srv-a", name: "Servidor A" } })
@@ -120,7 +121,8 @@ describe("process", () => {
     const root = await folder()
     const state = path.join(root, "state")
     const collecting = [process.execPath, path.join(import.meta.dir, "fixture/bancada-collecting.ts")]
-    const client = makeBancadaClient({ state, owner: owner("srv-a", "Servidor A"), command: collecting })
+    const config = path.join(root, "bancada.toml")
+    const client = makeBancadaClient({ state, owner: owner("srv-a", "Servidor A"), command: collecting, config })
     await client.call("wake", {})
     const info = await read(state)
     if (!info) throw new Error("no bancada.json")
@@ -133,6 +135,7 @@ describe("process", () => {
         BUN_BE_BUN: "1",
         OPENCODE_BANCADA_STATE: state,
         OPENCODE_BANCADA_PARENT: String(process.pid),
+        OPENCODE_BANCADA_CONFIG: config,
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -167,6 +170,8 @@ describe("process", () => {
       ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("OPENCODE_"))),
       OPENCODE_BANCADA: "1",
       OPENCODE_BANCADA_STATE: state,
+      // A machine file of its own (absent: every default), never the host's.
+      OPENCODE_BANCADA_CONFIG: path.join(root, "bancada.toml"),
       OPENCODE_SUMMARY_HUB: `http://127.0.0.1:${hub.port}`,
       OPENCODE_SUMMARY_HUB_PASSWORD: "hub-secret",
       OPENCODE_HOST_NAME: "Servidor de teste",

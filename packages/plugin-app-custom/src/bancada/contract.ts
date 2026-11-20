@@ -1,6 +1,7 @@
 export * as BancadaContract from "./contract.js"
 
 import type { BancadaProtocol } from "./protocol.js"
+import { isTable, list, table, text1, toml, unknownKeys, type Raw } from "./toml.js"
 
 /**
  * The project's `.bancada.toml` (`docs/bancada.md`, "Project contract"): what each test needs and how it builds,
@@ -148,17 +149,6 @@ function scpLike(url: string) {
 function urlLike(url: string) {
   const match = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:]+)(?::\d+)?\/(.+)$/i.exec(url)
   return match ? { host: match[1]!, path: match[2]! } : undefined
-}
-
-type Raw = Record<string, unknown>
-
-function toml(text: string): Raw | string {
-  try {
-    const value: unknown = Bun.TOML.parse(text)
-    return isTable(value) ? value : "o arquivo não é uma tabela"
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error)
-  }
 }
 
 /** The test's own keys over its ancestors' (a key it defines replaces the parent's whole value: lists never add up). */
@@ -334,34 +324,4 @@ function relative(value: string, at: string, problems: string[]) {
     return false
   }
   return true
-}
-
-function list(value: unknown, at: string, problems: string[]): string[] {
-  if (value === undefined) return []
-  if (Array.isArray(value) && value.every((item) => typeof item === "string")) return value
-  problems.push(`${at}: precisa ser uma lista de textos`)
-  return []
-}
-
-function text1(value: unknown, at: string, problems: string[]) {
-  if (typeof value === "string") return value
-  problems.push(`${at}: precisa ser um texto`)
-  return undefined
-}
-
-function table(value: unknown, at: string, problems: string[]) {
-  if (value === undefined) return undefined
-  if (isTable(value)) return value
-  problems.push(`${at}: precisa ser uma tabela`)
-  return undefined
-}
-
-function unknownKeys(value: Raw, known: ReadonlySet<string>, at: string, problems: string[]) {
-  Object.keys(value)
-    .filter((key) => !known.has(key))
-    .forEach((key) => problems.push(`${at ? `${at}.` : ""}${key}: chave desconhecida`))
-}
-
-function isTable(value: unknown): value is Raw {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

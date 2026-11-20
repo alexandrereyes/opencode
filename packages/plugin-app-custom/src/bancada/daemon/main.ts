@@ -11,6 +11,8 @@ import { createCore, type Core } from "./core.js"
 import { openExclusive } from "./db.js"
 import { runGit } from "./git.js"
 import { makeProcessLauncher } from "./launcher/process.js"
+import { probe } from "./probes.js"
+import { offered, parseMachineConfig } from "../machine-config.js"
 import { makeBlobs } from "./blobs.js"
 import { Invalid, makeRequests } from "./requests.js"
 import { makeWorkdirs } from "./workdir.js"
@@ -25,6 +27,8 @@ export const adminProtocol = 1
 export const limits = {
   /** How often the core advances (executions, the queue); also after every request. */
   tickMs: 1_000,
+  /** How often the machine is read for the brake and the owner's presence. */
+  probeMs: 5_000,
   /** How often unused working folders and expired transfers go (also once, a little after the start). */
   sweepMs: 60 * 60_000,
   firstSweepMs: 60_000,
@@ -92,6 +96,7 @@ export async function main() {
     process.exit(1)
   }
   const machineID = await machine(state)
+  const machineFile = await readMachineFile()
   const secret = randomBytes(32).toString("base64url")
   const info = path.join(state, "bancada.json")
   const owner: { current?: Owner } = {}
@@ -129,6 +134,9 @@ export async function main() {
         (error: unknown) => log(`the hourly sweep failed: ${String(error)}`),
       )
     current.timers.push(setTimeout(sweep, limits.firstSweepMs), setInterval(sweep, limits.sweepMs))
+    const config = machineFile.config
+    // An invalid machine file offers nothing: no budget, no capability (the problems are in the log).
+    const offering = machineFile.valid
     current.core = createCore({
       db,
       now,
@@ -140,19 +148,45 @@ export async function main() {
         name: owner.current.name,
         platform: process.platform === "darwin" ? "darwin" : "linux",
         hub: owner.current.hub,
-        speed: "normal",
-        capabilities: {},
-        capacity: {
-          memMb: Math.round((os.totalmem() / 1_048_576) * 0.75),
-          cpuMilli: os.availableParallelism() * 800,
-          builds: 1,
-          android: 0,
-          ios: 0,
-        },
+        speed: config.speed,
+        // Discovering what the machine has (Android SDK, Xcode, phones…) comes with the devices.
+        capabilities: offering ? offered(config, {}) : {},
+        capacity: offering
+          ? {
+              memMb: config.budget.memMb,
+              cpuMilli: config.budget.cpuMilli,
+              builds: config.budget.builds,
+              android: config.budget.maxAndroid,
+              ios: config.budget.maxIos,
+            }
+          : { memMb: 0, cpuMilli: 0, builds: 0, android: 0, ios: 0 },
+        secrets: config.execution.mode === "docker" ? [] : config.secrets,
+        presence: config.budget.presence,
+        brake: config.brake,
+        ports: config.ports.project,
+        docker: config.execution.mode === "docker",
       },
-      launcher: makeProcessLauncher({ state, workdirs, git: runGit, now, random, wake: advance, log }),
+      timings: { silentMs: config.times.silentMs },
+      launcher: makeProcessLauncher({
+        state,
+        workdirs,
+        git: runGit,
+        now,
+        random,
+        deadlines: { prepareMs: config.times.prepareMs, buildMs: config.times.buildMs, runMs: config.times.runMs },
+        lowPriority: config.execution.lowPriority,
+        wake: advance,
+        log,
+      }),
     })
     current.requests = makeRequests(current.core, runGit)
+    // The machine is read off the round, every 5 s: the brake and the owner's presence.
+    const reading = () =>
+      void probe()
+        .then((value) => held.process?.core?.observe(value))
+        .catch((error: unknown) => log(`reading the machine failed: ${String(error)}`))
+    reading()
+    current.timers.push(setInterval(reading, limits.probeMs))
     advance()
     return current.core
   }
@@ -296,6 +330,28 @@ async function farewell(machineID: string, owner: Owner | undefined) {
     }),
     signal: AbortSignal.timeout(limits.farewellMs),
   }).catch(() => undefined)
+}
+
+/**
+ * The machine file (`OPENCODE_BANCADA_CONFIG`, else `~/.config/opencode/bancada.toml`): absent, every default; invalid,
+ * its problems go to the log and the machine offers nothing (its defaults still give the times).
+ */
+async function readMachineFile() {
+  const file = process.env.OPENCODE_BANCADA_CONFIG || path.join(os.homedir(), ".config/opencode/bancada.toml")
+  const text = await Bun.file(file)
+    .text()
+    .catch(() => undefined)
+  const host = {
+    memMb: Math.round(os.totalmem() / 1_048_576),
+    cores: os.availableParallelism(),
+    inDocker: (await Bun.file("/.dockerenv").exists()) && (await fs.exists("/var/run/docker.sock")),
+  }
+  const parsed = parseMachineConfig(text, host)
+  if (parsed.ok) return { valid: true, config: parsed.config }
+  log(`the machine file ${file} is invalid; this machine offers nothing:\n  ${parsed.problems.join("\n  ")}`)
+  const fallback = parseMachineConfig(undefined, host)
+  if (!fallback.ok) throw new Error(fallback.problems.join("\n"))
+  return { valid: false, config: fallback.config }
 }
 
 /** Brings the database to this release's schema; a database of a newer release is left untouched. */

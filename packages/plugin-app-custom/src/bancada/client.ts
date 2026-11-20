@@ -64,6 +64,8 @@ export function makeBancadaClient(options: {
   readonly state: string
   readonly owner: () => Promise<BancadaDaemon.Owner>
   readonly command?: readonly string[]
+  /** The machine file the process reads (`OPENCODE_BANCADA_CONFIG`); by default the owner's `~/.config/opencode/bancada.toml`. */
+  readonly config?: string
 }) {
   const file = path.join(options.state, "bancada.json")
   const origin = (info: Info) => `http://127.0.0.1:${info.port}`
@@ -127,6 +129,7 @@ export function makeBancadaClient(options: {
         BUN_BE_BUN: "1",
         OPENCODE_BANCADA_STATE: options.state,
         OPENCODE_BANCADA_PARENT: String(process.pid),
+        ...(options.config ? { OPENCODE_BANCADA_CONFIG: options.config } : {}),
       },
       stdin: "ignore",
       stdout: log,

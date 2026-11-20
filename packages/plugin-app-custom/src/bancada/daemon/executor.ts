@@ -1,6 +1,12 @@
 import type { Database } from "bun:sqlite"
+import { buildCost, dockerExtraPerDevice } from "../catalog/costs.js"
+import type { BrakeConfig, Range } from "../machine-config.js"
 import { BancadaProtocol } from "../protocol.js"
 import { judge, type Ending } from "../results.js"
+import { open, step, type Brake, type Reading } from "./brake.js"
+import { add, free as budgetFree, largestFit, measured, room, samples, times, zero, type Cost } from "./budget.js"
+import { deviceFor } from "./devices/types.js"
+import { block } from "./devices/ports.js"
 
 /** The key of an attempt: a part of a job, and its number. */
 export type AttemptKey = { readonly job: string; readonly part: string; readonly attempt: number }
@@ -47,6 +53,20 @@ export interface Launcher {
   readonly cleanup: (key: AttemptKey) => Promise<void>
 }
 
+/** What this machine offers and how much of it (`docs/bancada.md`, "Budget"), from its machine file. */
+export type Limits = {
+  readonly capacity: BancadaProtocol.Vector
+  readonly capabilities: Readonly<Record<string, unknown>>
+  /** MyCredentials policies resolved here: a part with `segredos` is accepted only when its policy is listed. */
+  readonly secrets: ReadonlyArray<string>
+  readonly presence: { readonly idleMs: number; readonly factor: number }
+  readonly brake: BrakeConfig
+  /** The machine's `portas.projeto`: each granted device gets a block of it. */
+  readonly ports: Range
+  /** Executions in containers: an Android device is an emulator in a container. */
+  readonly docker: boolean
+}
+
 type AttemptRow = {
   readonly job_id: string
   readonly part: string
@@ -72,7 +92,7 @@ export function makeExecutor(input: {
   readonly now: () => number
   readonly random: () => string
   readonly machineID: string
-  readonly capacity: BancadaProtocol.Vector
+  readonly limits: Limits
   readonly launcher: Launcher
   readonly send: (body: BancadaProtocol.FromMachine) => void
   /** The session's repository of a request this machine's origin holds (the same machine: nothing travels). */
@@ -81,9 +101,18 @@ export function makeExecutor(input: {
   readonly wake: () => void
 }) {
   const db = input.db
-  const used = db.query<{ android: number; ios: number }, []>(
-    "SELECT COALESCE(SUM(android), 0) AS android, COALESCE(SUM(ios), 0) AS ios FROM lease WHERE state = 'active'",
+  const limits = input.limits
+  const used = db.query<BancadaProtocol.Vector, []>(
+    "SELECT COALESCE(SUM(mem_mb), 0) AS memMb, COALESCE(SUM(cpu_milli), 0) AS cpuMilli, COALESCE(SUM(builds), 0) AS builds, COALESCE(SUM(android), 0) AS android, COALESCE(SUM(ios), 0) AS ios FROM lease WHERE state = 'active'",
   )
+  const samplesOf = db.query<Cost, [string, number]>(
+    "SELECT mem_mb AS memMb, cpu_milli AS cpuMilli FROM cost_sample WHERE subject = ? ORDER BY at DESC LIMIT ?",
+  )
+  const portsTaken = db.query<Range, []>(
+    "SELECT d.port_start AS start, d.port_end AS end FROM lease_device d JOIN lease l ON l.id = d.lease_id WHERE l.state = 'active'",
+  )
+  /** The brake and the owner's presence, from the process's readings (`observe`); in memory, read again on restart. */
+  const watch: { brake: Brake; present: boolean } = { brake: open, present: false }
   const live = db.query<AttemptRow, []>(
     "SELECT * FROM attempt WHERE state IN ('aceito', 'compilando', 'rodando') ORDER BY accepted_at",
   )
@@ -137,49 +166,113 @@ export function makeExecutor(input: {
   }
   const keyOf = (row: AttemptRow): AttemptKey => ({ job: row.job_id, part: row.part, attempt: row.n })
 
-  const free = (): BancadaProtocol.Vector => {
-    const taken = used.get()!
-    return {
-      ...input.capacity,
-      android: Math.max(0, input.capacity.android - taken.android),
-      ios: Math.max(0, input.capacity.ios - taken.ios),
-    }
+  /** What this machine measured of a subject (the last samples), or its default cost before it has enough. */
+  const costOf = (subject: string, fallback: Cost) => measured(samplesOf.all(subject, samples.kept), fallback)
+  const simslim = () => {
+    const ios = limits.capabilities.ios
+    return typeof ios === "object" && ios !== null && "simslim" in ios && ios.simslim === true
+  }
+  const device = (platform: BancadaProtocol.Platform, spec: BancadaProtocol.DeviceSpec) => {
+    const found = deviceFor(platform, spec, { docker: limits.docker, simslim: simslim() })
+    return found ? costOf(found.subject, found.cost) : zero
+  }
+  /** What new admissions may use now: a share of memory and CPU while the owner uses the Mac. */
+  const current = () => room(limits.capacity, used.get()!, watch.present ? limits.presence.factor : 1)
+  /** The pulse's free vector: the hub never offers beyond it (a default build, default devices). */
+  const free = (): BancadaProtocol.Vector =>
+    budgetFree(current(), buildCost, {
+      android: device("android", { slim: "aceita" }),
+      ios: device("ios", { slim: "aceita" }),
+    })
+
+  /**
+   * An attempt's peak at admission (`docs/bancada.md`, "Budget"): its project's build, its devices and what the test
+   * takes beside them, with as many devices between the offer's minimum and proposal as fit now.
+   */
+  const admit = (message: typeof BancadaProtocol.Offer.Type) => {
+    const spec = message.spec
+    const build = costOf(`build:${message.code.project}`, buildCost)
+    const unit = device(spec.platform, spec.device)
+    const measuredExtra = samplesOf.all(`extra:${message.code.project}/${spec.part}`, samples.kept)
+    const extra = (n: number) =>
+      measuredExtra.length >= samples.trusted
+        ? measured(measuredExtra, zero)
+        : spec.needs.includes("docker")
+          ? times(dockerExtraPerDevice, n)
+          : zero
+    const devices = largestFit({
+      room: current(),
+      platform: spec.platform,
+      min: message.devices.min,
+      proposed: message.devices.proposed,
+      build,
+      device: unit,
+      extra,
+    })
+    return devices === undefined
+      ? undefined
+      : { devices, build, peak: add(build, times(unit, devices), extra(devices)) }
   }
 
-  /** Called inside the transaction that applies the hub's message. */
+  /** A block of the project's ports for each granted device, none shared with a live reservation. */
+  const portsFor = (devices: number) =>
+    Array.from({ length: devices }).reduce<Range[] | undefined>((blocks) => {
+      if (!blocks) return undefined
+      const next = block(limits.ports, [...portsTaken.all(), ...blocks])
+      return next ? [...blocks, next] : undefined
+    }, [])
+
+  /**
+   * Called inside the transaction that applies the hub's message (`docs/bancada.md`, "Accept or refuse"): this
+   * machine's answer is the truth, the hub only mirrors it. Refused while reconciling, with the brake closed, when a
+   * capability is gone or the part's policy is not resolved here, when not even its minimum fits.
+   */
   const offer = (message: typeof BancadaProtocol.Offer.Type) => {
     if (findAttempt.get(message.job, message.part, message.attempt)) return
-    if (reconciling.value)
-      return input.send({
+    const refuse = (reason: BancadaProtocol.Reason) =>
+      input.send({
         type: "offer.reply",
         job: message.job,
         part: message.part,
         attempt: message.attempt,
         accepted: false,
-        reason: { code: "reconciliando", text: "reconciliando" },
+        reason,
       })
+    if (reconciling.value) return refuse({ code: "reconciliando", text: "reconciliando" })
+    if (watch.brake.closed) return refuse({ code: "freio", text: `freio fechado: ${watch.brake.reasons.join("; ")}` })
+    const missing = message.spec.needs.filter((need) => !(need in limits.capabilities))
+    if (missing.length > 0)
+      return refuse({ code: "sem_maquina", text: `esta máquina não oferece mais ${missing.join(", ")}` })
+    const secrets = message.spec.secrets
+    if (secrets && !limits.secrets.includes(secrets))
+      return refuse({ code: "sem_maquina", text: `a policy ${secrets} não está na lista segredos desta máquina` })
+    const admission = admit(message)
+    if (!admission) return refuse({ code: "orcamento", text: "aguardando folga" })
+    const blocks = portsFor(admission.devices)
+    if (!blocks) return refuse({ code: "orcamento", text: "sem portas livres para os aparelhos" })
     const kind = message.spec.platform
-    const available = kind === "none" ? 0 : free()[kind]
-    if (kind !== "none" && available < message.devices.min)
-      return input.send({
-        type: "offer.reply",
-        job: message.job,
-        part: message.part,
-        attempt: message.attempt,
-        accepted: false,
-        reason: { code: "orcamento", text: "aguardando folga" },
-      })
-    const devices = kind === "none" ? 0 : Math.min(message.devices.proposed, available)
+    const devices = admission.devices
     const lease = input.random()
     db.run(
-      "INSERT INTO lease (id, kind, owner, android, ios, mem_mb, cpu_milli, builds, state, created_at) VALUES (?, 'job', ?, ?, ?, 0, 0, 0, 'active', ?)",
+      "INSERT INTO lease (id, kind, owner, android, ios, mem_mb, cpu_milli, builds, build_mem_mb, build_cpu_milli, state, created_at) VALUES (?, 'job', ?, ?, ?, ?, ?, 1, ?, ?, 'active', ?)",
       [
         lease,
         `${message.job}/${message.part}/${message.attempt}`,
         kind === "android" ? devices : 0,
         kind === "ios" ? devices : 0,
+        admission.peak.memMb,
+        admission.peak.cpuMilli,
+        admission.build.memMb,
+        admission.build.cpuMilli,
         input.now(),
       ],
+    )
+    blocks.forEach((ports) =>
+      db.run("INSERT INTO lease_device (lease_id, device_id, port_start, port_end) VALUES (?, NULL, ?, ?)", [
+        lease,
+        ports.start,
+        ports.end,
+      ]),
     )
     db.run(
       "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, only_scenarios, state, lease_id, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aceito', ?, ?)",
@@ -265,7 +358,14 @@ export function makeExecutor(input: {
           row.n,
           row.state,
         ]).changes
-        if (changed) input.send({ type: "attempt", ...key, state: next })
+        if (!changed) return
+        // The build ended: its share of the reservation goes back (`docs/bancada.md`, "Budget").
+        if (next === "rodando")
+          db.run(
+            "UPDATE lease SET mem_mb = mem_mb - build_mem_mb, cpu_milli = cpu_milli - build_cpu_milli, builds = 0, build_mem_mb = 0, build_cpu_milli = 0 WHERE id = ?",
+            [row.lease_id],
+          )
+        input.send({ type: "attempt", ...key, state: next })
       })()
     }
     if (unread.count === 0) reconciling.value = false
@@ -273,10 +373,13 @@ export function makeExecutor(input: {
     // Until then an orphan of a dead runner may still use the machine: the budget would take another part on top.
     for (const row of holding.all())
       if (!input.launcher.held(keyOf(row)))
-        db.run("UPDATE lease SET state = 'released', released_at = ? WHERE id = ? AND state = 'active'", [
-          input.now(),
-          row.lease_id,
-        ])
+        db.transaction(() => {
+          db.run("UPDATE lease SET state = 'released', released_at = ? WHERE id = ? AND state = 'active'", [
+            input.now(),
+            row.lease_id,
+          ])
+          db.run("DELETE FROM lease_device WHERE lease_id = ?", [row.lease_id])
+        })()
     for (const row of delivered.all()) {
       const id = `cleanup:${row.job_id}/${row.part}/${row.n}`
       const task = tasks.get(id)
@@ -326,6 +429,18 @@ export function makeExecutor(input: {
     running: (): BancadaProtocol.Pulse["running"] =>
       live.all().map((row) => ({ job: row.job_id, part: row.part, attempt: row.n })),
     reconciling: () => reconciling.value,
+    /**
+     * A reading of the machine (the process takes one every 5 s, off the round): the brake moves, and whether the
+     * owner is at the Mac. Says whether the brake changed, for the log.
+     */
+    observe: (reading: Reading) => {
+      const was = watch.brake.closed
+      watch.brake = step(watch.brake, reading, limits.brake)
+      watch.present = reading.idleMs !== undefined && reading.idleMs < limits.presence.idleMs
+      return { changed: was !== watch.brake.closed, closed: watch.brake.closed, reasons: watch.brake.reasons }
+    },
+    braked: () => watch.brake.closed,
+    present: () => watch.present,
   }
 }
 
