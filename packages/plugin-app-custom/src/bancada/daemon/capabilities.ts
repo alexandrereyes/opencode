@@ -273,32 +273,48 @@ async function phonesCapability(
 }
 
 /** `dotnet` with its SDKs, and `dotnet-android`, `dotnet-ios`, `dotnet-maui` by the installed workloads. */
+/**
+ * Every .NET installation found (`DOTNET_ROOT`, `~/.dotnet*` such as the `~/.dotnet11` a project pins in its
+ * `global.json`, the system's), with their SDKs and workloads together: a project picks its own.
+ */
 async function dotnetCapabilities(probe: Probe) {
-  const dotnet = await first(
-    [
-      ...(probe.env.DOTNET_ROOT ? [path.join(probe.env.DOTNET_ROOT, "dotnet")] : []),
-      path.join(probe.home, ".dotnet/dotnet"),
-      "/usr/local/share/dotnet/dotnet",
-      "/opt/homebrew/bin/dotnet",
-      "/usr/share/dotnet/dotnet",
-      "/usr/lib/dotnet/dotnet",
-    ],
-    probe.exists,
+  const own = (await probe.list(probe.home)).filter((name) => /^\.dotnet[\w.-]*$/.test(name)).toSorted()
+  const candidates = [
+    ...(probe.env.DOTNET_ROOT ? [path.join(probe.env.DOTNET_ROOT, "dotnet")] : []),
+    ...own.map((name) => path.join(probe.home, name, "dotnet")),
+    "/usr/local/share/dotnet/dotnet",
+    "/opt/dotnet/dotnet",
+    "/opt/homebrew/bin/dotnet",
+    "/usr/share/dotnet/dotnet",
+    "/usr/lib/dotnet/dotnet",
+  ]
+  const found = (
+    await Promise.all([...new Set(candidates)].map(async (dotnet) => ((await probe.exists(dotnet)) ? [dotnet] : [])))
+  ).flat()
+  const read = await Promise.all(
+    found.map(async (dotnet) => {
+      const sdks = await probe.run([dotnet, "--list-sdks"])
+      if (sdks?.code !== 0) return undefined
+      // `dotnet workload list`, in any language: one installed workload id per line (`maui`, `maui-android`, …).
+      const workloads = ((await probe.run([dotnet, "workload", "list"]))?.output ?? "")
+        .split("\n")
+        .flatMap((line) => /^([a-z][a-z0-9-]*)\s+\d/.exec(line.trim())?.slice(1, 2) ?? [])
+      return {
+        sdks: sdks.output.split("\n").flatMap((line) => /^(\d+\.\d+\.\d+\S*)/.exec(line.trim())?.slice(1, 2) ?? []),
+        workloads,
+      }
+    }),
   )
-  if (!dotnet) return {}
-  const sdks = await probe.run([dotnet, "--list-sdks"])
-  if (sdks?.code !== 0) return {}
-  const versions = sdks.output.split("\n").flatMap((line) => /^(\d+\.\d+\.\d+\S*)/.exec(line.trim())?.slice(1, 2) ?? [])
-  // `dotnet workload list`: one installed workload id per line (`android`, `ios`, `maui`, `maui-android`, …).
-  const installed = ((await probe.run([dotnet, "workload", "list"]))?.output ?? "")
-    .split("\n")
-    .flatMap((line) => /^([a-z][a-z0-9-]*)\s+\d/.exec(line.trim())?.slice(1, 2) ?? [])
-  const has = (...ids: string[]) => installed.some((id) => ids.includes(id))
+  const usable = read.filter((item) => item !== undefined)
+  if (usable.length === 0) return {}
+  const versions = [...new Set(usable.flatMap((item) => item.sdks))]
+  const installed = new Set(usable.flatMap((item) => item.workloads))
+  const has = (...ids: string[]) => ids.some((id) => installed.has(id))
   return {
     dotnet: { sdks: versions },
     ...(has("android", "maui", "maui-android", "maui-mobile") ? { "dotnet-android": {} } : {}),
     ...(has("ios", "maui", "maui-ios", "maui-mobile") ? { "dotnet-ios": {} } : {}),
-    ...(installed.some((id) => id === "maui" || id.startsWith("maui-")) ? { "dotnet-maui": {} } : {}),
+    ...([...installed].some((id) => id === "maui" || id.startsWith("maui-")) ? { "dotnet-maui": {} } : {}),
   }
 }
 

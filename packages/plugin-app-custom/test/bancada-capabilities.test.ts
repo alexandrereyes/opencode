@@ -145,6 +145,36 @@ describe("discovery", () => {
     })
   })
 
+  test(".NET in every installation: the one a project pins (~/.dotnet11) has the workloads, the system's has others", async () => {
+    const found = await discover(
+      mac({
+        files: [`${home}/.dotnet11/dotnet`, `${home}/.dotnet/dotnet`],
+        outputs: {
+          [`${home}/.dotnet11/dotnet --list-sdks`]: { output: `11.0.100 [${home}/.dotnet11/sdk]\n` },
+          [`${home}/.dotnet11/dotnet workload list`]: {
+            output: workloads.replace(
+              /maui-android .*\n/,
+              "maui                                   11.0.0/11.0.100          SDK 11.0.100\n",
+            ),
+          },
+          // The user's other SDKs, without workloads.
+          [`${home}/.dotnet/dotnet --list-sdks`]: { output: `10.0.302 [${home}/.dotnet/sdk]\n` },
+          [`${home}/.dotnet/dotnet workload list`]: {
+            output: workloads.replace(/^maui-android .*$/m, "").replace(/^wasm-tools .*$/m, ""),
+          },
+          "/usr/local/share/dotnet/dotnet workload list": { output: workloads.replace(/^maui-android .*$/m, "") },
+        },
+      }),
+      config(),
+    )
+    expect(found.found).toMatchObject({
+      dotnet: { sdks: ["10.0.302", "11.0.100", "9.0.200"] },
+      "dotnet-android": {},
+      "dotnet-ios": {},
+      "dotnet-maui": {},
+    })
+  })
+
   test("Homebrew's avdmanager is never used; without the SDK's, or without Java, no AVD is created, and why", async () => {
     const withoutTools = await discover(mac({ files: [`${studio}/bin/java`] }), config())
     expect(withoutTools.found.android).toMatchObject({
