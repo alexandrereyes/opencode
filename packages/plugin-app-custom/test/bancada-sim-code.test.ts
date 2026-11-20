@@ -174,6 +174,28 @@ describe("simulation: code through the hub (S13)", () => {
     expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([{ state: "concluido", outcome: { approved: true } }])
   })
 
+  test("the origin gives up sending a transfer the hub no longer has; the code comes under a new one, once", async () => {
+    // The Mac is cut off past the transfer's 2 minutes: when it comes back, the hub has dropped it.
+    const sim = world(48, {
+      timings: { transferMs: 2 * 60_000 },
+      partitions: [{ machine: "Mac", from: 1_003_000, to: 1_300_000 }],
+    })
+    await sim.advance(1_000)
+    ask(sim)
+    await sim.advance(10 * 60_000)
+    sim.settle()
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([{ state: "concluido", outcome: { approved: true } }])
+    const byTransfer = Map.groupBy(sim.facts.puts, (put) => put.transfer)
+    // Each dropped transfer (the executor asked again every 2 minutes) got one chunk, answered "unknown" or
+    // "expired", and nothing after; the last one carried the whole bundle.
+    const counts = [...byTransfer.values()].map((puts) => puts.length)
+    expect(counts.at(-1)).toBe(4)
+    expect(counts.slice(0, -1).length).toBeGreaterThan(0)
+    expect(counts.slice(0, -1).every((count) => count === 1)).toBe(true)
+    expect(sim.logs).toContainEqual(expect.stringContaining("gave up sending the code of j-aaaaaaaa"))
+    expect(sim.machines.get("Mac")!.db.query("SELECT COUNT(*) AS n FROM code_out").get()).toEqual({ n: 0 })
+  })
+
   test("a bundle that arrives with another SHA-256 is never fetched from: asked again, and the good one runs", async () => {
     const sim = world(44)
     sim.spoil(1)

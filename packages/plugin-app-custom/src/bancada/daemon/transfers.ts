@@ -97,6 +97,9 @@ export function makeTransfers(input: {
 }) {
   const db = input.db
   const outgoing = db.query<CodeOut, []>("SELECT * FROM code_out WHERE state = 'enviar'")
+  const pending = db.query<{ transfer: string }, [string]>(
+    "SELECT transfer FROM code_out WHERE transfer = ? AND state = 'enviar'",
+  )
   const incoming = db.query<CodeIn, []>("SELECT * FROM code_in WHERE state IN ('pedir', 'pedido', 'baixar')")
   const codeIn = db.query<CodeIn, [string]>("SELECT * FROM code_in WHERE job_id = ?")
   const blob = db.query<BlobRow, [string]>("SELECT * FROM hub_blob WHERE transfer = ?")
@@ -154,7 +157,10 @@ export function makeTransfers(input: {
     if (!made) return close(row, "o git não conseguiu fazer o pacote do commit")
     if (made.size > limits.codeBytes) return close(row, "o pacote do commit passa de 1 GB")
     const declared: BancadaProtocol.File = { index: 0, path: "codigo.bundle", ...made }
-    const send = async (offset: number, restarted: boolean): Promise<void> => {
+    /** Sends from `offset`; says whether the hub has it all (false: it no longer knows this transfer). */
+    const send = async (offset: number, restarted: boolean): Promise<boolean> => {
+      // The request was delivered meanwhile: its send is over.
+      if (!pending.get(row.transfer)) return false
       const length = Math.min(blobLimits.chunkBytes, made.size - offset)
       const data = await files.read(made.file, offset, length)
       const answer = await link.put({
@@ -165,17 +171,22 @@ export function makeTransfers(input: {
         data: Buffer.from(data).toString("base64"),
         end: offset + length >= made.size,
       })
-      if (answer.ok) return answer.done ? undefined : send(answer.received, restarted)
+      if (answer.ok) return answer.done ? true : send(answer.received, restarted)
       if (answer.reason === "offset" && answer.received !== undefined) return send(answer.received, restarted)
       // The hub found another SHA-256 at the end: what it had was spoiled; once more from the start.
       if (answer.reason === "sha256" && !restarted) return send(0, true)
+      // The hub no longer has this transfer: if the executor still needs the code, it asks again, under another one.
+      if (answer.reason === "unknown" || answer.reason === "expired") return false
       throw new Error(`o hub recusou o pacote (${answer.reason})`)
     }
-    await send(0, false)
+    const whole = await send(0, false)
     db.transaction(() => {
+      if (!pending.get(row.transfer)) return
+      if (!whole) return void db.run("UPDATE code_out SET state = 'desistiu' WHERE transfer = ?", [row.transfer])
       db.run("UPDATE code_out SET state = 'enviado' WHERE transfer = ?", [row.transfer])
       input.send({ type: "blob.ready", transfer: { id: row.transfer, files: [declared] } })
     })()
+    if (!whole) input.log(`gave up sending the code of ${row.job_id}: the hub no longer has transfer ${row.transfer}`)
     await files.remove(made.file)
   }
   const bundle = async (row: CodeOut, repository: string) => {
@@ -312,7 +323,15 @@ export function makeTransfers(input: {
       if (row.file && input.files) void input.files.remove(row.file).catch(() => undefined)
     },
     /** The origin: the request was delivered; what it sent for it is history no more. */
-    sent: (job: string) => void db.run("DELETE FROM code_out WHERE job_id = ? AND state <> 'enviar'", [job]),
+    sent: (job: string) => {
+      const files = db
+        .query<{ file: string | null }, [string]>("SELECT file FROM code_out WHERE job_id = ?")
+        .all(job)
+        .flatMap((row) => (row.file ? [row.file] : []))
+      // Also a send still running: it stops at its next chunk, and its bundle goes here.
+      db.run("DELETE FROM code_out WHERE job_id = ?", [job])
+      files.forEach((file) => void input.files?.remove(file).catch(() => undefined))
+    },
     /** Starts what each side has to do; never waits for it. */
     tick: () => {
       if (input.files && input.link) {
