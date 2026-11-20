@@ -175,6 +175,19 @@ describe("false green", () => {
     expect(join(withFailure, retry)).toMatchObject({ verdict: "falhou", lost: [], approved: false })
   })
 
+  test("a new attempt that was not approved by itself never approves the join, even with every scenario answered", () => {
+    const first = judge(run(75, { planned: planned("c1", "c2"), summary: summary(passed("c1")) }))
+    // Exit 1 and the deadline: c2 says "passou", but the attempt did not end well.
+    const exit1 = judge(run(1, { only: ["c2"], summary: summary(passed("c2")) }))
+    expect(join(first, exit1)).toMatchObject({ verdict: "sem_relatorio", lost: [], approved: false })
+    const deadline = judge(run(undefined, { cause: "prazo", only: ["c2"], summary: summary(passed("c2")) }))
+    expect(join(first, deadline)).toMatchObject({
+      verdict: "infraestrutura",
+      reason: "prazo estourado",
+      approved: false,
+    })
+  })
+
   test("a join approves only with every planned scenario answered and one passed", () => {
     const first = judge(run(75, { planned: planned("c1", "c2", "c3"), summary: summary(passed("c1")) }))
     // The new attempt alone was approved, but c3 still has no result.

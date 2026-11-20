@@ -271,6 +271,8 @@ export function createCore(ports: Ports) {
 
   return {
     submit: (request: NewJob) => origin.submit(request),
+    /** The session cancels a request of this origin. */
+    cancel: (job: string) => origin.cancel(job),
     /** Whether this machine is still reading again what it started before a restart. */
     reconciling: executor.reconciling,
     /** A reading of the machine for the brake and the owner's presence; the brake's changes go to the log. */

@@ -204,4 +204,40 @@ describe("simulation: the queue", () => {
     ])
     expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBe(1)
   })
+
+  test("S18: a request cancelled with its machine silent closes cancelled at once, never runs again, and stops there on its return", async () => {
+    const sim = createWorld({
+      seed: 18,
+      timings: { silentMs: 10_000, uncertainMs: 20_000, lostMs: 60_000 },
+      partitions: [{ machine: "Mac", from: 1_015_000, to: 1_200_000 }],
+    })
+    // The host-6 is slow without history: the part goes to the Mac.
+    sim.addMachine({
+      name: "Linux",
+      hub: true,
+      platform: "linux",
+      speed: "lento",
+      capabilities: { android: {} },
+      capacity: room,
+    })
+    sim.addMachine({ name: "Mac", capabilities: { android: {} }, capacity: room })
+    sim.script("j-aaaaaaaa", "android", ok(10 * 60_000))
+    await sim.advance(1_000)
+    ask(sim, "Linux", "j-aaaaaaaa", [spec("android")])
+    await sim.advance(10_000)
+    const on = sim.machines.get("Linux")!.db.query("SELECT machine_id FROM hub_part").get()
+    expect(on).toEqual({ machine_id: "m-Mac" })
+    await sim.advance(20_000)
+    expect(sim.seen("j-aaaaaaaa", "android").at(-1)).toBe("incerto")
+    sim.machines.get("Linux")!.core.cancel("j-aaaaaaaa")
+    await sim.advance(2_000)
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([{ part: "android", state: "cancelado" }])
+    // Past the 15 min of uncertainty (1 min here), nothing is offered again anywhere.
+    await sim.advance(2 * 60_000)
+    expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBe(1)
+    // Back, the Mac hears the cancel and stops its execution.
+    await sim.advance(2 * 60_000)
+    sim.settle()
+    expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBe(1)
+  })
 })

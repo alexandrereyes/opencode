@@ -227,9 +227,19 @@ export function makeOrigin(input: {
   const forget = (tombstoneMs: number) =>
     db.run("DELETE FROM job WHERE state = 'entregue' AND delivered_at < ?", [input.now() - tombstoneMs])
 
+  /** The session cancels its request: the hub stops what runs and closes the parts `cancelado` (its result says so). */
+  const cancel = (jobID: string) =>
+    db.transaction(() => {
+      const row = find.get(jobID)
+      if (!row || row.state === "concluido" || row.state === "entregue") return false
+      input.send({ type: "cancel", job: jobID })
+      return true
+    })()
+
   return {
     submit,
     apply,
+    cancel,
     unregistered,
     resubmit,
     forget,

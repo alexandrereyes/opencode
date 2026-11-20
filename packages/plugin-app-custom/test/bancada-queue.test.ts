@@ -212,6 +212,10 @@ describe("queue on the hub", () => {
     it.call([], running, { state: "reconciling" })
     await it.later(30_000)
     expect(it.part("j-aaaaaaaa", "android")).toMatchObject({ state: "incerto", held_state: "aceito" })
+    // Still reconciling, its list does not bring the part back (it would come and go every round).
+    it.call([], running, { state: "reconciling" })
+    await it.later(1_000)
+    expect(it.part("j-aaaaaaaa", "android")).toMatchObject({ state: "incerto" })
     // Done reconciling, it lists the attempt: back to where it was.
     it.call([], running)
     expect(it.part("j-aaaaaaaa", "android")).toMatchObject({ state: "aceito", held_state: null })
@@ -266,6 +270,48 @@ describe("queue on the hub", () => {
     expect(it.inbox.find((body) => body.type === "result")).toMatchObject({
       parts: [{ part: "android", state: "concluido", attempts: 2, outcome: { verdict: "aprovado", lost: [] } }],
     })
+  })
+
+  test("an infrastructure failure with every scenario answered does not run again: it closes with what it gave", () => {
+    const it = harness()
+    it.call([it.hello, it.submit("j-aaaaaaaa", [spec("android")])])
+    it.call([accept("j-aaaaaaaa", "android")], [{ job: "j-aaaaaaaa", part: "android", attempt: 1 }])
+    const replies = it.call([
+      report("j-aaaaaaaa", "android", 1, "perdido", {
+        ...outcome("infraestrutura", ["c1"], ["c1"]),
+        reason: "infraestrutura (saída 75)",
+      }),
+    ])
+    expect(replies.filter((body) => body.type === "offer")).toEqual([])
+    expect(it.part("j-aaaaaaaa", "android")).toMatchObject({ state: "perdido", attempt_n: 1 })
+    expect(JSON.parse(it.part("j-aaaaaaaa", "android")!.outcome!)).toMatchObject({
+      reason: "infraestrutura (saída 75)",
+      scenarios: [{ id: "c1", result: "passou" }],
+    })
+  })
+
+  test("a cancelled request never comes back: its uncertain part closes at once and nothing runs again", async () => {
+    const it = harness()
+    it.call([it.hello])
+    // A session of the hub's own asks; the Mac runs it.
+    it.hub.submit({ id: "j-aaaaaaaa", sessionID: "ses_hub", rootSessionID: "ses_hub", code, parts: [spec("android")] })
+    await it.later(1_000)
+    it.call()
+    const running = [{ job: "j-aaaaaaaa", part: "android", attempt: 1 }]
+    it.call([accept("j-aaaaaaaa", "android")], running)
+    await it.later(46_000)
+    expect(it.part("j-aaaaaaaa", "android")?.state).toBe("incerto")
+    // Cancelled while the Mac is silent: closed now, the cancel waits for the Mac.
+    it.hub.cancel("j-aaaaaaaa")
+    await it.later(1_000)
+    expect(it.part("j-aaaaaaaa", "android")).toMatchObject({ state: "cancelado" })
+    expect(it.hub.notices()).toMatchObject([{ job: "j-aaaaaaaa", parts: [{ part: "android", state: "cancelado" }] }])
+    // Past the 15 min, nothing is offered again; back, the Mac hears the cancel.
+    await it.later(16 * 60_000)
+    expect(it.call([], running)).toContainEqual(
+      expect.objectContaining({ type: "attempt.cancel", job: "j-aaaaaaaa", attempt: 1 }),
+    )
+    expect(it.offers().map((offer) => offer.attempt)).toEqual([1])
   })
 
   test("a late report of an older attempt stays in its history and stops it; the part goes on", async () => {

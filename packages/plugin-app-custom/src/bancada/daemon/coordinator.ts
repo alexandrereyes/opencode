@@ -52,6 +52,7 @@ type JobRow = {
   readonly code: string
   readonly state: string
   readonly created_at: number
+  readonly cancelled_at: number | null
   readonly closed_at: number | null
 }
 
@@ -179,6 +180,21 @@ export function makeCoordinator(input: {
     approved: false,
   })
 
+  /** A part of a cancelled request closes `cancelado` now; what it runs hears `attempt.cancel` when its machine calls. */
+  const cancelNow = (row: PartRow) => {
+    if (row.machine_id && row.state !== "na_fila")
+      cancelAttempt(row.machine_id, { job: row.job_id, part: row.part, attempt: row.attempt_n }, "cancelado")
+    releaseLocks(row)
+    update(row, {
+      state: "cancelado",
+      held_state: null,
+      outcome: JSON.stringify({ ...lostOutcome("cancelado"), verdict: "cancelado" }),
+      since: input.now(),
+    })
+    tell(row)
+  }
+  const cancelled = (jobID: string) => job.get(jobID)?.cancelled_at != null
+
   /** When every part is final the job closes, once, and its result goes to the origin. */
   const close = (jobID: string) => {
     const owner = job.get(jobID)
@@ -210,12 +226,20 @@ export function makeCoordinator(input: {
    */
   const ended = (row: PartRow, outcome: BancadaProtocol.Outcome, confirmed: boolean) => {
     const previous: BancadaProtocol.Outcome | undefined = row.previous ? JSON.parse(row.previous) : undefined
-    const joined = previous ? join(previous, outcome) : outcome
+    const result = previous ? join(previous, outcome) : outcome
+    // A cancelled request never runs again: whatever the attempt said, the part closes cancelled.
+    const joined: BancadaProtocol.Outcome = cancelled(row.job_id)
+      ? { ...result, verdict: "cancelado", reason: "cancelado", approved: false }
+      : result
     const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+    // Only when something is left to run: scenarios without result, or no plan at all (it never wrote planned.json),
+    // when it runs whole. An infrastructure failure with every scenario answered closes with what it gave.
+    const leftover = joined.lost.length > 0 || (joined.verdict === "infraestrutura" && joined.planned.length === 0)
     const retry =
       row.retry_used === 0 &&
+      leftover &&
       (confirmed || !spec.unsafe) &&
-      (joined.verdict === "infraestrutura" || (joined.verdict === "incompleto" && joined.lost.length > 0))
+      (joined.verdict === "infraestrutura" || joined.verdict === "incompleto")
     releaseLocks(row)
     if (retry) {
       update(row, {
@@ -226,7 +250,7 @@ export function makeCoordinator(input: {
         missing: 0,
         retry_used: 1,
         previous: JSON.stringify(joined),
-        only_scenarios: joined.planned.length > 0 ? JSON.stringify(joined.lost) : null,
+        only_scenarios: joined.lost.length > 0 ? JSON.stringify(joined.lost) : null,
         refused_by: null,
         refused_pulse: null,
         told: null,
@@ -243,6 +267,7 @@ export function makeCoordinator(input: {
 
   /** A part goes back to the queue: its offer was refused or withdrawn. The next offer has the next attempt number. */
   const requeue = (row: PartRow, extra: Partial<Record<keyof PartRow, unknown>> = {}) => {
+    if (cancelled(row.job_id)) return cancelNow(row)
     releaseLocks(row)
     update(row, {
       state: "na_fila",
@@ -301,25 +326,22 @@ export function makeCoordinator(input: {
         superseded,
       })
     },
+    /**
+     * A cancelled request never comes back (`docs/bancada.md`, "State machine"): it is marked, nothing of it is offered
+     * or tried again; what waits, what was offered and what is uncertain closes `cancelado` now, what runs on a machine
+     * that answers closes when its final report comes.
+     */
     cancel: (from: string, message: typeof BancadaProtocol.Cancel.Type) => {
       const owner = job.get(message.job)
-      if (!owner || owner.origin_machine !== from || owner.state !== "aberto") return
+      if (!owner || owner.origin_machine !== from || owner.state !== "aberto" || owner.cancelled_at !== null) return
+      db.run("UPDATE hub_job SET cancelled_at = ? WHERE id = ?", [input.now(), message.job])
       for (const row of parts.all(message.job)) {
         if (BancadaProtocol.finalStates.has(row.state)) continue
-        // What runs stops where it runs; its final report closes the part.
-        if (row.machine_id && row.state !== "oferecido" && row.state !== "na_fila") {
+        if (row.machine_id && (live as ReadonlyArray<string>).includes(row.state)) {
           cancelAttempt(row.machine_id, { job: row.job_id, part: row.part, attempt: row.attempt_n }, "cancelado")
           continue
         }
-        if (row.machine_id)
-          cancelAttempt(row.machine_id, { job: row.job_id, part: row.part, attempt: row.attempt_n }, "cancelado")
-        releaseLocks(row)
-        update(row, {
-          state: "cancelado",
-          outcome: JSON.stringify({ ...lostOutcome("cancelado"), verdict: "cancelado" }),
-          since: input.now(),
-        })
-        tell(row)
+        cancelNow(row)
       }
       close(message.job)
     },
@@ -512,7 +534,9 @@ export function makeCoordinator(input: {
     const acknowledged = input.acknowledged(sync.machineID)
     for (const row of onMachine.all(sync.machineID)) {
       const listed = running.has(`${row.job_id}/${row.part}/${row.attempt_n}`)
-      if (row.state === "incerto" && listed && row.held_state && row.held_state !== "oferecido") {
+      // Only a machine that is `ok` vouches for what it lists: a reconciling one lists its database, not what it saw run.
+      const vouched = listed && sync.pulse.state === "ok"
+      if (row.state === "incerto" && vouched && row.held_state && row.held_state !== "oferecido") {
         update(row, { state: row.held_state, held_state: null, missing: 0 })
         tell(row)
         continue
@@ -580,6 +604,11 @@ export function makeCoordinator(input: {
   /** A silent machine: its offers go back to the queue (an unsafe one waits as `incerto`), what it runs turns `incerto`. */
   const uncertain = (silent: MachineRow) => {
     for (const row of onMachine.all(silent.machine_id)) {
+      if (cancelled(row.job_id) && !BancadaProtocol.finalStates.has(row.state)) {
+        cancelNow(row)
+        close(row.job_id)
+        continue
+      }
       const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
       if (row.state === "oferecido" && !spec.unsafe) {
         withdraw(row)

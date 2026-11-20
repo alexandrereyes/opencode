@@ -116,7 +116,10 @@ export function judge(ending: Ending): BancadaProtocol.Outcome {
 
 /**
  * The result of a part after a new attempt (`docs/bancada.md`, "State machine"): the new attempt's results count for
- * the scenarios it was asked again (`retry.planned`), the earlier one's for the rest.
+ * the scenarios it was asked again (`retry.planned`), the earlier one's for the rest. Its verdict, in this order: a
+ * scenario failed → `falhou`; the new attempt alone was not approved → its verdict and reason (one that exited 1,
+ * missed its deadline or died approves nothing, even with every scenario answered); a scenario still without result →
+ * `incompleto`; otherwise `aprovado`.
  */
 export function join(previous: BancadaProtocol.Outcome, retry: BancadaProtocol.Outcome): BancadaProtocol.Outcome {
   const again = new Set(retry.planned)
@@ -124,17 +127,13 @@ export function join(previous: BancadaProtocol.Outcome, retry: BancadaProtocol.O
   const answered = new Set(scenarios.map((item) => item.id))
   const lost = previous.planned.filter((id) => !answered.has(id))
   const failed = scenarios.some((item) => item.result === "falhou")
-  const passed = scenarios.some((item) => item.result === "passou")
-  // Approved only with every planned scenario answered and one passed, whatever the new attempt alone said.
   const [verdict, reason]: [Verdict, string | undefined] = failed
     ? ["falhou", undefined]
-    : lost.length > 0 && retry.verdict === "aprovado"
-      ? ["incompleto", `${lost.length} cenário(s) sem resultado`]
+    : retry.verdict !== "aprovado"
+      ? [retry.verdict, retry.reason]
       : lost.length > 0
-        ? [retry.verdict, retry.reason]
-        : passed
-          ? ["aprovado", undefined]
-          : ["incompleto", "nenhum cenário rodou"]
+        ? ["incompleto", `${lost.length} cenário(s) sem resultado`]
+        : ["aprovado", undefined]
   return {
     ...(retry.exit === undefined ? {} : { exit: retry.exit }),
     planned: previous.planned,

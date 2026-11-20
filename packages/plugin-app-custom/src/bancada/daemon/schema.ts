@@ -135,6 +135,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       code TEXT NOT NULL,
       state TEXT NOT NULL,
       created_at INTEGER NOT NULL,
+      cancelled_at INTEGER,
       closed_at INTEGER
     )`,
     `CREATE TABLE hub_part (

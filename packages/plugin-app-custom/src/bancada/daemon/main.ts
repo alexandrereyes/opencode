@@ -166,7 +166,7 @@ export async function main() {
         ports: config.ports.project,
         docker: config.execution.mode === "docker",
       },
-      timings: { silentMs: config.times.silentMs },
+      timings: { silentMs: config.times.silentMs, uncertainMs: config.times.uncertainMs, lostMs: config.times.lostMs },
       launcher: makeProcessLauncher({
         state,
         workdirs,
