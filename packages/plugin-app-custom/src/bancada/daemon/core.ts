@@ -11,6 +11,7 @@ import { makeExecutor, type Launcher } from "./executor.js"
 import { makeMessages } from "./messages.js"
 import { makeOrigin, type NewJob } from "./origin.js"
 import { needs } from "./scheduler.js"
+import { BancadaNotice } from "../notice.js"
 import type { Blobs } from "./blobs.js"
 import { makeTransfers, type BlobLink, type Files } from "./transfers.js"
 import { migrate } from "./schema.js"
@@ -256,6 +257,7 @@ export function createCore(ports: Ports) {
     if (message.type === "cleanup") return executor.cleanup(message)
     if (message.type === "code.request") return transfers.request(message)
     if (message.type === "code.source") return transfers.source(message)
+    if (message.type === "evidence.request") return transfers.evidence(message)
     if (message.type === "submit.ack" || message.type === "job.update" || message.type === "result")
       return origin.apply(message)
   }
@@ -393,6 +395,40 @@ export function createCore(ports: Ports) {
       .forEach((alert) => alerts.clear(alert.id))
   }
 
+  /**
+   * Requests whose result arrived get their notice (`docs/bancada.md`, "Notice"): at once when there is no evidence to
+   * bring; otherwise once the evidence is where the session can read it (a task off the round, tried again in 5 s while
+   * some is on its way). More than 20 failures: the whole list goes to `falhas.json` beside the evidence.
+   */
+  const noticing = new Map<string, number>()
+  const notify = () =>
+    origin.received().forEach((item) => {
+      const failures = item.parts.flatMap((part) =>
+        (part.outcome?.scenarios ?? [])
+          .filter((scenario) => scenario.result === "falhou")
+          .map((scenario) => ({ part: part.part, ...scenario })),
+      )
+      const long = failures.length > BancadaNotice.limits.failures && ports.files !== undefined
+      if (!long && !item.parts.some((part) => part.evidence?.length)) return origin.notify(item.job, {})
+      if ((noticing.get(item.job) ?? 0) > ports.now()) return
+      noticing.set(item.job, Number.POSITIVE_INFINITY)
+      void (async () => {
+        const delivered = await transfers.collect(item.job, item.parts, item.receivedAt)
+        const list = long ? ports.files!.deliver(item.job, ".", "falhas.json") : undefined
+        if (list) {
+          await ports.files!.remove(list)
+          await ports.files!.append(list, new TextEncoder().encode(JSON.stringify(failures, null, 2)))
+        }
+        origin.notify(item.job, delivered, list)
+      })().then(
+        () => {
+          noticing.delete(item.job)
+          void tick()
+        },
+        () => noticing.set(item.job, ports.now() + 5_000),
+      )
+    })
+
   /** One round: executions starting and ending, then the queue (and, on the hub, this machine's loop to it). */
   const round = async () => {
     await executor.tick()
@@ -407,6 +443,8 @@ export function createCore(ports: Ports) {
       queue.schedule()
     })()
     loop()
+    // After the loop: a result this machine's own queue just gave gets its notice in the same round.
+    notify()
   }
   /**
    * One `tick` at a time: a call while one runs joins it and asks for one more round at its end. Two rounds waiting on
@@ -445,8 +483,14 @@ export function createCore(ports: Ports) {
     notices: origin.notices,
     /** The session received the notice of a request: once; the hub may clean up, and nothing of its code stays. */
     delivered: (job: string) => {
+      const repository = origin.repository(job)
       origin.delivered(job)
       transfers.sent(job)
+      // The ref that held the frozen commit in the session's repository goes (`docs/bancada.md`, "Frozen code").
+      if (repository && ports.files)
+        void ports.files
+          .release(repository, job)
+          .catch((error: unknown) => ports.log(`could not remove refs/bancada/${job}: ${String(error)}`))
     },
     /** The alerts up now. */
     alerts: alerts.active,

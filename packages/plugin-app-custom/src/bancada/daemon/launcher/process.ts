@@ -7,6 +7,7 @@ import type { Ending } from "../../results.js"
 import { CodeMissing, type Launch, type Launcher, type Placed, type Status } from "../executor.js"
 import type { Git } from "../git.js"
 import { createOnce, runFlag, type Attempt, type Claim, type Event, type PartStatus } from "../runner.js"
+import { sha256 } from "../blobs.js"
 import { contractAt } from "../snapshot.js"
 import { prepareCommands, scrubCommands, type Workdirs } from "../workdir.js"
 
@@ -251,6 +252,8 @@ export function makeProcessLauncher(input: {
     const log =
       stage === "build" ? path.join(dir, "build.log") : path.join(out, stage === "plan" ? "plan.log" : "run.log")
     const only = attempt.parts.find((item) => item.part === part)?.only
+    const summary = await json(path.join(out, "summary.json"))
+    const failedRun = status?.cause !== undefined || status?.exit !== 0 || status === undefined
     return {
       stage,
       ...(status?.exit === undefined ? {} : { exit: status.exit }),
@@ -259,10 +262,40 @@ export function makeProcessLauncher(input: {
       ...(status?.reason ? { reason: status.reason } : {}),
       ...(status?.sleptMs ? { sleptMs: status.sleptMs } : {}),
       planned: await json(path.join(out, "planned.json")),
-      summary: await json(path.join(out, "summary.json")),
+      summary,
       ...(only ? { only } : {}),
       logTail: await tail(log),
+      files: {
+        evidence: await kept(out, summary),
+        ...(failedRun ? await keptLog(log) : {}),
+      },
     } satisfies Ending
+  }
+
+  /** The evidence files the summary names for failed scenarios: regular files inside the output folder, read. */
+  const kept = async (out: string, summary: unknown) => {
+    const scenarios =
+      typeof summary === "object" && summary !== null && "cenarios" in summary && Array.isArray(summary.cenarios)
+        ? (summary.cenarios as { resultado?: unknown; evidencias?: unknown }[])
+        : []
+    const named = scenarios
+      .filter((item) => item.resultado === "falhou" && Array.isArray(item.evidencias))
+      .flatMap((item) => (item.evidencias as unknown[]).filter((file): file is string => typeof file === "string"))
+      .filter((file) => !path.isAbsolute(file) && !file.split(/[\\/]/).includes(".."))
+    const found = await Promise.all(
+      [...new Set(named)].map(async (relative) => {
+        const file = path.join(out, relative)
+        const stat = await fs.lstat(file).catch(() => undefined)
+        if (!stat?.isFile()) return []
+        return [[relative, { file, size: stat.size, sha256: await sha256(file) }] as const]
+      }),
+    )
+    return Object.fromEntries(found.flat())
+  }
+  const keptLog = async (log: string) => {
+    const stat = await fs.lstat(log).catch(() => undefined)
+    if (!stat?.isFile()) return {}
+    return { log: { name: path.basename(log), file: log, size: stat.size, sha256: await sha256(log) } }
   }
 
   const status = async (key: Placed): Promise<Status> => {

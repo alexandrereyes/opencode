@@ -44,6 +44,61 @@ const ask = (sim: ReturnType<typeof createWorld>) =>
     repository: "/Users/alexandre/exemplo",
   })
 
+describe("simulation: evidence of failures", () => {
+  const failing = {
+    buildMs: 2_000,
+    runMs: 20_000,
+    exit: 1,
+    planned: ["c1", "c2"],
+    scenarios: [
+      { id: "c1", result: "passou" as const },
+      {
+        id: "c2",
+        name: "Leitura › Ouvir a mensagem",
+        result: "falhou" as const,
+        message: 'Esperava "Transcrevendo…"; achou "0:07"',
+        evidence: ["telas/c2.png"],
+      },
+    ],
+  }
+
+  test("a failure's evidence reaches the origin's folder through the hub, and the notice names it", async () => {
+    const sim = world(51)
+    sim.script("j-aaaaaaaa", "android", failing)
+    await sim.advance(1_000)
+    ask(sim)
+    await sim.advance(3 * 60_000)
+    sim.settle()
+    const delivered = "Mac/entrega/j-aaaaaaaa/android/telas-c2.png"
+    expect(new TextDecoder().decode(sim.disk.get(delivered))).toBe("evidência telas/c2.png de j-aaaaaaaa/android/1")
+    expect(sim.facts.texts.get("j-aaaaaaaa")).toBe(
+      [
+        "[Bancada] j-aaaaaaaa terminou (commit 3417b7e3)",
+        "Android: 1 aprovado, 1 falhou. Linux, 1 min.",
+        "✗ Leitura › Ouvir a mensagem",
+        '  Esperava "Transcrevendo…"; achou "0:07"',
+        `  Evidências: ${delivered}`,
+      ].join("\n"),
+    )
+    // Nothing of it stays on the executor nor on the hub; the session's folder is the session's.
+    expect([...sim.disk.keys()]).toEqual([delivered])
+    expect(sim.machines.get("Linux")!.db.query("SELECT COUNT(*) AS n FROM hub_blob").get()).toEqual({ n: 0 })
+  })
+
+  test("run on the origin's own machine, the evidence is copied from the attempt's folder", async () => {
+    const sim = createWorld({ seed: 52 })
+    sim.addMachine({ name: "Linux", hub: true, platform: "linux", capabilities: {}, capacity: room })
+    sim.addMachine({ name: "Mac", capabilities: { android: {} }, capacity: room })
+    sim.script("j-aaaaaaaa", "android", failing)
+    await sim.advance(1_000)
+    ask(sim)
+    await sim.advance(3 * 60_000)
+    sim.settle()
+    expect(sim.facts.texts.get("j-aaaaaaaa")).toContain("  Evidências: Mac/entrega/j-aaaaaaaa/android/telas-c2.png")
+    expect(sim.facts.puts).toEqual([])
+  })
+})
+
 describe("simulation: code through the hub (S13)", () => {
   test("the Mac's request runs on the host-6 with the Mac's bundle, in chunks, checked; nothing of it stays", async () => {
     const sim = world(41)

@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { BancadaNotice } from "../notice.js"
 import type { BancadaProtocol } from "../protocol.js"
 import type { Alerts } from "./alerts.js"
 
@@ -13,6 +15,8 @@ export type NewJob = {
   readonly parts: ReadonlyArray<BancadaProtocol.PartSpec>
   /** The session's repository root, where the commit is frozen (an executor on this machine fetches from it). */
   readonly repository?: string
+  /** A snapshot of the working tree was frozen: how many files it took beyond HEAD. */
+  readonly snapshot?: { readonly files: number }
 }
 
 /** Where each part stands, as the hub last said. */
@@ -39,13 +43,22 @@ type JobRow = {
   readonly state: string
   readonly view: string
   readonly result: string | null
+  readonly snapshot: string | null
+  readonly received_at: number | null
+  readonly notice_id: string | null
+  readonly notice_text: string | null
+  readonly repo_dir: string | null
+  readonly delivered_at: number | null
   readonly created_at: number
 }
 
-/** A job whose result arrived and whose notice the session has not received yet. */
+/** A job whose result arrived and whose notice the session has not received yet: its message, with a fixed id. */
 export type Notice = {
   readonly job: string
   readonly sessionID: string
+  /** Drawn once, before any delivery: the same message whatever happens on the way (`synthetic` with this id). */
+  readonly id: string
+  readonly text: string
   readonly parts: ReadonlyArray<BancadaProtocol.PartResult>
 }
 
@@ -74,7 +87,7 @@ export function makeOrigin(input: {
   const db = input.db
   const find = db.query<JobRow, [string]>("SELECT * FROM job WHERE id = ?")
   const ready = db.query<JobRow, []>(
-    "SELECT * FROM job WHERE state = 'concluido' AND delivered_at IS NULL ORDER BY notice_ready_at",
+    "SELECT * FROM job WHERE state = 'concluido' AND delivered_at IS NULL AND notice_text IS NOT NULL ORDER BY notice_ready_at",
   )
   const waiting = db.query<JobRow, [Scope, number]>(
     "SELECT * FROM job WHERE scope = ? AND state = 'aguardando_confirmacao' AND submit_seq IS NOT NULL AND submit_seq <= ?",
@@ -99,7 +112,7 @@ export function makeOrigin(input: {
         request.parts.map((spec) => [spec.part, { state: "na_fila", attempt: 0, reason }]),
       )
       db.run(
-        "INSERT INTO job (id, session_id, repo_dir, root_session_id, origin, code, parts, scope, state, view, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando_confirmacao', ?, ?)",
+        "INSERT INTO job (id, session_id, repo_dir, root_session_id, origin, code, parts, scope, state, view, snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando_confirmacao', ?, ?, ?)",
         [
           request.id,
           request.sessionID,
@@ -110,6 +123,7 @@ export function makeOrigin(input: {
           JSON.stringify(request.parts),
           scope,
           JSON.stringify(view),
+          request.snapshot ? JSON.stringify(request.snapshot) : null,
           input.now(),
         ],
       )
@@ -159,7 +173,7 @@ export function makeOrigin(input: {
     }
     if (message.type === "job.update") {
       const row = find.get(message.job)
-      if (!row || row.state === "concluido" || row.state === "entregue") return
+      if (!row || closed(row.state)) return
       view(row, message.part, (current) =>
         current && current.attempt > message.attempt
           ? current
@@ -176,8 +190,9 @@ export function makeOrigin(input: {
     }
     if (message.type === "result") {
       const row = find.get(message.job)
-      if (!row || row.state === "concluido" || row.state === "entregue") return
-      db.run("UPDATE job SET state = 'concluido', result = ?, notice_ready_at = ? WHERE id = ?", [
+      if (!row || closed(row.state)) return
+      // The notice is made next, once its evidence is here (`notify`).
+      db.run("UPDATE job SET state = 'recebido', result = ?, received_at = ? WHERE id = ?", [
         JSON.stringify(message.parts),
         input.now(),
         row.id,
@@ -225,7 +240,7 @@ export function makeOrigin(input: {
         lost: [],
         approved: false,
       }
-      db.run("UPDATE job SET state = 'concluido', result = ?, view = ?, notice_ready_at = ? WHERE id = ?", [
+      db.run("UPDATE job SET state = 'recebido', result = ?, view = ?, received_at = ? WHERE id = ?", [
         JSON.stringify(specs.map((spec) => ({ part: spec.part, state: "invalido", attempts: 0, outcome }))),
         JSON.stringify(Object.fromEntries(specs.map((spec) => [spec.part, { state: "invalido", attempt: 0 }]))),
         input.now(),
@@ -273,15 +288,59 @@ export function makeOrigin(input: {
   const cancel = (jobID: string) =>
     db.transaction(() => {
       const row = find.get(jobID)
-      if (!row || row.state === "concluido" || row.state === "entregue") return false
+      if (!row || closed(row.state)) return false
       input.send({ type: "cancel", job: jobID }, row.scope)
       return true
+    })()
+
+  /** Requests whose result arrived and whose notice is still to be made, with their evidence to bring. */
+  const received = () =>
+    db
+      .query<JobRow, []>("SELECT * FROM job WHERE state = 'recebido' ORDER BY received_at")
+      .all()
+      .map((row) => ({
+        job: row.id,
+        receivedAt: row.received_at ?? input.now(),
+        parts: JSON.parse(row.result ?? "[]") as BancadaProtocol.PartResult[],
+      }))
+
+  /**
+   * The notice of a request whose evidence is where the session can read it (`docs/bancada.md`, "Notice"): its text
+   * made once, its message id drawn once, before any delivery.
+   */
+  const notify = (
+    job: string,
+    delivered: Readonly<Record<string, BancadaNotice.Input["parts"][number]["delivered"]>>,
+    failuresFile?: string,
+  ) =>
+    db.transaction(() => {
+      const row = find.get(job)
+      if (!row || row.state !== "recebido") return
+      const specs: BancadaProtocol.PartSpec[] = JSON.parse(row.parts)
+      const results: BancadaProtocol.PartResult[] = JSON.parse(row.result ?? "[]")
+      const text = BancadaNotice.text({
+        job,
+        commit: (JSON.parse(row.code) as BancadaProtocol.Code).commit,
+        ...(row.snapshot ? { snapshot: JSON.parse(row.snapshot) } : {}),
+        parts: results.map((result) => {
+          const spec = specs.find((item) => item.part === result.part)
+          const files = delivered[result.part]
+          return { label: spec?.label ?? result.part, result, ...(files ? { delivered: files } : {}) }
+        }),
+        ...(failuresFile ? { failuresFile } : {}),
+      })
+      db.run(
+        "UPDATE job SET state = 'concluido', notice_id = ?, notice_text = ?, notice_ready_at = ? WHERE id = ? AND state = 'recebido'",
+        [SessionMessage.ID.create(), text, input.now(), job],
+      )
     })()
 
   return {
     submit,
     apply,
     cancel,
+    received,
+    notify,
     unregistered,
     resubmit,
     forget,
@@ -292,7 +351,13 @@ export function makeOrigin(input: {
       undefined,
     /** Results waiting to reach their sessions. */
     notices: (): Notice[] =>
-      ready.all().map((row) => ({ job: row.id, sessionID: row.session_id, parts: JSON.parse(row.result ?? "[]") })),
+      ready.all().map((row) => ({
+        job: row.id,
+        sessionID: row.session_id,
+        id: row.notice_id!,
+        text: row.notice_text!,
+        parts: JSON.parse(row.result ?? "[]"),
+      })),
     /** The session received the notice: once, and the hub may clean up. */
     delivered: (job: string) =>
       db.transaction(() => {
@@ -320,3 +385,8 @@ export function makeOrigin(input: {
 }
 
 export type Origin = ReturnType<typeof makeOrigin>
+
+/** A request whose result is in: nothing the hub says about its parts changes it any more. */
+function closed(state: string) {
+  return state === "recebido" || state === "concluido" || state === "entregue"
+}

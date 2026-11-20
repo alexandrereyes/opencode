@@ -58,7 +58,12 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       submit_seq INTEGER,
       acked_at INTEGER,
       confirmed_at INTEGER,
+      snapshot TEXT,
+      received_at INTEGER,
+      notice_id TEXT,
+      notice_text TEXT,
       notice_ready_at INTEGER,
+      wait_inline INTEGER NOT NULL DEFAULT 0,
       delivered_at INTEGER,
       created_at INTEGER NOT NULL
     )`,
@@ -104,6 +109,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       group_id TEXT,
       cancel_at INTEGER,
       cancel_reason TEXT,
+      evidence TEXT,
       delivered INTEGER NOT NULL DEFAULT 0,
       accepted_at INTEGER NOT NULL,
       started_at INTEGER,
@@ -177,6 +183,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       built_at INTEGER,
       adopt_until INTEGER,
       needs_code INTEGER NOT NULL DEFAULT 0,
+      evidence TEXT NOT NULL DEFAULT '[]',
       PRIMARY KEY (job_id, part)
     )`,
     // Every attempt of a part, also the old ones: a late report changes only its own row. By machine too: a hub that
@@ -216,6 +223,14 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       state TEXT NOT NULL,
       created_at INTEGER NOT NULL
     )`,
+    // The executor's side of an evidence transfer: the files of an attempt, sent until the hub has them all.
+    `CREATE TABLE evidence_out (
+      transfer TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      files TEXT NOT NULL,
+      state TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
     // The executor's side: a request whose code it asked for, the transfer the hub named and the file once checked.
     `CREATE TABLE code_in (
       job_id TEXT PRIMARY KEY,
@@ -232,6 +247,14 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       job_id TEXT NOT NULL,
       part TEXT NOT NULL,
       since INTEGER NOT NULL
+    )`,
+    // The last results of each scenario of a project's test, for "falhou N das últimas M vezes" in the notice.
+    `CREATE TABLE hub_scenario (
+      project TEXT NOT NULL,
+      test TEXT NOT NULL,
+      scenario_id TEXT NOT NULL,
+      last TEXT NOT NULL,
+      PRIMARY KEY (project, test, scenario_id)
     )`,
     `CREATE TABLE hub_duration (
       project TEXT NOT NULL,

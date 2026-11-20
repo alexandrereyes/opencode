@@ -54,6 +54,45 @@ export type Ending = {
   /** How long the machine slept while the command that ended it ran. */
   readonly sleptMs?: number
   readonly logTail?: string
+  /**
+   * Files a notice may carry, already read (`evidence`): the evidence of failed scenarios, by its path relative to the
+   * part's output folder, and the log of the stage that ended it.
+   */
+  readonly files?: {
+    readonly evidence: Readonly<Record<string, Kept>>
+    readonly log?: Kept & { readonly name: string }
+  }
+}
+
+/** A file of an attempt that may go to the origin: where it is, and what it is. */
+export type Kept = { readonly file: string; readonly size: number; readonly sha256: string }
+
+/** Evidence travels in files of at most this; a larger one stays out of the notice, said so. */
+export const evidenceFileBytes = 20 * 1024 * 1024
+
+/**
+ * What an attempt keeps for the notice (`docs/bancada.md`, "Notice"): the evidence of its failed scenarios and, for a
+ * failed build, infrastructure, a failure without report or an invalid request, the log. Each file named for the
+ * origin's folder (`<path with / as ->`, or the log's name), numbered.
+ */
+export function evidence(outcome: BancadaProtocol.Outcome, ending: Ending) {
+  const files = ending.files
+  if (!files) return []
+  const failed = outcome.scenarios
+    .filter((item) => item.result === "falhou")
+    .flatMap((item) =>
+      (item.evidence ?? []).flatMap((relative) => {
+        const kept = files.evidence[relative]
+        return kept ? [{ name: relative.replaceAll(/[\\/]+/g, "-"), ...kept }] : []
+      }),
+    )
+  const log =
+    files.log && ["compilacao", "infraestrutura", "sem_relatorio", "invalido"].includes(outcome.verdict)
+      ? [files.log]
+      : []
+  return [...failed, ...log]
+    .filter((item) => item.size <= evidenceFileBytes)
+    .map((item, index) => ({ index, path: item.name, size: item.size, sha256: item.sha256, file: item.file }))
 }
 
 /** Judges one attempt of a part. */
@@ -155,6 +194,11 @@ export function join(previous: BancadaProtocol.Outcome, retry: BancadaProtocol.O
     verdict,
     ...(reason ? { reason } : {}),
     approved: verdict === "aprovado",
+    // What ran again, and why: the notice says so (`docs/bancada.md`, "Notice").
+    retried: {
+      count: retry.planned.length || previous.planned.length,
+      ...(previous.reason ? { reason: previous.reason } : {}),
+    },
   }
 }
 

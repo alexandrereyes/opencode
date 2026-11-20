@@ -96,6 +96,8 @@ export function createWorld(options: {
     launches: [] as { machine: string; job: string; group: string; parts: string[] }[],
     /** Every start that fetched its code from a bundle that came through the hub. */
     bundles: [] as { machine: string; job: string }[],
+    /** The text of each notice delivered. */
+    texts: new Map<string, string>(),
     /** Every chunk a machine sent to the hub, by its offset. */
     puts: [] as { machine: string; transfer: string; offset: number }[],
   }
@@ -141,6 +143,9 @@ export function createWorld(options: {
       return true
     },
     have: async () => [],
+    deliver: (job, part, name) => `${machine}/entrega/${job}/${part}/${name}`,
+    copy: async (from, to) => void disk.set(to, disk.get(from) ?? new Uint8Array(0)),
+    release: async () => {},
   })
   /** The hub's `blob.put` and `blob.get` through the network: nothing gets through a cut. */
   const blobLink = (machine: string): BlobLink => {
@@ -253,16 +258,34 @@ export function createWorld(options: {
           : { state: "done", ending: { stage: "run", cause: "runner_morto" } }
       if (elapsed < run.script.buildMs) return { state: "compilando" }
       if (elapsed < run.script.buildMs + run.script.runMs) return { state: "rodando" }
-      // The project's two files, as a real run writes them.
+      // The project's two files, as a real run writes them; a failure's evidence in its output folder.
+      const out = `${machine}/attempts/${key(attempt)}/out`
+      const evidence = Object.fromEntries(
+        run.script.scenarios
+          .filter((item) => item.result === "falhou")
+          .flatMap((item) => item.evidence ?? [])
+          .map((relative) => {
+            const data = new TextEncoder().encode(`evidência ${relative} de ${key(attempt)}`)
+            disk.set(`${out}/${relative}`, data)
+            return [relative, { file: `${out}/${relative}`, size: data.byteLength, sha256: sha256(data) }] as const
+          }),
+      )
       return {
         state: "done",
         ending: {
           stage: "run",
           exit: run.script.exit,
+          files: { evidence },
           ...(run.script.fell ? { fell: run.script.fell } : {}),
           ...(run.sleptMs > 0 ? { sleptMs: run.sleptMs } : {}),
           ...(run.only ? { only: run.only } : {}),
-          planned: { versao: 1, cenarios: run.script.planned.map((id) => ({ id })) },
+          planned: {
+            versao: 1,
+            cenarios: run.script.planned.map((id) => {
+              const name = run.script.scenarios.find((item) => item.id === id)?.name
+              return { id, ...(name ? { nome: name } : {}) }
+            }),
+          },
           summary: {
             versao: 1,
             cenarios: run.script.scenarios.map((item) => ({
@@ -270,6 +293,7 @@ export function createWorld(options: {
               resultado: item.result,
               ...(item.message ? { mensagem: item.message } : {}),
               ...(item.device ? { aparelho: item.device } : {}),
+              ...(item.evidence ? { evidencias: item.evidence } : {}),
             })),
           },
         },
@@ -285,7 +309,11 @@ export function createWorld(options: {
     },
     reap: async () => {},
     held: () => false,
-    cleanup: async () => {},
+    // The attempt's folder goes with it, evidence included (the origin has its copy by then).
+    cleanup: async (attempt) =>
+      [...disk.keys()]
+        .filter((file) => file.startsWith(`${machine}/attempts/${key(attempt)}/`))
+        .forEach((file) => disk.delete(file)),
   })
 
   /**
@@ -307,9 +335,8 @@ export function createWorld(options: {
       launcher: launcher(config.name),
       log: (line) => logs.push(`${config.name}: ${line}`),
       ...(options.timings ? { timings: options.timings } : {}),
-      ...(options.codeTravels
-        ? { files: files(config.name), ...(config.hub ? { blobs } : { blobLink: blobLink(config.name) }) }
-        : {}),
+      files: files(config.name),
+      ...(config.hub ? { blobs } : { blobLink: blobLink(config.name) }),
     })
 
   const faults = (direction: Faults | undefined, machine: string) => {
@@ -369,6 +396,7 @@ export function createWorld(options: {
     machine.core.notices().forEach((notice) => {
       facts.notices.set(notice.job, (facts.notices.get(notice.job) ?? 0) + 1)
       facts.delivered.set(notice.job, notice.parts)
+      facts.texts.set(notice.job, notice.text)
       machine.core.delivered(notice.job)
     })
 

@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite"
 import { buildCost, dockerExtraPerDevice } from "../catalog/costs.js"
 import type { BrakeConfig, Range } from "../machine-config.js"
 import { BancadaProtocol } from "../protocol.js"
-import { judge, type Ending } from "../results.js"
+import { evidence, judge, type Ending } from "../results.js"
 import { open, step, type Brake, type Reading } from "./brake.js"
 import { add, free as budgetFree, largestFit, measured, room, samples, times, zero, type Cost } from "./budget.js"
 import { deviceFor } from "./devices/types.js"
@@ -108,6 +108,8 @@ type AttemptRow = {
   readonly cancel_reason: string | null
   readonly started_at: number | null
   readonly outcome: string | null
+  /** What it keeps for the notice: `{ index, path, size, sha256, file }[]`. */
+  readonly evidence: string | null
 }
 
 /** How long an execution may take to answer a cancel before its runner is ended (`docs/bancada.md`, "Cancel"). */
@@ -418,6 +420,13 @@ export function makeExecutor(input: {
       state: row.state as BancadaProtocol.AttemptState,
       ...(row.outcome ? { outcome: JSON.parse(row.outcome) } : {}),
       ...(row.only_scenarios ? { partial: true } : {}),
+      ...(row.evidence
+        ? {
+            evidence: (JSON.parse(row.evidence) as (BancadaProtocol.File & { file: string })[]).map(
+              ({ file: _, ...declared }) => declared,
+            ),
+          }
+        : {}),
     })
   }
 
@@ -613,10 +622,22 @@ export function makeExecutor(input: {
         : outcome.verdict === "cancelado"
           ? "cancelado"
           : "concluido"
+    // What it keeps for the notice; the files stay in the attempt's folder until the hub asks for them, or the origin
+    // (on this machine) copies them.
+    const kept = status.state === "done" && !cancelled ? evidence(final, status.ending) : []
     db.transaction(() => {
       const changed = db.run(
-        "UPDATE attempt SET state = ?, ended_at = ?, outcome = ? WHERE job_id = ? AND part = ? AND n = ? AND state = ?",
-        [state, input.now(), JSON.stringify(final), row.job_id, row.part, row.n, row.state],
+        "UPDATE attempt SET state = ?, ended_at = ?, outcome = ?, evidence = ? WHERE job_id = ? AND part = ? AND n = ? AND state = ?",
+        [
+          state,
+          input.now(),
+          JSON.stringify(final),
+          kept.length ? JSON.stringify(kept) : null,
+          row.job_id,
+          row.part,
+          row.n,
+          row.state,
+        ],
       ).changes
       if (!changed) return
       // It held its group's build and leaves before the start: the build passes to a sibling that builds.
@@ -629,6 +650,7 @@ export function makeExecutor(input: {
         state,
         outcome: final,
         ...(row.only_scenarios ? { partial: true } : {}),
+        ...(kept.length ? { evidence: kept.map(({ file: _, ...declared }) => declared) } : {}),
       })
     })()
   }

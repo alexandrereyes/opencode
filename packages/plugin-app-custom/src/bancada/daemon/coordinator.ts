@@ -36,6 +36,8 @@ type PartRow = {
   readonly adopt_until: number | null
   /** Its last attempt could not get the origin's bundle: offered again only with the origin `ok`. */
   readonly needs_code: number
+  /** `BancadaProtocol.Evidence[]`: what its attempts keep for the notice. */
+  readonly evidence: string
 }
 type MachineRow = {
   readonly machine_id: string
@@ -135,6 +137,7 @@ export function makeCoordinator(input: {
     {
       transfer: string
       job_id: string
+      kind: string
       uploader: string
       downloader: string
       received: string
@@ -143,6 +146,9 @@ export function makeCoordinator(input: {
     },
     [string]
   >("SELECT * FROM hub_blob WHERE transfer = ?")
+  const scenarios = db.query<{ last: string }, [string, string, string]>(
+    "SELECT last FROM hub_scenario WHERE project = ? AND test = ? AND scenario_id = ?",
+  )
   const durations = db.query<{ machine_id: string; samples: string }, [string, string]>(
     "SELECT machine_id, samples FROM hub_duration WHERE project = ? AND test = ?",
   )
@@ -229,17 +235,33 @@ export function makeCoordinator(input: {
     const all = parts.all(jobID)
     if (!all.every((row) => BancadaProtocol.finalStates.has(row.state))) return
     db.run("UPDATE hub_job SET state = 'fechado', closed_at = ? WHERE id = ?", [input.now(), jobID])
+    const project = (JSON.parse(owner.code) as BancadaProtocol.Code).project
     input.send(owner.origin_machine, {
       type: "result",
       job: jobID,
       parts: all.map((row) => {
         const at = row.machine_id ? machine.get(row.machine_id) : undefined
+        const outcome: BancadaProtocol.Outcome | undefined = row.outcome ? JSON.parse(row.outcome) : undefined
+        const evidence: BancadaProtocol.Evidence[] = JSON.parse(row.evidence)
+        const history = Object.fromEntries(
+          (outcome?.scenarios ?? [])
+            .filter((scenario) => scenario.result === "falhou")
+            .flatMap((scenario) => {
+              const last = scenarios.get(project, row.part, scenario.id)
+              if (!last) return []
+              const results: string[] = JSON.parse(last.last)
+              return [[scenario.id, { failed: results.filter((item) => item === "falhou").length, of: results.length }]]
+            }),
+        )
         return {
           part: row.part,
           state: row.state,
           attempts: row.attempt_n,
           ...(at ? { machine: { machineID: at.machine_id, name: at.name } } : {}),
-          ...(row.outcome ? { outcome: JSON.parse(row.outcome) } : {}),
+          ...(outcome ? { outcome } : {}),
+          ...(row.started_at !== null ? { ms: Math.max(0, row.since - row.started_at) } : {}),
+          ...(Object.keys(history).length ? { history } : {}),
+          ...(evidence.length ? { evidence } : {}),
         }
       }),
     })
@@ -288,6 +310,7 @@ export function makeCoordinator(input: {
     const state =
       joined.verdict === "infraestrutura" ? "perdido" : joined.verdict === "cancelado" ? "cancelado" : "concluido"
     update(row, { state, held_state: null, outcome: JSON.stringify(joined), since: input.now() })
+    remember(row, joined)
     tell(row)
     close(row.job_id)
   }
@@ -497,6 +520,7 @@ export function makeCoordinator(input: {
         return tell(row)
       }
       const outcome = message.outcome ?? lostOutcome("a execução terminou sem resultado")
+      keep(row, from, message)
       // A failed build says nothing about how long the test takes.
       if (message.state === "concluido" && outcome.verdict !== "compilacao") sample(row, outcome)
       // A new attempt that ran only some scenarios, adopted by a hub that lost the earlier one's result: it never
@@ -567,6 +591,8 @@ export function makeCoordinator(input: {
         JSON.stringify(message.transfer.files),
         row.transfer,
       ])
+      // Evidence: the origin reads it when the request closes (`result`); code: the executor hears where it is.
+      if (row.kind !== "codigo") return
       input.send(row.downloader, {
         type: "code.source",
         job: row.job_id,
@@ -640,6 +666,54 @@ export function makeCoordinator(input: {
         close(jobID)
       })
     return whole
+  }
+
+  /** A part's final scenario results join each scenario's last 20 (passed or failed; ignored ones say nothing). */
+  const remember = (row: PartRow, outcome: BancadaProtocol.Outcome) => {
+    const owner = job.get(row.job_id)
+    if (!owner) return
+    const project = (JSON.parse(owner.code) as BancadaProtocol.Code).project
+    outcome.scenarios
+      .filter((scenario) => scenario.result !== "ignorado")
+      .forEach((scenario) => {
+        const known = scenarios.get(project, row.part, scenario.id)
+        const last = [...(known ? (JSON.parse(known.last) as string[]) : []), scenario.result].slice(-20)
+        db.run("INSERT OR REPLACE INTO hub_scenario (project, test, scenario_id, last) VALUES (?, ?, ?, ?)", [
+          project,
+          row.part,
+          scenario.id,
+          JSON.stringify(last),
+        ])
+      })
+  }
+
+  /**
+   * What an attempt keeps for the notice, from its final report: on the origin's own machine it is there already;
+   * from another, the hub names a transfer to the origin and asks the executor to send it (`evidence.request`).
+   */
+  const keep = (row: PartRow, from: string, message: typeof BancadaProtocol.AttemptReport.Type) => {
+    const owner = job.get(row.job_id)
+    if (!owner || !message.evidence?.length) return
+    const transfer = from === owner.origin_machine ? undefined : input.random()
+    if (transfer) {
+      db.run(
+        "INSERT INTO hub_blob (transfer, job_id, kind, uploader, downloader, state, expires_at, created_at) VALUES (?, ?, 'evidencias', ?, ?, 'aberta', ?, ?)",
+        [transfer, row.job_id, from, owner.origin_machine, input.now() + times.transferMs, input.now()],
+      )
+      input.send(from, {
+        type: "evidence.request",
+        job: row.job_id,
+        part: row.part,
+        attempt: message.attempt,
+        transfer,
+      })
+    }
+    const entry: BancadaProtocol.Evidence = {
+      attempt: message.attempt,
+      ...(transfer ? { transfer } : {}),
+      files: message.evidence,
+    }
+    update(row, { evidence: JSON.stringify([...(JSON.parse(row.evidence) as BancadaProtocol.Evidence[]), entry]) })
   }
 
   /** A concluded attempt's times feed the estimates of that project's test on that machine (the last 10). */

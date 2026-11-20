@@ -198,6 +198,8 @@ export const Outcome = Schema.Struct({
   approved: Schema.Boolean,
   /** The end of the command's log, for a failure the scenarios do not explain. */
   logTail: optional(Schema.String),
+  /** A new attempt ran: how many scenarios it ran again, and why the first left them without result. */
+  retried: optional(Schema.Struct({ count: Count, reason: optional(Schema.String) })),
 }).annotate({ identifier: "Bancada.Outcome" })
 export type Outcome = typeof Outcome.Type
 
@@ -268,6 +270,8 @@ export const AttemptReport = Schema.Struct({
   fell: optional(Schema.String),
   /** It ran only some scenarios (`only`): a new attempt, whose result joins an earlier one's. */
   partial: optional(Schema.Literal(true)),
+  /** At its end: what it keeps for the notice (failed scenarios' evidence, the log of a failure without them). */
+  evidence: optional(Schema.Array(File)),
 })
 export const CodeHave = Schema.Struct({
   type: Schema.Literal("code.have"),
@@ -368,19 +372,34 @@ export const CodeSource = Schema.Struct({
     Schema.Struct({ transfer: Transfer }),
   ]),
 })
+/**
+ * Evidence of an attempt, for the notice: in a transfer from its executor to the origin, or (no transfer) on the
+ * origin's own machine, in the attempt's folder.
+ */
+export const Evidence = Schema.Struct({
+  attempt: Count,
+  transfer: optional(Schema.String),
+  files: Schema.Array(File),
+})
+export type Evidence = typeof Evidence.Type
 export const PartResult = Schema.Struct({
   part: PartName,
   state: PartState,
+  /** Offers made, not executions: never to be told as runs. */
   attempts: Count,
   machine: optional(MachineRef),
   outcome: optional(Outcome),
+  /** How long its last attempt took, from its acceptance to its end. */
+  ms: optional(Schema.Number),
+  /** For each failed scenario: how many of its last results (this one included) failed. */
+  history: optional(Schema.Record(Schema.String, Schema.Struct({ failed: Count, of: Count }))),
+  evidence: optional(Schema.Array(Evidence)),
 })
 export type PartResult = typeof PartResult.Type
 export const Result = Schema.Struct({
   type: Schema.Literal("result"),
   job: JobID,
   parts: Schema.Array(PartResult),
-  evidence: optional(Schema.String),
 })
 export const HoldGrant = Schema.Struct({
   type: Schema.Literal("hold.grant"),
@@ -396,6 +415,14 @@ export const HoldDeny = Schema.Struct({
 })
 export const HoldExpire = Schema.Struct({ type: Schema.Literal("hold.expire"), hold: Schema.String })
 export const Cleanup = Schema.Struct({ type: Schema.Literal("cleanup"), job: JobID })
+/** To the executor: send this attempt's evidence in the transfer the hub named, to the origin. */
+export const EvidenceRequest = Schema.Struct({
+  type: Schema.Literal("evidence.request"),
+  job: JobID,
+  part: PartName,
+  attempt: Count,
+  transfer: Schema.String,
+})
 
 export const FromHub = Schema.Union([
   SubmitAck,
@@ -409,6 +436,7 @@ export const FromHub = Schema.Union([
   HoldDeny,
   HoldExpire,
   Cleanup,
+  EvidenceRequest,
 ]).annotate({ identifier: "Bancada.FromHub" })
 export type FromHub = typeof FromHub.Type
 

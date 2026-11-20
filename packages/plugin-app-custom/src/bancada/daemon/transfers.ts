@@ -24,7 +24,18 @@ export interface Files {
   }) => Promise<boolean>
   /** The commits this machine has of a project, so the bundle it receives carries less (`workdir.ts`, `have`). */
   readonly have: (project: string) => Promise<ReadonlyArray<string>>
+  /**
+   * Where the origin puts a part's evidence for the session (`docs/bancada.md`, "Notice"):
+   * `<tmp of the server>/bancada/<job>/<part>/<name>`. The folder is the session's; the Bancada never removes it.
+   */
+  readonly deliver: (job: string, part: string, name: string) => string
+  readonly copy: (from: string, to: string) => Promise<void>
+  /** After delivery: the ref that held a request's frozen commit in the session's repository goes. */
+  readonly release: (repository: string, job: string) => Promise<void>
 }
+
+/** A part's evidence where the session can read it: what arrived, and how many files did not. */
+export type Delivered = Record<string, { readonly files: Readonly<Record<string, string>>; readonly missing: number }>
 
 /** The hub's `blob.put` and `blob.get`, as this machine reaches them: the link, or on the hub its own. */
 export interface BlobLink {
@@ -35,6 +46,11 @@ export interface BlobLink {
 export const limits = {
   /** A code bundle may not pass this. */
   codeBytes: 1024 ** 3,
+  /** Evidence: each file, and a request's together (`docs/bancada.md`, "Blobs"). */
+  evidenceFileBytes: 20 * 1024 * 1024,
+  evidenceBytes: 200 * 1024 * 1024,
+  /** How long the origin waits for evidence still on its way before it tells the session without it. */
+  evidenceWaitMs: 2 * 60_000,
   /** Times an executor asks for a request's code before its attempts are lost. */
   tries: 3,
   /** A transfer's work that failed (the hub did not answer) waits this long before it is tried again. */
@@ -67,6 +83,7 @@ type BlobRow = {
   readonly downloader: string
   readonly received: string
   readonly state: string
+  readonly kind: string
   readonly expires_at: number
 }
 
@@ -97,6 +114,12 @@ export function makeTransfers(input: {
 }) {
   const db = input.db
   const outgoing = db.query<CodeOut, []>("SELECT * FROM code_out WHERE state = 'enviar'")
+  const evidenceOut = db.query<{ transfer: string; job_id: string; files: string }, []>(
+    "SELECT transfer, job_id, files FROM evidence_out WHERE state = 'enviar'",
+  )
+  const sending = db.query<{ transfer: string }, [string]>(
+    "SELECT transfer FROM evidence_out WHERE transfer = ? AND state = 'enviar'",
+  )
   const pending = db.query<{ transfer: string }, [string]>(
     "SELECT transfer FROM code_out WHERE transfer = ? AND state = 'enviar'",
   )
@@ -147,6 +170,67 @@ export function makeTransfers(input: {
     return next
   }
 
+  /**
+   * Sends one file of a transfer from what the hub already has; says whether the hub has it all (false: the hub no
+   * longer knows the transfer, or `still` says the send is over). If the executor still needs it, it asks again.
+   */
+  const sendFile = async (
+    transfer: string,
+    declared: BancadaProtocol.File,
+    source: string,
+    still: () => boolean,
+  ): Promise<boolean> => {
+    const send = async (offset: number, restarted: boolean): Promise<boolean> => {
+      if (!still()) return false
+      const length = Math.min(blobLimits.chunkBytes, declared.size - offset)
+      const data = await input.files!.read(source, offset, length)
+      const answer = await input.link!.put({
+        ...caller,
+        transfer,
+        file: declared,
+        offset,
+        data: Buffer.from(data).toString("base64"),
+        end: offset + length >= declared.size,
+      })
+      if (answer.ok) return answer.done ? true : send(answer.received, restarted)
+      if (answer.reason === "offset" && answer.received !== undefined) return send(answer.received, restarted)
+      // The hub found another SHA-256 at the end: what it had was spoiled; once more from the start.
+      if (answer.reason === "sha256" && !restarted) return send(0, true)
+      if (answer.reason === "unknown" || answer.reason === "expired") return false
+      throw new Error(`o hub recusou o arquivo ${declared.path} (${answer.reason})`)
+    }
+    return send(0, false)
+  }
+  /**
+   * Fetches one file of a transfer into `target`, resuming what is there, and checks it; the failure, if any
+   * ("expired", "unknown", "incomplete", "sha256").
+   */
+  const fetchFile = async (transfer: string, file: BancadaProtocol.File, target: string) => {
+    const files = input.files!
+    const fetch = async (offset: number): Promise<string | undefined> => {
+      if (offset >= file.size && file.size > 0) return undefined
+      const answer = await input.link!.get({
+        ...caller,
+        transfer,
+        index: file.index,
+        offset,
+        size: blobLimits.chunkBytes,
+      })
+      if (!answer.ok) return answer.reason
+      const data = Buffer.from(answer.data, "base64")
+      await files.append(target, data)
+      return answer.end ? undefined : fetch(offset + data.byteLength)
+    }
+    const failure = await fetch(await files.size(target))
+    if (failure) {
+      await files.remove(target)
+      return failure
+    }
+    if ((await files.size(target)) === file.size && (await files.sha256(target)) === file.sha256) return undefined
+    await files.remove(target)
+    return "sha256"
+  }
+
   /** The origin sends its bundle, resuming from what the hub already has; then says it is all there. */
   const upload = async (row: CodeOut) => {
     const files = input.files!
@@ -157,29 +241,8 @@ export function makeTransfers(input: {
     if (!made) return close(row, "o git não conseguiu fazer o pacote do commit")
     if (made.size > limits.codeBytes) return close(row, "o pacote do commit passa de 1 GB")
     const declared: BancadaProtocol.File = { index: 0, path: "codigo.bundle", ...made }
-    /** Sends from `offset`; says whether the hub has it all (false: it no longer knows this transfer). */
-    const send = async (offset: number, restarted: boolean): Promise<boolean> => {
-      // The request was delivered meanwhile: its send is over.
-      if (!pending.get(row.transfer)) return false
-      const length = Math.min(blobLimits.chunkBytes, made.size - offset)
-      const data = await files.read(made.file, offset, length)
-      const answer = await link.put({
-        ...caller,
-        transfer: row.transfer,
-        file: declared,
-        offset,
-        data: Buffer.from(data).toString("base64"),
-        end: offset + length >= made.size,
-      })
-      if (answer.ok) return answer.done ? true : send(answer.received, restarted)
-      if (answer.reason === "offset" && answer.received !== undefined) return send(answer.received, restarted)
-      // The hub found another SHA-256 at the end: what it had was spoiled; once more from the start.
-      if (answer.reason === "sha256" && !restarted) return send(0, true)
-      // The hub no longer has this transfer: if the executor still needs the code, it asks again, under another one.
-      if (answer.reason === "unknown" || answer.reason === "expired") return false
-      throw new Error(`o hub recusou o pacote (${answer.reason})`)
-    }
-    const whole = await send(0, false)
+    // The request was delivered meanwhile: its send is over.
+    const whole = await sendFile(row.transfer, declared, made.file, () => pending.get(row.transfer) !== null)
     db.transaction(() => {
       if (!pending.get(row.transfer)) return
       if (!whole) return void db.run("UPDATE code_out SET state = 'desistiu' WHERE transfer = ?", [row.transfer])
@@ -221,33 +284,14 @@ export function makeTransfers(input: {
     const file = transfer.files[0]
     if (!file) return retry(row, "a transferência veio sem arquivo", true)
     const target = files.path(`in-${transfer.id}-${file.index}.bundle`)
-    const fetch = async (offset: number): Promise<string | undefined> => {
-      if (offset >= file.size && file.size > 0) return undefined
-      const answer = await link.get({
-        ...caller,
-        transfer: transfer.id,
-        index: file.index,
-        offset,
-        size: blobLimits.chunkBytes,
-      })
-      if (!answer.ok) return answer.reason
-      const data = Buffer.from(answer.data, "base64")
-      await files.append(target, data)
-      return answer.end ? undefined : fetch(offset + data.byteLength)
-    }
-    const failure = await fetch(await files.size(target))
-    if (failure) {
-      await files.remove(target)
+    const failure = await fetchFile(transfer.id, file, target)
+    if (failure === "sha256") return retry(row, "o pacote chegou corrompido (SHA-256 diferente)", true)
+    if (failure)
       return retry(
         row,
         failure === "expired" ? "a transferência venceu" : `a transferência não está no hub (${failure})`,
         false,
       )
-    }
-    if ((await files.size(target)) !== file.size || (await files.sha256(target)) !== file.sha256) {
-      await files.remove(target)
-      return retry(row, "o pacote chegou corrompido (SHA-256 diferente)", true)
-    }
     db.run("UPDATE code_in SET state = 'pronto', file = ? WHERE job_id = ? AND state = 'baixar'", [target, row.job_id])
   }
   /**
@@ -276,6 +320,82 @@ export function makeTransfers(input: {
     })()
   }
 
+  /** The executor sends an attempt's evidence, file by file, then says it is all there. */
+  const sendEvidence = async (row: { transfer: string; job_id: string; files: string }) => {
+    const files: (BancadaProtocol.File & { readonly file: string })[] = JSON.parse(row.files)
+    const still = () => sending.get(row.transfer) !== null
+    const sent = await Promise.all(
+      files.map(({ file, ...declared }) => sendFile(row.transfer, declared, file, still)),
+    ).then((all) => all.every(Boolean))
+    db.transaction(() => {
+      if (!still()) return
+      db.run("UPDATE evidence_out SET state = ? WHERE transfer = ?", [sent ? "enviado" : "desistiu", row.transfer])
+      if (sent)
+        input.send({
+          type: "blob.ready",
+          transfer: { id: row.transfer, files: files.map(({ file: _, ...declared }) => declared) },
+        })
+    })()
+  }
+
+  /**
+   * The origin's copy of a request's evidence (`docs/bancada.md`, "Notice"): from the attempt's folder when it ran
+   * here, else from the hub. Evidence still on its way is waited for until `evidenceWaitMs` after `since`; past that,
+   * or when the hub no longer has it, the notice goes without it (counted as missing).
+   */
+  const collect = async (job: string, parts: ReadonlyArray<BancadaProtocol.PartResult>, since: number) => {
+    const files = input.files
+    const entries = parts.flatMap((part) => (part.evidence ?? []).map((entry) => ({ part: part.part, entry })))
+    const results = await Promise.all(
+      entries.map(async ({ part, entry }) => {
+        const got = await Promise.all(
+          entry.files.map(async (file) => {
+            const name = safeName(file.path, file.index)
+            if (!files) return { name, missing: true }
+            const target = files.deliver(job, part, name)
+            if (entry.transfer === undefined) {
+              const source = localSource(job, part, entry.attempt, file.index)
+              if (!source) return { name, missing: true }
+              await files.copy(source, target)
+              return { name, target }
+            }
+            if (!input.link) return { name, missing: true }
+            const failure = await fetchFile(entry.transfer, file, target)
+            if (!failure) return { name, target }
+            // Not there yet (still being sent): later, unless the wait is over.
+            if (failure !== "sha256" && input.now() - since < limits.evidenceWaitMs)
+              throw new Error(`a evidência ${name} ainda não chegou`)
+            return { name, missing: true }
+          }),
+        )
+        return { part, got }
+      }),
+    )
+    return results.reduce<Delivered>((all, { part, got }) => {
+      const known = all[part] ?? { files: {}, missing: 0 }
+      return {
+        ...all,
+        [part]: {
+          files: {
+            ...known.files,
+            ...Object.fromEntries(got.flatMap((item) => ("target" in item ? [[item.name, item.target!]] : []))),
+          },
+          missing: known.missing + got.filter((item) => "missing" in item).length,
+        },
+      }
+    }, {})
+  }
+  const localSource = (job: string, part: string, attempt: number, index: number) => {
+    const row = db
+      .query<
+        { evidence: string | null },
+        [string, string, number]
+      >("SELECT evidence FROM attempt WHERE job_id = ? AND part = ? AND n = ?")
+      .get(job, part, attempt)
+    const kept: { index: number; file: string }[] = row?.evidence ? JSON.parse(row.evidence) : []
+    return kept.find((item) => item.index === index)?.file
+  }
+
   /** The hub's transfers that ended (delivered, expired) leave its disk. */
   const sweep = () => {
     if (!input.blobs) return
@@ -299,6 +419,22 @@ export function makeTransfers(input: {
         "INSERT OR IGNORE INTO code_out (transfer, job_id, have, state, created_at) VALUES (?, ?, ?, 'enviar', ?)",
         [message.transfer, message.job, JSON.stringify(message.have), input.now()],
       ),
+    /** The executor: the hub asks for an attempt's evidence (in the transaction that applies the message). */
+    evidence: (message: typeof BancadaProtocol.EvidenceRequest.Type) => {
+      const row = db
+        .query<
+          { evidence: string | null },
+          [string, string, number]
+        >("SELECT evidence FROM attempt WHERE job_id = ? AND part = ? AND n = ?")
+        .get(message.job, message.part, message.attempt)
+      if (!row?.evidence) return
+      db.run(
+        "INSERT OR IGNORE INTO evidence_out (transfer, job_id, files, state, created_at) VALUES (?, ?, ?, 'enviar', ?)",
+        [message.transfer, message.job, row.evidence, input.now()],
+      )
+    },
+    /** The origin: a request's evidence, where the session can read it. Rejects while some is still on its way. */
+    collect,
     /** The executor: the code of `job` could not be brought here; it is asked through the hub. */
     ask: (job: string, project: string) =>
       void db.run(
@@ -317,6 +453,7 @@ export function makeTransfers(input: {
     code: (job: string) => codeIn.get(job) ?? undefined,
     /** The executor: the request is over here; its bundle goes. */
     forget: (job: string) => {
+      db.run("DELETE FROM evidence_out WHERE job_id = ?", [job])
       const row = codeIn.get(job)
       if (!row) return
       db.run("DELETE FROM code_in WHERE job_id = ?", [job])
@@ -345,6 +482,7 @@ export function makeTransfers(input: {
         })
       if (input.files && input.link) {
         outgoing.all().forEach((row) => run(`out:${row.transfer}`, () => upload(row)))
+        evidenceOut.all().forEach((row) => run(`evidence:${row.transfer}`, () => sendEvidence(row)))
         incoming.all().forEach((row) => {
           if (row.state === "pedir") return run(`in:${row.job_id}`, () => ask(row))
           if (row.state === "baixar") return run(`in:${row.job_id}`, () => download(row))
@@ -363,10 +501,11 @@ export function makeTransfers(input: {
       const data = Buffer.from(request.data, "base64")
       if (data.byteLength > blobLimits.chunkBytes) return Promise.resolve({ ok: false, reason: "size" })
       return serial(request.transfer, async () => {
+        const evidence = row.kind === "evidencias"
         await blobs.open({
           id: request.transfer,
-          limitBytes: limits.codeBytes,
-          fileLimitBytes: limits.codeBytes,
+          limitBytes: evidence ? limits.evidenceBytes : limits.codeBytes,
+          fileLimitBytes: evidence ? limits.evidenceFileBytes : limits.codeBytes,
           expiresAt: row.expires_at,
         })
         const answer = await blobs.put({
@@ -403,3 +542,9 @@ export function makeTransfers(input: {
 }
 
 export type Transfers = ReturnType<typeof makeTransfers>
+
+/** A file's name in the session's folder: no folder of its own, no way out of it. */
+function safeName(name: string, index: number) {
+  const base = name.split(/[\\/]/).at(-1) ?? ""
+  return base && base !== "." && base !== ".." ? base : `evidencia-${index}`
+}

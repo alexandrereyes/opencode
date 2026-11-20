@@ -16,7 +16,7 @@ import { offered, parseMachineConfig } from "../machine-config.js"
 import { makeBlobs, sha256 } from "./blobs.js"
 import { makeLink, type Link } from "./link.js"
 import { Invalid, makeRequests } from "./requests.js"
-import { bundle } from "./snapshot.js"
+import { bundle, release } from "./snapshot.js"
 import type { Files } from "./transfers.js"
 import { makeWorkdirs, type Workdirs } from "./workdir.js"
 import { migrate, NewerSchemaError } from "./schema.js"
@@ -375,7 +375,7 @@ function diskFiles(root: string, workdirs: Workdirs): Files {
           .arrayBuffer(),
       ),
     append: async (file, data) => {
-      await folder()
+      await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 })
       await fs.appendFile(file, data, { mode: 0o600 })
     },
     remove: (file) => fs.rm(file, { force: true }),
@@ -384,6 +384,13 @@ function diskFiles(root: string, workdirs: Workdirs): Files {
       return bundle(runGit, input.repository, input.job, input.have, input.file)
     },
     have: (project) => workdirs.have(project),
+    // The server's own temporary folder (`paths.tmp`): `/tmp/opencode` on Linux, `$TMPDIR/opencode` on the Mac.
+    deliver: (job, part, name) => path.join(os.tmpdir(), "opencode", "bancada", job, part, name),
+    copy: async (from, to) => {
+      await fs.mkdir(path.dirname(to), { recursive: true })
+      await fs.copyFile(from, to)
+    },
+    release: (repository, job) => release(runGit, repository, job),
   }
 }
 
