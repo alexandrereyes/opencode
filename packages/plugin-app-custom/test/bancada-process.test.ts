@@ -207,21 +207,25 @@ describe("process", () => {
 
     server.kill("SIGKILL")
     await until(async () => (await liveness(info.pid)).state === "dead", 10_000)
-    // The hub also gets this server's unified summary (`custom.summary`), which is another feature's.
-    expect(calls.filter((call) => call.path.startsWith("/api/rpc/custom.bancada/"))).toEqual([
-      {
-        path: "/api/rpc/custom.bancada/sync",
-        authorization: `Basic ${Buffer.from("opencode:hub-secret").toString("base64")}`,
-        body: {
-          input: expect.objectContaining({
-            protocol: 1,
-            machineID: info.machineID,
-            name: "Servidor de teste",
-            leaving: "restart",
-          }),
-        },
+    // The hub also gets this server's unified summary (`custom.summary`), which is another feature's. This one
+    // answers nothing the link can read, so it calls a few times; its last call is the goodbye.
+    const bancada = calls.filter((call) => call.path.startsWith("/api/rpc/custom.bancada/"))
+    expect(bancada.every((call) => call.path === "/api/rpc/custom.bancada/sync")).toBe(true)
+    expect(bancada.at(-1)).toEqual({
+      path: "/api/rpc/custom.bancada/sync",
+      authorization: `Basic ${Buffer.from("opencode:hub-secret").toString("base64")}`,
+      body: {
+        input: expect.objectContaining({
+          protocol: 1,
+          machineID: info.machineID,
+          name: "Servidor de teste",
+          leaving: "restart",
+        }),
       },
-    ])
+    })
+    expect(bancada.slice(0, -1).every((call) => !(call.body as { input: { leaving?: string } }).input.leaving)).toBe(
+      true,
+    )
     expect(await Bun.file(path.join(state, "bancada.json")).exists()).toBe(false)
   }, 30_000)
 })

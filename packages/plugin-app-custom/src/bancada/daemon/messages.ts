@@ -159,6 +159,10 @@ export function makeMessages(
     acknowledged(peer: string) {
       return row(peer).out_acked
     },
+    /** The last sequence number this side wrote to `peer`. */
+    written(peer: string) {
+      return row(peer).out_seq
+    },
   }
 }
 

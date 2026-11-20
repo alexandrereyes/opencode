@@ -21,16 +21,24 @@ const decodeTaken = Schema.decodeUnknownOption(Taken)
 
 export class BancadaError extends Error {
   constructor(
-    readonly reason: "process" | "owner" | "invalid",
+    readonly reason: "process" | "owner" | "invalid" | "not_hub" | "protocol_mismatch" | "machine_taken",
     message: string,
     readonly owner?: Bancada.Owner,
     readonly problems?: ReadonlyArray<string>,
+    readonly data?: Readonly<Record<string, unknown>>,
   ) {
     super(message)
   }
 }
 const Problems = Schema.Struct({ type: Schema.Literal("invalid"), problems: Schema.Array(Schema.String) })
 const decodeProblems = Schema.decodeUnknownOption(Problems)
+/** A refusal of the process between servers (`BancadaDaemon`, status 422). */
+const Refused = Schema.Struct({
+  type: Schema.Literals(["not_hub", "protocol_mismatch", "machine_taken", "invalid"]),
+  message: Schema.String,
+  data: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+})
+const decodeRefused = Schema.decodeUnknownOption(Refused)
 
 export const limits = {
   /** Deadline of an ordinary admin request; the process answers on loopback in milliseconds. */
@@ -174,6 +182,9 @@ export function makeBancadaClient(options: {
         : undefined
       if (response?.ok) return (await response.json()) as T
       if (response?.status === 409) throw taken(await response.json().catch(() => undefined))
+      const refused = response?.status === 422 ? decodeRefused(await response.json().catch(() => undefined)) : undefined
+      if (refused && Option.isSome(refused))
+        throw new BancadaError(refused.value.type, refused.value.message, undefined, undefined, refused.value.data)
       const invalid =
         response?.status === 400 ? decodeProblems(await response.json().catch(() => undefined)) : undefined
       if (invalid && Option.isSome(invalid))

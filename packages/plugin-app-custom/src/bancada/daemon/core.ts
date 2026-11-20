@@ -101,7 +101,8 @@ const local = "local"
 
 /** Why the link to the hub refused, as it tells the core; a refusal by version or schema puts the machine alone. */
 export type Refusal = {
-  readonly type: "protocol_mismatch" | "invalid" | "not_hub" | "machine_taken" | "unauthorized"
+  /** `unreadable`: this machine could not read the hub's answer (the hub is of another release). */
+  readonly type: "protocol_mismatch" | "invalid" | "unreadable" | "not_hub" | "machine_taken" | "unauthorized"
   readonly message: string
 }
 
@@ -139,6 +140,7 @@ export function createCore(ports: Ports) {
     !self.hub &&
     (link.refused?.type === "protocol_mismatch" ||
       link.refused?.type === "invalid" ||
+      link.refused?.type === "unreadable" ||
       ports.now() - link.okAt >= times.hubAwayMs)
   const origin = makeOrigin({
     db,
@@ -330,13 +332,10 @@ export function createCore(ports: Ports) {
   /** The hub's side of `custom.bancada/sync`: applies what the machine sent and answers with what waits for it. */
   const sync = (raw: unknown): BancadaProtocol.SyncOutput => {
     if (!self.hub) throw new CoreError("not_hub", "this server does not keep the queue")
+    version(raw)
     const decoded = decodeInput(raw)
     if (Result.isFailure(decoded)) throw new CoreError("invalid", decoded.failure.message)
     const input = decoded.success
-    if (input.protocol !== BancadaProtocol.version)
-      throw new CoreError("protocol_mismatch", "this hub speaks another protocol", {
-        expected: BancadaProtocol.version,
-      })
     const taken = queue.taken(input)
     if (taken)
       throw new CoreError("machine_taken", `the machine ${input.machineID} is ${taken.name}'s`, {
@@ -347,15 +346,11 @@ export function createCore(ports: Ports) {
   }
 
   /** A blob call the hub decoded: only the hub takes them, in its protocol. */
-  const decodeBlob = <A extends { readonly protocol: number }>(
-    decoded: Result.Result<A, { readonly message: string }>,
-  ) => {
+  const decodeBlob = <A>(raw: unknown, decode: (raw: unknown) => Result.Result<A, { readonly message: string }>) => {
     if (!self.hub) throw new CoreError("not_hub", "this server does not keep the queue")
+    version(raw)
+    const decoded = decode(raw)
     if (Result.isFailure(decoded)) throw new CoreError("invalid", decoded.failure.message)
-    if (decoded.success.protocol !== BancadaProtocol.version)
-      throw new CoreError("protocol_mismatch", "this hub speaks another protocol", {
-        expected: BancadaProtocol.version,
-      })
     return decoded.success
   }
 
@@ -457,13 +452,15 @@ export function createCore(ports: Ports) {
     outgoing,
     incoming,
     refused,
+    /** What this machine wrote to the hub and what the hub acknowledged of it (the link's nudge). */
+    queued: () => ({ written: messages.written(hub), acked: messages.acknowledged(hub) }),
     sync,
     /** What waits for a machine now (the hub's answer to a long poll that waited). */
     reply,
     /** The hub's `custom.bancada/blob.put`. */
-    blobPut: (raw: unknown) => transfers.put(decodeBlob(decodePut(raw))),
+    blobPut: (raw: unknown) => transfers.put(decodeBlob(raw, decodePut)),
     /** The hub's `custom.bancada/blob.get`. */
-    blobGet: (raw: unknown) => transfers.get(decodeBlob(decodeGet(raw))),
+    blobGet: (raw: unknown) => transfers.get(decodeBlob(raw, decodeGet)),
     /** Calls `listener` with the machine whenever the queue writes to one; returns how to stop. */
     listen: (listener: (peer: string) => void) => {
       listeners.add(listener)
@@ -476,9 +473,22 @@ export function createCore(ports: Ports) {
 
 export type Core = ReturnType<typeof createCore>
 
+/**
+ * A call of another protocol version is refused by name before anything else of it is read: its shape may have
+ * changed too, and "invalid" would hide why.
+ */
+function version(raw: unknown) {
+  const protocol = typeof raw === "object" && raw !== null && "protocol" in raw ? raw.protocol : undefined
+  if (typeof protocol === "number" && protocol !== BancadaProtocol.version)
+    throw new CoreError("protocol_mismatch", `this hub speaks protocol ${BancadaProtocol.version}, not ${protocol}`, {
+      expected: BancadaProtocol.version,
+    })
+}
+
 function refusalText(refusal: Refusal) {
-  if (refusal.type === "protocol_mismatch") return `o hub fala outra versão do protocolo (${refusal.message})`
+  if (refusal.type === "protocol_mismatch") return "o hub fala outra versão do protocolo da Bancada"
   if (refusal.type === "invalid") return `o hub não entendeu a chamada desta máquina: ${refusal.message}`
+  if (refusal.type === "unreadable") return `esta máquina não entendeu a resposta do hub: ${refusal.message}`
   if (refusal.type === "not_hub") return "o servidor configurado como hub não é o hub"
   if (refusal.type === "machine_taken")
     return `o hub já tem esta máquina registrada por outro servidor: ${refusal.message}`

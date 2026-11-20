@@ -81,7 +81,7 @@ describe("simulation: the link to the hub", () => {
     const mac = sim.machines.get("Mac")!.core
     expect(mac.hub()).toMatchObject({
       state: "unavailable",
-      reason: "o hub fala outra versão do protocolo (this hub speaks another protocol)",
+      reason: "o hub fala outra versão do protocolo da Bancada",
     })
     expect(mac.alerts()).toMatchObject([{ id: "hub:protocol_mismatch", kind: "hub" }, { id: "hub:fora" }])
     ask(sim, "Mac", "j-aaaaaaaa", [spec("android")])

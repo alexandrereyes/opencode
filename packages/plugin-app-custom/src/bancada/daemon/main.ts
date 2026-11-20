@@ -7,15 +7,18 @@ import os from "node:os"
 import path from "node:path"
 import { Option, Schema } from "effect"
 import { Bancada } from "../rpc.js"
-import { createCore, type Core } from "./core.js"
+import { CoreError, createCore, type Core } from "./core.js"
 import { openExclusive } from "./db.js"
 import { runGit } from "./git.js"
 import { makeProcessLauncher } from "./launcher/process.js"
 import { probe } from "./probes.js"
 import { offered, parseMachineConfig } from "../machine-config.js"
-import { makeBlobs } from "./blobs.js"
+import { makeBlobs, sha256 } from "./blobs.js"
+import { makeLink, type Link } from "./link.js"
 import { Invalid, makeRequests } from "./requests.js"
-import { makeWorkdirs } from "./workdir.js"
+import { bundle } from "./snapshot.js"
+import type { Files } from "./transfers.js"
+import { makeWorkdirs, type Workdirs } from "./workdir.js"
 import { migrate, NewerSchemaError } from "./schema.js"
 
 /** Argument that makes the bundled plugin (`plugin/index.js`) run this process instead of exporting the plugin. */
@@ -70,6 +73,8 @@ const held: {
     timers: (ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>)[]
     core?: Core
     requests?: ReturnType<typeof makeRequests>
+    /** The link to the hub, on a machine that is not the hub and knows where it is. */
+    link?: Link
   }
 } = {}
 
@@ -106,7 +111,8 @@ export async function main() {
     if (stopping) return
     stopping = true
     log(`stopping: ${why}`)
-    await farewell(machineID, owner.current)
+    // The goodbye: the hub shows "reconciliando" instead of "silenciosa" (at most 2 s).
+    await held.process?.link?.stop().catch(() => undefined)
     held.process?.timers.forEach((timer) => clearInterval(timer))
     void server.stop(true)
     const current: unknown = await Bun.file(info)
@@ -137,11 +143,23 @@ export async function main() {
     const config = machineFile.config
     // An invalid machine file offers nothing: no budget, no capability (the problems are in the log).
     const offering = machineFile.valid
+    const link = owner.current.link && !owner.current.hub ? owner.current.link : undefined
     current.core = createCore({
       db,
       now,
       random,
       log,
+      files: diskFiles(path.join(state, "transfers"), workdirs),
+      ...(owner.current.hub ? { blobs } : {}),
+      // The link starts with the core it serves; until then nothing calls it.
+      ...(link
+        ? {
+            blobLink: {
+              put: (input) => held.process!.link!.blobs.put(input),
+              get: (input) => held.process!.link!.blobs.get(input),
+            },
+          }
+        : {}),
       machine: {
         machineID,
         instanceID: owner.current.instanceID,
@@ -180,6 +198,10 @@ export async function main() {
       }),
     })
     current.requests = makeRequests(current.core, runGit)
+    if (link) {
+      current.link = makeLink({ target: link.target, password: link.password, core: current.core, log })
+      void current.link.run()
+    }
     // The machine is read off the round, every 5 s: the brake and the owner's presence.
     const reading = () =>
       void probe()
@@ -190,9 +212,12 @@ export async function main() {
     advance()
     return current.core
   }
-  /** One round of the core now (it runs one at a time; a call during one asks for another). */
+  /** One round of the core now (it runs one at a time; a call during one asks for another); what it wrote goes. */
   const advance = () =>
-    void held.process?.core?.tick().catch((error: unknown) => log(`a round of the core failed: ${String(error)}`))
+    void held.process?.core
+      ?.tick()
+      .then(() => held.process?.link?.nudge())
+      .catch((error: unknown) => log(`a round of the core failed: ${String(error)}`))
 
   const server = Bun.serve({
     hostname: "127.0.0.1",
@@ -297,39 +322,73 @@ async function admin(
     const view = core.status(job)
     return Response.json({ jobs: view ? [view] : [] })
   }
+  // Another machine's calls to the hub, relayed by the plugin: a refusal goes back by name (422).
+  if (method === "sync")
+    return refusable(async () => {
+      const output = core.sync(input)
+      context.advance()
+      const waitMs = typeof input === "object" && input !== null && "waitMs" in input ? Number(input.waitMs) : 0
+      if (output.out.messages.length > 0 || !(waitMs > 0)) return output
+      // The long poll: held until the queue writes to that machine, or its wait ends.
+      const machineID = String((input as { machineID: unknown }).machineID)
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer)
+          stop()
+          resolve()
+        }
+        const timer = setTimeout(done, Math.min(waitMs, 25_000))
+        const stop = core.listen((peer) => peer === machineID && done())
+      })
+      return core.reply(machineID)
+    })
+  if (method === "blob.put") return refusable(() => core.blobPut(input))
+  if (method === "blob.get") return refusable(() => core.blobGet(input))
   return new Response(null, { status: 404 })
+}
+
+/** The answer of a call between servers, or its refusal by name (`CoreError`, status 422). */
+async function refusable(run: () => unknown) {
+  try {
+    return Response.json(await run())
+  } catch (error) {
+    if (!(error instanceof CoreError)) throw error
+    return Response.json({ type: error.type, message: error.message, data: error.data ?? {} }, { status: 422 })
+  }
+}
+
+/** The files of code transfers on this machine's disk: bundles made from the session's repository, bundles received. */
+function diskFiles(root: string, workdirs: Workdirs): Files {
+  const folder = () => fs.mkdir(root, { recursive: true, mode: 0o700 })
+  return {
+    path: (name) => path.join(root, name),
+    size: (file) =>
+      fs.stat(file).then(
+        (stat) => stat.size,
+        () => 0,
+      ),
+    sha256,
+    read: async (file, offset, length) =>
+      new Uint8Array(
+        await Bun.file(file)
+          .slice(offset, offset + length)
+          .arrayBuffer(),
+      ),
+    append: async (file, data) => {
+      await folder()
+      await fs.appendFile(file, data, { mode: 0o600 })
+    },
+    remove: (file) => fs.rm(file, { force: true }),
+    bundle: async (input) => {
+      await folder()
+      return bundle(runGit, input.repository, input.job, input.have, input.file)
+    },
+    have: (project) => workdirs.have(project),
+  }
 }
 
 function taken(owner: Owner) {
   return Response.json({ owner: { instanceID: owner.instanceID, name: owner.name } }, { status: 409 })
-}
-
-/**
- * Tells the hub this machine is restarting, so it shows "reconciliando" instead of "silenciosa". Best effort, at most
- * `limits.farewellMs`; only a server linked to a hub has one to tell.
- */
-async function farewell(machineID: string, owner: Owner | undefined) {
-  if (!owner?.link) return
-  await fetch(`${owner.link.target}/api/rpc/custom.bancada/sync`, {
-    method: "POST",
-    headers: {
-      authorization: `Basic ${Buffer.from(`opencode:${owner.link.password}`).toString("base64")}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      input: {
-        protocol: Bancada.protocol,
-        machineID,
-        instanceID: owner.instanceID,
-        name: owner.name,
-        ack: 0,
-        messages: [],
-        leaving: "restart",
-        waitMs: 0,
-      },
-    }),
-    signal: AbortSignal.timeout(limits.farewellMs),
-  }).catch(() => undefined)
 }
 
 /**

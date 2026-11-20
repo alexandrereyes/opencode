@@ -139,6 +139,19 @@ describe("simulation: code through the hub (S13)", () => {
     expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBe(1)
   })
 
+  test("an upload cut in the middle resumes from what the hub already has", async () => {
+    const sim = world(46)
+    sim.cut(3)
+    await sim.advance(1_000)
+    ask(sim)
+    await sim.advance(3 * 60_000)
+    sim.settle()
+    const mib = 1024 * 1024
+    // The third chunk was lost; asked again from the start, the hub said what it had and the rest followed.
+    expect(sim.facts.puts.map((put) => put.offset)).toEqual([0, mib, 2 * mib, 0, 2 * mib, 3 * mib])
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([{ state: "concluido", outcome: { approved: true } }])
+  })
+
   test("a bundle that arrives with another SHA-256 is never fetched from: asked again, and the good one runs", async () => {
     const sim = world(44)
     sim.spoil(1)

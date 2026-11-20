@@ -83,6 +83,26 @@ export type Submitted = typeof Submitted.Type
 
 const errors = { unavailable: Schema.toStandardSchemaV1(Unavailable) }
 
+/** Refusals between servers, by name: a call of another version or one the hub cannot read is never half applied. */
+export const ProtocolMismatch = Schema.Struct({ expected: Schema.Number }).annotate({
+  identifier: "Bancada.ProtocolMismatch",
+})
+export const MachineTaken = Schema.Struct({ instanceID: Schema.String, name: Schema.String }).annotate({
+  identifier: "Bancada.MachineTaken",
+})
+const between = {
+  ...errors,
+  not_hub: Schema.toStandardSchemaV1(Schema.Struct({})),
+  protocol_mismatch: Schema.toStandardSchemaV1(ProtocolMismatch),
+  machine_taken: Schema.toStandardSchemaV1(MachineTaken),
+  invalid: Schema.toStandardSchemaV1(Schema.Struct({})),
+}
+/**
+ * Loose on purpose (`docs/bancada.md`, "sync"): the process reads them against the protocol, so another version is
+ * refused as `protocol_mismatch`, not as a generic invalid input.
+ */
+const loose = Schema.toStandardSchemaV1(Schema.Record(Schema.String, Schema.Unknown))
+
 export const Definition = Rpc.define({
   id: "custom.bancada",
   methods: {
@@ -92,6 +112,12 @@ export const Definition = Rpc.define({
       output: Schema.toStandardSchemaV1(Wake),
       errors,
     },
+    /** Another machine's call to the hub (`BancadaProtocol.SyncInput` → `SyncOutput`); only the hub takes it. */
+    sync: { input: loose, output: loose, errors: between },
+    /** A chunk of a transfer's file, from the machine the hub named its sender (`BancadaProtocol.BlobPut`). */
+    "blob.put": { input: loose, output: loose, errors: between },
+    /** A chunk of a transfer's file, for the machine the hub named its receiver (`BancadaProtocol.BlobGet`). */
+    "blob.get": { input: loose, output: loose, errors: between },
   },
   events: {},
 })

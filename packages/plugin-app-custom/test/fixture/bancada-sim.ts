@@ -96,6 +96,8 @@ export function createWorld(options: {
     launches: [] as { machine: string; job: string; group: string; parts: string[] }[],
     /** Every start that fetched its code from a bundle that came through the hub. */
     bundles: [] as { machine: string; job: string }[],
+    /** Every chunk a machine sent to the hub, by its offset. */
+    puts: [] as { machine: string; offset: number }[],
   }
   /** Starts still bringing their code, released when the virtual clock reaches them. */
   const starting: { readonly at: number; readonly resolve: () => void }[] = []
@@ -121,8 +123,11 @@ export function createWorld(options: {
     new Uint8Array(options.codeTravels?.bundleBytes ?? 0).map(
       (_, index) => (job.charCodeAt(index % job.length) + index) % 251,
     )
-  /** Faults of the hub's store: the next file it receives is spoiled after it was checked (`sha256` wrong on the way out). */
-  const store = { spoil: 0 }
+  /**
+   * Faults of transfers: the hub's store spoils the next `spoil` files it receives, after its own check (`sha256`
+   * wrong on the way out); the `cut`-th chunk sent to the hub from now on is lost on the way.
+   */
+  const store = { spoil: 0, cut: 0 }
   const files = (machine: string): Files => ({
     path: (name) => `${machine}/${name}`,
     size: async (file) => disk.get(file)?.byteLength ?? 0,
@@ -144,7 +149,11 @@ export function createWorld(options: {
       return hub.core
     }
     return {
-      put: async (input) => wire(await reach().blobPut(wire(input))),
+      put: async (input) => {
+        facts.puts.push({ machine, offset: input.offset })
+        if (store.cut > 0 && --store.cut === 0) throw new Error("the connection dropped")
+        return wire(await reach().blobPut(wire(input)))
+      },
       get: async (input) => wire(await reach().blobGet(wire(input))),
     }
   }
@@ -415,6 +424,10 @@ export function createWorld(options: {
     /** The hub's store spoils the next `count` files it receives (after its own check). */
     spoil: (count: number) => {
       store.spoil = count
+    },
+    /** The `nth` chunk sent to the hub from now on is lost on the way (the connection drops). */
+    cut: (nth: number) => {
+      store.cut = nth
     },
     disk,
     addMachine: (input: { readonly name: string; readonly hub?: boolean } & Partial<Omit<Machine, "hub" | "name">>) => {
