@@ -78,16 +78,26 @@ export function makeLink(input: {
     }
   }
 
-  /** One call to the hub, its answer applied; says whether it went through. */
+  /**
+   * One call to the hub, its answer applied; says whether it went through and moved something (rule 12): the hub
+   * confirmed what this machine wrote, or brought something, or held the long poll as it should. A call that comes
+   * back at once with nothing confirmed counts as a failure for the waits, so the link never spins.
+   */
   const exchange = async (waitMs: number) => {
+    const before = input.core.queued()
+    const startedAt = Date.now()
     const sent = input.core.outgoing(waitMs)
     if (waitMs > 0) state.carried = sent.out.messages.at(-1)?.seq ?? sent.out.base
     const answer = await call("sync", sent, waitMs + limits.callMs)
     if (answer.ok) {
-      const applied = apply(answer.output)
-      if (applied && state.reason !== undefined) input.log("the hub answers again")
-      if (applied) state.reason = undefined
-      return applied
+      const received = apply(answer.output)
+      if (received === undefined) return false
+      if (state.reason !== undefined) input.log("the hub answers again")
+      state.reason = undefined
+      const confirmed = input.core.queued().acked > before.acked
+      const owed = sent.out.messages.length > 0
+      const held = waitMs > 0 && Date.now() - startedAt >= waitMs / 2
+      return confirmed || (!owed && (received > 0 || held))
     }
     if ("refusal" in answer) {
       input.core.refused(answer.refusal)
@@ -98,15 +108,15 @@ export function makeLink(input: {
     state.reason = answer.reason
     return false
   }
+  /** The hub's answer applied: how many of its messages it carried, or undefined when it could not be read. */
   const apply = (output: unknown) => {
     try {
-      input.core.incoming(output)
-      return true
+      return input.core.incoming(output)
     } catch (error) {
       // Another version was already told to the core by `incoming`; an answer this machine cannot read is a refusal.
       if (error instanceof CoreError && error.type === "invalid")
         input.core.refused({ type: "unreadable", message: error.message })
-      return false
+      return undefined
     }
   }
 
