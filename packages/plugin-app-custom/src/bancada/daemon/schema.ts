@@ -125,6 +125,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       protocol INTEGER NOT NULL,
       pulse_stream TEXT,
       pulse_seq INTEGER,
+      running TEXT NOT NULL DEFAULT '[]',
       last_sync_at INTEGER NOT NULL,
       state_since INTEGER NOT NULL DEFAULT 0
     )`,
@@ -165,9 +166,11 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       acked_at INTEGER,
       started_at INTEGER,
       built_at INTEGER,
+      adopt_until INTEGER,
       PRIMARY KEY (job_id, part)
     )`,
-    // Every attempt of a part, also the old ones: a late report changes only its own row.
+    // Every attempt of a part, also the old ones: a late report changes only its own row. By machine too: a hub that
+    // forgot a request numbers its attempts again, and another machine may still run one with the same number.
     `CREATE TABLE hub_attempt (
       job_id TEXT NOT NULL,
       part TEXT NOT NULL,
@@ -177,7 +180,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       outcome TEXT,
       cancelled INTEGER NOT NULL DEFAULT 0,
       at INTEGER NOT NULL,
-      PRIMARY KEY (job_id, part, n)
+      PRIMARY KEY (job_id, part, n, machine_id)
     )`,
     `CREATE TABLE hub_lock (
       name TEXT PRIMARY KEY,

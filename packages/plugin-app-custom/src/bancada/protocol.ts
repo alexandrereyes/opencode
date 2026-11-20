@@ -228,6 +228,8 @@ export const Submit = Schema.Struct({
   code: Code,
   parts: Schema.Array(PartSpec).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
   createdAt: Schema.Number,
+  /** Sent again to a hub that forgot (another stream): it waits for the machines to list what runs before offering. */
+  again: optional(Schema.Boolean),
 })
 export const Cancel = Schema.Struct({ type: Schema.Literal("cancel"), job: JobID })
 export const OfferAccepted = Schema.Struct({

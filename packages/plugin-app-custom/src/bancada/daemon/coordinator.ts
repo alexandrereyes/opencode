@@ -31,6 +31,7 @@ type PartRow = {
   readonly acked_at: number | null
   readonly started_at: number | null
   readonly built_at: number | null
+  readonly adopt_until: number | null
 }
 type MachineRow = {
   readonly machine_id: string
@@ -42,6 +43,7 @@ type MachineRow = {
   readonly state: string
   readonly pulse_stream: string | null
   readonly pulse_seq: number | null
+  readonly running: string
   readonly last_sync_at: number
   readonly state_since: number
 }
@@ -112,8 +114,8 @@ export function makeCoordinator(input: {
   const onMachine = db.query<PartRow, [string]>("SELECT * FROM hub_part WHERE machine_id = ?")
   const machines = db.query<MachineRow, []>("SELECT * FROM hub_machine ORDER BY machine_id")
   const machine = db.query<MachineRow, [string]>("SELECT * FROM hub_machine WHERE machine_id = ?")
-  const history = db.query<{ cancelled: number; state: string }, [string, string, number]>(
-    "SELECT cancelled, state FROM hub_attempt WHERE job_id = ? AND part = ? AND n = ?",
+  const history = db.query<{ cancelled: number; state: string }, [string, string, number, string]>(
+    "SELECT cancelled, state FROM hub_attempt WHERE job_id = ? AND part = ? AND n = ? AND machine_id = ?",
   )
   const durations = db.query<{ machine_id: string; samples: string }, [string, string]>(
     "SELECT machine_id, samples FROM hub_duration WHERE project = ? AND test = ?",
@@ -132,7 +134,7 @@ export function makeCoordinator(input: {
     fields: { machine?: string; state: string; outcome?: unknown },
   ) =>
     db.run(
-      "INSERT INTO hub_attempt (job_id, part, n, machine_id, state, outcome, at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (job_id, part, n) DO UPDATE SET state = excluded.state, outcome = COALESCE(excluded.outcome, outcome), at = excluded.at",
+      "INSERT INTO hub_attempt (job_id, part, n, machine_id, state, outcome, at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (job_id, part, n, machine_id) DO UPDATE SET state = excluded.state, outcome = COALESCE(excluded.outcome, outcome), at = excluded.at",
       [
         key.job,
         key.part,
@@ -145,12 +147,11 @@ export function makeCoordinator(input: {
     )
   /** An attempt the hub gave up (withdrawn, lost, replaced): the machine hears it when it calls, and stops it. */
   const cancelAttempt = (machineID: string, key: { job: string; part: string; attempt: number }, reason: string) => {
-    if (history.get(key.job, key.part, key.attempt)?.cancelled) return
-    db.run("UPDATE hub_attempt SET cancelled = 1 WHERE job_id = ? AND part = ? AND n = ?", [
-      key.job,
-      key.part,
-      key.attempt,
-    ])
+    if (history.get(key.job, key.part, key.attempt, machineID)?.cancelled) return
+    db.run(
+      "INSERT INTO hub_attempt (job_id, part, n, machine_id, state, cancelled, at) VALUES (?, ?, ?, ?, 'cancelado', 1, ?) ON CONFLICT (job_id, part, n, machine_id) DO UPDATE SET cancelled = 1",
+      [key.job, key.part, key.attempt, machineID, input.now()],
+    )
     input.send(machineID, { type: "attempt.cancel", job: key.job, part: key.part, attempt: key.attempt, reason })
   }
   const releaseLocks = (row: PartRow) =>
@@ -282,6 +283,73 @@ export function makeCoordinator(input: {
     })
   }
 
+  /**
+   * A machine lists an attempt of a part this hub forgot and was told again (`again`): the hub adopts it, offering that
+   * attempt, with its number, to that machine, which answers with what it has (`docs/bancada.md`, "When a side forgot").
+   */
+  const adopt = (machineID: string, ref: typeof BancadaProtocol.AttemptRef.Type) => {
+    const row = part.get(ref.job, ref.part)
+    const owner = job.get(ref.job)
+    if (!row || !owner || row.state !== "na_fila" || row.adopt_until === null) return
+    const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+    const seq = input.send(machineID, {
+      type: "offer",
+      job: ref.job,
+      part: ref.part,
+      attempt: ref.attempt,
+      spec,
+      origin: JSON.parse(owner.origin),
+      code: JSON.parse(owner.code),
+      devices: { min: spec.devices.min, proposed: spec.devices.max },
+    })
+    spec.exclusive.forEach((name) =>
+      db.run("INSERT OR REPLACE INTO hub_lock (name, job_id, part, since) VALUES (?, ?, ?, ?)", [
+        name,
+        ref.job,
+        ref.part,
+        input.now(),
+      ]),
+    )
+    record(ref, { machine: machineID, state: "oferecido" })
+    update(row, {
+      state: "oferecido",
+      attempt_n: ref.attempt,
+      machine_id: machineID,
+      offer_seq: seq,
+      devices_granted: spec.devices.max,
+      offered_at: input.now(),
+      acked_at: null,
+      adopt_until: null,
+      told: null,
+      since: input.now(),
+    })
+    input.log(`adopted attempt ${ref.attempt} of ${ref.job}/${ref.part}, which ${machineID} still runs`)
+    tell(row)
+  }
+
+  /** Requests over whose cleanup a machine running something of them already heard (this process's life). */
+  const cleaned = new Set<string>()
+  /**
+   * An attempt a machine lists that is no longer its part's (the part ran again elsewhere, or closed while the machine
+   * was cut off): it stops there; a request already delivered is cleaned up there. A request this hub never knew is the
+   * machine's own, run while the hub was out: only recorded (`local.job`).
+   */
+  const stray = (machineID: string, ref: typeof BancadaProtocol.AttemptRef.Type) => {
+    const owner = job.get(ref.job)
+    if (!owner) return
+    if (owner.state === "entregue") {
+      if (cleaned.has(`${machineID}/${ref.job}`)) return
+      cleaned.add(`${machineID}/${ref.job}`)
+      input.send(machineID, { type: "cleanup", job: ref.job })
+      return
+    }
+    const row = part.get(ref.job, ref.part)
+    if (!row || (row.state === "na_fila" && row.adopt_until !== null)) return
+    const over = BancadaProtocol.finalStates.has(row.state)
+    if (!over && row.machine_id === machineID && row.attempt_n === ref.attempt) return
+    cancelAttempt(machineID, ref, over ? "o pedido já terminou" : "substituída por uma nova tentativa")
+  }
+
   const handlers = {
     hello: (from: string, message: typeof BancadaProtocol.Hello.Type) =>
       db.run("UPDATE hub_machine SET platform = ?, capabilities = ?, speed = ? WHERE machine_id = ?", [
@@ -303,15 +371,17 @@ export function makeCoordinator(input: {
           })
         return
       }
-      const superseded = supersede(from, message)
+      const superseded = message.again ? [] : supersede(from, message)
       db.run(
         "INSERT INTO hub_job (id, origin_machine, origin, code, state, created_at) VALUES (?, ?, ?, ?, 'aberto', ?)",
         [message.job, from, JSON.stringify(message.origin), JSON.stringify(message.code), input.now()],
       )
+      // Sent again to this hub, which forgot it: a machine may run it. Nothing is offered until they all called.
+      const adoptUntil = message.again ? input.now() + times.silentMs : null
       message.parts.forEach((spec, idx) =>
         db.run(
-          "INSERT INTO hub_part (job_id, part, idx, spec, state, attempt_n, since) VALUES (?, ?, ?, ?, 'na_fila', 0, ?)",
-          [message.job, spec.part, idx, JSON.stringify(spec), input.now()],
+          "INSERT INTO hub_part (job_id, part, idx, spec, state, attempt_n, since, adopt_until) VALUES (?, ?, ?, ?, 'na_fila', 0, ?, ?)",
+          [message.job, spec.part, idx, JSON.stringify(spec), input.now(), adoptUntil],
         ),
       )
       input.send(from, {
@@ -321,10 +391,18 @@ export function makeCoordinator(input: {
           part: spec.part,
           state: "na_fila",
           attempt: 0,
-          reason: { code: "fila", text: "na fila" },
+          reason: message.again ? { code: "reconciliando", text: "reconciliando" } : { code: "fila", text: "na fila" },
         })),
         superseded,
       })
+      if (message.again)
+        machines
+          .all()
+          .forEach((row) =>
+            (JSON.parse(row.running) as BancadaProtocol.Pulse["running"])
+              .filter((ref) => ref.job === message.job)
+              .forEach((ref) => adopt(row.machine_id, ref)),
+          )
     },
     /**
      * A cancelled request never comes back (`docs/bancada.md`, "State machine"): it is marked, nothing of it is offered
@@ -350,10 +428,11 @@ export function makeCoordinator(input: {
       message: typeof BancadaProtocol.OfferAccepted.Type | typeof BancadaProtocol.OfferRefused.Type,
     ) => {
       const row = part.get(message.job, message.part)
+      if (!row) return
       record(message, { machine: from, state: message.accepted ? "aceito" : "recusado" })
       // An unsafe part whose machine went silent with the offer unanswered waits as `incerto` for this reply.
       const pending = row?.state === "oferecido" || (row?.state === "incerto" && row.held_state === "oferecido")
-      if (!row || !pending || row.attempt_n !== message.attempt || row.machine_id !== from) return
+      if (!pending || row.attempt_n !== message.attempt || row.machine_id !== from) return
       if (message.accepted) {
         update(row, {
           state: "aceito",
@@ -392,7 +471,8 @@ export function makeCoordinator(input: {
         return tell(row)
       }
       const outcome = message.outcome ?? lostOutcome("a execução terminou sem resultado")
-      if (message.state === "concluido") sample(row, outcome)
+      // A failed build says nothing about how long the test takes.
+      if (message.state === "concluido" && outcome.verdict !== "compilacao") sample(row, outcome)
       ended(row, outcome, true)
     },
     delivered: (from: string, message: typeof BancadaProtocol.Delivered.Type) => {
@@ -517,7 +597,7 @@ export function makeCoordinator(input: {
     const stream = sync.out.stream
     if (known && known.pulse_stream === stream && (known.pulse_seq ?? -1) >= sync.pulse.seq) return
     db.run(
-      "UPDATE hub_machine SET state = ?, state_since = CASE WHEN state = ? THEN state_since ELSE ? END, last_sync_at = ?, free = ?, brake = ?, pulse_stream = ?, pulse_seq = ? WHERE machine_id = ?",
+      "UPDATE hub_machine SET state = ?, state_since = CASE WHEN state = ? THEN state_since ELSE ? END, last_sync_at = ?, free = ?, brake = ?, pulse_stream = ?, pulse_seq = ?, running = ? WHERE machine_id = ?",
       [
         sync.pulse.state,
         sync.pulse.state,
@@ -527,9 +607,14 @@ export function makeCoordinator(input: {
         sync.pulse.brake ? 1 : 0,
         stream,
         sync.pulse.seq,
+        JSON.stringify(sync.pulse.running),
         sync.machineID,
       ],
     )
+    sync.pulse.running.forEach((ref) => {
+      adopt(sync.machineID, ref)
+      stray(sync.machineID, ref)
+    })
     const running = new Set(sync.pulse.running.map((item) => `${item.job}/${item.part}/${item.attempt}`))
     const acknowledged = input.acknowledged(sync.machineID)
     for (const row of onMachine.all(sync.machineID)) {
@@ -591,6 +676,20 @@ export function makeCoordinator(input: {
       )
       ended(row, lostOutcome(`a máquina ${away?.name ?? row.machine_id} não respondeu`), false)
     }
+    // Nobody listed it while every live machine called: a safe part queues as new, an unsafe one is lost.
+    for (const row of inState.all("na_fila")) {
+      if (row.adopt_until === null || now < row.adopt_until) continue
+      if (!(JSON.parse(row.spec) as BancadaProtocol.PartSpec).unsafe) {
+        update(row, { adopt_until: null, told: null })
+        continue
+      }
+      update(row, { adopt_until: null })
+      ended(
+        row,
+        lostOutcome("o hub perdeu o registro deste pedido e esta parte não pode repetir sem confirmação"),
+        false,
+      )
+    }
     for (const row of inState.all("oferecido")) {
       if (!row.machine_id) continue
       const received = (row.offer_seq ?? 0) <= input.acknowledged(row.machine_id)
@@ -635,7 +734,8 @@ export function makeCoordinator(input: {
   const schedule = () => {
     const now = input.now()
     const all = machines.all()
-    const queued = inState.all("na_fila")
+    // A part of a request this hub forgot waits for the machines to list what they run (`adopt`).
+    const queued = inState.all("na_fila").filter((row) => row.adopt_until === null)
     if (queued.length === 0) return
     const offered = inState.all("oferecido")
     const busy = (machineID: string) =>

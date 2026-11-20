@@ -219,6 +219,7 @@ export function makeOrigin(input: {
           code: JSON.parse(row.code),
           parts: JSON.parse(row.parts),
           createdAt: row.created_at,
+          again: true,
         })
         db.run("UPDATE job SET submit_seq = ?, acked_at = NULL WHERE id = ?", [seq, row.id])
       })

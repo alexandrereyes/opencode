@@ -166,6 +166,85 @@ describe("simulation: the queue", () => {
     expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBe(1)
   })
 
+  test("S14: with two capable machines, the hub that forgot waits, adopts the attempt the Mac lists and never runs it elsewhere", async () => {
+    const sim = createWorld({ seed: 21 })
+    // The host-6 is slow without history: the part goes to the Mac first. After the wipe the Mac is full, so a hub
+    // that offered at once would send this unsafe part to the host-6 while it still runs on the Mac.
+    sim.addMachine({
+      name: "Linux",
+      hub: true,
+      platform: "linux",
+      speed: "lento",
+      capabilities: { android: {} },
+      capacity: room,
+    })
+    sim.addMachine({ name: "Mac", capabilities: { android: {} }, capacity: { ...room, android: 1 } })
+    sim.script("j-aaaaaaaa", "celular", ok(3 * 60_000))
+    await sim.advance(1_000)
+    ask(sim, "Mac", "j-aaaaaaaa", [spec("celular", { unsafe: true })])
+    await sim.advance(10_000)
+    expect(sim.seen("j-aaaaaaaa", "celular").at(-1)).toBe("rodando")
+    sim.replaceDb("Linux")
+    await sim.advance(5_000)
+    const hub = sim.machines.get("Linux")!.db
+    expect(hub.query("SELECT state, attempt_n, machine_id FROM hub_part").get()).toMatchObject({
+      attempt_n: 1,
+      machine_id: "m-Mac",
+    })
+    await sim.advance(4 * 60_000)
+    sim.settle()
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([
+      { state: "concluido", attempts: 1, machine: { name: "Mac" }, outcome: { approved: true } },
+    ])
+    expect(sim.facts.starts.get("j-aaaaaaaa/celular")).toBe(1)
+    expect(sim.logs).toContainEqual(expect.stringContaining("adopted attempt 1 of j-aaaaaaaa/celular"))
+  })
+
+  test("S14: a hub that forgot, and nobody lists the part for 45 s: a safe part queues again, an unsafe one is lost", async () => {
+    const sim = createWorld({ seed: 22, partitions: [{ machine: "Mac2", from: 1_020_000, to: 1_200_000 }] })
+    sim.addMachine({
+      name: "Linux",
+      hub: true,
+      platform: "linux",
+      speed: "lento",
+      capabilities: { android: {} },
+      capacity: room,
+    })
+    sim.addMachine({ name: "Mac", capabilities: {}, capacity: room })
+    sim.addMachine({ name: "Mac2", capabilities: { android: {} }, capacity: room })
+    sim.script("j-aaaaaaaa", "celular", ok(5 * 60_000))
+    sim.script("j-bbbbbbbb", "android", ok(5 * 60_000))
+    await sim.advance(1_000)
+    ask(sim, "Mac", "j-aaaaaaaa", [spec("celular", { unsafe: true })])
+    ask(sim, "Mac", "j-bbbbbbbb", [spec("android")])
+    await sim.advance(10_000)
+    expect(sim.seen("j-aaaaaaaa", "celular").at(-1)).toBe("rodando")
+    // Mac2, which runs both, is cut off when the hub's database is replaced.
+    await sim.advance(10_000)
+    sim.replaceDb("Linux")
+    await sim.advance(20_000)
+    const hub = sim.machines.get("Linux")!.db
+    expect(hub.query("SELECT part, state FROM hub_part ORDER BY part").all()).toEqual([
+      { part: "android", state: "na_fila" },
+      { part: "celular", state: "na_fila" },
+    ])
+    await sim.advance(40_000)
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([
+      {
+        state: "perdido",
+        outcome: { reason: "o hub perdeu o registro deste pedido e esta parte não pode repetir sem confirmação" },
+      },
+    ])
+    expect(hub.query("SELECT state, machine_id FROM hub_part WHERE part = 'android'").get()).toMatchObject({
+      machine_id: "m-Linux",
+    })
+    await sim.advance(10 * 60_000)
+    sim.settle()
+    expect(sim.facts.delivered.get("j-bbbbbbbb")).toMatchObject([{ state: "concluido", outcome: { approved: true } }])
+    // The unsafe part ran once: Mac2's attempt, which went on while it was cut off, and never again.
+    expect(sim.facts.starts.get("j-aaaaaaaa/celular")).toBe(1)
+  })
+
   test("S14: the Mac's database is wiped mid-run: what the hub had there is lost by the pulse, and runs again", async () => {
     const sim = createWorld({ seed: 15 })
     sim.addMachine({ name: "Linux", hub: true, platform: "linux" })
