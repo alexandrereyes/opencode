@@ -31,7 +31,18 @@ export type Launch = {
   }>
   /** The session's repository, when the request came from this machine: the code is fetched from it, nothing travels. */
   readonly repository?: string
+  /** The origin's bundle, received through the hub and checked: the code is fetched from it. */
+  readonly bundle?: string
 }
+
+/**
+ * A start that found no way to bring the commit (not here, not in the session's repository nor a remote): the executor
+ * asks the origin for it through the hub and starts again with the bundle (`docs/bancada.md`, "Frozen code").
+ */
+export class CodeMissing extends Error {}
+
+/** How the code of a request asked through the hub stands on this machine (`transfers.ts`). */
+export type CodeState = { readonly state: string; readonly file: string | null; readonly reason: string | null }
 
 /**
  * What an execution reports, read from its folder: still building or running, or ended (how, with the project's files,
@@ -120,6 +131,12 @@ export function makeExecutor(input: {
   readonly repository: (job: string) => string | undefined
   /** Asks for a round: a task of an attempt ended. */
   readonly wake: () => void
+  /** The code through the hub; without it, a start without code loses its attempt. */
+  readonly code?: {
+    readonly ask: (job: string, project: string) => void
+    readonly state: (job: string) => CodeState | undefined
+    readonly forget: (job: string) => void
+  }
 }) {
   const db = input.db
   const limits = input.limits
@@ -156,13 +173,14 @@ export function makeExecutor(input: {
    * Work of an attempt that may take long (its start, its removal): it runs on its own and a later round collects how
    * it ended (`docs/bancada.md`, "Process"). Per process: after a restart the launcher says what to start again.
    */
-  const tasks = new Map<string, { done: boolean; failure?: string }>()
+  const tasks = new Map<string, { done: boolean; failure?: string; missing?: boolean }>()
   const run = (id: string, work: () => Promise<void>) => {
-    const task: { done: boolean; failure?: string } = { done: false }
+    const task: { done: boolean; failure?: string; missing?: boolean } = { done: false }
     tasks.set(id, task)
     void work()
       .catch((error: unknown) => {
         task.failure = error instanceof Error ? error.message : String(error)
+        task.missing = error instanceof CodeMissing
       })
       .finally(() => {
         task.done = true
@@ -188,6 +206,15 @@ export function makeExecutor(input: {
     "SELECT a.*, l.id AS lease FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE a.job_id = ? AND a.state = 'aceito' AND a.group_id IS NULL AND a.cancel_at IS NULL AND l.builds = 0 AND l.state = 'active' ORDER BY a.part",
   )
   const startOf = (job: string, group: string) => `start:${job}/${group}`
+  /** A request of another machine's session whose bundle has not arrived yet: its group does not form. */
+  const waitingCode = (job: string) => {
+    const code = input.code?.state(job)
+    return code !== undefined && code.state !== "pronto" && code.state !== "falhou"
+  }
+  /** Code that may come through the hub: the request is another machine's, and no bundle came for it yet. */
+  const throughHub = (row: AttemptRow) =>
+    (JSON.parse(row.origin) as BancadaProtocol.Origin).machineID !== input.machineID &&
+    input.code?.state(row.job_id)?.state !== "pronto"
   /**
    * Starts a group (`docs/bancada.md`, "Requests with several parts"): the attempts of one request accepted together,
    * one working folder, one build, the runs side by side; or a group again after a restart.
@@ -204,6 +231,8 @@ export function makeExecutor(input: {
     )
     const origin: BancadaProtocol.Origin = JSON.parse(first.origin)
     const repository = origin.machineID === input.machineID ? input.repository(first.job_id) : undefined
+    const code = input.code?.state(first.job_id)
+    const bundle = code?.state === "pronto" && code.file ? code.file : undefined
     run(startOf(first.job_id, group), () =>
       input.launcher.start({
         job: first.job_id,
@@ -217,6 +246,7 @@ export function makeExecutor(input: {
           ...(row.only_scenarios ? { only: JSON.parse(row.only_scenarios) } : {}),
         })),
         ...(repository ? { repository } : {}),
+        ...(bundle ? { bundle } : {}),
       }),
     )
   }
@@ -401,6 +431,7 @@ export function makeExecutor(input: {
    * folders, then their rows); one still running stops, the request is over.
    */
   const cleanup = (message: typeof BancadaProtocol.Cleanup.Type) => {
+    input.code?.forget(message.job)
     db.run("UPDATE attempt SET delivered = 1 WHERE job_id = ?", [message.job])
     db.run(
       "UPDATE attempt SET cancel_at = ?, cancel_reason = 'o pedido já foi entregue' WHERE job_id = ? AND state IN ('aceito', 'compilando', 'rodando') AND cancel_at IS NULL",
@@ -423,6 +454,19 @@ export function makeExecutor(input: {
       tasks.delete(id)
       const slash = id.indexOf("/")
       const rows = inGroup.all(id.slice("start:".length, slash), id.slice(slash + 1))
+      const first = rows[0]
+      // The code is not here: asked from the origin through the hub; the group forms again when it arrives.
+      if (task.missing && first && input.code && throughHub(first)) {
+        rows.forEach((row) =>
+          db.run("UPDATE attempt SET group_id = NULL WHERE job_id = ? AND part = ? AND n = ?", [
+            row.job_id,
+            row.part,
+            row.n,
+          ]),
+        )
+        input.code.ask(first.job_id, (JSON.parse(first.code) as BancadaProtocol.Code).project)
+        continue
+      }
       if (task.failure !== undefined) {
         rows.forEach((row) => finish(row, { state: "gone", reason: `a partida falhou: ${task.failure}` }))
         continue
@@ -440,8 +484,15 @@ export function makeExecutor(input: {
     for (const row of live.all())
       if (row.started_at === null && row.group_id === null && row.cancel_at !== null)
         finish(row, { state: "done", ending: { stage: "build", cause: "cancelado" } })
-    // New groups: what one request has here not started yet.
-    const fresh = live.all().filter((row) => row.group_id === null && row.cancel_at === null)
+    // Code asked through the hub that never came: the request's attempts here are lost with the reason.
+    for (const row of live.all()) {
+      const code = row.group_id === null && row.cancel_at === null ? input.code?.state(row.job_id) : undefined
+      if (code?.state === "falhou") finish(row, { state: "gone", reason: code.reason ?? "o código não chegou" })
+    }
+    // New groups: what one request has here not started yet, and whose code is here (or not asked for).
+    const fresh = live
+      .all()
+      .filter((row) => row.group_id === null && row.cancel_at === null && !waitingCode(row.job_id))
     new Set(fresh.map((row) => row.job_id)).forEach((job) => {
       const rows = fresh.filter((row) => row.job_id === job).toSorted((a, b) => a.part.localeCompare(b.part))
       begin(rows, rows.map((row) => `${row.part}-${row.n}`).join("+"))
@@ -454,7 +505,8 @@ export function makeExecutor(input: {
         continue
       }
       if (row.started_at === null) {
-        unread.count++
+        // Waiting for its code is a known state, not one still to read again.
+        if (!waitingCode(row.job_id)) unread.count++
         continue
       }
       if (row.cancel_at !== null) stopping(row, key)

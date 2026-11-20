@@ -11,6 +11,8 @@ import { makeExecutor, type Launcher } from "./executor.js"
 import { makeMessages } from "./messages.js"
 import { makeOrigin, type NewJob } from "./origin.js"
 import { needs } from "./scheduler.js"
+import type { Blobs } from "./blobs.js"
+import { makeTransfers, type BlobLink, type Files } from "./transfers.js"
 import { migrate } from "./schema.js"
 
 /** This machine as the core sees it. `hub`: the queue of every machine runs here too. */
@@ -47,6 +49,12 @@ export interface Ports {
   readonly log: (line: string) => void
   /** Shorter times for tests; production uses `defaults`. */
   readonly timings?: Partial<typeof timings>
+  /** The files of code transfers (bundles sent and received); without them no code travels through the hub. */
+  readonly files?: Files
+  /** The hub's `blob.put` and `blob.get` through the link; the hub uses its own. */
+  readonly blobLink?: BlobLink
+  /** The hub's store of transfers. */
+  readonly blobs?: Blobs
 }
 
 /** The times of the protocol (`docs/bancada.md`, "State machine"). */
@@ -69,6 +77,8 @@ export const timings = {
   noMachineMs: 10 * 60_000,
   /** This long without a call to the hub that went through, a machine serves its own new requests alone. */
   hubAwayMs: 45_000,
+  /** A transfer of code lives this long on the hub; an executor that waited longer asks again. */
+  transferMs: 60 * 60_000,
 }
 
 export class CoreError extends Error {
@@ -96,6 +106,8 @@ export type Refusal = {
 }
 
 const decodeInput = Schema.decodeUnknownResult(BancadaProtocol.SyncInput)
+const decodePut = Schema.decodeUnknownResult(BancadaProtocol.BlobPut)
+const decodeGet = Schema.decodeUnknownResult(BancadaProtocol.BlobGet)
 const decodeOutput = Schema.decodeUnknownResult(BancadaProtocol.SyncOutput)
 
 /**
@@ -145,6 +157,25 @@ export function createCore(ports: Ports) {
   })
   /** A message about a request goes to the queue that has it: the hub's, or this machine's own (`local`). */
   const peerOf = (job: string) => (origin.scope(job) === "local" ? local : hub)
+  const transfers = makeTransfers({
+    db,
+    now: ports.now,
+    transferMs: times.transferMs,
+    self: { machineID: self.machineID, instanceID: self.instanceID },
+    ...(ports.files ? { files: ports.files } : {}),
+    // On the hub its own store answers, in this process (a copy on the same disk, no HTTP).
+    ...(self.hub
+      ? { link: { put: (input) => transfers.put(input), get: (input) => transfers.get(input) } satisfies BlobLink }
+      : ports.blobLink
+        ? { link: ports.blobLink }
+        : {}),
+    ...(self.hub && ports.blobs ? { blobs: ports.blobs } : {}),
+    send: (body) => messages.send(hub, body),
+    repository: origin.repository,
+    alerts,
+    log: ports.log,
+    wake: () => void tick(),
+  })
   const executor = makeExecutor({
     db,
     now: ports.now,
@@ -164,6 +195,7 @@ export function createCore(ports: Ports) {
     repository: origin.repository,
     // A task of an attempt ended: its result should not wait for the next second.
     wake: () => void tick(),
+    ...(transfers.enabled() ? { code: { ask: transfers.ask, state: transfers.code, forget: transfers.forget } } : {}),
   })
   /** The queue: every machine's on the hub; elsewhere, this machine's own, for its requests while the hub is out. */
   const queue = makeCoordinator({
@@ -179,6 +211,7 @@ export function createCore(ports: Ports) {
     },
     acknowledged: (machineID) => messages.acknowledged(machineID),
     alerts,
+    random: ports.random,
   })
   /** How this machine reaches the queue in this process: as the hub's own machine, or its own queue. */
   const queuePeer = self.hub ? hub : local
@@ -215,6 +248,8 @@ export function createCore(ports: Ports) {
     if (message.type === "offer") return executor.offer(message)
     if (message.type === "attempt.cancel") return executor.cancel(message)
     if (message.type === "cleanup") return executor.cleanup(message)
+    if (message.type === "code.request") return transfers.request(message)
+    if (message.type === "code.source") return transfers.source(message)
     if (message.type === "submit.ack" || message.type === "job.update" || message.type === "result")
       return origin.apply(message)
   }
@@ -311,6 +346,19 @@ export function createCore(ports: Ports) {
     return serve(input)
   }
 
+  /** A blob call the hub decoded: only the hub takes them, in its protocol. */
+  const decodeBlob = <A extends { readonly protocol: number }>(
+    decoded: Result.Result<A, { readonly message: string }>,
+  ) => {
+    if (!self.hub) throw new CoreError("not_hub", "this server does not keep the queue")
+    if (Result.isFailure(decoded)) throw new CoreError("invalid", decoded.failure.message)
+    if (decoded.success.protocol !== BancadaProtocol.version)
+      throw new CoreError("protocol_mismatch", "this hub speaks another protocol", {
+        expected: BancadaProtocol.version,
+      })
+    return decoded.success
+  }
+
   /** This machine reaches its queue in this process, until neither side has anything new. */
   const loop = () => {
     for (const _ of Array.from({ length: 8 })) {
@@ -345,6 +393,7 @@ export function createCore(ports: Ports) {
   /** One round: executions starting and ending, then the queue (and, on the hub, this machine's loop to it). */
   const round = async () => {
     await executor.tick()
+    transfers.tick()
     follow()
     db.transaction(() => {
       origin.unregistered((scope) => messages.acknowledged(scope === "local" ? local : hub))
@@ -411,6 +460,10 @@ export function createCore(ports: Ports) {
     sync,
     /** What waits for a machine now (the hub's answer to a long poll that waited). */
     reply,
+    /** The hub's `custom.bancada/blob.put`. */
+    blobPut: (raw: unknown) => transfers.put(decodeBlob(decodePut(raw))),
+    /** The hub's `custom.bancada/blob.get`. */
+    blobGet: (raw: unknown) => transfers.get(decodeBlob(decodeGet(raw))),
     /** Calls `listener` with the machine whenever the queue writes to one; returns how to stop. */
     listen: (listener: (peer: string) => void) => {
       listeners.add(listener)

@@ -94,6 +94,8 @@ export type QueueTimes = {
   readonly tombstoneMs: number
   /** A part waiting this long for a machine that nobody offers raises an alert. */
   readonly noMachineMs: number
+  /** A transfer lives this long (`docs/bancada.md`, "Blobs"). */
+  readonly transferMs: number
 }
 
 /**
@@ -112,6 +114,8 @@ export function makeCoordinator(input: {
   readonly acknowledged: (machineID: string) => number
   readonly log: (line: string) => void
   readonly alerts: Alerts
+  /** A fresh random id (128 bits): the hub names each transfer. */
+  readonly random: () => string
 }) {
   const db = input.db
   const times = input.times
@@ -125,6 +129,18 @@ export function makeCoordinator(input: {
   const history = db.query<{ cancelled: number; state: string }, [string, string, number, string]>(
     "SELECT cancelled, state FROM hub_attempt WHERE job_id = ? AND part = ? AND n = ? AND machine_id = ?",
   )
+  const blob = db.query<
+    {
+      transfer: string
+      job_id: string
+      uploader: string
+      downloader: string
+      received: string
+      state: string
+      created_at: number
+    },
+    [string]
+  >("SELECT * FROM hub_blob WHERE transfer = ?")
   const durations = db.query<{ machine_id: string; samples: string }, [string, string]>(
     "SELECT machine_id, samples FROM hub_duration WHERE project = ? AND test = ?",
   )
@@ -492,6 +508,48 @@ export function makeCoordinator(input: {
         "INSERT OR IGNORE INTO hub_job (id, origin_machine, origin, code, state, created_at, closed_at) VALUES (?, ?, ?, ?, 'local', ?, ?)",
         [message.job, from, JSON.stringify(message.origin), JSON.stringify(message.code), input.now(), input.now()],
       ),
+    /**
+     * An executor could not bring a request's code (`docs/bancada.md`, "Frozen code"): the hub names a transfer from
+     * the origin to it and asks the origin for a bundle; its parts there wait for the code. Asked again, the earlier
+     * transfer is dropped.
+     */
+    "code.have": (from: string, message: typeof BancadaProtocol.CodeHave.Type) => {
+      const owner = job.get(message.job)
+      if (!owner || owner.state !== "aberto") return
+      db.run(
+        "UPDATE hub_blob SET state = 'apagar' WHERE job_id = ? AND downloader = ? AND state IN ('aberta', 'pronta')",
+        [message.job, from],
+      )
+      const transfer = input.random()
+      db.run(
+        "INSERT INTO hub_blob (transfer, job_id, kind, uploader, downloader, state, expires_at, created_at) VALUES (?, ?, 'codigo', ?, ?, 'aberta', ?, ?)",
+        [transfer, message.job, owner.origin_machine, from, input.now() + times.transferMs, input.now()],
+      )
+      input.send(owner.origin_machine, { type: "code.request", job: message.job, have: message.have, transfer })
+      parts
+        .all(message.job)
+        .filter((row) => row.machine_id === from && (live as ReadonlyArray<string>).includes(row.state))
+        .forEach((row) => tell(row, { reason: { code: "aguardando_codigo", text: "aguardando o código" } }))
+    },
+    /** The origin sent the whole bundle: once the hub has every file it declared, the executor hears where it is. */
+    "blob.ready": (from: string, message: typeof BancadaProtocol.BlobReady.Type) => {
+      const row = blob.get(message.transfer.id)
+      if (!row || row.uploader !== from || row.state !== "aberta") return
+      const received: Record<string, string> = JSON.parse(row.received)
+      if (!message.transfer.files.every((file) => received[file.index] === file.sha256)) {
+        input.log(`transfer ${row.transfer} of ${row.job_id} said ready without every file`)
+        return
+      }
+      db.run("UPDATE hub_blob SET state = 'pronta', files = ? WHERE transfer = ?", [
+        JSON.stringify(message.transfer.files),
+        row.transfer,
+      ])
+      input.send(row.downloader, {
+        type: "code.source",
+        job: row.job_id,
+        source: { transfer: message.transfer },
+      })
+    },
     delivered: (from: string, message: typeof BancadaProtocol.Delivered.Type) => {
       const owner = job.get(message.job)
       if (!owner || owner.origin_machine !== from || owner.state !== "fechado") return
@@ -522,6 +580,7 @@ export function makeCoordinator(input: {
     db.run("DELETE FROM hub_part WHERE job_id = ?", [jobID])
     db.run("DELETE FROM hub_attempt WHERE job_id = ?", [jobID])
     db.run("DELETE FROM hub_lock WHERE job_id = ?", [jobID])
+    db.run("UPDATE hub_blob SET state = 'apagar' WHERE job_id = ?", [jobID])
   }
 
   /**
@@ -591,6 +650,8 @@ export function makeCoordinator(input: {
     if (message.type === "attempt") return handlers.attempt(from, message)
     if (message.type === "delivered") return handlers.delivered(from, message)
     if (message.type === "local.job") return handlers["local.job"](from, message)
+    if (message.type === "code.have") return handlers["code.have"](from, message)
+    if (message.type === "blob.ready") return handlers["blob.ready"](from, message)
   }
 
   /**
@@ -729,6 +790,31 @@ export function makeCoordinator(input: {
     }
     db.run("DELETE FROM hub_job WHERE state IN ('entregue', 'local') AND closed_at < ?", [now - times.tombstoneMs])
     alertNoMachine(now)
+    alertNoCode(now)
+  }
+
+  /** Code an executor waits for that has not arrived in `noMachineMs` (the origin is away, say): an alert, until it does. */
+  const alertNoCode = (now: number) => {
+    const waiting = db
+      .query<
+        { job_id: string; uploader: string; downloader: string; created_at: number },
+        []
+      >("SELECT job_id, uploader, downloader, created_at FROM hub_blob WHERE state = 'aberta'")
+      .all()
+    const ids = new Set(waiting.map((row) => `codigo:${row.job_id}/${row.downloader}`))
+    input.alerts
+      .active()
+      .filter((alert) => alert.kind === "aguardando_codigo" && !ids.has(alert.id))
+      .forEach((alert) => input.alerts.clear(alert.id))
+    waiting
+      .filter((row) => now - row.created_at >= times.noMachineMs)
+      .forEach((row) =>
+        input.alerts.raise(
+          `codigo:${row.job_id}/${row.downloader}`,
+          "aguardando_codigo",
+          `o código do pedido ${row.job_id} não chegou a ${machine.get(row.downloader)?.name ?? row.downloader} há ${Math.round((now - row.created_at) / 60_000)} min: a origem ${machine.get(row.uploader)?.name ?? row.uploader} não o enviou`,
+        ),
+      )
   }
 
   /** A part that no machine offers what it needs, for `noMachineMs`: an alert, until it leaves that wait. */

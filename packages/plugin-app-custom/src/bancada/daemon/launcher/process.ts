@@ -4,7 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { Option, Schema } from "effect"
 import type { Ending } from "../../results.js"
-import type { Launch, Launcher, Placed, Status } from "../executor.js"
+import { CodeMissing, type Launch, type Launcher, type Placed, type Status } from "../executor.js"
 import type { Git } from "../git.js"
 import { createOnce, runFlag, type Attempt, type Claim, type Event, type PartStatus } from "../runner.js"
 import { contractAt } from "../snapshot.js"
@@ -421,10 +421,13 @@ export function makeProcessLauncher(input: {
       job: launch.job,
       ...(launch.repository ? { local: { repository: launch.repository } } : {}),
       ...(launch.code.inRemote && launch.code.remotes[0] ? { remote: { url: launch.code.remotes[0] } } : {}),
+      ...(launch.bundle ? { bundle: { file: launch.bundle } } : {}),
     })
     if (!fetched.ok) {
       input.workdirs.release(workdir)
-      throw new Error(`o código não chegou (${fetched.tried.join("; ") || "nenhuma fonte"})`)
+      const reason = `o código não chegou (${fetched.tried.join("; ") || "nenhuma fonte"})`
+      // Without the origin's bundle yet, the executor asks for it through the hub; with it, the bundle was bad.
+      throw launch.bundle ? new Error(reason) : new CodeMissing(reason)
     }
     const contract = await contractAt(input.git, workdir.path, launch.code.commit, launch.code.project)
     const missing = contract.ok ? launch.parts.filter((part) => !contract.contract.tests[part.part]) : []

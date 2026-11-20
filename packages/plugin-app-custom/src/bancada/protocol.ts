@@ -205,8 +205,15 @@ export const MachineRef = Schema.Struct({ machineID: Schema.String, name: Schema
   identifier: "Bancada.MachineRef",
 })
 
-const File = Schema.Struct({ index: Count, path: Schema.String, size: Count, sha256: Schema.String })
-const Transfer = Schema.Struct({ id: Schema.String, files: Schema.Array(File) })
+export const File = Schema.Struct({
+  index: Count,
+  path: Schema.String,
+  size: Count,
+  sha256: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+})
+export type File = typeof File.Type
+export const Transfer = Schema.Struct({ id: Schema.String, files: Schema.Array(File) })
+export type Transfer = typeof Transfer.Type
 const HoldTarget = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("vaga"), platform: Schema.Literals(["android", "ios"]), name: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("fisico"), device: Schema.String }),
@@ -455,3 +462,44 @@ export const SyncOutput = Schema.Struct({
 export type SyncOutput = typeof SyncOutput.Type
 
 export type Envelope<M> = { readonly seq: number; readonly body: M }
+
+// Bytes through the hub (`docs/bancada.md`, "Blobs"): only the machine the hub named for a transfer writes or reads it.
+
+/** Who calls, as in `sync`: a transfer is written only by its sender and read only by its receiver. */
+const Caller = { protocol: Schema.Number, machineID: Schema.String, instanceID: Schema.String }
+
+/** A chunk of a file at `offset`, which must be what the hub already has of it; `end` with its last byte. */
+export const BlobPut = Schema.Struct({
+  ...Caller,
+  transfer: Schema.String,
+  file: File,
+  offset: Count,
+  /** Base64, at most 1 MiB once decoded. */
+  data: Schema.String,
+  end: optional(Schema.Boolean),
+}).annotate({ identifier: "Bancada.BlobPut" })
+export type BlobPut = typeof BlobPut.Type
+/** `offset`: the hub has another size of the file (`received`), from which the sender resumes. */
+export const BlobPutOutput = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true), received: Count, done: Schema.Boolean }),
+  Schema.Struct({
+    ok: Schema.Literal(false),
+    reason: Schema.Literals(["unknown", "expired", "offset", "limit", "size", "sha256"]),
+    received: optional(Count),
+  }),
+]).annotate({ identifier: "Bancada.BlobPutOutput" })
+export type BlobPutOutput = typeof BlobPutOutput.Type
+
+export const BlobGet = Schema.Struct({
+  ...Caller,
+  transfer: Schema.String,
+  index: Count,
+  offset: Count,
+  size: Count,
+}).annotate({ identifier: "Bancada.BlobGet" })
+export type BlobGet = typeof BlobGet.Type
+export const BlobGetOutput = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true), data: Schema.String, end: Schema.Boolean }),
+  Schema.Struct({ ok: Schema.Literal(false), reason: Schema.Literals(["unknown", "expired", "incomplete"]) }),
+]).annotate({ identifier: "Bancada.BlobGetOutput" })
+export type BlobGetOutput = typeof BlobGetOutput.Type

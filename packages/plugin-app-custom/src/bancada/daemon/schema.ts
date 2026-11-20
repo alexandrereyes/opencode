@@ -191,6 +191,41 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       at INTEGER NOT NULL,
       PRIMARY KEY (job_id, part, n, machine_id)
     )`,
+    // A transfer the hub created (`docs/bancada.md`, "Blobs"): who sends, who receives, what arrived (index → sha256).
+    `CREATE TABLE hub_blob (
+      transfer TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      uploader TEXT NOT NULL,
+      downloader TEXT NOT NULL,
+      files TEXT NOT NULL DEFAULT '[]',
+      received TEXT NOT NULL DEFAULT '{}',
+      state TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+    // The origin's side of a code transfer: the bundle it made for it, sent in chunks until the hub has it all.
+    `CREATE TABLE code_out (
+      transfer TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      have TEXT NOT NULL,
+      file TEXT,
+      size INTEGER,
+      sha256 TEXT,
+      state TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+    // The executor's side: a request whose code it asked for, the transfer the hub named and the file once checked.
+    `CREATE TABLE code_in (
+      job_id TEXT PRIMARY KEY,
+      project TEXT NOT NULL,
+      state TEXT NOT NULL,
+      transfer TEXT,
+      file TEXT,
+      reason TEXT,
+      tries INTEGER NOT NULL DEFAULT 0,
+      asked_at INTEGER NOT NULL
+    )`,
     `CREATE TABLE hub_lock (
       name TEXT PRIMARY KEY,
       job_id TEXT NOT NULL,

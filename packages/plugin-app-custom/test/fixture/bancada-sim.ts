@@ -4,7 +4,16 @@
 import { Database } from "bun:sqlite"
 import type { Reading } from "../../src/bancada/daemon/brake"
 import { CoreError, createCore, type Core, type Machine, type timings } from "../../src/bancada/daemon/core"
-import type { AttemptKey, Launch, Launcher, Placed, Status } from "../../src/bancada/daemon/executor"
+import type { Blobs } from "../../src/bancada/daemon/blobs"
+import {
+  CodeMissing,
+  type AttemptKey,
+  type Launch,
+  type Launcher,
+  type Placed,
+  type Status,
+} from "../../src/bancada/daemon/executor"
+import type { BlobLink, Files } from "../../src/bancada/daemon/transfers"
 import type { NewJob } from "../../src/bancada/daemon/origin"
 import type { BancadaProtocol } from "../../src/bancada/protocol"
 
@@ -49,6 +58,11 @@ export function createWorld(options: {
   readonly timings?: Partial<typeof timings>
   /** A machine whose calls say another protocol version (an older or newer release). */
   readonly versions?: Readonly<Record<string, number>>
+  /**
+   * The code of a request is only at its origin: a machine that runs another's request has it only through the hub,
+   * as a bundle of `bundleBytes` (no remote, no copy of its own).
+   */
+  readonly codeTravels?: { readonly bundleBytes: number }
 }) {
   const clock = { now: 1_000_000 }
   const random = rng(options.seed)
@@ -80,6 +94,8 @@ export function createWorld(options: {
     peak: new Map<string, number>(),
     /** Every group started: on which machine, with which parts. */
     launches: [] as { machine: string; job: string; group: string; parts: string[] }[],
+    /** Every start that fetched its code from a bundle that came through the hub. */
+    bundles: [] as { machine: string; job: string }[],
   }
   /** Starts still bringing their code, released when the virtual clock reaches them. */
   const starting: { readonly at: number; readonly resolve: () => void }[] = []
@@ -98,8 +114,97 @@ export function createWorld(options: {
   const scriptOf = (job: string, part: string, attempt: number) =>
     scripts.get(`${job}/${part}#${attempt}`) ?? scripts.get(`${job}/${part}`)
 
+  /** Every machine's transfer files, by `<machine>/<name>`: bundles made, bundles received. */
+  const disk = new Map<string, Uint8Array>()
+  /** What a request's bundle holds: the same bytes wherever it is made. */
+  const bundleOf = (job: string) =>
+    new Uint8Array(options.codeTravels?.bundleBytes ?? 0).map(
+      (_, index) => (job.charCodeAt(index % job.length) + index) % 251,
+    )
+  /** Faults of the hub's store: the next file it receives is spoiled after it was checked (`sha256` wrong on the way out). */
+  const store = { spoil: 0 }
+  const files = (machine: string): Files => ({
+    path: (name) => `${machine}/${name}`,
+    size: async (file) => disk.get(file)?.byteLength ?? 0,
+    sha256: async (file) => sha256(disk.get(file) ?? new Uint8Array(0)),
+    read: async (file, offset, length) => (disk.get(file) ?? new Uint8Array(0)).slice(offset, offset + length),
+    append: async (file, data) => void disk.set(file, concat(disk.get(file) ?? new Uint8Array(0), data)),
+    remove: async (file) => void disk.delete(file),
+    bundle: async ({ job, file }) => {
+      if (!machines.get(machine)?.awake) throw new Error(`${machine} is asleep`)
+      disk.set(file, bundleOf(job))
+      return true
+    },
+    have: async () => [],
+  })
+  /** The hub's `blob.put` and `blob.get` through the network: nothing gets through a cut. */
+  const blobLink = (machine: string): BlobLink => {
+    const reach = () => {
+      if (!hub?.awake || faults(undefined, machine).length === 0) throw new Error("the hub did not answer")
+      return hub.core
+    }
+    return {
+      put: async (input) => wire(await reach().blobPut(wire(input))),
+      get: async (input) => wire(await reach().blobGet(wire(input))),
+    }
+  }
+  /** The hub's store of transfers, in memory, with the checks of `blobs.ts`. */
+  const transfers = new Map<string, { expiresAt: number; files: Map<number, { data: Uint8Array; done: boolean }> }>()
+  const blobs: Blobs = {
+    open: async (transfer) =>
+      void (
+        transfers.has(transfer.id) || transfers.set(transfer.id, { expiresAt: transfer.expiresAt, files: new Map() })
+      ),
+    put: async (request) => {
+      const known = transfers.get(request.transfer)
+      if (!known) return { ok: false, reason: "unknown" }
+      if (clock.now > known.expiresAt) return { ok: false, reason: "expired" }
+      const entry = known.files.get(request.file.index) ?? { data: new Uint8Array(0), done: false }
+      if (entry.done) return { ok: true, received: entry.data.byteLength, done: true }
+      if (request.offset !== entry.data.byteLength)
+        return { ok: false, reason: "offset", received: entry.data.byteLength }
+      const data = concat(entry.data, request.data)
+      if (data.byteLength > request.file.size) return { ok: false, reason: "size", received: entry.data.byteLength }
+      if (!request.end) {
+        known.files.set(request.file.index, { data, done: false })
+        return { ok: true, received: data.byteLength, done: false }
+      }
+      if (data.byteLength !== request.file.size) return { ok: false, reason: "size", received: data.byteLength }
+      if (sha256(data) !== request.file.sha256) {
+        known.files.delete(request.file.index)
+        return { ok: false, reason: "sha256", received: 0 }
+      }
+      const spoiled = store.spoil > 0 && data.byteLength > 0
+      if (spoiled) store.spoil--
+      known.files.set(request.file.index, {
+        data: spoiled ? data.map((byte, index) => (index === 0 ? byte ^ 1 : byte)) : data,
+        done: true,
+      })
+      return { ok: true, received: data.byteLength, done: true }
+    },
+    get: async (request) => {
+      const known = transfers.get(request.transfer)
+      if (!known) return { ok: false, reason: "unknown" }
+      if (clock.now > known.expiresAt) return { ok: false, reason: "expired" }
+      const entry = known.files.get(request.index)
+      if (!entry?.done) return { ok: false, reason: "incomplete" }
+      const data = entry.data.slice(request.offset, request.offset + Math.min(request.size, 1024 * 1024))
+      return { ok: true, data, end: request.offset + data.byteLength >= entry.data.byteLength }
+    },
+    file: async () => undefined,
+    remove: async (transfer) => void transfers.delete(transfer),
+    expire: async () => 0,
+  }
+
   const launcher = (machine: string): Launcher => ({
     start: async (launch: Launch) => {
+      const from = facts.submitted.get(launch.job)?.machine
+      if (options.codeTravels && from && from !== machine) {
+        if (!launch.bundle) throw new CodeMissing(`${machine} has no copy of ${launch.job}`)
+        const got = disk.get(launch.bundle)
+        if (!got || sha256(got) !== sha256(bundleOf(launch.job))) throw new Error("git bundle verify failed")
+        facts.bundles.push({ machine, job: launch.job })
+      }
       facts.launches.push({
         machine,
         job: launch.job,
@@ -193,6 +298,9 @@ export function createWorld(options: {
       launcher: launcher(config.name),
       log: (line) => logs.push(`${config.name}: ${line}`),
       ...(options.timings ? { timings: options.timings } : {}),
+      ...(options.codeTravels
+        ? { files: files(config.name), ...(config.hub ? { blobs } : { blobLink: blobLink(config.name) }) }
+        : {}),
     })
 
   const faults = (direction: Faults | undefined, machine: string) => {
@@ -304,6 +412,11 @@ export function createWorld(options: {
     machines,
     facts,
     logs,
+    /** The hub's store spoils the next `count` files it receives (after its own check). */
+    spoil: (count: number) => {
+      store.spoil = count
+    },
+    disk,
     addMachine: (input: { readonly name: string; readonly hub?: boolean } & Partial<Omit<Machine, "hub" | "name">>) => {
       const config: Machine = {
         machineID: `m-${input.name}`,
@@ -429,6 +542,17 @@ export function createWorld(options: {
 }
 
 export type World = ReturnType<typeof createWorld>
+
+function sha256(data: Uint8Array) {
+  return new Bun.CryptoHasher("sha256").update(data).digest("hex")
+}
+
+function concat(a: Uint8Array, b: Uint8Array) {
+  const joined = new Uint8Array(a.byteLength + b.byteLength)
+  joined.set(a)
+  joined.set(b, a.byteLength)
+  return joined
+}
 
 /** The value, or the core's refusal it threw. */
 function attempt<T>(run: () => T): T | CoreError {
