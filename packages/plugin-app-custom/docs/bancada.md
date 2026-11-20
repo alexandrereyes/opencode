@@ -55,6 +55,13 @@ process finds the runner dead there (infrastructure: the part runs once more, on
   (budget and ports), so two scenarios never get four emulators. Without a plan, every device granted starts.
 - Only devices of the `device` table, named with the machine's prefix, are ever stopped. A device dead, or mute for
   60 s, during a run fell: the scenarios it lost run again once elsewhere; two falls in a row put it 30 min aside.
+  Emulators starting together get their console ports one at a time, each held in its row from the start, and one
+  whose port answers another AVD after the boot is ended by its own pid. One that cannot be given back is set apart
+  (`isolado`, its port still held, tried again every round): its attempt's reservation and folder go back meanwhile.
+- **Code on another machine:** a working folder takes the commit from the machine's other folders of the project
+  first (no transfer), and borrows from them what a bundle needs; a bundle that still does not apply is
+  infrastructure, asked again whole. Code asked through the hub that does not come in 30 min ends its attempts with
+  the reason (the part runs once more), instead of holding the machine.
 
 ## Phones
 
