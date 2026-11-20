@@ -112,6 +112,27 @@ describe("false green", () => {
     })
   })
 
+  test("a command the machine slept through: green stays green, a failure has no result, any other error is the machine's", () => {
+    const slept = 12 * 60_000
+    const cases: [Ending, Partial<ReturnType<typeof judge>>][] = [
+      [run(0, { sleptMs: slept, summary: summary(passed("c1"), passed("c2")) }), { verdict: "aprovado" }],
+      [
+        run(0, { sleptMs: slept, summary: summary(passed("c1"), failed("c2")) }),
+        { verdict: "incompleto", lost: ["c2"] },
+      ],
+      [
+        run(1, { sleptMs: slept, summary: summary(failed("c1")) }),
+        { verdict: "infraestrutura", reason: "a máquina dormiu 12 min durante o run", lost: ["c1", "c2"] },
+      ],
+      [
+        { stage: "build", exit: 1, sleptMs: slept },
+        { verdict: "infraestrutura", reason: "a máquina dormiu 12 min durante o build" },
+      ],
+      [run(undefined, { sleptMs: slept, cause: "cancelado" }), { verdict: "cancelado" }],
+    ]
+    cases.forEach(([ending, expected]) => expect(judge(ending)).toMatchObject(expected))
+  })
+
   test("the reason names the signal, the command that never started, the runner's error and the deadline's cause", () => {
     expect(
       [

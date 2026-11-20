@@ -257,6 +257,7 @@ export function makeProcessLauncher(input: {
       ...(status?.signal ? { signal: status.signal } : {}),
       ...(status ? (status.cause ? { cause: status.cause } : {}) : { cause: "runner_morto" as const }),
       ...(status?.reason ? { reason: status.reason } : {}),
+      ...(status?.sleptMs ? { sleptMs: status.sleptMs } : {}),
       planned: await json(path.join(out, "planned.json")),
       summary: await json(path.join(out, "summary.json")),
       ...(only ? { only } : {}),

@@ -51,6 +51,8 @@ export type Ending = {
   readonly summary?: unknown
   readonly only?: ReadonlyArray<string>
   readonly fell?: ReadonlyArray<string>
+  /** How long the machine slept while the command that ended it ran. */
+  readonly sleptMs?: number
   readonly logTail?: string
 }
 
@@ -60,9 +62,13 @@ export function judge(ending: Ending): BancadaProtocol.Outcome {
   const summary = Option.getOrUndefined(decodeSummary(ending.summary))
   const names = new Map(planned?.cenarios.flatMap((item) => (item.nome ? [[item.id, item.nome] as const] : [])))
   const fell = new Set(ending.fell ?? [])
+  const slept = ending.sleptMs ?? 0
+  // A failure on a device that fell, or after the machine slept (the test's own clocks ran on), says nothing about the
+  // app: the scenario is lost instead.
+  const unreliable = (item: Reported) =>
+    item.resultado === "falhou" && (slept > 0 || Boolean(item.aparelho && fell.has(item.aparelho)))
   const scenarios = merged(summary?.cenarios ?? [])
-    // A failure on a device that fell during the attempt says nothing about the app: the scenario is lost instead.
-    .filter((item) => !(item.resultado === "falhou" && item.aparelho && fell.has(item.aparelho)))
+    .filter((item) => !unreliable(item))
     .map((item) => scenario(item, names.get(item.id)))
   const expected = ending.only ? [...ending.only] : (planned?.cenarios.map((item) => item.id) ?? [])
   const answered = new Set(scenarios.map((item) => item.id))
@@ -83,6 +89,12 @@ export function judge(ending: Ending): BancadaProtocol.Outcome {
   })
 
   if (ending.cause === "cancelado") return outcome("cancelado", "cancelado")
+  // Any other error after a sleep, at any stage, is the machine's: never "a compilação falhou", which is final.
+  if (slept > 0 && (ending.cause !== undefined || (ending.exit ?? 75) !== 0))
+    return outcome(
+      "infraestrutura",
+      `a máquina dormiu ${Math.max(1, Math.round(slept / 60_000))} min durante o ${ending.stage}`,
+    )
   if (ending.cause === "prazo")
     return outcome("infraestrutura", ending.reason ? `prazo estourado: ${ending.reason}` : "prazo estourado")
   if (ending.cause === "runner_morto") return outcome("infraestrutura", "a execução morreu")

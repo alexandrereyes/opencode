@@ -31,6 +31,7 @@ async function setup(
     readonly runner?: string
     readonly graceMs?: number
     readonly heartbeatMs?: number
+    readonly sleepGapMs?: number
   } = {},
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-runner-"))
@@ -62,7 +63,12 @@ async function setup(
       now: more.now ?? Date.now,
       random,
       deadlines: { prepareMs: 30_000, buildMs: 30_000, runMs: options.runMs ?? 60_000 },
-      timing: { pollMs: 50, heartbeatMs: options.heartbeatMs ?? 200, killGraceMs: 500 },
+      timing: {
+        pollMs: 50,
+        heartbeatMs: options.heartbeatMs ?? 200,
+        killGraceMs: 500,
+        ...(options.sleepGapMs ? { sleepGapMs: options.sleepGapMs } : {}),
+      },
       ...(more.platform ? { platform: more.platform } : {}),
       ...(more.wake ? { wake: more.wake } : {}),
       ...(options.graceMs ? { startGraceMs: options.graceMs } : {}),
@@ -382,6 +388,22 @@ describe("detached execution", () => {
     expect(await status()).toBe("não sei")
     await second
     expect(await status()).toMatchObject({ state: "done", ending: { cause: "runner_morto" } })
+  }, 20_000)
+
+  // The runner stopped for 1.5 s stands for a machine asleep, with a 1 s gap counting as a sleep.
+  test("a command the machine slept through says how long, so its failure is never taken as the code's", async () => {
+    const context = await setup({ sleepGapMs: 1_000 })
+    const { key, dir } = await launch(context, { job: "j-wwwwwwww", args: ["--dorme", "4"] })
+    await until(context.launcher, key, (status) => status.state === "rodando")
+    const runner = (await Bun.file(path.join(dir, "runner.json")).json()) as { pid: number }
+    process.kill(runner.pid, "SIGSTOP")
+    await Bun.sleep(1_500)
+    process.kill(runner.pid, "SIGCONT")
+    const status = await until(context.launcher, key, ended)
+    if (status.state !== "done") throw new Error(JSON.stringify(status))
+    expect(status.ending.sleptMs).toBeGreaterThanOrEqual(1_000)
+    expect(judge(status.ending).verdict).toBe("aprovado")
+    await commands(dir)
   }, 20_000)
 
   test("orphans: a leader with another start time, or without a recorded one, is never touched", async () => {

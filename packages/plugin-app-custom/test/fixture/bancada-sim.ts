@@ -57,6 +57,8 @@ export function createWorld(options: {
     string,
     {
       awakeMs: number
+      /** How long its machine slept while it ran. */
+      sleptMs: number
       readonly script: Script
       cancelled: boolean
       readonly only?: ReadonlyArray<string>
@@ -114,6 +116,7 @@ export function createWorld(options: {
         if (runs.has(name)) continue
         runs.set(name, {
           awakeMs: 0,
+          sleptMs: 0,
           script,
           cancelled: false,
           unsafe: part.spec.unsafe,
@@ -141,6 +144,7 @@ export function createWorld(options: {
           stage: "run",
           exit: run.script.exit,
           ...(run.script.fell ? { fell: run.script.fell } : {}),
+          ...(run.sleptMs > 0 ? { sleptMs: run.sleptMs } : {}),
           ...(run.only ? { only: run.only } : {}),
           planned: { versao: 1, cenarios: run.script.planned.map((id) => ({ id })) },
           summary: {
@@ -353,7 +357,11 @@ export function createWorld(options: {
     advance: async (ms: number, step = 1_000) => {
       for (const end = clock.now + ms; clock.now < end; ) {
         clock.now += step
-        for (const [name, run] of runs) if (machines.get(name.slice(0, name.indexOf(":")))?.awake) run.awakeMs += step
+        for (const [name, run] of runs) {
+          const finished = "vanishMs" in run.script || run.awakeMs >= run.script.buildMs + run.script.runMs
+          if (machines.get(name.slice(0, name.indexOf(":")))?.awake) run.awakeMs += step
+          else if (!finished && !run.cancelled) run.sleptMs += step
+        }
         starting
           .filter((start) => start.at <= clock.now)
           .forEach((start) => {

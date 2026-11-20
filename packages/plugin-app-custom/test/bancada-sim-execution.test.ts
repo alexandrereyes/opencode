@@ -18,8 +18,7 @@ const code = { project: "exemplo", commit: "3417b7e3c0ffee5d1c2b3a4f5e6d7c8b9a0f
 const passed = (ids: string[]) => ids.map((id) => ({ id, result: "passou" as const }))
 
 function world() {
-  // A part uncertain for an hour is lost: these scenarios test sleeping and restarts, not giving up on a machine.
-  const result = createWorld({ seed: 7, timings: { silentMs: 45_000, lostMs: 60 * 60_000 } })
+  const result = createWorld({ seed: 7 })
   result.addMachine({ name: "Linux", hub: true, platform: "linux" })
   result.addMachine({
     name: "Mac",
@@ -137,12 +136,12 @@ describe("simulation: executions outlive the Bancada process", () => {
     expect(["j-bbbbbbbb/android", "j-cccccccc/docker"].map((part) => sim.facts.starts.get(part))).toEqual([1, 1])
   })
 
-  test("S3: the Mac sleeps 20 minutes in the middle of a run: incerto, then its real state, and nothing is lost", async () => {
+  test("S3: the Mac sleeps 10 minutes in the middle of a run: incerto, then its real state; passed, it counts", async () => {
     const sim = world()
     await sim.advance(12_000)
     expect(sim.seen("j-7qk2m9xa", "android").at(-1)).toBe("rodando")
     sim.sleep("Mac", true)
-    await sim.advance(20 * 60_000)
+    await sim.advance(10 * 60_000)
     expect(sim.seen("j-7qk2m9xa", "android").at(-1)).toBe("incerto")
     sim.sleep("Mac", false)
     await sim.advance(60_000)
@@ -153,6 +152,57 @@ describe("simulation: executions outlive the Bancada process", () => {
     expect(sim.facts.delivered.get("j-7qk2m9xa")).toMatchObject([
       { part: "android", state: "concluido", attempts: 1, outcome: { approved: true } },
     ])
+  })
+
+  test("S3: a scenario that failed after a 10-minute sleep is no result: it runs again, and the join is green", async () => {
+    const sim = world()
+    sim.script("j-7qk2m9xa", "android", {
+      buildMs: 4_000,
+      runMs: 20_000,
+      exit: 1,
+      planned: ["a1", "a2"],
+      scenarios: [...passed(["a1"]), { id: "a2", result: "falhou", message: "tempo esgotado" }],
+    })
+    sim.script(
+      "j-7qk2m9xa",
+      "android",
+      { buildMs: 4_000, runMs: 5_000, exit: 0, planned: ["a2"], scenarios: passed(["a2"]) },
+      2,
+    )
+    await sim.advance(12_000)
+    sim.sleep("Mac", true)
+    await sim.advance(10 * 60_000)
+    sim.sleep("Mac", false)
+    await sim.advance(2 * 60_000)
+    sim.settle()
+    expect(sim.facts.delivered.get("j-7qk2m9xa")).toMatchObject([
+      {
+        state: "concluido",
+        attempts: 2,
+        outcome: {
+          verdict: "aprovado",
+          scenarios: [
+            { id: "a1", result: "passou" },
+            { id: "a2", result: "passou" },
+          ],
+        },
+      },
+    ])
+  })
+
+  test("S3: a 20-minute sleep: at 15 min the hub gives the attempt up; on waking it is cancelled and the part runs again, once", async () => {
+    const sim = world()
+    await sim.advance(12_000)
+    sim.sleep("Mac", true)
+    await sim.advance(20 * 60_000)
+    expect(sim.seen("j-7qk2m9xa", "android").at(-1)).toBe("na_fila")
+    sim.sleep("Mac", false)
+    await sim.advance(2 * 60_000)
+    sim.settle()
+    expect(sim.facts.delivered.get("j-7qk2m9xa")).toMatchObject([
+      { state: "concluido", attempts: 2, outcome: { approved: true } },
+    ])
+    expect(sim.facts.starts.get("j-7qk2m9xa/android")).toBe(2)
   })
 
   test("S10: seven sessions ask at once on a Mac with room for three emulators: the budget never breaks, all are served", async () => {

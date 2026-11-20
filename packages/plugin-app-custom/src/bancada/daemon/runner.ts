@@ -41,6 +41,8 @@ export type Attempt = {
     readonly heartbeatMs?: number
     readonly awakeClampMs?: number
     readonly killGraceMs?: number
+    /** A gap between two steps longer than this is a sleep of the machine (`sleepGapMs`). */
+    readonly sleepGapMs?: number
   }
   readonly lowPriority: boolean
   /** Extra variables for the project's commands (`BANCADA_DOCKER_LABEL` where there is Docker). */
@@ -54,6 +56,8 @@ export type PartStatus = {
   readonly signal?: string
   readonly cause?: "prazo" | "cancelado" | "runner_erro"
   readonly reason?: string
+  /** How long the machine slept while the command that ended the part ran (a failure after a sleep is not the code's). */
+  readonly sleptMs?: number
   readonly endedAt: number
   readonly awakeMs: number
 }
@@ -72,14 +76,18 @@ export type Claim =
  */
 export type Event = { readonly type: string; readonly pid?: number; readonly startedAt?: string }
 
-type Ended =
+type Ended = (
   | { readonly exit: number; readonly signal?: string; readonly reason?: string }
   | { readonly cause: "prazo" | "cancelado" }
+) & { readonly sleptMs?: number }
 
 /**
  * Awake time: each step adds what passed since the last one, but never more than `clampMs`, so a machine that slept
  * does not count its sleep against any deadline (a step cannot run while it sleeps).
  */
+/** A gap between two steps longer than this is a sleep of the machine. */
+export const sleepGapMs = 30_000
+
 export function awake(total: number, last: number, now: number, clampMs: number) {
   return total + Math.min(Math.max(0, now - last), clampMs)
 }
@@ -98,10 +106,12 @@ export async function runAttempt(dir: string) {
     heartbeatMs: attempt.timing?.heartbeatMs ?? 5_000,
     clampMs: attempt.timing?.awakeClampMs ?? 15_000,
     killGraceMs: attempt.timing?.killGraceMs ?? 10_000,
+    sleepGapMs: attempt.timing?.sleepGapMs ?? sleepGapMs,
   }
-  const clock = { awakeMs: 0, last: Date.now(), beat: 0 }
+  const clock = { awakeMs: 0, sleptMs: 0, last: Date.now(), beat: 0 }
   const tick = () => {
     const now = Date.now()
+    if (now - clock.last > timing.sleepGapMs) clock.sleptMs += now - clock.last
     clock.awakeMs = awake(clock.awakeMs, clock.last, now, timing.clampMs)
     clock.last = now
     if (now - clock.beat < timing.heartbeatMs) return
@@ -170,11 +180,13 @@ export async function runAttempt(dir: string) {
     const identity = startOf(child.pid).then((started) => {
       if (started) event("command.identity", { pid: child.pid, startedAt: started })
     })
+    const asleep = clock.sleptMs
     const result = await follow(child, options.deadlineMs, options.part)
     await identity
     signal(child.pid, "SIGKILL")
-    event("command.end", { pid: child.pid })
-    return result
+    const sleptMs = clock.sleptMs - asleep
+    event("command.end", { pid: child.pid, ...(sleptMs > 0 ? { sleptMs } : {}) })
+    return sleptMs > 0 ? { ...result, sleptMs } : result
   }
   const follow = async (child: Bun.Subprocess, deadlineMs: number, part?: string): Promise<Ended> => {
     const started = clock.awakeMs
@@ -215,7 +227,9 @@ export async function runAttempt(dir: string) {
   const close = (part: string, result: Ended) =>
     finish(
       part,
-      "cause" in result ? { stage: stage.current, cause: result.cause } : { stage: stage.current, ...result },
+      "cause" in result
+        ? { stage: stage.current, cause: result.cause, ...(result.sleptMs ? { sleptMs: result.sleptMs } : {}) }
+        : { stage: stage.current, ...result },
     )
 
   /** The argv lists of `commands` in the working folder, stopping at the first that does not exit 0. */
