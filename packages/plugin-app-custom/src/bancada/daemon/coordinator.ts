@@ -1,8 +1,9 @@
 import type { Database } from "bun:sqlite"
 import { BancadaProtocol } from "../protocol.js"
+import type { Alerts } from "./alerts.js"
 import { join } from "../results.js"
 import { duration, defaults as estimates, wait, type Sample } from "./estimate.js"
-import { reserveAfter, schedule as choose, type MachineView, type QueuedPart } from "./scheduler.js"
+import { needs, reserveAfter, schedule as choose, type MachineView, type QueuedPart } from "./scheduler.js"
 
 type PartRow = {
   readonly job_id: string
@@ -26,6 +27,7 @@ type PartRow = {
   readonly previous: string | null
   readonly missing: number
   readonly told: string | null
+  readonly reason_at: number | null
   readonly est_ms: number | null
   readonly offered_at: number | null
   readonly acked_at: number | null
@@ -87,6 +89,8 @@ export type QueueTimes = {
   readonly replyMs: number
   /** How long a delivered request's tombstone stays (its id would not run again). */
   readonly tombstoneMs: number
+  /** A part waiting this long for a machine that nobody offers raises an alert. */
+  readonly noMachineMs: number
 }
 
 /**
@@ -104,6 +108,7 @@ export function makeCoordinator(input: {
   /** The last sequence number `machineID` acknowledged of the hub's stream to it. */
   readonly acknowledged: (machineID: string) => number
   readonly log: (line: string) => void
+  readonly alerts: Alerts
 }) {
   const db = input.db
   const times = input.times
@@ -698,6 +703,29 @@ export function makeCoordinator(input: {
       withdraw(row)
     }
     db.run("DELETE FROM hub_job WHERE state = 'entregue' AND closed_at < ?", [now - times.tombstoneMs])
+    alertNoMachine(now)
+  }
+
+  /** A part that no machine offers what it needs, for `noMachineMs`: an alert, until it leaves that wait. */
+  const alertNoMachine = (now: number) => {
+    const waiting = inState
+      .all("na_fila")
+      .filter((row) => row.told !== null && (JSON.parse(row.told) as unknown[])[0] === "sem_maquina")
+    const ids = new Set(waiting.map((row) => `sem_maquina:${row.job_id}/${row.part}`))
+    input.alerts
+      .active()
+      .filter((alert) => alert.kind === "sem_maquina" && !ids.has(alert.id))
+      .forEach((alert) => input.alerts.clear(alert.id))
+    waiting
+      .filter((row) => row.reason_at !== null && now - row.reason_at >= times.noMachineMs)
+      .forEach((row) => {
+        const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+        input.alerts.raise(
+          `sem_maquina:${row.job_id}/${row.part}`,
+          "sem_maquina",
+          `a parte ${spec.label} do pedido ${row.job_id} espera há ${Math.round((now - row.reason_at!) / 60_000)} min: nenhuma máquina oferece ${needs(spec).join(", ")}`,
+        )
+      })
   }
 
   /** A silent machine: its offers go back to the queue (an unsafe one waits as `incerto`), what it runs turns `incerto`. */
@@ -924,7 +952,9 @@ export function makeCoordinator(input: {
       const item = byPart.get(`${waiting.job}/${waiting.part}`)!
       const told = JSON.stringify([waiting.reason.code, waiting.reason.detail ?? null, waiting.position ?? null])
       if (item.row.told === told) continue
-      update(item.row, { told })
+      // Since when it waits for this reason (a new place in the queue is the same reason).
+      const before: unknown[] | null = item.row.told ? JSON.parse(item.row.told) : null
+      update(item.row, { told, ...(before?.[0] === waiting.reason.code ? {} : { reason_at: now }) })
       tell(item.row, {
         reason: waiting.reason,
         ...(waiting.position === undefined ? {} : { position: waiting.position }),

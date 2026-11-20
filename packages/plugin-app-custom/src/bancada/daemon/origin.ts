@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { BancadaProtocol } from "../protocol.js"
+import type { Alerts } from "./alerts.js"
 
 /** A request of one of this server's sessions, already resolved against the project's `.bancada.toml`. */
 export type NewJob = {
@@ -56,6 +57,7 @@ export function makeOrigin(input: {
   /** How long a request the hub acknowledged receiving may wait for its `submit.ack` before it closes here. */
   readonly unregisteredMs: number
   readonly log: (line: string) => void
+  readonly alerts: Alerts
 }) {
   const db = input.db
   const find = db.query<JobRow, [string]>("SELECT * FROM job WHERE id = ?")
@@ -197,7 +199,11 @@ export function makeOrigin(input: {
         input.now(),
         row.id,
       ])
-      input.log(`alert: the hub acknowledged request ${row.id} but never registered it; closed as invalido`)
+      input.alerts.raise(
+        `nao_registrado:${row.id}`,
+        "pedido",
+        `o hub confirmou o recebimento do pedido ${row.id} mas não conseguiu registrá-lo; o pedido fechou como inválido`,
+      )
     }
   }
 

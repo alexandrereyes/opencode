@@ -28,6 +28,14 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       at INTEGER NOT NULL,
       PRIMARY KEY (peer, stream, seq)
     )`,
+    // Exceptions the owner must see; the hub's about the queue, any machine's about its link.
+    `CREATE TABLE alert (
+      id TEXT PRIMARY KEY,
+      at INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      text TEXT NOT NULL,
+      cleared_at INTEGER
+    )`,
     `CREATE TABLE outbox (
       peer TEXT NOT NULL,
       seq INTEGER NOT NULL,
@@ -161,6 +169,7 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       previous TEXT,
       missing INTEGER NOT NULL DEFAULT 0,
       told TEXT,
+      reason_at INTEGER,
       est_ms INTEGER,
       offered_at INTEGER,
       acked_at INTEGER,

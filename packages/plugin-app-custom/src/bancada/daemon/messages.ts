@@ -23,7 +23,14 @@ export type Stream<M = unknown> = {
  * numbered as in `docs/bancada.md` ("Streams"), also cover a side whose database was replaced or restored from an
  * older copy, and a message its handler cannot apply.
  */
-export function makeMessages(db: Database, random: () => string, now: () => number, log: (line: string) => void) {
+export function makeMessages(
+  db: Database,
+  random: () => string,
+  now: () => number,
+  log: (line: string) => void,
+  /** A message went to `dead_letter`: the owner must hear it (rule 6). */
+  dead: (peer: string, seq: number, error: string) => void = () => undefined,
+) {
   const read = db.query<Row, [string]>(
     "SELECT out_stream, out_seq, out_acked, in_stream, in_seq FROM peer WHERE peer = ?",
   )
@@ -130,6 +137,7 @@ export function makeMessages(db: Database, random: () => string, now: () => numb
           advance()
         })()
         log(`message ${message.seq} from ${peer} could not be applied and went to dead_letter: ${failure}`)
+        dead(peer, message.seq, failure)
       }
       if (known === null) return "new"
       return known === incoming.stream ? "same" : "changed"

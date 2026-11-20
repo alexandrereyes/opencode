@@ -135,7 +135,7 @@ describe("simulation", () => {
     },
   )
 
-  test("a request the hub acknowledged but could not register closes at its origin a minute later, with an alert", async () => {
+  test("S15: a message the hub cannot apply goes to dead_letter with an alert; its request closes at its origin a minute later", async () => {
     const world = createWorld({ seed: 3 })
     layout(world, 1)
     // A part named twice: the hub's queue names parts by test, its handler fails and the submit goes to dead_letter.
@@ -157,9 +157,60 @@ describe("simulation", () => {
     }
     expect(world.facts.delivered.get("j-7qk2m9xa")).toMatchObject([closed, closed])
     expect(world.facts.notices.get("j-7qk2m9xa")).toBe(1)
-    expect(world.logs).toContainEqual(expect.stringContaining("alert: the hub acknowledged request j-7qk2m9xa"))
     const hub = world.machines.get("Linux")!.db
     expect(hub.query("SELECT COUNT(*) AS n FROM dead_letter").get()).toEqual({ n: 1 })
+    expect(world.machines.get("Linux")!.core.alerts()).toMatchObject([
+      { kind: "mensagem", text: expect.stringContaining("uma mensagem de m-Mac não pôde ser aplicada") },
+    ])
+    expect(world.machines.get("Mac")!.core.alerts()).toMatchObject([
+      {
+        id: "nao_registrado:j-7qk2m9xa",
+        text: "o hub confirmou o recebimento do pedido j-7qk2m9xa mas não conseguiu registrá-lo; o pedido fechou como inválido",
+      },
+    ])
+    // The rest of the conversation with the Mac goes on: its next request runs.
+    world.script("j-bbbbbbbb", "android", {
+      buildMs: 2_000,
+      runMs: 20_000,
+      exit: 0,
+      planned: ["c1"],
+      scenarios: [{ id: "c1", result: "passou" }],
+    })
+    world.submit("Mac", {
+      id: "j-bbbbbbbb",
+      sessionID: "ses_b",
+      rootSessionID: "ses_b",
+      code,
+      parts: [spec("android", "android")],
+    })
+    await world.advance(10 * 60_000)
+    expect(world.facts.delivered.get("j-bbbbbbbb")).toMatchObject([{ state: "concluido" }])
+  })
+
+  test("a part that no machine serves for 10 minutes raises an alert, which clears when a machine offers it", async () => {
+    const world = createWorld({ seed: 5 })
+    layout(world, 1)
+    world.submit("Mac", {
+      id: "j-7qk2m9xa",
+      sessionID: "ses_a",
+      rootSessionID: "ses_a",
+      code,
+      parts: [{ ...spec("xcode", "android"), label: "xcode", needs: ["xcode"] }],
+    })
+    await world.advance(9 * 60_000)
+    const hub = world.machines.get("Linux")!.core
+    expect(hub.alerts()).toEqual([])
+    await world.advance(2 * 60_000)
+    expect(hub.alerts()).toMatchObject([
+      {
+        id: "sem_maquina:j-7qk2m9xa/xcode",
+        kind: "sem_maquina",
+        text: "a parte xcode do pedido j-7qk2m9xa espera há 10 min: nenhuma máquina oferece xcode",
+      },
+    ])
+    world.addMachine({ name: "Mac2", capabilities: { xcode: {} } })
+    await world.advance(30_000)
+    expect(hub.alerts()).toEqual([])
   })
 
   test("a part with secrets goes only to a machine that resolves its policy, and never to one with its brake closed", async () => {

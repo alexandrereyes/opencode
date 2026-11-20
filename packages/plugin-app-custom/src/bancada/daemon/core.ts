@@ -3,6 +3,7 @@ export * as BancadaCore from "./core.js"
 import type { Database } from "bun:sqlite"
 import { Result, Schema } from "effect"
 import { BancadaProtocol } from "../protocol.js"
+import { makeAlerts } from "./alerts.js"
 import { makeCoordinator } from "./coordinator.js"
 import { defaults, type BrakeConfig, type Range } from "../machine-config.js"
 import type { Reading } from "./brake.js"
@@ -63,6 +64,8 @@ export const timings = {
   tombstoneMs: 7 * 24 * 60 * 60_000,
   /** A request the hub acknowledged and never registered closes at its origin after this long. */
   unregisteredMs: 60_000,
+  /** A part waiting this long for a machine that nobody offers raises an alert. */
+  noMachineMs: 10 * 60_000,
 }
 
 export class CoreError extends Error {
@@ -90,7 +93,14 @@ export function createCore(ports: Ports) {
   const db = ports.db
   migrate(db)
   const self = ports.machine
-  const messages = makeMessages(db, ports.random, ports.now, ports.log)
+  const alerts = makeAlerts(db, ports.now, ports.log)
+  const messages = makeMessages(db, ports.random, ports.now, ports.log, (peer, seq, error) =>
+    alerts.raise(
+      `dead_letter:${peer}/${seq}`,
+      "mensagem",
+      `uma mensagem de ${peer === hub ? "o hub" : peer} não pôde ser aplicada e foi guardada à parte: ${error}`,
+    ),
+  )
   const toHub = (body: BancadaProtocol.FromMachine) => messages.send(hub, body)
   const times = { ...timings, ...ports.timings }
   const origin = makeOrigin({
@@ -100,6 +110,7 @@ export function createCore(ports: Ports) {
     send: toHub,
     unregisteredMs: times.unregisteredMs,
     log: ports.log,
+    alerts,
   })
   const executor = makeExecutor({
     db,
@@ -130,6 +141,7 @@ export function createCore(ports: Ports) {
         log: ports.log,
         send: (machineID, body) => messages.send(machineID, body),
         acknowledged: (machineID) => messages.acknowledged(machineID),
+        alerts,
       })
     : undefined
 
@@ -282,6 +294,8 @@ export function createCore(ports: Ports) {
       return brake
     },
     status: origin.status,
+    /** The alerts up now. */
+    alerts: alerts.active,
     notices: origin.notices,
     delivered: origin.delivered,
     outgoing,
