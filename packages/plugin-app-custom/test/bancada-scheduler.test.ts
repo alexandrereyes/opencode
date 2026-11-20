@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { Wait } from "../src/bancada/daemon/estimate"
 import { schedule, type MachineView, type QueuedPart } from "../src/bancada/daemon/scheduler"
 import type { BancadaProtocol } from "../src/bancada/protocol"
 
@@ -47,14 +48,14 @@ const machine = (
 const run = (
   parts: QueuedPart[],
   machines: MachineView[],
-  options: { locks?: string[]; durations?: Record<string, number>; waits?: Record<string, number> } = {},
+  options: { locks?: string[]; durations?: Record<string, number>; waits?: Record<string, Wait> } = {},
 ) =>
   schedule({
     parts,
     machines,
     locks: new Set(options.locks ?? []),
     duration: (item, at) => options.durations?.[`${item.job}@${at.machineID}`] ?? 60_000,
-    wait: (item, at) => options.waits?.[`${item.job}@${at.machineID}`] ?? 0,
+    wait: (item, at) => options.waits?.[`${item.job}@${at.machineID}`] ?? { ms: 0, by: "now" },
   })
 const offered = (decision: ReturnType<typeof run>) => decision.offers.map((offer) => `${offer.job}→${offer.machineID}`)
 
@@ -71,20 +72,56 @@ describe("queue", () => {
   test("a part that does not fit where it would end soonest waits for it, with why and when", () => {
     const mac = machine("mac", { android: 0 }, ["android"])
     const ios = machine("mac2", { ios: 0 }, ["ios"])
-    const decision = run([part("j-a", spec("android")), part("j-b", spec("ios"))], [mac, ios], {
-      waits: { "j-a@mac": 120_000, "j-b@mac2": 30_000 },
-    })
+    const decision = run(
+      [part("j-a", spec("android")), part("j-b", spec("ios")), part("j-c", spec("android"))],
+      [mac, ios, machine("linux", { android: 0 }, ["android"])],
+      {
+        waits: {
+          "j-a@mac": { ms: 120_000, by: "queue" },
+          "j-a@linux": { ms: 900_000, by: "queue" },
+          "j-b@mac2": { ms: 30_000, by: "queue" },
+          "j-c@mac": { ms: 400_000, by: "queue" },
+          "j-c@linux": { ms: 300_000, by: "budget" },
+        },
+      },
+    )
     expect(decision.offers).toEqual([])
+    // The queue explains j-a's wait; nothing that runs on Linux frees enough for j-c; an iOS part waits for a Mac.
     expect(decision.waiting).toEqual([
       { job: "j-b", part: "ios", reason: { code: "orcamento", text: "aguardando um Mac" }, position: 1, etaMs: 30_000 },
+      { job: "j-a", part: "android", reason: { code: "fila", text: "na fila" }, position: 2, etaMs: 120_000 },
       {
-        job: "j-a",
+        job: "j-c",
         part: "android",
         reason: { code: "orcamento", text: "aguardando folga" },
-        position: 2,
-        etaMs: 120_000,
+        position: 3,
+        etaMs: 300_000,
       },
     ])
+  })
+
+  test("each machine is told who waits for it ahead, and what was offered to it in this decision", () => {
+    const mac = machine("mac", { android: 1, builds: 1 }, ["android"])
+    const lines: Record<string, unknown> = {}
+    schedule({
+      parts: [part("j-a", spec("android")), part("j-b", spec("android")), part("j-c", spec("android"))],
+      machines: [mac],
+      locks: new Set(),
+      duration: () => 60_000,
+      wait: (item, _at, line) => {
+        lines[item.job] = {
+          offered: line.offered.map((offer) => offer.part.job),
+          waiting: line.waiting.map((ahead) => ahead.job),
+          builds: line.free.builds,
+        }
+        return { ms: line.free.builds > 0 ? 0 : 60_000, by: line.free.builds > 0 ? "now" : "queue" }
+      },
+    })
+    expect(lines).toEqual({
+      "j-a": { offered: [], waiting: [], builds: 1 },
+      "j-b": { offered: ["j-a"], waiting: [], builds: 0 },
+      "j-c": { offered: ["j-a"], waiting: ["j-b"], builds: 0 },
+    })
   })
 
   test("braked, away, nobody offers it: each reason with its text, and no position under a lock", () => {
@@ -144,7 +181,7 @@ describe("queue", () => {
     const decision = run([{ ...old, reserved: true }, newer, ios], [mac])
     expect(offered(decision)).toEqual(["j-ios→mac"])
     expect(decision.waiting).toMatchObject([
-      { job: "j-old", reason: { code: "orcamento" }, position: 1 },
+      { job: "j-old", reason: { code: "fila" }, position: 1 },
       { job: "j-new", reason: { code: "fila", text: "na fila" }, position: 2 },
     ])
   })

@@ -38,20 +38,52 @@ describe("estimate", () => {
     )
   })
 
-  test("wait: none when it fits now; else until enough of what runs ends, plus what is held ahead", () => {
+  test("wait: none when it fits now; else until enough of what runs ends (the queue), or room (the budget)", () => {
     const now = 1_000_000
-    const base = { now, ceiling: 4, min: 2, braked: false, ahead: [] as number[] }
-    expect(wait({ ...base, free: { builds: 1, devices: 2 }, running: [] })).toBe(0)
+    const base = { now, ceiling: 4, min: 2, builds: 1, braked: false, ahead: [] }
+    expect(wait({ ...base, free: { builds: 1, devices: 2 }, running: [] })).toEqual({ ms: 0, by: "now" })
     const running = [
       { endsAt: now + 9 * minute, devices: 2, building: false },
       { endsAt: now + 3 * minute, devices: 1, building: false },
       { endsAt: now + 5 * minute, devices: 1, building: true },
     ]
     // One device free, no build: the attempt ending in 3 min frees a device, the one in 5 min a build.
-    expect(wait({ ...base, free: { builds: 0, devices: 1 }, running })).toBe(5 * minute)
-    expect(wait({ ...base, free: { builds: 1, devices: 2 }, running, ahead: [4 * minute] })).toBe(4 * minute)
-    expect(wait({ ...base, min: 5, free: { builds: 1, devices: 4 }, running })).toBe(Number.POSITIVE_INFINITY)
+    expect(wait({ ...base, free: { builds: 0, devices: 1 }, running })).toEqual({ ms: 5 * minute, by: "queue" })
+    // Without build (or with its group's build held), the device is enough.
+    expect(wait({ ...base, builds: 0, free: { builds: 0, devices: 1 }, running })).toEqual({
+      ms: 3 * minute,
+      by: "queue",
+    })
+    expect(wait({ ...base, min: 5, free: { builds: 1, devices: 4 }, running })).toEqual({
+      ms: Number.POSITIVE_INFINITY,
+      by: "never",
+    })
+    // Nothing that runs frees enough (the owner's presence took the room): unknown, 5 minutes.
+    expect(wait({ ...base, free: { builds: 1, devices: 0 }, running: [] })).toEqual({ ms: 5 * minute, by: "budget" })
     // A brake reopens after good readings, never because something ended.
-    expect(wait({ ...base, braked: true, free: { builds: 1, devices: 4 }, running: [] })).toBe(5 * minute)
+    expect(wait({ ...base, braked: true, free: { builds: 1, devices: 4 }, running: [] })).toEqual({
+      ms: 5 * minute,
+      by: "brake",
+    })
+  })
+
+  test("wait: each part ahead takes its turn when it fits and holds it for its duration; the next waits for it", () => {
+    const now = 1_000_000
+    const base = { now, ceiling: 4, min: 1, builds: 1, braked: false }
+    // One emulator, busy for 3 more minutes. The 1st waits 3 min; the 2nd waits for the 1st's 4 min on top.
+    const running = [{ endsAt: now + 3 * minute, devices: 1, building: false }]
+    const free = { builds: 1, devices: 0 }
+    expect(wait({ ...base, free, running, ahead: [] })).toEqual({ ms: 3 * minute, by: "queue" })
+    const first = { devices: 1, builds: 1, durationMs: 4 * minute }
+    expect(wait({ ...base, free, running, ahead: [first] })).toEqual({ ms: 7 * minute, by: "queue" })
+    // Two emulators: the 1st takes the one that frees, the 2nd the other one, when it frees.
+    const two = [...running, { endsAt: now + 5 * minute, devices: 1, building: false }]
+    expect(wait({ ...base, free: { builds: 2, devices: 0 }, running: two, ahead: [first] })).toEqual({
+      ms: 5 * minute,
+      by: "queue",
+    })
+    // A part ahead that nothing frees enough for keeps its place and takes nothing.
+    const big = { devices: 3, builds: 1, durationMs: 4 * minute }
+    expect(wait({ ...base, free, running, ahead: [big] })).toEqual({ ms: 3 * minute, by: "queue" })
   })
 })

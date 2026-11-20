@@ -1,4 +1,5 @@
 import type { BancadaProtocol } from "../protocol.js"
+import type { Wait } from "./estimate.js"
 
 /**
  * The queue's choice (`docs/bancada.md`, "Queue"): which waiting part goes to which machine now, with how many
@@ -51,6 +52,17 @@ export type Decision = {
   readonly bypassed: ReadonlyArray<{ readonly job: string; readonly part: string; readonly times: number }>
 }
 
+/**
+ * A machine as one part would find it in this decision: what is left free after the offers made to it so far, the build
+ * slots the part takes there, those offers (they hold from now on) and the parts that wait for it ahead of this one.
+ */
+export type Line = {
+  readonly free: BancadaProtocol.Vector
+  readonly builds: number
+  readonly offered: ReadonlyArray<{ readonly part: QueuedPart; readonly devices: number; readonly builds: number }>
+  readonly waiting: ReadonlyArray<QueuedPart>
+}
+
 /** Bypasses that make a part reserved. */
 export const reserveAfter = 3
 
@@ -59,8 +71,8 @@ export function schedule(input: {
   readonly machines: ReadonlyArray<MachineView>
   /** Exclusive locks held now (by parts offered or running). */
   readonly locks: ReadonlySet<string>
-  /** How long until the part could start on the machine (`estimate.ts`, `wait`). */
-  readonly wait: (part: QueuedPart, machine: MachineView) => number
+  /** How long until the part could start on the machine, and why (`estimate.ts`, `wait`). */
+  readonly wait: (part: QueuedPart, machine: MachineView, line: Line) => Wait
   /** How long the part would take there once started (`estimate.ts`, `duration`). */
   readonly duration: (part: QueuedPart, machine: MachineView) => number
 }): Decision {
@@ -78,16 +90,6 @@ export function schedule(input: {
         capable(part, machine) &&
         !(part.refused?.machineID === machine.machineID && machine.pulse <= part.refused.pulse),
     )
-  const ends = (part: QueuedPart, machine: MachineView) => input.wait(part, machine) + input.duration(part, machine)
-  const best = (part: QueuedPart, among: ReadonlyArray<MachineView>) =>
-    among
-      .map((machine) => ({ machine, ends: ends(part, machine), wait: input.wait(part, machine) }))
-      .toSorted(
-        (a, b) =>
-          a.ends - b.ends ||
-          (room.get(b.machine.machineID)?.memMb ?? 0) - (room.get(a.machine.machineID)?.memMb ?? 0) ||
-          a.machine.machineID.localeCompare(b.machine.machineID),
-      )[0]
   /** Siblings offered in this decision, by request and machine: a group takes one build slot. */
   const grouped = new Set<string>()
   /** The build slots a part takes on a machine: none without `build`, or where its group already holds one. */
@@ -95,6 +97,26 @@ export function schedule(input: {
     !part.spec.build || part.siblingsOn?.includes(machine.machineID) || grouped.has(`${part.job}@${machine.machineID}`)
       ? 0
       : 1
+  /** What was offered to each machine in this decision, and which parts wait for it, in order. */
+  const offeredOn = new Map<string, Line["offered"][number][]>()
+  const waitingOn = new Map<string, QueuedPart[]>()
+  const best = (part: QueuedPart, among: ReadonlyArray<MachineView>) =>
+    among
+      .map((machine) => {
+        const wait = input.wait(part, machine, {
+          free: room.get(machine.machineID)!,
+          builds: builds(part, machine),
+          offered: offeredOn.get(machine.machineID) ?? [],
+          waiting: waitingOn.get(machine.machineID) ?? [],
+        })
+        return { machine, ends: wait.ms + input.duration(part, machine), wait }
+      })
+      .toSorted(
+        (a, b) =>
+          a.ends - b.ends ||
+          (room.get(b.machine.machineID)?.memMb ?? 0) - (room.get(a.machine.machineID)?.memMb ?? 0) ||
+          a.machine.machineID.localeCompare(b.machine.machineID),
+      )[0]
   const fits = (part: QueuedPart, machine: MachineView) => {
     const free = room.get(machine.machineID)
     if (!free || machine.braked || free.builds < builds(part, machine)) return false
@@ -153,12 +175,11 @@ export function schedule(input: {
     }
     if (!fits(part, choice.machine)) {
       if (part.reserved) all.forEach((machine) => held.set(`${machine.machineID}:${part.spec.platform}`, part))
+      waitingOn.set(choice.machine.machineID, [...(waitingOn.get(choice.machine.machineID) ?? []), part])
       waiting.push({
         part,
-        reason: choice.machine.braked
-          ? { code: "freio", text: "máquina no limite" }
-          : { code: "orcamento", text: onlyMacs(part) ? "aguardando um Mac" : "aguardando folga" },
-        ...(Number.isFinite(choice.wait) ? { etaMs: choice.wait } : {}),
+        reason: why(part, choice.machine, choice.wait),
+        ...(Number.isFinite(choice.wait.ms) ? { etaMs: choice.wait.ms } : {}),
         ranked: true,
       })
       continue
@@ -167,6 +188,10 @@ export function schedule(input: {
     const free = room.get(choice.machine.machineID)!
     const taken = builds(part, choice.machine)
     grouped.add(`${part.job}@${choice.machine.machineID}`)
+    offeredOn.set(choice.machine.machineID, [
+      ...(offeredOn.get(choice.machine.machineID) ?? []),
+      { part, devices: proposed, builds: taken },
+    ])
     room.set(choice.machine.machineID, {
       ...free,
       builds: free.builds - taken,
@@ -233,8 +258,16 @@ function older(a: QueuedPart, b: QueuedPart) {
   return a.createdAt - b.createdAt || a.job.localeCompare(b.job) || a.index - b.index
 }
 
-function onlyMacs(part: QueuedPart) {
-  return part.spec.platform === "ios"
+/**
+ * Why a part waits for the machine it would end soonest on (`docs/bancada.md`, "Queue"): the queue explains it when what
+ * runs or waits ahead there frees enough (`fila`, the common case); otherwise it waits for room (`orcamento`). A part
+ * only Macs serve (iOS) waits for a Mac.
+ */
+function why(part: QueuedPart, machine: MachineView, wait: Wait): BancadaProtocol.Reason {
+  if (machine.braked) return { code: "freio", text: "máquina no limite" }
+  if (part.spec.platform === "ios") return { code: "orcamento", text: "aguardando um Mac" }
+  if (wait.by === "queue" || wait.by === "now") return { code: "fila", text: "na fila" }
+  return { code: "orcamento", text: "aguardando folga" }
 }
 
 /** `abacato:servidor-dev` as `servidor-dev`. */

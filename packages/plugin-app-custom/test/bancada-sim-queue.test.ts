@@ -274,4 +274,40 @@ describe("simulation: the queue", () => {
       { machine: "Mac", job: "j-aaaaaaaa", group: "android-1+ios-1", parts: ["android", "ios"] },
     ])
   })
+
+  test("the queue explains the wait: each one behind is 'na fila', one place further and later than the one ahead", async () => {
+    const sim = createWorld({ seed: 20 })
+    sim.addMachine({
+      name: "Linux",
+      hub: true,
+      platform: "linux",
+      capabilities: { android: {} },
+      capacity: { ...room, android: 1 },
+    })
+    const ids = ["j-aaaaaaaa", "j-bbbbbbbb", "j-cccccccc", "j-dddddddd"]
+    ids.forEach((id) => sim.script(id, "android", ok(4 * 60_000)))
+    await sim.advance(1_000)
+    ids.forEach((id) => ask(sim, "Linux", id, [spec("android")]))
+    await sim.advance(10_000)
+    const views = sim.machines
+      .get("Linux")!
+      .db.query<{ id: string; view: string }, []>("SELECT id, view FROM job ORDER BY id")
+      .all()
+      .map((row) => JSON.parse(row.view).android)
+    expect(views[0]).toMatchObject({ state: "rodando" })
+    const waiting = views.slice(1)
+    expect(waiting.map((view) => [view.position, view.reason])).toEqual([
+      [1, { code: "fila", text: "na fila" }],
+      [2, { code: "fila", text: "na fila" }],
+      [3, { code: "fila", text: "na fila" }],
+    ])
+    // Without history every run takes 5 minutes: the 1st waits for what runs, each next one 5 minutes more.
+    const etas = waiting.map((view) => view.etaMs as number)
+    expect(etas[0]).toBeGreaterThan(4 * 60_000)
+    expect(etas[0]).toBeLessThanOrEqual(5 * 60_000)
+    expect([etas[1]! - etas[0]!, etas[2]! - etas[1]!]).toEqual([5 * 60_000, 5 * 60_000])
+    await sim.advance(20 * 60_000)
+    sim.settle()
+    expect(ids.map((id) => sim.facts.delivered.get(id)?.[0]?.outcome?.approved)).toEqual([true, true, true, true])
+  })
 })

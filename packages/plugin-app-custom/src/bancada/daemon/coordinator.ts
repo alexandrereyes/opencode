@@ -738,23 +738,39 @@ export function makeCoordinator(input: {
           .map((row) => row.name),
       ),
       duration: estimateOf,
-      wait: (item, at) =>
-        wait({
+      wait: (item, at, line) => {
+        // Only devices of the part's kind count for it; builds count for every part.
+        const kind = (spec: BancadaProtocol.PartSpec, devices: number) =>
+          spec.platform !== "none" && spec.platform === item.spec.platform ? devices : 0
+        return wait({
           now,
           free: {
-            builds: at.free?.builds ?? 0,
-            devices: item.spec.platform === "none" ? 0 : (at.free?.[item.spec.platform] ?? 0),
+            builds: line.free.builds,
+            devices: item.spec.platform === "none" ? 0 : line.free[item.spec.platform],
           },
           ceiling: Number.POSITIVE_INFINITY,
-          min: item.spec.platform === "none" ? 0 : item.spec.devices.min,
+          min: kind(item.spec, item.spec.devices.min),
+          builds: line.builds,
           braked: at.braked,
-          running: busy(at.machineID).map((row) => ({
-            endsAt: (row.started_at ?? row.since) + (row.est_ms ?? estimates.durationMs),
-            devices: row.devices_granted ?? 0,
-            building: row.state !== "rodando",
+          running: [
+            ...busy(at.machineID).map((row) => ({
+              endsAt: (row.started_at ?? row.since) + (row.est_ms ?? estimates.durationMs),
+              devices: kind(JSON.parse(row.spec), row.devices_granted ?? 0),
+              building: row.state !== "rodando",
+            })),
+            ...line.offered.map((offer) => ({
+              endsAt: now + estimateOf(offer.part, at),
+              devices: kind(offer.part.spec, offer.devices),
+              building: offer.builds > 0,
+            })),
+          ],
+          ahead: line.waiting.map((ahead) => ({
+            devices: kind(ahead.spec, ahead.spec.devices.min),
+            builds: ahead.spec.build ? 1 : 0,
+            durationMs: estimateOf(ahead, at),
           })),
-          ahead: [],
-        }),
+        })
+      },
     })
     for (const offer of decision.offers) {
       const item = byPart.get(`${offer.job}/${offer.part}`)!
