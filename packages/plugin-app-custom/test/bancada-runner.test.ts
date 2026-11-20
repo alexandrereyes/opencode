@@ -223,7 +223,7 @@ describe("detached execution", () => {
     )
     expect(await Bun.file(path.join(dir, "parts/simples/out/marca")).text()).toBe("só no snapshot\n")
     const environment = (await Bun.file(path.join(dir, "parts/simples/out/ambiente.txt")).text()).split("\n")
-    expect(environment).toContain("BANCADA_OUT")
+    expect(environment).toEqual(expect.arrayContaining(["BANCADA_OUT", "BANCADA_DOCKER_LABEL"]))
     expect(environment.filter((name) => name.startsWith("OPENCODE_BANCADA") || name === "BUN_BE_BUN")).toEqual([])
     expect(await Bun.file(path.join(dir, "build.log")).text()).toContain("compilado")
     // Every command was recorded as it started, then its start time, then its end; nothing of their groups is left.

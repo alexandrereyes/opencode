@@ -540,6 +540,8 @@ export function makeProcessLauncher(input: {
       deadlines: longest ? { ...deadlines, runMs: longest * 60_000 } : deadlines,
       ...(input.timing ? { timing: input.timing } : {}),
       lowPriority: input.lowPriority === true,
+      // Containers the project starts carry it (`docs/bancada.md`, "Project contract"), on every machine.
+      env: { BANCADA_DOCKER_LABEL: `bancada.job=${launch.job}` },
     }
     for (const part of launch.parts) {
       await fs.mkdir(path.join(dir, "parts", part.part, "out"), { recursive: true })
