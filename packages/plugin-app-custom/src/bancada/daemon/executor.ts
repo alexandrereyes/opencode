@@ -41,7 +41,15 @@ export type Launch = {
  * A start that found no way to bring the commit (not here, not in the session's repository nor a remote): the executor
  * asks the origin for it through the hub and starts again with the bundle (`docs/bancada.md`, "Frozen code").
  */
-export class CodeMissing extends Error {}
+export class CodeMissing extends Error {
+  constructor(
+    message: string,
+    /** A bundle came and did not apply here: asked again, whole (`transfers.ts`). */
+    readonly spoiled = false,
+  ) {
+    super(message)
+  }
+}
 
 /** How the code of a request asked through the hub stands on this machine (`transfers.ts`). */
 export type CodeState = { readonly state: string; readonly file: string | null; readonly reason: string | null }
@@ -157,6 +165,8 @@ export function makeExecutor(input: {
   /** The code through the hub; without it, a start without code loses its attempt. */
   readonly code?: {
     readonly ask: (job: string, project: string) => void
+    /** The bundle that came did not apply: asked again, whole, while tries are left. */
+    readonly spoiled: (job: string, reason: string) => void
     readonly state: (job: string) => CodeState | undefined
     readonly forget: (job: string) => void
   }
@@ -202,14 +212,15 @@ export function makeExecutor(input: {
    * Work of an attempt that may take long (its start, its removal): it runs on its own and a later round collects how
    * it ended (`docs/bancada.md`, "Process"). Per process: after a restart the launcher says what to start again.
    */
-  const tasks = new Map<string, { done: boolean; failure?: string; missing?: boolean }>()
+  const tasks = new Map<string, { done: boolean; failure?: string; missing?: boolean; spoiled?: boolean }>()
   const run = (id: string, work: () => Promise<void>) => {
-    const task: { done: boolean; failure?: string; missing?: boolean } = { done: false }
+    const task: { done: boolean; failure?: string; missing?: boolean; spoiled?: boolean } = { done: false }
     tasks.set(id, task)
     void work()
       .catch((error: unknown) => {
         task.failure = error instanceof Error ? error.message : String(error)
         task.missing = error instanceof CodeMissing
+        task.spoiled = error instanceof CodeMissing && error.spoiled
       })
       .finally(() => {
         task.done = true
@@ -587,8 +598,9 @@ export function makeExecutor(input: {
       const slash = id.indexOf("/")
       const rows = inGroup.all(id.slice("start:".length, slash), id.slice(slash + 1))
       const first = rows[0]
-      // The code is not here: asked from the origin through the hub; the group forms again when it arrives.
-      if (task.missing && first && input.code && throughHub(first)) {
+      // The code is not here, or its bundle did not apply (infrastructure, never the code's fault): asked from the
+      // origin through the hub, whole after a bundle that failed; the group forms again when it arrives.
+      if (task.missing && first && input.code && (throughHub(first) || task.spoiled)) {
         rows.forEach((row) =>
           db.run("UPDATE attempt SET group_id = NULL WHERE job_id = ? AND part = ? AND n = ?", [
             row.job_id,
@@ -596,7 +608,8 @@ export function makeExecutor(input: {
             row.n,
           ]),
         )
-        input.code.ask(first.job_id, (JSON.parse(first.code) as BancadaProtocol.Code).project)
+        if (task.spoiled) input.code.spoiled(first.job_id, task.failure ?? "o pacote não se aplicou")
+        else input.code.ask(first.job_id, (JSON.parse(first.code) as BancadaProtocol.Code).project)
         continue
       }
       if (task.failure !== undefined) {

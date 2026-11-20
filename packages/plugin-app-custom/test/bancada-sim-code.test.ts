@@ -282,6 +282,47 @@ describe("simulation: code through the hub (S13)", () => {
     expect(sim.machines.get("Mac")!.db.query("SELECT COUNT(*) AS n FROM code_out").get()).toEqual({ n: 0 })
   })
 
+  test("the origin cannot make the bundle: the executor gives up after 30 min with the reason, frees its budget, and the part runs once more", async () => {
+    const sim = world(49)
+    sim.unbundle()
+    await sim.advance(1_000)
+    ask(sim)
+    await sim.advance(5 * 60_000)
+    // Accepted and waiting for its code: it holds the machine meanwhile, and the origin said why it cannot send it.
+    const linux = sim.machines.get("Linux")!
+    expect(
+      sim.machines
+        .get("Mac")!
+        .core.alerts()
+        .map((alert) => alert.text),
+    ).toContainEqual("o código do pedido j-aaaaaaaa não pôde ser enviado: o git não conseguiu fazer o pacote do commit")
+    // Infrastructure: it runs once more (asking again), and gives up again.
+    await sim.advance(65 * 60_000)
+    sim.settle()
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([
+      {
+        state: "perdido",
+        attempts: 2,
+        outcome: { verdict: "infraestrutura", reason: expect.stringContaining("o código não chegou em 30 min") },
+      },
+    ])
+    expect(linux.db.query("SELECT COUNT(*) AS n FROM lease WHERE state = 'active'").get()).toEqual({ n: 0 })
+  }, 30_000)
+
+  test("a bundle that does not apply where it arrives is infrastructure: asked again, whole, and the same attempt runs", async () => {
+    const sim = world(50)
+    sim.unapply(1)
+    await sim.advance(1_000)
+    ask(sim)
+    await sim.advance(5 * 60_000)
+    sim.settle()
+    expect(sim.logs).toContainEqual(expect.stringContaining("o pacote não se aplicou (bundle: git saiu com 1)"))
+    expect(sim.facts.delivered.get("j-aaaaaaaa")).toMatchObject([
+      { state: "concluido", attempts: 1, outcome: { approved: true } },
+    ])
+    expect(sim.facts.starts.get("j-aaaaaaaa/android")).toBe(1)
+  })
+
   test("a bundle that arrives with another SHA-256 is never fetched from: asked again, and the good one runs", async () => {
     const sim = world(44)
     sim.spoil(1)

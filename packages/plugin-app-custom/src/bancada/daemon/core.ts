@@ -236,7 +236,9 @@ export function createCore(ports: Ports) {
     wake: () => void tick(),
     keepMs: times.tombstoneMs,
     slots: () => holds.waiting(),
-    ...(transfers.enabled() ? { code: { ask: transfers.ask, state: transfers.code, forget: transfers.forget } } : {}),
+    ...(transfers.enabled()
+      ? { code: { ask: transfers.ask, spoiled: transfers.spoiled, state: transfers.code, forget: transfers.forget } }
+      : {}),
   })
   /** The queue: every machine's on the hub; elsewhere, this machine's own, for its requests while the hub is out. */
   const queue = makeCoordinator({

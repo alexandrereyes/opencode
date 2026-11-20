@@ -496,7 +496,7 @@ export function makeProcessLauncher(input: {
       input.workdirs.release(workdir)
       const reason = `o código não chegou (${fetched.tried.join("; ") || "nenhuma fonte"})`
       // Without the origin's bundle yet, the executor asks for it through the hub; with it, the bundle was bad.
-      throw launch.bundle ? new Error(reason) : new CodeMissing(reason)
+      throw new CodeMissing(reason, launch.bundle !== undefined)
     }
     const contract = await contractAt(input.git, workdir.path, launch.code.commit, launch.code.project)
     const missing = contract.ok ? launch.parts.filter((part) => !contract.contract.tests[part.part]) : []

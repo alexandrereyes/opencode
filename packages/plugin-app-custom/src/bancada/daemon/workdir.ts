@@ -24,7 +24,7 @@ export type Sources = {
 }
 
 export type Fetched =
-  | { readonly ok: true; readonly via: "present" | "local" | "remote" | "bundle" }
+  | { readonly ok: true; readonly via: "present" | "folder" | "local" | "remote" | "bundle" }
   | { readonly ok: false; readonly tried: ReadonlyArray<string> }
 
 type Row = {
@@ -107,8 +107,26 @@ export function makeWorkdirs(input: {
       workdir.id,
     ])
 
-  const has = async (workdir: Workdir, commit: string) =>
+  const has = async (workdir: Pick<Workdir, "path">, commit: string) =>
     (await git(["cat-file", "-e", `${commit}^{commit}`], { cwd: workdir.path })).code === 0
+  /**
+   * Brings `commits` from the project's other working folders that have them (an earlier attempt's folder): a local
+   * fetch, no transfer. What none of them has stays missing.
+   */
+  const borrow = async (workdir: Workdir, commits: ReadonlyArray<string>) => {
+    const others = byProject.all(workdir.project).filter((row) => row.path !== workdir.path)
+    for (const commit of commits) {
+      if (await has(workdir, commit)) continue
+      for (const other of others) {
+        if (!(await has(other, commit))) continue
+        const fetched = await git(
+          ["-c", "uploadpack.allowAnySHA1InWant=true", "fetch", "--no-tags", "--quiet", other.path, commit],
+          { cwd: workdir.path },
+        )
+        if (fetched.code === 0 && (await has(workdir, commit))) break
+      }
+    }
+  }
 
   /**
    * Brings the commit into the folder, stopping at the first source that works; each keeps it under
@@ -143,13 +161,24 @@ export function makeWorkdirs(input: {
         ? [
             {
               via: "bundle" as const,
-              run: async () =>
-                (await step(["bundle", "verify", "--quiet", sources.bundle!.file])) ??
-                step(["fetch", "--no-tags", sources.bundle!.file, into]),
+              run: async () => {
+                // The bundle needs what this machine said it has, which may be in another of its folders.
+                await borrow(workdir, await prerequisites(sources.bundle!.file))
+                return (
+                  (await step(["bundle", "verify", "--quiet", sources.bundle!.file])) ??
+                  step(["fetch", "--no-tags", sources.bundle!.file, into])
+                )
+              },
             },
           ]
         : []),
     ]
+    // Another folder of the project has it (an earlier attempt of the request ran there): from it, no transfer.
+    await borrow(workdir, [commit])
+    if (await has(workdir, commit)) {
+      await git(["update-ref", ref(sources.job), commit], { cwd: workdir.path })
+      return { ok: true, via: "folder" }
+    }
     const tried: string[] = []
     for (const attempt of attempts) {
       const failure = await attempt.run()
@@ -228,4 +257,16 @@ export function scrubCommands(): string[][] {
 /** A project name as a folder name. */
 function slug(project: string) {
   return project.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+/, "") || "projeto"
+}
+
+/** The commits a git bundle needs the receiver to have (its header's `-<sha>` lines). */
+export async function prerequisites(file: string) {
+  const head = await Bun.file(file)
+    .slice(0, 1024 * 1024)
+    .text()
+    .catch(() => "")
+  const end = head.indexOf("\n\n")
+  return (end < 0 ? head : head.slice(0, end))
+    .split("\n")
+    .flatMap((line) => (/^-[0-9a-f]{40,64}\b/.test(line) ? [line.slice(1).split(" ")[0]!] : []))
 }

@@ -200,11 +200,50 @@ describe("working folders", () => {
       ok: true,
       via: "bundle",
     })
-    // A folder without the bundle's prerequisites refuses it before taking anything.
-    const empty = await folders.acquire("bancada-exemplo", third.frozen.commit, "j-cccccccc/g2")
-    expect(empty.path).not.toBe(folder.path)
-    const refused = await folders.fetch(empty, third.frozen.commit, { job: "j-cccccccc", bundle: { file: thin } })
+    // A folder without the bundle's prerequisites, and no other folder of its project that has them, refuses it
+    // before taking anything.
+    const alone = await folders.acquire("outro-projeto", third.frozen.commit, "j-cccccccc/g3")
+    const refused = await folders.fetch(alone, third.frozen.commit, { job: "j-cccccccc", bundle: { file: thin } })
     expect(refused).toMatchObject({ ok: false, tried: [expect.stringContaining("bundle:")] })
+  })
+
+  test("two folders of a project: the bundle made for what the machine has applies in the folder that lacks it; the code one folder has needs no transfer", async () => {
+    const { root, repository } = await project()
+    const { workdirs: folders } = workdirs(root)
+    // Folder 1 ran the first request; folder 2 an older commit only (another attempt ran there at the same time).
+    const older = await git(repository, "rev-parse", "HEAD")
+    await git(repository, "commit", "-q", "--allow-empty", "-m", "segundo")
+    const first = await freeze({ git: runGit, directory: repository, job: "j-aaaaaaaa", snapshot: false })
+    if (!first.ok) throw new Error(first.problems.join("\n"))
+    const one = await folders.acquire("bancada-exemplo", first.frozen.commit, "j-aaaaaaaa/g1")
+    const two = await folders.acquire("bancada-exemplo", older, "j-zzzzzzzz/g1")
+    expect(await folders.fetch(one, first.frozen.commit, { job: "j-aaaaaaaa", local: { repository } })).toMatchObject({
+      ok: true,
+    })
+    await git(two.path, "fetch", "-q", "--no-tags", repository, `${older}:refs/bancada/antigo`)
+    folders.release(one, first.frozen.commit)
+    // The next request: the machine says what all its folders have; the bundle is made without those commits.
+    await git(repository, "commit", "-q", "--allow-empty", "-m", "terceiro")
+    const next = await freeze({ git: runGit, directory: repository, job: "j-bbbbbbbb", snapshot: false })
+    if (!next.ok) throw new Error(next.problems.join("\n"))
+    const have = await folders.have("bancada-exemplo")
+    const thin = path.join(root, "thin.bundle")
+    expect(await bundle(runGit, repository, "j-bbbbbbbb", have, thin)).toBe(true)
+    // Folder 1 is busy elsewhere; the request gets folder 2, which lacks the bundle's prerequisite (`git bundle verify`
+    // alone would refuse it): it takes it from folder 1 first.
+    expect(await git(two.path, "bundle", "verify", "--quiet", thin).catch(() => "recusado")).toBe("recusado")
+    expect(await folders.fetch(two, next.frozen.commit, { job: "j-bbbbbbbb", bundle: { file: thin } })).toEqual({
+      ok: true,
+      via: "bundle",
+    })
+    // A request whose commit folder 1 already has (an earlier attempt of it ran there) takes it from there.
+    const fresh = await folders.acquire("bancada-exemplo", first.frozen.commit, "j-cccccccc/g1")
+    const third = fresh.path === one.path ? await folders.acquire("bancada-exemplo", "x", "j-dddddddd/g1") : fresh
+    expect(await folders.fetch(third, first.frozen.commit, { job: "j-aaaaaaaa" })).toEqual({ ok: true, via: "folder" })
+    // The origin asked by a machine that already has the commit (in some folder) still makes a bundle, never an empty
+    // one git refuses.
+    const again = path.join(root, "again.bundle")
+    expect(await bundle(runGit, repository, "j-aaaaaaaa", [first.frozen.commit, older], again)).toBe(true)
   })
 
   test("a free folder that held the commit is preferred, a busy one never shared nor taken twice, an unused one pruned", async () => {

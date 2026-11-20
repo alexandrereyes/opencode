@@ -129,7 +129,7 @@ export function createWorld(options: {
    * Faults of transfers: the hub's store spoils the next `spoil` files it receives, after its own check (`sha256`
    * wrong on the way out); the `cut`-th chunk sent to the hub from now on is lost on the way.
    */
-  const store = { spoil: 0, cut: 0 }
+  const store = { spoil: 0, cut: 0, unbundled: false, unapplied: 0 }
   const files = (machine: string): Files => ({
     path: (name) => `${machine}/${name}`,
     size: async (file) => disk.get(file)?.byteLength ?? 0,
@@ -139,6 +139,7 @@ export function createWorld(options: {
     remove: async (file) => void disk.delete(file),
     bundle: async ({ job, file }) => {
       if (!machines.get(machine)?.awake) throw new Error(`${machine} is asleep`)
+      if (store.unbundled) return false
       disk.set(file, bundleOf(job))
       return true
     },
@@ -217,6 +218,11 @@ export function createWorld(options: {
         if (!launch.bundle) throw new CodeMissing(`${machine} has no copy of ${launch.job}`)
         const got = disk.get(launch.bundle)
         if (!got || sha256(got) !== sha256(bundleOf(launch.job))) throw new Error("git bundle verify failed")
+        // A bundle whose prerequisites this folder lacks: the start reports it, as the process launcher does.
+        if (store.unapplied > 0) {
+          store.unapplied--
+          throw new CodeMissing("bundle: git saiu com 1", true)
+        }
         facts.bundles.push({ machine, job: launch.job })
       }
       facts.launches.push({
@@ -453,6 +459,14 @@ export function createWorld(options: {
     /** The hub's store spoils the next `count` files it receives (after its own check). */
     spoil: (count: number) => {
       store.spoil = count
+    },
+    /** The next `count` bundles do not apply where they arrive (`git bundle verify` exits 1). */
+    unapply: (count: number) => {
+      store.unapplied = count
+    },
+    /** From now on no origin can make a bundle (git refuses). */
+    unbundle: () => {
+      store.unbundled = true
     },
     /**
      * Writes a message straight into a machine's outbox to the hub, as a release with another shape would: its body may

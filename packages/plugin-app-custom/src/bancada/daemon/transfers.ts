@@ -53,6 +53,11 @@ export const limits = {
   evidenceWaitMs: 2 * 60_000,
   /** Times an executor asks for a request's code before its attempts are lost. */
   tries: 3,
+  /**
+   * An executor that asked for a request's code and heard of no transfer for this long gives up: its attempts end with
+   * the reason (the origin could not make the bundle, or the hub forgot) instead of holding the machine.
+   */
+  codeWaitMs: 30 * 60_000,
   /** A transfer's work that failed (the hub did not answer) waits this long before it is tried again. */
   retryMs: 5_000,
 }
@@ -75,6 +80,7 @@ type CodeIn = {
   readonly reason: string | null
   readonly tries: number
   readonly asked_at: number
+  readonly first_asked_at: number | null
 }
 type BlobRow = {
   readonly transfer: string
@@ -306,9 +312,21 @@ export function makeTransfers(input: {
       row.job_id,
     ])
   }
-  /** Tells the hub what this machine has of the project, so the bundle carries less. */
+  const giveUp = (row: CodeIn) => {
+    const reason = `o código não chegou em ${Math.round(limits.codeWaitMs / 60_000)} min (a origem não o enviou)`
+    input.log(`the code of ${row.job_id} did not arrive: gave up after ${Math.round(limits.codeWaitMs / 60_000)} min`)
+    db.run("UPDATE code_in SET state = 'falhou', reason = ?, transfer = NULL WHERE job_id = ? AND state = 'pedido'", [
+      reason,
+      row.job_id,
+    ])
+    input.alerts.raise(`codigo-esperado:${row.job_id}`, "codigo", `o pedido ${row.job_id} desistiu: ${reason}`)
+  }
+  /**
+   * Tells the hub what this machine has of the project, so the bundle carries less; after a bundle that failed,
+   * nothing: the next one comes whole.
+   */
   const ask = async (row: CodeIn) => {
-    const have = await input.files!.have(row.project)
+    const have = row.tries > 0 ? [] : await input.files!.have(row.project)
     db.transaction(() => {
       const changed = db.run("UPDATE code_in SET state = 'pedido', asked_at = ? WHERE job_id = ? AND state = 'pedir'", [
         input.now(),
@@ -436,9 +454,17 @@ export function makeTransfers(input: {
     /** The executor: the code of `job` could not be brought here; it is asked through the hub. */
     ask: (job: string, project: string) =>
       void db.run(
-        "INSERT INTO code_in (job_id, project, state, asked_at) VALUES (?, ?, 'pedir', ?) ON CONFLICT (job_id) DO UPDATE SET state = 'pedir' WHERE state <> 'falhou'",
-        [job, project, input.now()],
+        "INSERT INTO code_in (job_id, project, state, asked_at, first_asked_at) VALUES (?, ?, 'pedir', ?, ?) ON CONFLICT (job_id) DO UPDATE SET state = 'pedir' WHERE state <> 'falhou'",
+        [job, project, input.now(), input.now()],
       ),
+    /** The executor: the bundle of `job` came and did not apply; asked again, whole, while tries are left. */
+    spoiled: (job: string, reason: string) => {
+      const row = codeIn.get(job)
+      if (!row || row.state !== "pronto") return
+      if (row.file && input.files) void input.files.remove(row.file).catch(() => undefined)
+      db.run("UPDATE code_in SET file = NULL WHERE job_id = ?", [job])
+      retry({ ...row, file: null }, `o pacote não se aplicou (${reason})`, true)
+    },
     /** The executor: where the code of `job` is (in the transaction that applies the message). */
     source: (message: typeof BancadaProtocol.CodeSource.Type) => {
       if (!("transfer" in message.source)) return
@@ -484,7 +510,9 @@ export function makeTransfers(input: {
         incoming.all().forEach((row) => {
           if (row.state === "pedir") return run(`in:${row.job_id}`, () => ask(row))
           if (row.state === "baixar") return run(`in:${row.job_id}`, () => download(row))
-          // Asked long ago and nothing came (the hub forgot, the transfer expired): asked again.
+          // Asked first `codeWaitMs` ago and still nothing: the attempts waiting for it end with the reason. Asked long
+          // ago and nothing came (the hub forgot, the transfer expired): asked again.
+          if (input.now() - (row.first_asked_at ?? row.asked_at) >= limits.codeWaitMs) return giveUp(row)
           if (input.now() - row.asked_at >= input.transferMs) retry(row, "nada chegou a tempo", false)
         })
       }

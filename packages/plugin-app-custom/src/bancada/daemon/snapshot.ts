@@ -100,12 +100,16 @@ export async function release(git: Git, root: string, job: string) {
 
 /**
  * A git bundle of the request's commit for a machine that has `have` (the tips of its working folders): only the
- * objects it lacks, when the session's repository knows those commits. Returns false when git refused.
+ * objects it lacks, when the session's repository knows those commits. A tip that already contains the commit is left
+ * out (the machine has it in another folder): the bundle is never empty. Returns false when git refused.
  */
 export async function bundle(git: Git, root: string, job: string, have: ReadonlyArray<string>, file: string) {
   const known = await Promise.all(
     have.map(async (commit) =>
-      (await git(["cat-file", "-e", `${commit}^{commit}`], { cwd: root })).code === 0 ? [commit] : [],
+      (await git(["cat-file", "-e", `${commit}^{commit}`], { cwd: root })).code === 0 &&
+      (await git(["merge-base", "--is-ancestor", ref(job), commit], { cwd: root })).code !== 0
+        ? [commit]
+        : [],
     ),
   )
   const result = await git(["bundle", "create", file, ref(job), "--not", ...known.flat()], { cwd: root })

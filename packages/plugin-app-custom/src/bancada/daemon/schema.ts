@@ -341,6 +341,8 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       PRIMARY KEY (project, test, machine_id)
     )`,
   ],
+  // When an executor first asked for a request's code: past `limits.codeWaitMs` it gives up (`transfers.ts`).
+  ["ALTER TABLE code_in ADD COLUMN first_asked_at INTEGER"],
 ]
 
 /** A database written by a newer release: opening it could corrupt it, so this release stays unavailable. */
