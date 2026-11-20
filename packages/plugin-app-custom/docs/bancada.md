@@ -35,8 +35,9 @@ end; nothing is approved without both. The example project (`test/fixture/bancad
   `<prefixo><modelo>-<n>`, booted trimmed by `simslim`, given back shut down and erased.
 - **host-6** (`devices/android-docker.ts`, `launcher/docker.ts`): each execution in a sibling container (the server's
   image and binary, the attempt's folders mounted at the same paths, limits, labels, no Docker socket) and each
-  emulator in its own container (`<prefixo>emu-<n>`, KVM, the emulators' network), given back with third-party
-  packages uninstalled and the container removed; the AVD volume stays.
+  emulator in its own container (`<prefixo>emu-<n>`, KVM, the emulators' network; Wi-Fi stays on, it is its only
+  network, and the device is delivered once it routes to the execution), given back with third-party packages
+  uninstalled and the container removed; the AVD volume stays.
 - Only devices of the `device` table, named with the machine's prefix, are ever stopped. A device dead, or mute for
   60 s, during a run fell: the scenarios it lost run again once elsewhere; two falls in a row put it 30 min aside.
 

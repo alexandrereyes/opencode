@@ -1,3 +1,4 @@
+import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
@@ -172,6 +173,8 @@ export function dockerExecutions(input: {
       self.current ??= await docker.self()
       const home = path.join(input.state, "home")
       const folders = [dir, path.join(input.state, "work"), home]
+      // A volume's subpath must exist before it is mounted.
+      await Promise.all(folders.map((folder) => fs.mkdir(folder, { recursive: true })))
       const mounts = folders.map((folder) => {
         const mount = mountFor(folder, self.current!.mounts)
         if (!mount) throw new Error(`${folder} não está num volume deste contêiner: o modo docker não pode montá-lo`)

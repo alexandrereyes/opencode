@@ -93,7 +93,7 @@ const headers = { authorization: `Basic ${btoa(`opencode:${password}`)}`, "conte
 function rpcResponse(name: string, route: string, input: unknown) {
   const server = servers.get(name)!
   const url = new URL(`/api/rpc/${route}`, server.base)
-  url.searchParams.set("location[directory]", path.join(server.root, "repo"))
+  url.searchParams.set("location[directory]", server.root)
   return fetch(url, { method: "POST", headers, body: JSON.stringify({ input }), signal: AbortSignal.timeout(130_000) })
 }
 async function rpc<T>(name: string, route: string, input: unknown) {
@@ -156,7 +156,9 @@ async function notice(name: string, sessionID: string, ms: number) {
     120_000,
   )
   await Bun.sleep(5_000)
-  return (await synthetic(name, sessionID)).map((message) => message.text!)
+  const texts = (await synthetic(name, sessionID)).map((message) => message.text!)
+  texts.forEach((text) => log(`notice in ${name}:\n${text}`))
+  return texts
 }
 
 function record(scenario: string, ok: boolean, detail: string) {
@@ -285,7 +287,8 @@ async function clean() {
   }
 }
 
-const times = `[tempos]\nsilenciosa_s = 20\nincerto_s = 60\nperdido_s = 300\nmodo_local_s = 30\n`
+// Shorter than production's, but never below the link's long poll (25 s): a machine waiting on it is not silent.
+const times = `[tempos]\nincerto_s = 90\nperdido_s = 300\n`
 
 async function mac() {
   await start({
@@ -326,14 +329,14 @@ async function linux() {
     name: "lhub",
     port: 47_521,
     hub: true,
-    machine: `versao = 1\nprefixo = "bancada-test-lhub-"\nrotulos = ["purpose=bancada-test"]\n[orcamento]\nmemoria_gb = 16\ncpu = 8\nmax_android = 1\n[execucao]\nmodo = "docker"\ncpus = 4\nmemoria_gb = 6\n[android.docker]\nimagem = "opencode-android:emu37.2.13-api36-google-r7"\nrede = "opencode-android-private"\ncpus_por_emulador = 4\nmemoria_por_emulador_gb = 6\n[portas]\nemulador = "5760-5779"\nprojeto = "48300-48399"\n${times}`,
+    machine: `versao = 1\nprefixo = "bancada-test-lhub-"\nrotulos = ["purpose=bancada-test"]\n[orcamento]\nmemoria_gb = 32\ncpu = 16\nmax_android = 1\n[execucao]\nmodo = "docker"\ncpus = 4\nmemoria_gb = 6\n[android.docker]\nimagem = "opencode-android:emu37.2.13-api36-google-r7"\nrede = "opencode-android-private"\ncpus_por_emulador = 4\nmemoria_por_emulador_gb = 6\n[portas]\nemulador = "5760-5779"\nprojeto = "48300-48399"\n${times}`,
   })
   await start(
     {
       name: "lmaq",
       port: 47_522,
       hub: false,
-      machine: `versao = 1\nprefixo = "bancada-test-lmaq-"\netiquetas = ["so-na-maq"]\nnao_oferecer = ["android", "docker"]\n[orcamento]\nmemoria_gb = 8\ncpu = 4\n[execucao]\nmodo = "processo"\n[portas]\nemulador = "5780-5799"\nprojeto = "48400-48499"\n${times}`,
+      machine: `versao = 1\nprefixo = "bancada-test-lmaq-"\netiquetas = ["so-na-maq"]\nnao_oferecer = ["android", "docker"]\n[orcamento]\nmemoria_gb = 16\ncpu = 8\n[execucao]\nmodo = "processo"\n[portas]\nemulador = "5780-5799"\nprojeto = "48400-48499"\n${times}`,
     },
     47_521,
   )
@@ -350,9 +353,9 @@ async function linux() {
   {
     const sessionID = await session("lmaq", "Android em contêiner")
     const job = await submit("lmaq", sessionID, ["android"])
-    const seen = { run: "", emulator: "" }
+    const seen = { run: "", emulator: "", done: false }
     const watcher = (async () => {
-      for (const _ of Array.from({ length: 900 })) {
+      while (!seen.done) {
         const listed = Bun.spawnSync([
           "docker",
           "ps",
@@ -378,7 +381,9 @@ async function linux() {
         await Bun.sleep(2_000)
       }
     })()
-    const texts = await notice("lmaq", sessionID, 40 * 60_000)
+    const texts = await notice("lmaq", sessionID, 40 * 60_000).finally(() => {
+      seen.done = true
+    })
     await watcher.catch(() => undefined)
     await Bun.sleep(20_000)
     const containers = (await leftovers()).filter((item) => item.startsWith("container:"))
@@ -447,6 +452,8 @@ async function linux() {
 }
 
 try {
+  // Fresh folders: what an earlier round left (a request half done) must not take part in this one.
+  await fs.rm(scratch, { recursive: true, force: true })
   await fs.mkdir(scratch, { recursive: true })
   await (pair === "mac" ? mac() : linux())
 } catch (error) {

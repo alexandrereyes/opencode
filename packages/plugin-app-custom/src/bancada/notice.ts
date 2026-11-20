@@ -91,7 +91,7 @@ function line(part: Input["parts"][number]) {
     tallied(scenarios, "ignorado", "ignorado", "ignorados"),
     outcome?.lost.length ? count(outcome.lost.length, "sem resultado", "sem resultado") : undefined,
   ].filter((item): item is string => item !== undefined)
-  const retried = outcome?.retried
+  const retried = outcome?.retried?.count
     ? `; ${count(outcome.retried.count, "refeito", "refeitos")}${because(outcome.retried.reason)}`
     : ""
   const problem = trouble(result)

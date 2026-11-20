@@ -50,7 +50,12 @@ if [ -n "$aparelhos" ]; then
   while IFS= read -r linha; do
     i=$((i + 1))
     case "$(campo "$linha" plataforma)" in
-      android) ids_aparelhos="$ids_aparelhos ligado-$i limpo-$i wifi-$i rede-$i" ;;
+      # Wi-Fi desligado só no emulador da própria máquina (adb local): no contêiner do host-6 é a única rede.
+      android)
+        case "$linha" in
+          *'"adb":{"host":"127.0.0.1"'*) ids_aparelhos="$ids_aparelhos ligado-$i limpo-$i wifi-$i rede-$i" ;;
+          *) ids_aparelhos="$ids_aparelhos ligado-$i limpo-$i rede-$i" ;;
+        esac ;;
       ios) ids_aparelhos="$ids_aparelhos ligado-$i limpo-$i captura-$i porta-$i" ;;
     esac
   done <<FIM

@@ -91,7 +91,8 @@ export function androidDocker(input: {
     )
     if (started.code !== 0) throw new Error(`o contêiner de ${name} não partiu: ${started.stderr.trim()}`)
   }
-  const ready = async (name: string) => {
+  /** Booted, the radio stopped, dialogs hidden, and its network (Wi-Fi: the only one here) up to `host`. */
+  const ready = async (name: string, host: string | undefined) => {
     const deadline = Date.now() + 8 * 60_000
     while (Date.now() < deadline) {
       if ((await shell(name, "shell", "getprop", "sys.boot_completed")).out.trim() === "1") break
@@ -105,8 +106,15 @@ export function androidDocker(input: {
     await shell(
       name,
       "shell",
-      "setprop ctl.stop vendor.radio-ranchu; settings put global hide_error_dialogs 1; am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null; input keyevent HOME; svc wifi disable",
+      "setprop ctl.stop vendor.radio-ranchu; settings put global hide_error_dialogs 1; am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null; input keyevent HOME",
     )
+    // Wi-Fi stays on: in its container the emulator has no other network, and it comes up a while after the boot.
+    const routed = Date.now() + 3 * 60_000
+    while (Date.now() < routed) {
+      if ((await shell(name, "shell", "ip", "route", "get", host ?? "10.0.2.2")).out.includes(" dev ")) return
+      await sleep(3_000)
+    }
+    throw new Error(`${name} ligou sem rede`)
   }
   /** Third-party packages uninstalled, forwards and reverses gone: what a test left. */
   const clean = async (name: string) => {
@@ -131,6 +139,7 @@ export function androidDocker(input: {
     ready: async (device, slot, key) => {
       const started = Date.now()
       const volume = `${device.id}-avd`
+      const host = await input.host(key)
       const fresh = (await docker.run(["volume", "inspect", volume])).code !== 0
       if (fresh)
         await docker.run([
@@ -142,16 +151,15 @@ export function androidDocker(input: {
           volume,
         ])
       await start(device.id)
-      await ready(device.id)
+      await ready(device.id, host)
       if (fresh) {
         await sleep(90_000)
         await shell(device.id, "emu", "kill")
         await sleep(10_000)
         await start(device.id)
-        await ready(device.id)
+        await ready(device.id, host)
       }
       await clean(device.id)
-      const host = await input.host(key)
       input.log(`${device.id} ready in ${Math.round((Date.now() - started) / 1000)} s${fresh ? " (new volume)" : ""}`)
       return {
         run: { serial: "emulator-5554", container: device.id },
