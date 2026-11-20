@@ -139,13 +139,14 @@ export function registerBancadaTools(
             const wait = input.esperar ?? family.subagent
             if (!wait) {
               const placed = yield* confirmed(client, submitted.job)
-              return { output: submitted, content: submittedText(submitted, placed) }
+              return { content: submittedText(submitted, placed) }
             }
             const notice = yield* waitFor(client, submitted.job, context.cancel)
-            if (notice) return { output: submitted, content: notice }
+            // The notice is delivered once the call's result is the session's (`hook.ts`, after the call): a call
+            // that fails from here on leaves it to come as a message.
+            if (notice) return { content: notice, metadata: { [noticeKey]: submitted.job } }
             const placed = yield* confirmed(client, submitted.job)
             return {
-              output: submitted,
               content: `${submittedText(submitted, placed).replace(`\n${sentences.later}`, "")}\n${sentences.stopped}`,
             }
           }),
@@ -345,7 +346,17 @@ function confirmed(client: BancadaClient, job: string) {
   return Effect.suspend(() => poll(Date.now() + 3_000))
 }
 
-/** Holds the tool until the notice is ready (25 s at a time); hands it back and marks it delivered. */
+/**
+ * `bancada_run`'s result carries the notice it waited for under this key: the hook acknowledges it once the call
+ * completed (`hook.ts`).
+ */
+export const noticeKey = "bancadaAviso"
+
+/**
+ * Holds the tool until the notice is ready (25 s at a time) and hands it back. While it asks, the notice does not go as
+ * a message; it is marked delivered only after the call completed (`hook.ts`), and goes as a message a minute after
+ * the last ask otherwise.
+ */
 function waitFor(client: BancadaClient, job: string, cancel: Effect.Effect<void> | undefined) {
   // `inline`: this is the tool that waits; the notice does not go as a message while it asks.
   const poll: Effect.Effect<string> = call(() =>
@@ -357,12 +368,7 @@ function waitFor(client: BancadaClient, job: string, cancel: Effect.Effect<void>
       return notice ? Effect.succeed(notice) : Effect.sleep("1 second").pipe(Effect.andThen(poll))
     }),
   )
-  const delivered = (notice: string) =>
-    call(() => client.call("notice.ack", { job, inline: true })).pipe(
-      Effect.catch(() => Effect.void),
-      Effect.as(notice),
-    )
-  const waiting = poll.pipe(Effect.flatMap(delivered))
+  const waiting = poll
   // Cancelled by the user: the notice goes the normal way, as a message.
   return cancel
     ? Effect.raceFirst(waiting, cancel.pipe(Effect.as(undefined as string | undefined)))

@@ -9,7 +9,7 @@ import type { BancadaClient } from "./client.js"
 import { inspect, reserved, touchesDevices } from "./commands.js"
 import { parseContract } from "./contract.js"
 import { runGit } from "./daemon/git.js"
-import { familyOf } from "./tools.js"
+import { familyOf, noticeKey } from "./tools.js"
 
 /**
  * The Bancada's hook on shell commands (`docs/bancada.md`, "Hook"). Step 1 here: a command the session's repository
@@ -92,7 +92,11 @@ export function makeBancadaHook(ctx: Pick<Context, "session">, client: BancadaCl
           return yield* new Tool.Error({ message: decision.value.message ?? "A Bancada recusou este comando." })
       }),
     after: (event: ToolHooks["execute.after"]) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
+        // `bancada_run` waited and its result is the notice: delivered now that the call completed.
+        const job = event.status === "completed" ? event.result.metadata?.[noticeKey] : undefined
+        if (typeof job === "string")
+          yield* Effect.promise(() => client.call("notice.ack", { job, inline: true }).catch(() => undefined))
         if (!unchecked.delete(event.id) || event.status !== "completed") return
         const content =
           typeof event.result.content === "string"

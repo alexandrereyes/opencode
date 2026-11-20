@@ -60,11 +60,14 @@ afterAll(async () => {
     if (value !== undefined) process.env[name] = value
   })
   if (!world.root) return
-  const info = (await Bun.file(path.join(world.root, "state", "bancada.json"))
-    .json()
-    .catch(() => undefined)) as { pid: number } | undefined
-  if (info && (await liveness(info.pid)).state !== "dead") process.kill(info.pid, "SIGTERM")
-  if (info) await until(async () => (await liveness(info.pid)).state === "dead", 5_000).catch(() => undefined)
+  // Each test's plugin is another server: each has a Bancada of its own.
+  for (const state of ["state", "state-tools"]) {
+    const info = (await Bun.file(path.join(world.root, state, "bancada.json"))
+      .json()
+      .catch(() => undefined)) as { pid: number } | undefined
+    if (info && (await liveness(info.pid)).state !== "dead") process.kill(info.pid, "SIGTERM")
+    if (info) await until(async () => (await liveness(info.pid)).state === "dead", 5_000).catch(() => undefined)
+  }
   await fs.rm(world.root, { recursive: true, force: true })
 })
 
@@ -139,6 +142,72 @@ describe("the Bancada's hook in the plugin host", () => {
           /^recusado: Pixel_Host está reservado para Sessão de teste \(em .+\); não use aparelho de outra sessão\.$/,
         )
         // Unloaded, the plugin stops asking its process for events: nothing starts it again after the test.
+        yield* plugins.activate([shell])
+      }),
+    120_000,
+  )
+})
+
+describe("the Bancada's tools in the core's registry", () => {
+  // The tools as a server runs them: its runtime checks what each one returns (an undeclared output is a defect).
+  it.live(
+    "each tool answers; a subagent's run waits and its notice is delivered once the call completed",
+    () =>
+      Effect.gen(function* () {
+        // This server is the hub: its requests run here.
+        process.env.OPENCODE_BANCADA_STATE = path.join(world.root!, "state-tools")
+        process.env.OPENCODE_HUB = "1"
+        const plugins = yield* Plugin.Service
+        const modules = yield* PluginModule.make().pipe(Effect.provide(Watcher.testLayer))
+        const custom = yield* modules.load({
+          type: "add",
+          target: path.join(import.meta.dir, "../src/index.ts"),
+          options: {},
+        })
+        if ("pending" in custom || "blocked" in custom) throw new Error("the custom plugin was not loaded")
+        yield* plugins.activate([shell, custom])
+        const registry = yield* Tool.Service
+        yield* waitForTool(registry, "bancada_release")
+        const sessions = yield* Session.Service
+        const location = Location.Ref.make({ directory: AbsolutePath.make(path.join(world.root!, "projeto")) })
+        const root = yield* sessions.create({ location, title: "Ferramentas" })
+        const child = yield* sessions.create({ parentID: root.id, title: "Subagente" })
+        let n = 0
+        const run = (sessionID: typeof root.id, name: string, input: unknown) =>
+          executeTool(registry, {
+            sessionID,
+            ...toolIdentity,
+            call: { type: "tool-call", id: `tools-${++n}`, name, input },
+          }).pipe(
+            Effect.map((result) => ({
+              status: result.status,
+              text:
+                result.status === "error"
+                  ? (result.error?.message ?? "")
+                  : String(result.content?.[0]?.type === "text" ? result.content[0].text : ""),
+            })),
+          )
+
+        // As one line each, "<status>: <text>" (Bun's toMatchObject would write its matchers into the object).
+        const asked = yield* run(root.id, "bancada_run", { testes: [{ teste: "simples", args: ["--dorme", "30"] }] })
+        expect(`${asked.status}: ${asked.text}`).toMatch(/^completed: Pedido j-[0-9a-z]{8} enviado/)
+        const job = /j-[0-9a-z]{8}/.exec(asked.text)![0]
+        const status = yield* run(root.id, "bancada_status", {})
+        expect(`${status.status}: ${status.text}`).toStartWith(`completed: ${job}:`)
+        const cancelled = yield* run(root.id, "bancada_cancel", { job })
+        expect(`${cancelled.status}: ${cancelled.text}`).toBe(
+          `completed: ${job} cancelado. O que esperava saiu da fila; o que rodava está sendo parado.`,
+        )
+        const held = yield* run(root.id, "bancada_hold", { tipo: "android", nome: "Pixel_Ferramentas" })
+        expect(`${held.status}: ${held.text}`).toMatch(/^completed: Reserva r-[0-9a-z]{8} concedida/)
+        const hold = /r-[0-9a-z]{8}/.exec(held.text)![0]
+        const released = yield* run(root.id, "bancada_release", { reserva: hold })
+        expect(`${released.status}: ${released.text}`).toBe(`completed: Reserva ${hold} solta.`)
+        // A subagent's call waits: the notice is its result, and once the call completed nothing is left to deliver.
+        const waited = yield* run(child.id, "bancada_run", { testes: [{ teste: "simples" }] })
+        expect(`${waited.status}: ${waited.text}`).toMatch(/^completed: \[Bancada\] j-[0-9a-z]{8} terminou: aprovado/)
+        const second = /j-[0-9a-z]{8}/.exec(waited.text)![0]
+        expect((yield* run(child.id, "bancada_status", {})).text).not.toContain(second)
         yield* plugins.activate([shell])
       }),
     120_000,

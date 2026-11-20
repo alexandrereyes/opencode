@@ -304,9 +304,21 @@ describe("notices and tools", () => {
         `^\\[Bancada\\] ${second} terminou: aprovado \\(commit ${head} mais 1 arquivo não commitado\\)\nSimples: 2 aprovados\\.`,
       ),
     )
-    expect((await view(context.client, second))?.state).toBe("entregue")
     const notices = await context.client.call<{ notices: { job: string }[] }>("events", { waitMs: 0 })
     expect(notices.notices.map((notice) => notice.job)).not.toContain(second)
+    // Delivered only once the call completed (the hook after it): a call that failed after the wait leaves the notice
+    // to come as a message.
+    expect((await view(context.client, second))?.state).toBe("concluido")
+    await Effect.runPromise(
+      makeBancadaHook(ctx, context.client).after({
+        tool: "bancada_run",
+        sessionID: "ses_child",
+        id: "call_6",
+        status: "completed",
+        result: waited,
+      } as unknown as Parameters<ReturnType<typeof makeBancadaHook>["after"]>[0]),
+    )
+    expect((await view(context.client, second))?.state).toBe("entregue")
     expect((await call("bancada_cancel", { job }, "call_7")).content).toBe(
       `${job} já tinha terminado; nada a cancelar.`,
     )
