@@ -8,6 +8,7 @@ import { liveness } from "../src/bancada/daemon/launcher/process"
 import { BancadaProtocol } from "../src/bancada/protocol"
 import type { Bancada } from "../src/bancada/rpc"
 import { registerBancadaTools } from "../src/bancada/tools"
+import { makeBancadaHook } from "../src/bancada/hook"
 import type { Tool } from "@opencode/schema/tool"
 import { Effect } from "effect"
 import { initGit } from "../../core/test/fixture/git"
@@ -235,6 +236,8 @@ describe("notices and tools", () => {
       ["bancada_run", false],
       ["bancada_status", false],
       ["bancada_cancel", false],
+      ["bancada_hold", false],
+      ["bancada_release", false],
     ])
     const tool = (name: string) => added.find((item) => item.name === name)!
     const call = (name: string, input: unknown, id: string, sessionID = "ses_tool") =>
@@ -324,6 +327,127 @@ describe("notices and tools", () => {
       submitted.job,
     ])
   }, 60_000)
+
+  test("the hook and the hold tools on a real process: fora, phones, slots, the family's own, and a process out", async () => {
+    const context = await setup(
+      `[[fisico]]\napelido = "poco"\nnome = "POCO X7"\nid = "IBHUYT85ZTYH5XDM"\nplataforma = "android"\ntransporte = "usb"\n` +
+        `[[fisico]]\napelido = "pessoal"\nnome = "Pessoal"\nid = "192.168.0.7:5555"\nplataforma = "android"\ntransporte = "wifi"\npolitica = "negar"\n`,
+    )
+    const added: Tool.Info[] = []
+    const titles: Record<string, string> = { ses_tool: "Sessão de teste", ses_other: "Outra" }
+    const ctx = {
+      tool: {
+        transform: (edit: (editor: { add: (tool: Tool.Info) => void }) => void) =>
+          Effect.sync(() => edit({ add: (tool) => void added.push(tool) })),
+      },
+      session: {
+        get: (input: { sessionID: string }) =>
+          Effect.succeed({
+            id: input.sessionID,
+            location: { directory: context.repository },
+            title: titles[input.sessionID],
+          }),
+      },
+    } as unknown as Parameters<typeof registerBancadaTools>[0]
+    await Effect.runPromise(Effect.scoped(registerBancadaTools(ctx, context.client, async () => "srv-a")))
+    const tool = (name: string) => added.find((item) => item.name === name)!
+    const call = async (name: string, input: unknown, id: string, sessionID = "ses_tool") =>
+      String(
+        (
+          await Effect.runPromise(
+            tool(name).execute(input, {
+              sessionID,
+              agent: "build",
+              messageID: "msg_1",
+              id,
+              progress: () => Effect.void,
+            } as unknown as Tool.Context),
+          )
+        ).content,
+      )
+    const run = (client: BancadaClient) => {
+      const hook = makeBancadaHook(ctx, client)
+      return async (command: string, sessionID = "ses_tool", id = "call_h") => {
+        const event = { tool: "shell", sessionID, agent: "build", messageID: "msg_1", id, input: { command } }
+        const before = await Effect.runPromise(
+          hook
+            .before(event as never)
+            .pipe(Effect.match({ onFailure: (error) => error.message, onSuccess: () => "passa" })),
+        )
+        const after = { ...event, status: "completed", result: { content: "ok" as unknown } }
+        await Effect.runPromise(hook.after(after as never))
+        return { before, after: after.result.content }
+      }
+    }
+    const hook = run(context.client)
+    // 1. A command the repository reserves to the Bancada.
+    expect((await hook("./scripts/por-fora --tudo")).before).toBe(
+      "Neste repositório, `./scripts/por-fora --tudo` só roda pela Bancada. Use `bancada_run` com o teste `simples` ou `lento` ou `android` ou `ios` ou `fisico` ou `exclusivo` ou `servidor`.",
+    )
+    expect((await hook("BANCADA_JOB=j-12345678 ./scripts/por-fora")).before).toBe("passa")
+    // 2. Phones: the family's hold first; never one not to be reserved.
+    expect((await hook("adb -s IBHUYT85ZTYH5XDM shell")).before).toBe(
+      'Reserve antes com `bancada_hold({ aparelho: "poco" })`.',
+    )
+    expect((await hook("adb -s 192.168.0.7:5555 shell")).before).toBe(
+      'O celular pessoal não pode ser usado por agentes (politica = "negar" no arquivo da máquina).',
+    )
+    const held = await call("bancada_hold", { aparelho: "poco" }, "call_1")
+    const poco = BancadaProtocol.holdID("srv-a\ncall_1")
+    expect(held.split("\n")[0]).toBe(`Reserva ${poco} concedida: o celular poco em Servidor A (id IBHUYT85ZTYH5XDM).`)
+    expect((await hook("adb -s IBHUYT85ZTYH5XDM install app.apk")).before).toBe("passa")
+    expect((await hook("adb -s IBHUYT85ZTYH5XDM shell", "ses_other")).before).toBe(
+      'Reserve antes com `bancada_hold({ aparelho: "poco" })`.',
+    )
+    // Another family waits for it, and is told when it is theirs.
+    const waiting = await call("bancada_hold", { aparelho: "poco" }, "call_2", "ses_other")
+    const other = BancadaProtocol.holdID("srv-a\ncall_2")
+    expect(waiting.split("\n")[0]).toBe(
+      `Reserva ${other} na fila: o celular poco em Servidor A, 1º na fila (aguardando poco (com Sessão de teste em Servidor A)).`,
+    )
+    expect(await call("bancada_status", {}, "call_3", "ses_other")).toBe(
+      `Reservas:\n  ${other}: o celular poco em Servidor A, 1º na fila (aguardando poco (com Sessão de teste em Servidor A))`,
+    )
+    expect(await call("bancada_release", { reserva: poco }, "call_4", "ses_other")).toBe(
+      `${poco} é de outra sessão; esta tool só solta reservas desta sessão e dos subagentes dela.`,
+    )
+    expect(await call("bancada_release", { reserva: poco }, "call_5")).toBe(`Reserva ${poco} solta.`)
+    type Note = { key: string; sessionID: string; text: string; resume: boolean }
+    const seen: Note[] = []
+    await until(async () => {
+      seen.push(...(await context.client.call<{ notes: Note[] }>("events", { waitMs: 0 })).notes)
+      return seen.length > 0
+    }, 10_000)
+    expect(seen).toMatchObject([
+      {
+        sessionID: "ses_other",
+        resume: true,
+        text: `[Bancada] Sua vaga saiu: o celular poco em Servidor A (reserva ${other}). Use agora; ela vence se ficar parada.`,
+      },
+    ])
+    await context.client.call("note.ack", { key: seen[0]!.key })
+    // 5. A start asks for a slot; the family uses it, another is told whose it is.
+    expect((await hook("emulator -avd Pixel_Teste -no-window")).before).toBe("passa")
+    expect((await hook("emulator -avd Pixel_Teste -wipe-data")).before).toBe("passa")
+    expect((await hook("emulator -avd Pixel_Teste", "ses_other")).before).toBe(
+      "Pixel_Teste está reservado para Sessão de teste (em Servidor A); não use aparelho de outra sessão.",
+    )
+    // The process out: a command passes with a warning; a start is refused.
+    const out = run({
+      call: () => Promise.reject(new BancadaError("process", "fora")),
+    } as unknown as BancadaClient)
+    expect(await out("adb devices")).toEqual({
+      before: "passa",
+      after: [
+        { type: "text", text: "ok" },
+        {
+          type: "text",
+          text: "[Bancada] O processo da Bancada não respondeu: este comando passou sem a conferência de aparelhos e reservas.",
+        },
+      ],
+    })
+    expect((await out("emulator @Outro")).before).toBe("a Bancada está reconciliando; tente de novo em instantes")
+  }, 90_000)
 })
 
 /** The example project as the session's repository, and a client of a process that is the hub. */

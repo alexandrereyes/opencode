@@ -488,6 +488,9 @@ export function createWorld(options: {
         ...(input.brake ? { brake: input.brake } : {}),
         ...(input.ports ? { ports: input.ports } : {}),
         ...(input.docker === undefined ? {} : { docker: input.docker }),
+        ...(input.phones ? { phones: input.phones } : {}),
+        ...(input.hardware ? { hardware: input.hardware } : {}),
+        ...(input.prefix ? { prefix: input.prefix } : {}),
       }
       const db = new Database(":memory:")
       const core = build(config, db)

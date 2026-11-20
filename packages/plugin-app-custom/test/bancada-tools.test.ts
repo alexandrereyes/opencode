@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import type { Bancada } from "../src/bancada/rpc"
-import { cancelText, jobText, sentences, submittedText } from "../src/bancada/tools"
+import {
+  cancelText,
+  holdLine,
+  holdText,
+  jobText,
+  releaseText,
+  sentences,
+  submittedText,
+  type Hold,
+} from "../src/bancada/tools"
 
 // The tools' answers (`docs/bancada.md`, "Tools"): these texts are the norm.
 const submitted = (more: Partial<Bancada.Submitted> = {}): Bancada.Submitted => ({
@@ -145,6 +154,71 @@ describe("bancada_status and bancada_cancel", () => {
       "j-7qk2m9xa já tinha terminado; nada a cancelar.",
       "Nenhum pedido j-7qk2m9xa neste servidor.",
       "j-7qk2m9xa é de outra sessão; esta tool só cancela pedidos desta sessão e dos subagentes dela.",
+    ])
+  })
+})
+
+describe("bancada_hold and bancada_release", () => {
+  const now = 1_000_000
+  const hold = (more: Partial<Hold>): Hold => ({
+    hold: "r-7qk2m9xa",
+    target: JSON.stringify({ kind: "fisico", device: "poco" }),
+    state: "concedida",
+    machine_name: "Mac de Alexandre",
+    device: JSON.stringify({ id: "IBHUYT85ZTYH5XDM" }),
+    expires_at: now + 10 * 60_000,
+    position: null,
+    reason: null,
+    ...more,
+  })
+
+  test("granted, waiting, asked of a machine that did not answer yet, refused", () => {
+    expect(holdText(hold({}), now)).toBe(
+      [
+        "Reserva r-7qk2m9xa concedida: o celular poco em Mac de Alexandre (id IBHUYT85ZTYH5XDM).",
+        "Se alguém esperar, ela vence no pior caso em ~10 min; cada comando que usa o aparelho a renova. Solte com bancada_release quando terminar.",
+      ].join("\n"),
+    )
+    expect(
+      holdText(
+        hold({
+          target: JSON.stringify({ kind: "vaga", platform: "android", name: "Pixel_9" }),
+          state: "esperando",
+          device: null,
+          expires_at: null,
+          position: 2,
+          reason: "sem folga para mais um aparelho agora",
+        }),
+        now,
+      ),
+    ).toBe(
+      [
+        "Reserva r-7qk2m9xa na fila: a vaga para Pixel_9 (Android) em Mac de Alexandre, 2º na fila (sem folga para mais um aparelho agora).",
+        "Você será avisado por mensagem quando sair; o lugar dura 15 min, e pedir de novo antes disso o mantém.",
+      ].join("\n"),
+    )
+    expect(
+      holdText(hold({ state: "esperando", position: 1, reason: "aguardando poco" }), now).split("\n")[1],
+    ).toStartWith("A reserva atual vence no pior caso em ~10 min. ")
+    expect(holdText(hold({ state: "pedida", machine_name: null, device: null }), now)).toBe(
+      "Reserva r-7qk2m9xa pedida: o celular poco em outra máquina; a resposta ainda não chegou. Você será avisado por mensagem quando sair.",
+    )
+    expect(holdText(hold({ state: "negada", reason: "o hub está fora" }), now)).toBe(
+      "Sem reserva: o celular poco em Mac de Alexandre (o hub está fora).",
+    )
+    expect(holdLine(hold({}), now)).toBe(
+      "r-7qk2m9xa: o celular poco em Mac de Alexandre, concedida (id IBHUYT85ZTYH5XDM); vence no pior caso em ~10 min",
+    )
+  })
+
+  test("release's four answers", () => {
+    expect(
+      ["solta", "vencida", "desconhecida", "outra_familia"].map((state) => releaseText("r-7qk2m9xa", state)),
+    ).toEqual([
+      "Reserva r-7qk2m9xa solta.",
+      "r-7qk2m9xa já tinha terminado; nada a soltar.",
+      "Nenhuma reserva r-7qk2m9xa neste servidor.",
+      "r-7qk2m9xa é de outra sessão; esta tool só solta reservas desta sessão e dos subagentes dela.",
     ])
   })
 })

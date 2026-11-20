@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { offered, parseMachineConfig, type MachineConfig } from "../src/bancada/machine-config"
+import { offered, parseMachineConfig, type Host, type MachineConfig } from "../src/bancada/machine-config"
 
-const mac = { memMb: 131_072, cores: 16, inDocker: false }
+const mac: Host = { memMb: 131_072, cores: 16, inDocker: false, platform: "darwin" }
 const valid = (text: string | undefined, host = mac): MachineConfig => {
   const parsed = parseMachineConfig(text, host)
   if (!parsed.ok) throw new Error(parsed.problems.join("\n"))
@@ -49,9 +49,28 @@ describe("machine file", () => {
         runMs: 3_600_000,
       },
       phones: [],
+      // A Mac identifies itself with ioreg; the machine behind the mac bridge, with ioreg through it.
+      bridges: {
+        mac: ["mac", "/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+        own: ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+      },
     })
     // In a container with Docker's socket, executions run in sibling containers by default.
     expect(valid(undefined, { ...mac, inDocker: true }).execution.mode).toBe("docker")
+    // Elsewhere nothing identifies the machine unless [pontes] says how.
+    expect(valid(undefined, { ...mac, platform: "linux" }).bridges).toEqual({
+      mac: ["mac", "/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+    })
+    expect(
+      valid(`versao = 1\n[pontes]\nmac = ["mac", "cat", "/tmp/uuid"]\npropria = ["cat", "/tmp/uuid"]`, {
+        ...mac,
+        platform: "linux",
+      }).bridges,
+    ).toEqual({ mac: ["mac", "cat", "/tmp/uuid"], own: ["cat", "/tmp/uuid"] })
+    expect(problems(`versao = 1\n[pontes]\nmac = []\nponte = "x"`)).toEqual([
+      expect.stringContaining("ponte"),
+      "pontes.mac: precisa de pelo menos o programa",
+    ])
   })
 
   test("the documented example reads as written", () => {

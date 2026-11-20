@@ -134,6 +134,8 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       name TEXT NOT NULL,
       platform TEXT,
       capabilities TEXT NOT NULL DEFAULT '{}',
+      phones TEXT NOT NULL DEFAULT '[]',
+      hardware TEXT,
       speed TEXT NOT NULL DEFAULT 'normal',
       free TEXT,
       brake INTEGER NOT NULL DEFAULT 0,
@@ -243,6 +245,59 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       reason TEXT,
       tries INTEGER NOT NULL DEFAULT 0,
       asked_at INTEGER NOT NULL
+    )`,
+    // A hold this machine decides (`docs/bancada.md`, "Holds"): a light slot for an emulator or simulator a session
+    // starts, or a phone of its catalog. `esperando` rows are the queue, in request order.
+    `CREATE TABLE hold (
+      id TEXT PRIMARY KEY,
+      origin_machine TEXT NOT NULL,
+      origin TEXT NOT NULL,
+      root_session_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      platform TEXT,
+      target TEXT NOT NULL,
+      lease_id TEXT,
+      state TEXT NOT NULL,
+      requested_at INTEGER NOT NULL,
+      acquired_at INTEGER,
+      last_activity_at INTEGER,
+      last_seen_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      reason TEXT
+    )`,
+    // What this server's sessions hold, here or on another machine, as the machine that has the device said.
+    `CREATE TABLE grant_mirror (
+      hold TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      root_session_id TEXT NOT NULL,
+      machine_id TEXT NOT NULL,
+      target TEXT NOT NULL,
+      state TEXT NOT NULL,
+      machine_name TEXT,
+      device TEXT,
+      expires_at INTEGER,
+      position INTEGER,
+      reason TEXT,
+      requested_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    // Notes to put in a session (a hold came out, a hold expired), each with its message id drawn once.
+    `CREATE TABLE note (
+      key TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      resume INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      delivered_at INTEGER
+    )`,
+    // Which machine decides a hold another machine's session asked, to relay its answers back.
+    `CREATE TABLE hub_hold (
+      hold TEXT PRIMARY KEY,
+      origin_machine TEXT NOT NULL,
+      target_machine TEXT NOT NULL,
+      state TEXT NOT NULL,
+      at INTEGER NOT NULL
     )`,
     `CREATE TABLE hub_lock (
       name TEXT PRIMARY KEY,

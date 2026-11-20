@@ -5,13 +5,16 @@ import { Result, Schema } from "effect"
 import { BancadaProtocol } from "../protocol.js"
 import { makeAlerts } from "./alerts.js"
 import { makeCoordinator } from "./coordinator.js"
-import { defaults, type BrakeConfig, type Range } from "../machine-config.js"
+import { defaults, type BrakeConfig, type Phone, type Range } from "../machine-config.js"
 import type { Reading } from "./brake.js"
 import { makeExecutor, type Launcher } from "./executor.js"
 import { makeMessages } from "./messages.js"
 import { makeOrigin, type NewJob } from "./origin.js"
 import { needs } from "./scheduler.js"
 import { BancadaNotice } from "../notice.js"
+import { SessionMessage } from "@opencode/schema/session-message"
+import { makeHolds, makeMirror, type Target } from "./holds.js"
+import { makeGate } from "./gate.js"
 import type { Blobs } from "./blobs.js"
 import { makeTransfers, type BlobLink, type Files } from "./transfers.js"
 import { migrate } from "./schema.js"
@@ -33,6 +36,12 @@ export interface Machine {
   readonly brake?: BrakeConfig
   readonly ports?: Range
   readonly docker?: boolean
+  /** The phones of the machine file's catalog (`[[fisico]]`). */
+  readonly phones?: ReadonlyArray<Phone>
+  /** Its hardware identity (`resources/machine.ts`), for machines that reach it through the `mac` bridge. */
+  readonly hardware?: string
+  /** The names of the devices the Bancada makes here start with it (the machine file's `prefixo`). */
+  readonly prefix?: string
 }
 
 /**
@@ -80,6 +89,11 @@ export const timings = {
   hubAwayMs: 45_000,
   /** A transfer of code lives this long on the hub; an executor that waited longer asks again. */
   transferMs: 60 * 60_000,
+  /** Holds (`docs/bancada.md`, "Holds"): the machine file's `[tempos]` of `device-lease`. */
+  holdIdleQueuedMs: 10 * 60_000,
+  holdIdleMs: 60 * 60_000,
+  holdTotalQueuedMs: 30 * 60_000,
+  queuePlaceMs: 15 * 60_000,
 }
 
 export class CoreError extends Error {
@@ -202,6 +216,7 @@ export function createCore(ports: Ports) {
     // A task of an attempt ended: its result should not wait for the next second.
     wake: () => void tick(),
     keepMs: times.tombstoneMs,
+    slots: () => holds.waiting(),
     ...(transfers.enabled() ? { code: { ask: transfers.ask, state: transfers.code, forget: transfers.forget } } : {}),
   })
   /** The queue: every machine's on the hub; elsewhere, this machine's own, for its requests while the hub is out. */
@@ -217,9 +232,162 @@ export function createCore(ports: Ports) {
       return seq
     },
     acknowledged: (machineID) => messages.acknowledged(machineID),
+    hub: self.hub,
     alerts,
     random: ports.random,
   })
+  /** What this server's sessions hold (here or elsewhere), and the holds this machine decides. */
+  const mirror = makeMirror({ db, now: ports.now, messageID: () => SessionMessage.ID.create(), answerMs: 8_000 })
+  const holds = makeHolds({
+    db,
+    now: ports.now,
+    machineID: self.machineID,
+    phones: () => self.phones ?? [],
+    times: {
+      idleQueuedMs: times.holdIdleQueuedMs,
+      idleMs: times.holdIdleMs,
+      totalQueuedMs: times.holdTotalQueuedMs,
+      placeMs: times.queuePlaceMs,
+    },
+    reserve: (platform) => executor.reserveSlot(platform),
+    release: (lease) => executor.releaseLease(lease),
+    // A session of this server: its mirror at once; another machine's: through the hub.
+    answer: (row, answer) =>
+      row.origin_machine === self.machineID
+        ? mirror.answer(answer, self.name)
+        : void messages.send(hub, { type: "hold.state", ...answer }),
+  })
+  /** A session of this server, as a hold's origin. */
+  const originOf = (request: {
+    readonly sessionID: string
+    readonly rootSessionID: string
+    readonly sessionTitle?: string
+    readonly rootTitle?: string
+  }): BancadaProtocol.Origin => ({
+    instanceID: self.instanceID,
+    machineID: self.machineID,
+    name: self.name,
+    sessionID: request.sessionID,
+    rootSessionID: request.rootSessionID,
+    ...(request.sessionTitle ? { sessionTitle: request.sessionTitle } : {}),
+    ...(request.rootTitle ? { rootTitle: request.rootTitle } : {}),
+  })
+  /** Renewals already sent to another machine, by hold: at most one a minute. */
+  const touched = new Map<string, number>()
+
+  /** The machines and phones the hub said (`catalog`), with this machine's own phones. */
+  const catalog = () => {
+    const said: Omit<typeof BancadaProtocol.Catalog.Type, "type"> = JSON.parse(
+      meta.get("catalog")?.value ?? '{"machines":[],"phones":[]}',
+    )
+    const own = (self.phones ?? []).map((phone) => ({
+      alias: phone.alias,
+      id: phone.id,
+      platform: phone.platform,
+      policy: phone.policy,
+      machineID: self.machineID,
+    }))
+    return {
+      machines: said.machines,
+      phones: [...own, ...said.phones.filter((phone) => phone.machineID !== self.machineID)],
+    }
+  }
+  /** The machine behind the `mac` bridge: this one, one of the catalog by its hardware, or `mac` (the hub picks a Mac). */
+  const bridged = () => {
+    const hardware = meta.get("bridge")?.value
+    if (!hardware) return "mac"
+    if (hardware === self.hardware) return self.machineID
+    return catalog().machines.find((item) => item.hardware === hardware)?.machineID ?? "mac"
+  }
+  /**
+   * A session asks for a device (`docs/bancada.md`, "Holds"): decided here when it is this machine's (a light slot
+   * by default; a phone of this catalog), else by the machine that has it, through the hub (`machine`: a machine id,
+   * or `mac` for the Mac). With the hub out, another machine's device is refused: "o hub está fora".
+   */
+  const askHold = (request: {
+    readonly hold: string
+    readonly sessionID: string
+    readonly rootSessionID: string
+    readonly sessionTitle?: string
+    readonly rootTitle?: string
+    readonly machine?: string
+    readonly target: Target
+  }) => {
+    const target = request.target
+    // The family holds it, or waits for it, already: the same hold (asking again keeps a place in the queue).
+    const same = mirror
+      .family(request.rootSessionID)
+      .find((row) => JSON.stringify(JSON.parse(row.target)) === JSON.stringify(target))
+    if (same) {
+      if (same.machine_id === self.machineID) holds.ask(same.hold, { ...originOf(request) }, self.machineID, target)
+      else if (!link.away)
+        messages.send(hub, {
+          type: "hold.request",
+          hold: same.hold,
+          origin: originOf(request),
+          machineID: same.machine_id,
+          target,
+        })
+      return mirror.find(same.hold)
+    }
+    const local =
+      request.machine === undefined
+        ? target.kind === "vaga" || (self.phones ?? []).some((phone) => phone.alias === target.device)
+        : request.machine === self.machineID
+    const origin = originOf(request)
+    db.transaction(() => {
+      mirror.asked({
+        hold: request.hold,
+        sessionID: request.sessionID,
+        rootSessionID: request.rootSessionID,
+        machineID: local ? self.machineID : (request.machine ?? ""),
+        target,
+      })
+      if (local) return holds.ask(request.hold, origin, self.machineID, target)
+      if (link.away)
+        return mirror.answer(
+          { hold: request.hold, state: "negada", reason: { code: "aguardando_hub", text: "o hub está fora" } },
+          "",
+        )
+      messages.send(hub, {
+        type: "hold.request",
+        hold: request.hold,
+        origin,
+        machineID: request.machine ?? "",
+        target,
+      })
+    })()
+    return mirror.find(request.hold)
+  }
+
+  /** Use of a held device by its family (the hook saw it): renewed; one renewal a minute travels to another machine. */
+  const touchHold = (hold: string) => {
+    const row = mirror.find(hold)
+    if (!row || row.state !== "concedida") return
+    if (row.machine_id === self.machineID) return void holds.renew(hold, ports.now())
+    if (ports.now() - (touched.get(hold) ?? 0) < 60_000) return
+    touched.set(hold, ports.now())
+    messages.send(hub, { type: "hold.touch", hold, at: ports.now() })
+  }
+
+  const testPorts = db.query<{ start: number; end: number }, []>(
+    "SELECT d.port_start AS start, d.port_end AS end FROM lease_device d JOIN lease l ON l.id = d.lease_id WHERE l.state = 'active'",
+  )
+  const gate = makeGate({
+    machineID: self.machineID,
+    prefix: self.prefix ?? "bancada-",
+    phones: () => catalog().phones,
+    family: mirror.family,
+    granted: mirror.granted,
+    here: holds.held,
+    ports: () => testPorts.all(),
+    bridge: bridged,
+    hold: askHold,
+    touch: touchHold,
+    find: mirror.find,
+    id: () => BancadaProtocol.holdID(ports.random()),
+  })
+
   /** How this machine reaches the queue in this process: as the hub's own machine, or its own queue. */
   const queuePeer = self.hub ? hub : local
 
@@ -237,6 +405,17 @@ export function createCore(ports: Ports) {
       platform: self.platform,
       capabilities: { ...self.capabilities },
       speed: self.speed,
+      ...(self.phones?.length
+        ? {
+            phones: self.phones.map((phone) => ({
+              alias: phone.alias,
+              id: phone.id,
+              platform: phone.platform,
+              policy: phone.policy,
+            })),
+          }
+        : {}),
+      ...(self.hardware ? { hardware: self.hardware } : {}),
     }
     const text = JSON.stringify(body)
     const peers = self.hub ? [hub] : [hub, local]
@@ -258,6 +437,36 @@ export function createCore(ports: Ports) {
     if (message.type === "code.request") return transfers.request(message)
     if (message.type === "code.source") return transfers.source(message)
     if (message.type === "evidence.request") return transfers.evidence(message)
+    if (message.type === "hold.ask")
+      return holds.ask(message.hold, message.origin, message.origin.machineID, message.target)
+    if (message.type === "hold.renew") return holds.renew(message.hold, message.at)
+    if (message.type === "catalog") return setMeta("catalog", JSON.stringify(message))
+    if (message.type === "hold.drop") return holds.drop(message.hold)
+    if (message.type === "hold.grant")
+      return mirror.answer(
+        { hold: message.hold, state: "concedida", device: message.device, expiresAt: message.expiresAt },
+        message.device.maquina ?? "",
+      )
+    if (message.type === "hold.deny")
+      return mirror.answer(
+        {
+          hold: message.hold,
+          state: message.position === undefined ? "negada" : "esperando",
+          reason: message.reason,
+          ...(message.position === undefined ? {} : { position: message.position }),
+          ...(message.expiresAt === undefined ? {} : { expiresAt: message.expiresAt }),
+        },
+        message.machine ?? "",
+      )
+    if (message.type === "hold.expire")
+      return mirror.answer(
+        {
+          hold: message.hold,
+          state: message.reason ? "vencida" : "solta",
+          ...(message.reason ? { reason: { code: "orcamento", text: message.reason } } : {}),
+        },
+        "",
+      )
     if (message.type === "submit.ack" || message.type === "job.update" || message.type === "result")
       return origin.apply(message)
   }
@@ -433,6 +642,7 @@ export function createCore(ports: Ports) {
   const round = async () => {
     await executor.tick()
     transfers.tick()
+    holds.tick()
     follow()
     db.transaction(() => {
       origin.unregistered((scope) => messages.acknowledged(scope === "local" ? local : hub))
@@ -482,6 +692,33 @@ export function createCore(ports: Ports) {
     status: origin.status,
     /** The requests of a session's family not delivered yet. */
     family: origin.family,
+    hold: askHold,
+    /** The session lets a hold go. */
+    release: (hold: string) =>
+      db.transaction(() => {
+        const row = mirror.find(hold)
+        if (!row || !["pedida", "esperando", "concedida"].includes(row.state)) return row
+        if (row.machine_id === self.machineID) holds.drop(hold)
+        else messages.send(hub, { type: "hold.release", hold })
+        mirror.answer({ hold, state: "solta" }, "")
+        return mirror.find(hold)
+      })(),
+    touch: touchHold,
+    /** The hook's decision on a shell command's parts (`gate.ts`). */
+    gate,
+    /**
+     * The machine behind the `mac` bridge, by the hardware identity its command printed (`[pontes]`): resolved
+     * against the hub's catalog from then on.
+     */
+    bridge: (hardware: string) => setMeta("bridge", hardware),
+    bridged,
+    /** The machines and phones the hub said (`catalog`), with this machine's own phones. */
+    catalog,
+    /** The holds of a session's family; every hold in force, for the hook; the holds this machine decides. */
+    holds: { family: mirror.family, granted: mirror.granted, find: mirror.find, here: holds.held, decided: holds.find },
+    /** Notes for the sessions (a hold came out, one expired), and their delivery. */
+    notes: mirror.notes,
+    noted: mirror.noted,
     notices: origin.notices,
     /** The session received the notice of a request: once; the hub may clean up, and nothing of its code stays. */
     delivered: (job: string) => {

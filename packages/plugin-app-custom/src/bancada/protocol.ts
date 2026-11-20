@@ -32,6 +32,11 @@ export function jobID(seed: string) {
   return `j-${Array.from(digest.subarray(0, 8), (byte) => alphabet[byte % 32]).join("")}`
 }
 
+/** A hold id (`r-` and 8 characters), seeded like `jobID`: the tool's call made again is the same hold. */
+export function holdID(seed: string) {
+  return `r-${jobID(seed).slice(2)}`
+}
+
 const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -216,7 +221,7 @@ export const File = Schema.Struct({
 export type File = typeof File.Type
 export const Transfer = Schema.Struct({ id: Schema.String, files: Schema.Array(File) })
 export type Transfer = typeof Transfer.Type
-const HoldTarget = Schema.Union([
+export const HoldTarget = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("vaga"), platform: Schema.Literals(["android", "ios"]), name: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("fisico"), device: Schema.String }),
 ])
@@ -224,11 +229,25 @@ const HoldTarget = Schema.Union([
 // Machine → hub.
 
 /** Who the machine is and what it offers; sent when it starts, when it changes and when the hub forgot it. */
+/** A phone of a machine's catalog, as the hook of every machine must recognise it (`docs/bancada.md`, "Hook"). */
+export const CatalogPhone = Schema.Struct({
+  alias: Schema.String,
+  id: Schema.String,
+  platform: Schema.Literals(["android", "ios"]),
+  policy: Schema.Literals(["reservavel", "negar"]),
+})
 export const Hello = Schema.Struct({
   type: Schema.Literal("hello"),
   platform: Schema.Literals(["darwin", "linux"]),
   capabilities: Schema.Record(Schema.String, Schema.Unknown),
   speed: Schema.Literals(["normal", "lento"]),
+  /** Its phones, `negar` ones included. */
+  phones: optional(Schema.Array(CatalogPhone)),
+  /**
+   * Its hardware identity, for a machine that reaches it through a bridge (`mac`): `machineID()` of
+   * `resources/machine.ts` over its `IOPlatformUUID` (a hash; the raw UUID never leaves the machine).
+   */
+  hardware: optional(Schema.String),
 })
 export const Submit = Schema.Struct({
   type: Schema.Literal("submit"),
@@ -288,6 +307,20 @@ export const HoldRequest = Schema.Struct({
 })
 export const HoldTouch = Schema.Struct({ type: Schema.Literal("hold.touch"), hold: Schema.String, at: Schema.Number })
 export const HoldRelease = Schema.Struct({ type: Schema.Literal("hold.release"), hold: Schema.String })
+/**
+ * The machine that has the device, on a hold the hub relayed to it (`hold.ask`): where it stands now. `concedida` with
+ * the device as it is now (serial, UDID) and when it ends at the latest; `esperando` with its place; `negada` with why;
+ * `vencida` or `solta` when it ended.
+ */
+export const HoldState = Schema.Struct({
+  type: Schema.Literal("hold.state"),
+  hold: Schema.String,
+  state: Schema.Literals(["concedida", "esperando", "negada", "vencida", "solta"]),
+  device: optional(Schema.Record(Schema.String, Schema.String)),
+  expiresAt: optional(Schema.Number),
+  position: optional(Count),
+  reason: optional(Reason),
+})
 export const Delivered = Schema.Struct({ type: Schema.Literal("delivered"), job: JobID })
 export const LocalJob = Schema.Struct({
   type: Schema.Literal("local.job"),
@@ -311,6 +344,7 @@ export const FromMachine = Schema.Union([
   HoldRelease,
   Delivered,
   LocalJob,
+  HoldState,
 ]).annotate({ identifier: "Bancada.FromMachine" })
 export type FromMachine = typeof FromMachine.Type
 
@@ -412,8 +446,26 @@ export const HoldDeny = Schema.Struct({
   hold: Schema.String,
   reason: Reason,
   position: optional(Count),
+  /** The name of the machine that has the device, when one was found. */
+  machine: optional(Schema.String),
+  /** While waiting: when the device's current hold ends at the latest. */
+  expiresAt: optional(Schema.Number),
 })
-export const HoldExpire = Schema.Struct({ type: Schema.Literal("hold.expire"), hold: Schema.String })
+export const HoldExpire = Schema.Struct({
+  type: Schema.Literal("hold.expire"),
+  hold: Schema.String,
+  reason: optional(Schema.String),
+})
+/** To the machine that has the device: a hold another machine's session asks (`hold.request`, relayed). */
+export const HoldAsk = Schema.Struct({
+  type: Schema.Literal("hold.ask"),
+  hold: Schema.String,
+  origin: Origin,
+  target: HoldTarget,
+})
+/** Relayed `hold.touch` and `hold.release`. */
+export const HoldRenew = Schema.Struct({ type: Schema.Literal("hold.renew"), hold: Schema.String, at: Schema.Number })
+export const HoldDrop = Schema.Struct({ type: Schema.Literal("hold.drop"), hold: Schema.String })
 export const Cleanup = Schema.Struct({ type: Schema.Literal("cleanup"), job: JobID })
 /** To the executor: send this attempt's evidence in the transfer the hub named, to the origin. */
 export const EvidenceRequest = Schema.Struct({
@@ -422,6 +474,23 @@ export const EvidenceRequest = Schema.Struct({
   part: PartName,
   attempt: Count,
   transfer: Schema.String,
+})
+
+/**
+ * From the hub to every machine, when a machine said hello: the machines and their phones, so each machine's hook knows
+ * a phone of another machine's catalog and which machine is behind its `mac` bridge, without asking anyone.
+ */
+export const Catalog = Schema.Struct({
+  type: Schema.Literal("catalog"),
+  machines: Schema.Array(
+    Schema.Struct({
+      machineID: Schema.String,
+      name: Schema.String,
+      platform: optional(Schema.String),
+      hardware: optional(Schema.String),
+    }),
+  ),
+  phones: Schema.Array(Schema.Struct({ ...CatalogPhone.fields, machineID: Schema.String })),
 })
 
 export const FromHub = Schema.Union([
@@ -437,6 +506,10 @@ export const FromHub = Schema.Union([
   HoldExpire,
   Cleanup,
   EvidenceRequest,
+  HoldAsk,
+  HoldRenew,
+  HoldDrop,
+  Catalog,
 ]).annotate({ identifier: "Bancada.FromHub" })
 export type FromHub = typeof FromHub.Type
 

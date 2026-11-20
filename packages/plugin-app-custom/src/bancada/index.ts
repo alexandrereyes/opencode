@@ -9,6 +9,7 @@ import { hubPassword, linkSettings } from "../live-activity/link.js"
 import { BancadaError, makeBancadaClient, stateDirectory } from "./client.js"
 import { Bancada } from "./rpc.js"
 import { registerBancadaTools } from "./tools.js"
+import { makeBancadaHook } from "./hook.js"
 
 /**
  * The Bancada of this machine (`docs/bancada.md`). The plugin only relays: every `custom.bancada` call goes to this
@@ -122,29 +123,55 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
     .pipe(Effect.orDie)
 
   yield* registerBancadaTools(ctx, client, () => run(identity(ctx.storage, env)).then((server) => server.instanceID))
+  const hook = makeBancadaHook(ctx, client)
+  yield* ctx.tool.hook("execute.before", hook.before)
+  yield* ctx.tool.hook("execute.after", hook.after)
 
   // Notices: each goes to one instance, which puts it in its session with a fixed id (a second delivery never makes a
   // second message) and then says so; without that, it goes again in 30 s (`docs/bancada.md`, "Notice").
-  yield* Effect.tryPromise(() =>
-    client.call<{ notices: { job: string; sessionID: string; id: string; text: string; resume: boolean }[] }>(
+  // Interrupted (this instance unloads), the long poll is abandoned and does not start the process again.
+  yield* Effect.tryPromise((signal) =>
+    client.call<{ notices: Message[]; notes?: (Omit<Message, "job"> & { key: string })[] }>(
       "events",
       { waitMs: 25_000 },
       35_000,
+      signal,
     ),
   ).pipe(
-    Effect.flatMap((answer) => Effect.forEach(answer.notices, (notice) => deliver(notice), { discard: true })),
+    Effect.flatMap((answer) =>
+      Effect.all(
+        [
+          Effect.forEach(answer.notices, (notice) => deliver(notice), { discard: true }),
+          // Notes of holds (one came out, one expired): the same way, with their own message id and wake-up.
+          Effect.forEach(
+            answer.notes ?? [],
+            (note) =>
+              deliver({ ...note, job: "" }, (missing) =>
+                client.call("note.ack", { key: note.key, ...(missing ? { missing } : {}) }),
+              ),
+            { discard: true },
+          ),
+        ],
+        { discard: true },
+      ),
+    ),
     Effect.catchCause(() => Effect.sleep("2 seconds")),
     Effect.repeat(Schedule.forever),
     Effect.forkScoped({ startImmediately: true }),
   )
-  function deliver(notice: { job: string; sessionID: string; id: string; text: string; resume: boolean }) {
+  type Message = { job: string; sessionID: string; id: string; text: string; resume: boolean }
+  function deliver(
+    notice: Message,
+    ack: (missing: boolean) => Promise<unknown> = (missing) =>
+      client.call("notice.ack", { job: notice.job, ...(missing ? { missing } : {}) }),
+  ) {
     return ctx.session
       .synthetic({
         sessionID: Session.ID.make(notice.sessionID),
         id: SessionMessage.ID.make(notice.id),
         text: notice.text,
-        description: `Bancada ${notice.job}`,
-        metadata: { custom: { bancada: { job: notice.job } } },
+        description: notice.job ? `Bancada ${notice.job}` : "Bancada",
+        metadata: { custom: { bancada: notice.job ? { job: notice.job } : {} } },
         // A request cancelled whole has nothing to act on: its notice does not wake the session.
         ...(notice.resume ? {} : { resume: false }),
       })
@@ -160,9 +187,7 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
             ? Effect.succeed(true)
             : Effect.fail(error),
         ),
-        Effect.flatMap((missing) =>
-          Effect.tryPromise(() => client.call("notice.ack", { job: notice.job, ...(missing ? { missing } : {}) })),
-        ),
+        Effect.flatMap((missing) => Effect.tryPromise(() => ack(missing))),
         Effect.catchCause((cause) =>
           Effect.logWarning("a Bancada notice was not delivered", { job: notice.job, cause }),
         ),

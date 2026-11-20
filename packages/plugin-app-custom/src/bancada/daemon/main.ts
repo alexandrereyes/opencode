@@ -17,6 +17,8 @@ import { makeBlobs, sha256 } from "./blobs.js"
 import { makeLink, type Link } from "./link.js"
 import { Invalid, makeRequests } from "./requests.js"
 import { bundle, release } from "./snapshot.js"
+import { identify } from "./bridge.js"
+import type { Part } from "../commands.js"
 import type { Files } from "./transfers.js"
 import { makeWorkdirs, type Workdirs } from "./workdir.js"
 import { migrate, NewerSchemaError } from "./schema.js"
@@ -108,6 +110,8 @@ export async function main() {
   }
   const machineID = await machine(state)
   const machineFile = await readMachineFile()
+  // Read once: machines that reach this one through the `mac` bridge find it by this hash (`[pontes]`).
+  const hardware = machineFile.config.bridges.own ? await identify(machineFile.config.bridges.own) : undefined
   const secret = randomBytes(32).toString("base64url")
   const info = path.join(state, "bancada.json")
   const owner: { current?: Owner } = {}
@@ -179,8 +183,18 @@ export async function main() {
         platform: process.platform === "darwin" ? "darwin" : "linux",
         hub: owner.current.hub,
         speed: config.speed,
-        // Discovering what the machine has (Android SDK, Xcode, phones…) comes with the devices.
-        capabilities: offering ? offered(config, {}) : {},
+        // Discovering what the machine has (Android SDK, Xcode…) comes with the devices; a phone of the catalog that
+        // can be reserved is offered by its alias (`fisico:<apelido>`).
+        capabilities: offering
+          ? offered(
+              config,
+              Object.fromEntries(
+                config.phones
+                  .filter((phone) => phone.policy !== "negar")
+                  .map((phone) => [`fisico:${phone.alias}`, { plataforma: phone.platform }]),
+              ),
+            )
+          : {},
         capacity: offering
           ? {
               memMb: config.budget.memMb,
@@ -195,12 +209,19 @@ export async function main() {
         brake: config.brake,
         ports: config.ports.project,
         docker: config.execution.mode === "docker",
+        phones: offering ? config.phones : [],
+        prefix: config.prefix,
+        ...(hardware ? { hardware } : {}),
       },
       timings: {
         silentMs: config.times.silentMs,
         uncertainMs: config.times.uncertainMs,
         lostMs: config.times.lostMs,
         hubAwayMs: config.times.localModeMs,
+        holdIdleQueuedMs: config.times.holdIdleQueuedMs,
+        holdIdleMs: config.times.holdIdleMs,
+        holdTotalQueuedMs: config.times.holdTotalQueuedMs,
+        queuePlaceMs: config.times.queuePlaceMs,
       },
       launcher: makeProcessLauncher({
         state,
@@ -229,6 +250,20 @@ export async function main() {
     advance()
     return current.core
   }
+  /**
+   * The machine behind the `mac` bridge, identified the first time a command or a hold needs it (`[pontes] mac`); a
+   * failed attempt is tried again after 10 min. Until then a hold there goes to any Mac the hub knows.
+   */
+  const bridge = { tried: 0 }
+  const identifyBridge = () => {
+    if (Date.now() - bridge.tried < 10 * 60_000) return
+    bridge.tried = Date.now()
+    void identify(machineFile.config.bridges.mac).then((found) => {
+      if (!found) return log("the machine behind the mac bridge could not be identified")
+      held.process?.core?.bridge(found)
+      bridge.tried = Number.POSITIVE_INFINITY
+    })
+  }
   /** One round of the core now (it runs one at a time; a call during one asks for another); what it wrote goes. */
   const advance = () =>
     void held.process?.core
@@ -250,6 +285,7 @@ export async function main() {
         advance,
         requests: () => held.process?.requests,
         deliveries,
+        identifyBridge,
       }),
   })
   /**
@@ -259,7 +295,13 @@ export async function main() {
   const wake = () => {
     const self = owner.current?.self
     const core = held.process?.core
-    if (!self || !core || Date.now() - deliveries.polledAt < limits.wakeMs || core.notices().length === 0) return
+    if (
+      !self ||
+      !core ||
+      Date.now() - deliveries.polledAt < limits.wakeMs ||
+      core.notices().length + core.notes().length === 0
+    )
+      return
     deliveries.polledAt = Date.now()
     void fetch(`${self.url}/api/rpc/custom.bancada/wake`, {
       method: "POST",
@@ -313,6 +355,7 @@ async function admin(
     readonly advance: () => void
     readonly requests: () => ReturnType<typeof makeRequests> | undefined
     readonly deliveries: Deliveries
+    readonly identifyBridge: () => void
   },
 ) {
   if (request.headers.get("authorization") !== `Bearer ${context.secret}`) return new Response(null, { status: 401 })
@@ -355,6 +398,20 @@ async function admin(
   const field = (name: string) =>
     typeof input === "object" && input !== null && name in input ? (input as Record<string, unknown>)[name] : undefined
   const requests = context.requests()
+  /** The session that asks (its family, with titles for whoever waits behind it). */
+  const asker = () => {
+    const sessionID = field("sessionID")
+    const rootSessionID = field("rootSessionID")
+    if (typeof sessionID !== "string" || typeof rootSessionID !== "string") return undefined
+    const title = field("sessionTitle")
+    const rootTitle = field("rootTitle")
+    return {
+      sessionID,
+      rootSessionID,
+      ...(typeof title === "string" ? { sessionTitle: title } : {}),
+      ...(typeof rootTitle === "string" ? { rootTitle } : {}),
+    }
+  }
   if (method === "submit" && requests) {
     const answer = await requests.submit(input).then(
       (submitted) => Response.json(submitted),
@@ -391,6 +448,72 @@ async function admin(
     context.advance()
     return Response.json({ state: "cancelado" })
   }
+  // A session asks for a device (`bancada_hold`): another machine's answer is awaited up to 8 s.
+  if (method === "hold") {
+    const family = asker()
+    const device = field("aparelho")
+    const platform = field("tipo")
+    const name = field("nome")
+    const target =
+      typeof device === "string"
+        ? { kind: "fisico" as const, device }
+        : (platform === "android" || platform === "ios") && typeof name === "string" && name
+          ? { kind: "vaga" as const, platform: platform as "android" | "ios", name }
+          : undefined
+    if (!family || !target || typeof field("hold") !== "string")
+      return Response.json({ error: "aparelho, or tipo and nome, are required" }, { status: 400 })
+    if (field("maquina") === "mac") context.identifyBridge()
+    const row = core.hold({
+      ...family,
+      hold: String(field("hold")),
+      ...(field("maquina") === "mac" ? { machine: core.bridged() } : {}),
+      target,
+    })
+    context.advance()
+    const settled = await answered(core, row ? [row.hold] : [], 8_000)
+    return Response.json({ hold: settled[0] ?? null })
+  }
+  if (method === "release") {
+    const hold = String(field("hold") ?? "")
+    const row = core.holds.find(hold)
+    if (!row) return Response.json({ state: "desconhecida" })
+    const root = field("rootSessionID")
+    if (typeof root === "string" && row.root_session_id !== root) return Response.json({ state: "outra_familia" })
+    const after = core.release(hold)
+    context.advance()
+    return Response.json({
+      state:
+        row.state === "concedida" || row.state === "esperando" || row.state === "pedida"
+          ? "solta"
+          : (after?.state ?? row.state),
+    })
+  }
+  if (method === "holds") {
+    const root = String(field("rootSessionID") ?? "")
+    return Response.json({ holds: core.holds.family(root) })
+  }
+  // The hook (`docs/bancada.md`, "Hook"): decided here on what the plugin read; a slot asked of another machine is
+  // awaited up to 8 s.
+  if (method === "hook") {
+    const family = asker()
+    const parts = field("parts")
+    if (!family || !Array.isArray(parts))
+      return Response.json({ error: "sessionID and parts are required" }, { status: 400 })
+    if ((parts as Part[]).some((part) => part.where === "mac")) context.identifyBridge()
+    const first = core.gate.decide(family, parts as Part[])
+    if (!("pending" in first)) return Response.json(first)
+    context.advance()
+    await answered(core, first.pending, 8_000)
+    const decision = core.gate.answer(first.pending)
+    return Response.json(
+      "pending" in decision
+        ? {
+            allow: false,
+            message: "Sem vaga agora (a máquina do aparelho não respondeu a tempo). Tente de novo em instantes.",
+          }
+        : decision,
+    )
+  }
   // The plugin's instances ask for the notices to deliver; each goes to one of them, again after 30 s without `ack`.
   if (method === "events") {
     context.deliveries.polledAt = Date.now()
@@ -403,10 +526,21 @@ async function admin(
           (waiting === undefined || Date.now() - waiting > limits.inlineMs)
         )
       })
-    while (Date.now() < deadline && due().length === 0) await Bun.sleep(250)
+    const notes = () =>
+      core.notes().filter((note) => (context.deliveries.leases.get(`note:${note.key}`) ?? 0) <= Date.now())
+    while (Date.now() < deadline && due().length + notes().length === 0) await Bun.sleep(250)
     const notices = due()
     notices.forEach((notice) => context.deliveries.leases.set(notice.job, Date.now() + context.deliveries.leaseMs))
+    const ready = notes()
+    ready.forEach((note) => context.deliveries.leases.set(`note:${note.key}`, Date.now() + context.deliveries.leaseMs))
     return Response.json({
+      notes: ready.map((note) => ({
+        key: note.key,
+        sessionID: note.session_id,
+        id: note.message_id,
+        text: note.text,
+        resume: note.resume === 1,
+      })),
       notices: notices.map((notice) => ({
         job: notice.job,
         sessionID: notice.sessionID,
@@ -415,6 +549,13 @@ async function admin(
         resume: notice.resume,
       })),
     })
+  }
+  if (method === "note.ack") {
+    const key = String(field("key") ?? "")
+    if (field("missing") === true) log(`the session of note ${key} no longer exists; it was dropped`)
+    core.noted(key)
+    context.deliveries.leases.delete(`note:${key}`)
+    return Response.json({})
   }
   if (method === "notice.ack") {
     const job = String(field("job") ?? "")
@@ -520,6 +661,7 @@ async function readMachineFile() {
     memMb: Math.round(os.totalmem() / 1_048_576),
     cores: os.availableParallelism(),
     inDocker: (await Bun.file("/.dockerenv").exists()) && (await fs.exists("/var/run/docker.sock")),
+    platform: process.platform,
   }
   const parsed = parseMachineConfig(text, host)
   if (parsed.ok) return { valid: true, config: parsed.config }
@@ -557,4 +699,12 @@ async function machine(state: string) {
 
 function log(line: string) {
   console.log(`${new Date().toISOString()} ${line}`)
+}
+
+/** The holds asked, once none is still waiting for another machine's first answer, or at `ms`. */
+async function answered(core: Core, holds: ReadonlyArray<string>, ms: number) {
+  const deadline = Date.now() + ms
+  const rows = () => holds.map((hold) => core.holds.find(hold))
+  while (Date.now() < deadline && rows().some((row) => row?.state === "pedida")) await Bun.sleep(100)
+  return rows()
 }

@@ -68,6 +68,11 @@ export type MachineConfig = {
   readonly ports: { readonly emulator: Range; readonly project: Range }
   readonly times: Times
   readonly phones: ReadonlyArray<Phone>
+  /**
+   * How a machine is identified (`docs/bancada.md`, "Hook"): `mac` prints the `IOPlatformUUID` of the machine behind
+   * the `mac` bridge; `propria`, this machine's own (on a Mac, `ioreg`; elsewhere none unless set). Read only, once.
+   */
+  readonly bridges: { readonly mac: ReadonlyArray<string>; readonly own?: ReadonlyArray<string> }
 }
 
 export type BrakeConfig = {
@@ -95,7 +100,13 @@ export type Times = {
 }
 
 /** What the machine itself says, for the defaults: its memory, its cores, and whether this runs in a container with Docker. */
-export type Host = { readonly memMb: number; readonly cores: number; readonly inDocker: boolean }
+export type Host = {
+  readonly memMb: number
+  readonly cores: number
+  readonly inDocker: boolean
+  /** Where the machine file is read: a Mac identifies itself with `ioreg` by default. */
+  readonly platform?: NodeJS.Platform
+}
 
 export type Parsed =
   | { readonly ok: true; readonly config: MachineConfig }
@@ -149,6 +160,7 @@ const topKeys = new Set([
   "portas",
   "tempos",
   "fisico",
+  "pontes",
 ])
 const capability = /^[a-z0-9:-]+$/
 const policy = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -332,6 +344,20 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
 
   const phones = phonesOf(raw.fisico, problems)
 
+  const bridgesRaw = section(raw, "pontes", ["mac", "propria"], problems)
+  const command = (value: unknown, at: string) => {
+    if (value === undefined) return undefined
+    const items = list(value, at, problems)
+    if (items.length === 0) problems.push(`${at}: precisa de pelo menos o programa`)
+    return items
+  }
+  const ioreg = ["/usr/sbin/ioreg", "-rd1", "-c", "IOPlatformExpertDevice"]
+  const own = command(bridgesRaw.propria, "pontes.propria") ?? (host.platform === "darwin" ? ioreg : undefined)
+  const bridges = {
+    mac: command(bridgesRaw.mac, "pontes.mac") ?? ["mac", ...ioreg],
+    ...(own ? { own } : {}),
+  }
+
   if (problems.length > 0) return { ok: false, problems: [...new Set(problems)] }
   return {
     ok: true,
@@ -354,6 +380,7 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
       ports: { emulator, project },
       times,
       phones,
+      bridges,
     },
   }
 }

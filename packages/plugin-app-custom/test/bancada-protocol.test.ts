@@ -235,7 +235,13 @@ describe("core", () => {
     const input = JSON.parse(JSON.stringify(mac.core.outgoing()))
     const output = hub.core.sync(input)
     const afterFirst = dump(hub.db)
-    expect(output.out.messages.map((message) => message.body.type)).toEqual(["submit.ack", "offer", "job.update"])
+    // The machine's hello brings the catalog of machines and phones back.
+    expect(output.out.messages.map((message) => message.body.type)).toEqual([
+      "catalog",
+      "submit.ack",
+      "offer",
+      "job.update",
+    ])
     hub.core.sync(input)
     expect(dump(hub.db)).toEqual(afterFirst)
 

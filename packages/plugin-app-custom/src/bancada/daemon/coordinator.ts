@@ -43,6 +43,9 @@ type MachineRow = {
   readonly machine_id: string
   readonly name: string
   readonly instance_id: string
+  readonly platform: string | null
+  readonly phones: string
+  readonly hardware: string | null
   readonly capabilities: string
   readonly speed: string
   readonly free: string | null
@@ -120,6 +123,8 @@ export function makeCoordinator(input: {
   readonly alerts: Alerts
   /** A fresh random id (128 bits): the hub names each transfer. */
   readonly random: () => string
+  /** The hub tells every machine the catalog; a machine's own queue does not. */
+  readonly hub?: boolean
 }) {
   const db = input.db
   const times = input.times
@@ -146,6 +151,9 @@ export function makeCoordinator(input: {
     },
     [string]
   >("SELECT * FROM hub_blob WHERE transfer = ?")
+  const holdRoute = db.query<{ origin_machine: string; target_machine: string }, [string]>(
+    "SELECT origin_machine, target_machine FROM hub_hold WHERE hold = ?",
+  )
   const scenarios = db.query<{ last: string }, [string, string, string]>(
     "SELECT last FROM hub_scenario WHERE project = ? AND test = ? AND scenario_id = ?",
   )
@@ -400,13 +408,37 @@ export function makeCoordinator(input: {
   }
 
   const handlers = {
-    hello: (from: string, message: typeof BancadaProtocol.Hello.Type) =>
-      db.run("UPDATE hub_machine SET platform = ?, capabilities = ?, speed = ? WHERE machine_id = ?", [
-        message.platform,
-        JSON.stringify(message.capabilities),
-        message.speed,
-        from,
-      ]),
+    hello: (from: string, message: typeof BancadaProtocol.Hello.Type) => {
+      db.run(
+        "UPDATE hub_machine SET platform = ?, capabilities = ?, speed = ?, phones = ?, hardware = ? WHERE machine_id = ?",
+        [
+          message.platform,
+          JSON.stringify(message.capabilities),
+          message.speed,
+          JSON.stringify(message.phones ?? []),
+          message.hardware ?? null,
+          from,
+        ],
+      )
+      if (!input.hub) return
+      const all = machines.all()
+      const catalog: BancadaProtocol.FromHub = {
+        type: "catalog",
+        machines: all.map((row) => ({
+          machineID: row.machine_id,
+          name: row.name,
+          ...(row.platform ? { platform: row.platform } : {}),
+          ...(row.hardware ? { hardware: row.hardware } : {}),
+        })),
+        phones: all.flatMap((row) =>
+          (JSON.parse(row.phones) as (typeof BancadaProtocol.CatalogPhone.Type)[]).map((phone) => ({
+            ...phone,
+            machineID: row.machine_id,
+          })),
+        ),
+      }
+      all.forEach((row) => input.send(row.machine_id, catalog))
+    },
     submit: (from: string, message: typeof BancadaProtocol.Submit.Type) => {
       const known = job.get(message.job)
       // A request seen before (its tombstone too) never runs again; an open one hears where it stands.
@@ -599,6 +631,74 @@ export function makeCoordinator(input: {
         source: { transfer: message.transfer },
       })
     },
+    /**
+     * A session asks for a device of another machine (`docs/bancada.md`, "Holds"): the hub finds that machine (the
+     * one named; `mac`, the Mac; for a phone, the machine whose catalog has it) and relays; that machine decides.
+     */
+    "hold.request": (from: string, message: typeof BancadaProtocol.HoldRequest.Type) => {
+      const all = machines.all()
+      const target =
+        message.machineID === "mac"
+          ? all.find((row) => row.platform === "darwin" && row.machine_id !== from)
+          : message.machineID === "" && message.target.kind === "fisico"
+            ? all.find(
+                (row) => `fisico:${(message.target as { device: string }).device}` in JSON.parse(row.capabilities),
+              )
+            : machine.get(message.machineID)
+      if (!target || target.state !== "ok") {
+        const reason: BancadaProtocol.Reason = target
+          ? { code: "maquina_fora", detail: target.name, text: `aguardando ${target.name} voltar` }
+          : { code: "sem_maquina", text: "nenhuma máquina tem esse aparelho" }
+        return input.send(from, { type: "hold.deny", hold: message.hold, reason })
+      }
+      db.run(
+        "INSERT OR REPLACE INTO hub_hold (hold, origin_machine, target_machine, state, at) VALUES (?, ?, ?, 'pedida', ?)",
+        [message.hold, from, target.machine_id, input.now()],
+      )
+      input.send(target.machine_id, {
+        type: "hold.ask",
+        hold: message.hold,
+        origin: message.origin,
+        target: message.target,
+      })
+    },
+    "hold.touch": (from: string, message: typeof BancadaProtocol.HoldTouch.Type) => {
+      const row = holdRoute.get(message.hold)
+      if (row && row.origin_machine === from)
+        input.send(row.target_machine, { type: "hold.renew", hold: message.hold, at: message.at })
+    },
+    "hold.release": (from: string, message: typeof BancadaProtocol.HoldRelease.Type) => {
+      const row = holdRoute.get(message.hold)
+      if (row && row.origin_machine === from) input.send(row.target_machine, { type: "hold.drop", hold: message.hold })
+    },
+    /** The machine that decides a hold says where it stands: relayed to the session's machine. */
+    "hold.state": (from: string, message: typeof BancadaProtocol.HoldState.Type) => {
+      const row = holdRoute.get(message.hold)
+      if (!row || row.target_machine !== from) return
+      db.run("UPDATE hub_hold SET state = ?, at = ? WHERE hold = ?", [message.state, input.now(), message.hold])
+      const name = machine.get(from)?.name ?? from
+      if (message.state === "concedida")
+        return input.send(row.origin_machine, {
+          type: "hold.grant",
+          hold: message.hold,
+          device: { ...message.device, maquina: name },
+          expiresAt: message.expiresAt ?? input.now(),
+        })
+      if (message.state === "esperando" || message.state === "negada")
+        return input.send(row.origin_machine, {
+          type: "hold.deny",
+          hold: message.hold,
+          reason: message.reason ?? { code: "orcamento", text: "sem folga agora" },
+          machine: name,
+          ...(message.state === "esperando" && message.position !== undefined ? { position: message.position } : {}),
+          ...(message.state === "esperando" && message.expiresAt !== undefined ? { expiresAt: message.expiresAt } : {}),
+        })
+      input.send(row.origin_machine, {
+        type: "hold.expire",
+        hold: message.hold,
+        ...(message.state === "vencida" && message.reason ? { reason: message.reason.text } : {}),
+      })
+    },
     delivered: (from: string, message: typeof BancadaProtocol.Delivered.Type) => {
       const owner = job.get(message.job)
       if (!owner || owner.origin_machine !== from || owner.state !== "fechado") return
@@ -748,6 +848,10 @@ export function makeCoordinator(input: {
     if (message.type === "delivered") return handlers.delivered(from, message)
     if (message.type === "local.job") return handlers["local.job"](from, message)
     if (message.type === "code.have") return handlers["code.have"](from, message)
+    if (message.type === "hold.request") return handlers["hold.request"](from, message)
+    if (message.type === "hold.touch") return handlers["hold.touch"](from, message)
+    if (message.type === "hold.release") return handlers["hold.release"](from, message)
+    if (message.type === "hold.state") return handlers["hold.state"](from, message)
     if (message.type === "blob.ready") return handlers["blob.ready"](from, message)
   }
 

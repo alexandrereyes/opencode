@@ -114,12 +114,13 @@ export function makeBancadaClient(options: {
     body: unknown,
     headers: Record<string, string> = {},
     timeout = limits.requestMs,
+    signal?: AbortSignal,
   ) =>
     fetch(`${origin(info)}${route}`, {
       method: "POST",
       headers: { ...headers, authorization: `Bearer ${info.secret}`, "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeout),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
     }).catch(() => undefined)
 
   const start = async (): Promise<Info | undefined> => {
@@ -172,13 +173,30 @@ export function makeBancadaClient(options: {
     return configured
   }
 
-  const call = async <T>(method: string, input: unknown, timeout = limits.requestMs): Promise<T> => {
+  /**
+   * The process's method. `signal`: the caller gave up (its plugin instance unloaded, say); the call ends without
+   * starting the process again.
+   */
+  const call = async <T>(
+    method: string,
+    input: unknown,
+    timeout = limits.requestMs,
+    signal?: AbortSignal,
+  ): Promise<T> => {
     const attempt = async (retry: boolean): Promise<T> => {
+      if (signal?.aborted) throw unavailable()
       const info = await ensure()
       if (!info) throw unavailable()
       const as = configured?.pid === info.pid ? configured : await configure(info)
       const response = as
-        ? await post(info, `/admin/rpc/${method}`, input, { [BancadaDaemon.instanceHeader]: as.instanceID }, timeout)
+        ? await post(
+            info,
+            `/admin/rpc/${method}`,
+            input,
+            { [BancadaDaemon.instanceHeader]: as.instanceID },
+            timeout,
+            signal,
+          )
         : undefined
       if (response?.ok) return (await response.json()) as T
       if (response?.status === 409) throw taken(await response.json().catch(() => undefined))
@@ -190,6 +208,7 @@ export function makeBancadaClient(options: {
       if (invalid && Option.isSome(invalid))
         throw new BancadaError("invalid", invalid.value.problems.join("\n"), undefined, invalid.value.problems)
       if (response && response.status !== 401 && response.status !== 412) throw unavailable()
+      if (signal?.aborted) throw unavailable()
       // Gone, restarted (a new secret, or a process this client never configured): look again once.
       cached = undefined
       configured = undefined

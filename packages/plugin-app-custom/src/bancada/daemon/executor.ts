@@ -135,6 +135,8 @@ export function makeExecutor(input: {
   readonly wake: () => void
   /** An ended attempt no `cleanup` reached in this long is cleaned up here. */
   readonly keepMs: number
+  /** Light slots waiting for room, per kind (`holds.ts`). */
+  readonly slots?: () => { readonly android: number; readonly ios: number }
   /** The code through the hub; without it, a start without code loses its attempt. */
   readonly code?: {
     readonly ask: (job: string, project: string) => void
@@ -269,7 +271,69 @@ export function makeExecutor(input: {
     return found ? costOf(found.subject, found.cost) : zero
   }
   /** What new admissions may use now: a share of memory and CPU while the owner uses the Mac. */
-  const current = () => room(limits.capacity, used.get()!, watch.present ? limits.presence.factor : 1)
+  const current = () => {
+    const base = room(limits.capacity, used.get()!, watch.present ? limits.presence.factor : 1)
+    // The light slots waiting for room take the next room (`docs/bancada.md`, "Holds"): tests wait behind them.
+    const waiting = input.slots?.() ?? { android: 0, ios: 0 }
+    const held = add(times(device("android", slim), waiting.android), times(device("ios", slim), waiting.ios))
+    return {
+      ...base,
+      memMb: base.memMb - held.memMb,
+      cpuMilli: base.cpuMilli - held.cpuMilli,
+      android: base.android - waiting.android,
+      ios: base.ios - waiting.ios,
+    }
+  }
+  const slim = { slim: "aceita" } as const
+
+  /**
+   * A light slot of `platform` reserved now, when one device of its kind fits (`docs/bancada.md`, "Holds"): its
+   * lease's id. A slot holds no build and no ports: the session starts the device itself.
+   */
+  const reserveSlot = (platform: "android" | "ios") => {
+    const cost = device(platform, slim)
+    // The slot asking is one of those waiting, whose room `current()` set aside: that share is its own.
+    const own = (input.slots?.()[platform] ?? 0) > 0
+    const now = current()
+    const fits = largestFit({
+      room: own
+        ? {
+            ...now,
+            memMb: now.memMb + cost.memMb,
+            cpuMilli: now.cpuMilli + cost.cpuMilli,
+            [platform]: now[platform] + 1,
+          }
+        : now,
+      builds: 0,
+      platform,
+      min: 1,
+      proposed: 1,
+      build: zero,
+      device: cost,
+      extra: () => zero,
+    })
+    if (fits === undefined) return undefined
+    const lease = input.random()
+    db.run(
+      "INSERT INTO lease (id, kind, owner, android, ios, mem_mb, cpu_milli, builds, build_mem_mb, build_cpu_milli, state, created_at) VALUES (?, 'hold', ?, ?, ?, ?, ?, 0, 0, 0, 'active', ?)",
+      [
+        lease,
+        `vaga:${platform}`,
+        platform === "android" ? 1 : 0,
+        platform === "ios" ? 1 : 0,
+        cost.memMb,
+        cost.cpuMilli,
+        input.now(),
+      ],
+    )
+    return lease
+  }
+  const releaseLease = (lease: string) =>
+    db.run("UPDATE lease SET state = 'released', released_at = ? WHERE id = ? AND state = 'active'", [
+      input.now(),
+      lease,
+    ])
+
   /** The pulse's free vector: the hub never offers beyond it (a default build, default devices). */
   const free = (): BancadaProtocol.Vector =>
     budgetFree(current(), buildCost, {
@@ -679,6 +743,8 @@ export function makeExecutor(input: {
     offer,
     cancel,
     cleanup,
+    reserveSlot,
+    releaseLease,
     tick,
     free,
     running: (): BancadaProtocol.Pulse["running"] =>
