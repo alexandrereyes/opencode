@@ -93,6 +93,10 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       only_scenarios TEXT,
       state TEXT NOT NULL,
       lease_id TEXT NOT NULL,
+      group_id TEXT,
+      cancel_at INTEGER,
+      cancel_reason TEXT,
+      delivered INTEGER NOT NULL DEFAULT 0,
       accepted_at INTEGER NOT NULL,
       started_at INTEGER,
       ended_at INTEGER,
@@ -121,7 +125,8 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       protocol INTEGER NOT NULL,
       pulse_stream TEXT,
       pulse_seq INTEGER,
-      last_sync_at INTEGER NOT NULL
+      last_sync_at INTEGER NOT NULL,
+      state_since INTEGER NOT NULL DEFAULT 0
     )`,
     `CREATE TABLE hub_job (
       id TEXT PRIMARY KEY,
@@ -147,7 +152,44 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       held_state TEXT,
       since INTEGER NOT NULL,
       outcome TEXT,
+      reserved INTEGER NOT NULL DEFAULT 0,
+      bypassed INTEGER NOT NULL DEFAULT 0,
+      retry_used INTEGER NOT NULL DEFAULT 0,
+      only_scenarios TEXT,
+      previous TEXT,
+      missing INTEGER NOT NULL DEFAULT 0,
+      told TEXT,
+      est_ms INTEGER,
+      offered_at INTEGER,
+      acked_at INTEGER,
+      started_at INTEGER,
+      built_at INTEGER,
       PRIMARY KEY (job_id, part)
+    )`,
+    // Every attempt of a part, also the old ones: a late report changes only its own row.
+    `CREATE TABLE hub_attempt (
+      job_id TEXT NOT NULL,
+      part TEXT NOT NULL,
+      n INTEGER NOT NULL,
+      machine_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      outcome TEXT,
+      cancelled INTEGER NOT NULL DEFAULT 0,
+      at INTEGER NOT NULL,
+      PRIMARY KEY (job_id, part, n)
+    )`,
+    `CREATE TABLE hub_lock (
+      name TEXT PRIMARY KEY,
+      job_id TEXT NOT NULL,
+      part TEXT NOT NULL,
+      since INTEGER NOT NULL
+    )`,
+    `CREATE TABLE hub_duration (
+      project TEXT NOT NULL,
+      test TEXT NOT NULL,
+      machine_id TEXT NOT NULL,
+      samples TEXT NOT NULL,
+      PRIMARY KEY (project, test, machine_id)
     )`,
   ],
 ]

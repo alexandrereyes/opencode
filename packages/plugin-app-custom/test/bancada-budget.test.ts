@@ -84,6 +84,8 @@ describe("budget", () => {
     // The ceiling of emulators, and no build free (or none that fits): nothing.
     expect(free(vector(96_000, 13_000, 1, 2, 0), build, devices).android).toBe(2)
     expect(free(vector(96_000, 13_000, 0, 8, 6), build, devices)).toEqual(vector(96_000, 13_000, 0, 0, 0))
+    // Three builds in the budget, CPU for two at once: two.
+    expect(free(vector(64_000, 16_000, 3, 8, 6), build, devices).builds).toBe(2)
     expect(free(vector(6_000, 13_000, 1, 8, 6), build, devices)).toMatchObject({ builds: 0, android: 0 })
   })
 })
@@ -245,6 +247,7 @@ describe("admission", () => {
       start: async () => {},
       status: async () => execution.status,
       cancel: async () => {},
+      stop: async () => {},
       reap: async () => {},
       held: () => false,
       cleanup: async () => {},

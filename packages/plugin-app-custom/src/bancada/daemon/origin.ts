@@ -121,6 +121,13 @@ export function makeOrigin(input: {
   /** Called inside the transaction that applies the hub's message. */
   const apply = (message: BancadaProtocol.FromHub) => {
     if (message.type === "submit.ack") {
+      // Requests this one replaced entirely close without a notice: the session asked again.
+      message.superseded.forEach((replaced) =>
+        db.run("UPDATE job SET state = 'entregue', delivered_at = ? WHERE id = ? AND state <> 'entregue'", [
+          input.now(),
+          replaced,
+        ]),
+      )
       const row = find.get(message.job)
       if (!row) return
       if (row.state === "aguardando_confirmacao")
@@ -194,10 +201,38 @@ export function makeOrigin(input: {
     }
   }
 
+  /**
+   * The hub forgot (another database): every request of this origin still open is sent again, as it was (the hub is
+   * idempotent by id); one already answered is not, its result is here (`docs/bancada.md`, "When a side forgot").
+   */
+  const resubmit = () =>
+    db
+      .query<JobRow & { origin: string; created_at: number }, []>(
+        "SELECT * FROM job WHERE state IN ('aguardando_confirmacao', 'na_fila')",
+      )
+      .all()
+      .forEach((row) => {
+        const seq = input.send({
+          type: "submit",
+          job: row.id,
+          origin: JSON.parse(row.origin),
+          code: JSON.parse(row.code),
+          parts: JSON.parse(row.parts),
+          createdAt: row.created_at,
+        })
+        db.run("UPDATE job SET submit_seq = ?, acked_at = NULL WHERE id = ?", [seq, row.id])
+      })
+
+  /** A delivered request keeps only its id and state for `tombstoneMs` (a resend of its id never runs it again). */
+  const forget = (tombstoneMs: number) =>
+    db.run("DELETE FROM job WHERE state = 'entregue' AND delivered_at < ?", [input.now() - tombstoneMs])
+
   return {
     submit,
     apply,
     unregistered,
+    resubmit,
+    forget,
     repository: (job: string) =>
       db.query<{ repo_dir: string | null }, [string]>("SELECT repo_dir FROM job WHERE id = ?").get(job)?.repo_dir ??
       undefined,
@@ -209,7 +244,10 @@ export function makeOrigin(input: {
       db.transaction(() => {
         const row = find.get(job)
         if (!row || row.state !== "concluido") return
-        db.run("UPDATE job SET state = 'entregue', delivered_at = ? WHERE id = ?", [input.now(), job])
+        db.run("UPDATE job SET state = 'entregue', delivered_at = ?, view = '{}', result = NULL WHERE id = ?", [
+          input.now(),
+          job,
+        ])
         input.send({ type: "delivered", job })
       })(),
     /** The request as this server knows it. */

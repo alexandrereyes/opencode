@@ -1,9 +1,11 @@
 import type { Database } from "bun:sqlite"
 import { BancadaProtocol } from "../protocol.js"
+import { join } from "../results.js"
+import { duration, defaults as estimates, wait, type Sample } from "./estimate.js"
+import { reserveAfter, schedule as choose, type MachineView, type QueuedPart } from "./scheduler.js"
 
 type PartRow = {
   readonly job_id: string
-  readonly devices_granted: number | null
   readonly part: string
   readonly idx: number
   readonly spec: string
@@ -11,19 +13,37 @@ type PartRow = {
   readonly attempt_n: number
   readonly machine_id: string | null
   readonly offer_seq: number | null
+  readonly devices_granted: number | null
   readonly refused_by: string | null
   readonly refused_pulse: number | null
   readonly held_state: BancadaProtocol.PartState | null
+  readonly since: number
   readonly outcome: string | null
+  readonly reserved: number
+  readonly bypassed: number
+  readonly retry_used: number
+  readonly only_scenarios: string | null
+  readonly previous: string | null
+  readonly missing: number
+  readonly told: string | null
+  readonly est_ms: number | null
+  readonly offered_at: number | null
+  readonly acked_at: number | null
+  readonly started_at: number | null
+  readonly built_at: number | null
 }
 type MachineRow = {
   readonly machine_id: string
   readonly name: string
   readonly capabilities: string
+  readonly speed: string
   readonly free: string | null
   readonly brake: number
   readonly state: string
+  readonly pulse_stream: string | null
   readonly pulse_seq: number | null
+  readonly last_sync_at: number
+  readonly state_since: number
 }
 type JobRow = {
   readonly id: string
@@ -31,6 +51,8 @@ type JobRow = {
   readonly origin: string
   readonly code: string
   readonly state: string
+  readonly created_at: number
+  readonly closed_at: number | null
 }
 
 /** How far a part has gone; a report never moves a part back. */
@@ -46,6 +68,23 @@ const rank: Record<BancadaProtocol.PartState, number> = {
   cancelado: 5,
   invalido: 5,
 }
+const live = ["aceito", "compilando", "rodando"] as const
+
+/** The times of the queue (`docs/bancada.md`, "State machine"); the hub's own `[tempos]`. */
+export type QueueTimes = {
+  /** A machine that has not called for this long is silent. */
+  readonly silentMs: number
+  /** Silent for this long, a machine is away (`fora`): parts only it can run wait for it by name. */
+  readonly uncertainMs: number
+  /** A part uncertain for this long is lost; it runs again elsewhere only when that is safe. */
+  readonly lostMs: number
+  /** A machine still reconciling after this long is treated as silent for what it runs. */
+  readonly reconcilingMs: number
+  /** An offer the machine received and has not answered after this long is withdrawn. */
+  readonly replyMs: number
+  /** How long a delivered request's tombstone stays (its id would not run again). */
+  readonly tombstoneMs: number
+}
 
 /**
  * The queue of every machine (`docs/bancada.md`, "Queue"), where the hub runs. It offers parts to machines that can
@@ -55,33 +94,31 @@ const rank: Record<BancadaProtocol.PartState, number> = {
 export function makeCoordinator(input: {
   readonly db: Database
   readonly now: () => number
-  /** A machine that has not called for this long is silent: what it runs becomes `incerto`. */
-  readonly silentMs: number
+  readonly times: QueueTimes
   /** When this hub's process started: a machine's silence counts only from then (it could not call a hub that was out). */
   readonly startedAt: number
   readonly send: (machineID: string, body: BancadaProtocol.FromHub) => number
   /** The last sequence number `machineID` acknowledged of the hub's stream to it. */
   readonly acknowledged: (machineID: string) => number
+  readonly log: (line: string) => void
 }) {
   const db = input.db
+  const times = input.times
   const job = db.query<JobRow, [string]>("SELECT * FROM hub_job WHERE id = ?")
   const part = db.query<PartRow, [string, string]>("SELECT * FROM hub_part WHERE job_id = ? AND part = ?")
   const parts = db.query<PartRow, [string]>("SELECT * FROM hub_part WHERE job_id = ? ORDER BY idx")
-  const queued = db.query<PartRow, []>(
-    "SELECT p.* FROM hub_part p JOIN hub_job j ON j.id = p.job_id WHERE p.state = 'na_fila' ORDER BY j.created_at, j.id, p.idx",
-  )
-  const offered = db.query<PartRow, []>("SELECT * FROM hub_part WHERE state = 'oferecido'")
-  const machines = db.query<MachineRow, []>("SELECT * FROM hub_machine WHERE state = 'ok' ORDER BY machine_id")
+  const inState = db.query<PartRow, [string]>("SELECT * FROM hub_part WHERE state = ?")
+  const onMachine = db.query<PartRow, [string]>("SELECT * FROM hub_part WHERE machine_id = ?")
+  const machines = db.query<MachineRow, []>("SELECT * FROM hub_machine ORDER BY machine_id")
   const machine = db.query<MachineRow, [string]>("SELECT * FROM hub_machine WHERE machine_id = ?")
-  const uncertain = db.query<PartRow, [string]>("SELECT * FROM hub_part WHERE state = 'incerto' AND machine_id = ?")
-  const silent = db.query<{ machine_id: string }, [number]>(
-    "SELECT machine_id FROM hub_machine WHERE state IN ('ok', 'reconciling') AND last_sync_at < ?",
+  const history = db.query<{ cancelled: number; state: string }, [string, string, number]>(
+    "SELECT cancelled, state FROM hub_attempt WHERE job_id = ? AND part = ? AND n = ?",
   )
-  const runningOn = db.query<PartRow, [string]>(
-    "SELECT * FROM hub_part WHERE machine_id = ? AND state IN ('aceito', 'compilando', 'rodando')",
+  const durations = db.query<{ machine_id: string; samples: string }, [string, string]>(
+    "SELECT machine_id, samples FROM hub_duration WHERE project = ? AND test = ?",
   )
 
-  const update = (row: PartRow, fields: Partial<Record<keyof PartRow | "since", unknown>>) => {
+  const update = (row: PartRow, fields: Partial<Record<keyof PartRow, unknown>>) => {
     const names = Object.keys(fields)
     db.run(`UPDATE hub_part SET ${names.map((name) => `${name} = ?`).join(", ")} WHERE job_id = ? AND part = ?`, [
       ...names.map((name) => fields[name as keyof typeof fields] as string | number | null),
@@ -89,6 +126,34 @@ export function makeCoordinator(input: {
       row.part,
     ])
   }
+  const record = (
+    key: { job: string; part: string; attempt: number },
+    fields: { machine?: string; state: string; outcome?: unknown },
+  ) =>
+    db.run(
+      "INSERT INTO hub_attempt (job_id, part, n, machine_id, state, outcome, at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (job_id, part, n) DO UPDATE SET state = excluded.state, outcome = COALESCE(excluded.outcome, outcome), at = excluded.at",
+      [
+        key.job,
+        key.part,
+        key.attempt,
+        fields.machine ?? "",
+        fields.state,
+        fields.outcome === undefined ? null : JSON.stringify(fields.outcome),
+        input.now(),
+      ],
+    )
+  /** An attempt the hub gave up (withdrawn, lost, replaced): the machine hears it when it calls, and stops it. */
+  const cancelAttempt = (machineID: string, key: { job: string; part: string; attempt: number }, reason: string) => {
+    if (history.get(key.job, key.part, key.attempt)?.cancelled) return
+    db.run("UPDATE hub_attempt SET cancelled = 1 WHERE job_id = ? AND part = ? AND n = ?", [
+      key.job,
+      key.part,
+      key.attempt,
+    ])
+    input.send(machineID, { type: "attempt.cancel", job: key.job, part: key.part, attempt: key.attempt, reason })
+  }
+  const releaseLocks = (row: PartRow) =>
+    db.run("DELETE FROM hub_lock WHERE job_id = ? AND part = ?", [row.job_id, row.part])
   /** Tells the origin where a part stands. */
   const tell = (row: PartRow, extra: Partial<typeof BancadaProtocol.JobUpdate.Type> = {}) => {
     const owner = job.get(row.job_id)
@@ -105,6 +170,15 @@ export function makeCoordinator(input: {
       ...extra,
     })
   }
+  const lostOutcome = (reason: string): BancadaProtocol.Outcome => ({
+    verdict: "infraestrutura",
+    reason,
+    planned: [],
+    scenarios: [],
+    lost: [],
+    approved: false,
+  })
+
   /** When every part is final the job closes, once, and its result goes to the origin. */
   const close = (jobID: string) => {
     const owner = job.get(jobID)
@@ -128,6 +202,61 @@ export function makeCoordinator(input: {
     })
   }
 
+  /**
+   * The end of an attempt (`docs/bancada.md`, "State machine"): its outcome joins the earlier attempt's, if any. A part
+   * with scenarios left without result (a device that fell, a deadline, exit 75, an incomplete run, a lost machine)
+   * runs once more with only those, when that is safe: a part on a phone, with real accounts, an exclusive lock or
+   * secrets only after an end its machine confirmed. A failed assertion never runs again.
+   */
+  const ended = (row: PartRow, outcome: BancadaProtocol.Outcome, confirmed: boolean) => {
+    const previous: BancadaProtocol.Outcome | undefined = row.previous ? JSON.parse(row.previous) : undefined
+    const joined = previous ? join(previous, outcome) : outcome
+    const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+    const retry =
+      row.retry_used === 0 &&
+      (confirmed || !spec.unsafe) &&
+      (joined.verdict === "infraestrutura" || (joined.verdict === "incompleto" && joined.lost.length > 0))
+    releaseLocks(row)
+    if (retry) {
+      update(row, {
+        state: "na_fila",
+        machine_id: null,
+        offer_seq: null,
+        held_state: null,
+        missing: 0,
+        retry_used: 1,
+        previous: JSON.stringify(joined),
+        only_scenarios: joined.planned.length > 0 ? JSON.stringify(joined.lost) : null,
+        refused_by: null,
+        refused_pulse: null,
+        told: null,
+        since: input.now(),
+      })
+      return tell(row)
+    }
+    const state =
+      joined.verdict === "infraestrutura" ? "perdido" : joined.verdict === "cancelado" ? "cancelado" : "concluido"
+    update(row, { state, held_state: null, outcome: JSON.stringify(joined), since: input.now() })
+    tell(row)
+    close(row.job_id)
+  }
+
+  /** A part goes back to the queue: its offer was refused or withdrawn. The next offer has the next attempt number. */
+  const requeue = (row: PartRow, extra: Partial<Record<keyof PartRow, unknown>> = {}) => {
+    releaseLocks(row)
+    update(row, {
+      state: "na_fila",
+      machine_id: null,
+      offer_seq: null,
+      held_state: null,
+      offered_at: null,
+      acked_at: null,
+      told: null,
+      since: input.now(),
+      ...extra,
+    })
+  }
+
   const handlers = {
     hello: (from: string, message: typeof BancadaProtocol.Hello.Type) =>
       db.run("UPDATE hub_machine SET platform = ?, capabilities = ?, speed = ? WHERE machine_id = ?", [
@@ -137,7 +266,19 @@ export function makeCoordinator(input: {
         from,
       ]),
     submit: (from: string, message: typeof BancadaProtocol.Submit.Type) => {
-      if (job.get(message.job)) return
+      const known = job.get(message.job)
+      // A request seen before (its tombstone too) never runs again; an open one hears where it stands.
+      if (known) {
+        if (known.state === "aberto")
+          input.send(from, {
+            type: "submit.ack",
+            job: message.job,
+            parts: parts.all(message.job).map((row) => ({ part: row.part, state: row.state, attempt: row.attempt_n })),
+            superseded: [],
+          })
+        return
+      }
+      const superseded = supersede(from, message)
       db.run(
         "INSERT INTO hub_job (id, origin_machine, origin, code, state, created_at) VALUES (?, ?, ?, ?, 'aberto', ?)",
         [message.job, from, JSON.stringify(message.origin), JSON.stringify(message.code), input.now()],
@@ -151,178 +292,482 @@ export function makeCoordinator(input: {
       input.send(from, {
         type: "submit.ack",
         job: message.job,
-        parts: message.parts.map((spec) => ({ part: spec.part, reason: { code: "fila", text: "na fila" } })),
-        superseded: [],
+        parts: message.parts.map((spec) => ({
+          part: spec.part,
+          state: "na_fila",
+          attempt: 0,
+          reason: { code: "fila", text: "na fila" },
+        })),
+        superseded,
       })
+    },
+    cancel: (from: string, message: typeof BancadaProtocol.Cancel.Type) => {
+      const owner = job.get(message.job)
+      if (!owner || owner.origin_machine !== from || owner.state !== "aberto") return
+      for (const row of parts.all(message.job)) {
+        if (BancadaProtocol.finalStates.has(row.state)) continue
+        // What runs stops where it runs; its final report closes the part.
+        if (row.machine_id && row.state !== "oferecido" && row.state !== "na_fila") {
+          cancelAttempt(row.machine_id, { job: row.job_id, part: row.part, attempt: row.attempt_n }, "cancelado")
+          continue
+        }
+        if (row.machine_id)
+          cancelAttempt(row.machine_id, { job: row.job_id, part: row.part, attempt: row.attempt_n }, "cancelado")
+        releaseLocks(row)
+        update(row, {
+          state: "cancelado",
+          outcome: JSON.stringify({ ...lostOutcome("cancelado"), verdict: "cancelado" }),
+          since: input.now(),
+        })
+        tell(row)
+      }
+      close(message.job)
     },
     "offer.reply": (
       from: string,
       message: typeof BancadaProtocol.OfferAccepted.Type | typeof BancadaProtocol.OfferRefused.Type,
     ) => {
       const row = part.get(message.job, message.part)
-      if (!row || row.state !== "oferecido" || row.attempt_n !== message.attempt || row.machine_id !== from) return
+      record(message, { machine: from, state: message.accepted ? "aceito" : "recusado" })
+      // An unsafe part whose machine went silent with the offer unanswered waits as `incerto` for this reply.
+      const pending = row?.state === "oferecido" || (row?.state === "incerto" && row.held_state === "oferecido")
+      if (!row || !pending || row.attempt_n !== message.attempt || row.machine_id !== from) return
       if (message.accepted) {
-        update(row, { state: "aceito", devices_granted: message.devices, since: input.now() })
+        update(row, {
+          state: "aceito",
+          held_state: null,
+          devices_granted: message.devices,
+          started_at: input.now(),
+          since: input.now(),
+        })
         return tell(row)
       }
-      update(row, {
-        state: "na_fila",
-        machine_id: null,
-        offer_seq: null,
-        refused_by: from,
-        refused_pulse: machine.get(from)?.pulse_seq ?? 0,
-      })
+      requeue(row, { refused_by: from, refused_pulse: machine.get(from)?.pulse_seq ?? 0 })
       tell(row, { reason: message.reason })
     },
     attempt: (from: string, message: typeof BancadaProtocol.AttemptReport.Type) => {
       const row = part.get(message.job, message.part)
-      if (!row || row.attempt_n !== message.attempt || row.machine_id !== from) return
-      if (rank[message.state] <= rank[row.state]) return
-      update(row, {
-        state: message.state,
-        since: input.now(),
-        ...(message.outcome ? { outcome: JSON.stringify(message.outcome) } : {}),
-      })
-      tell(row)
-      close(row.job_id)
+      if (!row) return
+      record(message, { machine: from, state: message.state, ...(message.outcome ? { outcome: message.outcome } : {}) })
+      // A late report of an older attempt stays in its history; if it still runs, it stops.
+      if (message.attempt < row.attempt_n || row.machine_id !== from) {
+        if (!BancadaProtocol.finalStates.has(message.state))
+          cancelAttempt(from, message, "substituída por uma nova tentativa")
+        return
+      }
+      if (message.attempt !== row.attempt_n || BancadaProtocol.finalStates.has(row.state)) return
+      // An uncertain part hears its real state again, whatever it was before the silence.
+      const from_ = row.state === "incerto" ? (row.held_state ?? "aceito") : row.state
+      if (rank[message.state] < rank[from_] || (rank[message.state] === rank[from_] && row.state !== "incerto")) return
+      if (!BancadaProtocol.finalStates.has(message.state)) {
+        update(row, {
+          state: message.state,
+          held_state: null,
+          missing: 0,
+          since: input.now(),
+          ...(message.state === "rodando" ? { built_at: input.now() } : {}),
+        })
+        return tell(row)
+      }
+      const outcome = message.outcome ?? lostOutcome("a execução terminou sem resultado")
+      if (message.state === "concluido") sample(row, outcome)
+      ended(row, outcome, true)
     },
     delivered: (from: string, message: typeof BancadaProtocol.Delivered.Type) => {
       const owner = job.get(message.job)
       if (!owner || owner.origin_machine !== from || owner.state !== "fechado") return
-      db.run("UPDATE hub_job SET state = 'entregue' WHERE id = ?", [message.job])
-      new Set(parts.all(message.job).flatMap((row) => (row.machine_id ? [row.machine_id] : []))).forEach((machineID) =>
-        input.send(machineID, { type: "cleanup", job: message.job }),
-      )
+      // Every machine that had an attempt of it, earlier ones included (a part that ran again elsewhere).
+      const machines = db
+        .query<{ machine_id: string }, [string]>(
+          "SELECT DISTINCT machine_id FROM hub_attempt WHERE job_id = ? AND machine_id <> ''",
+        )
+        .all(message.job)
+        .map((row) => row.machine_id)
+      new Set([
+        ...machines,
+        ...parts.all(message.job).flatMap((row) => (row.machine_id ? [row.machine_id] : [])),
+      ]).forEach((machineID) => input.send(machineID, { type: "cleanup", job: message.job }))
+      tombstone(message.job)
     },
+  }
+
+  /**
+   * After delivery only the request's id and state stay, for `tombstoneMs`, so a resend of the same id never runs it
+   * again (`docs/bancada.md`, "State"); its parts and their history go at once.
+   */
+  const tombstone = (jobID: string) => {
+    db.run("UPDATE hub_job SET state = 'entregue', origin = '{}', code = '{}', closed_at = ? WHERE id = ?", [
+      input.now(),
+      jobID,
+    ])
+    db.run("DELETE FROM hub_part WHERE job_id = ?", [jobID])
+    db.run("DELETE FROM hub_attempt WHERE job_id = ?", [jobID])
+    db.run("DELETE FROM hub_lock WHERE job_id = ?", [jobID])
+  }
+
+  /**
+   * Substitution (`docs/bancada.md`, "Queue"): a request replaces its session's parts of the same project and test
+   * still waiting. They are cancelled ("substituída por …"); a request left with every part replaced closes without
+   * a notice (the origin hears it in `superseded`). Returns those requests.
+   */
+  const supersede = (from: string, message: typeof BancadaProtocol.Submit.Type) => {
+    const replaced = new Set(message.parts.map((spec) => spec.part))
+    const waiting = db
+      .query<PartRow & { origin: string; code: string }, [string]>(
+        "SELECT p.*, j.origin, j.code FROM hub_part p JOIN hub_job j ON j.id = p.job_id WHERE j.origin_machine = ? AND j.state = 'aberto' AND p.state = 'na_fila'",
+      )
+      .all(from)
+      .filter(
+        (row) =>
+          replaced.has(row.part) &&
+          (JSON.parse(row.origin) as BancadaProtocol.Origin).sessionID === message.origin.sessionID &&
+          (JSON.parse(row.code) as BancadaProtocol.Code).project === message.code.project,
+      )
+    const outcome = { ...lostOutcome(`substituída por ${message.job}`), verdict: "cancelado" as const }
+    waiting.forEach((row) => update(row, { state: "cancelado", outcome: JSON.stringify(outcome), since: input.now() }))
+    const touched = [...new Set(waiting.map((row) => row.job_id))]
+    const whole = touched.filter((jobID) =>
+      parts
+        .all(jobID)
+        .every((row) => row.state === "cancelado" && row.outcome?.includes(`substituída por ${message.job}`)),
+    )
+    whole.forEach(tombstone)
+    touched
+      .filter((jobID) => !whole.includes(jobID))
+      .forEach((jobID) => {
+        waiting.filter((row) => row.job_id === jobID).forEach((row) => tell(row))
+        close(jobID)
+      })
+    return whole
+  }
+
+  /** A concluded attempt's times feed the estimates of that project's test on that machine (the last 10). */
+  const sample = (row: PartRow, outcome: BancadaProtocol.Outcome) => {
+    const owner = job.get(row.job_id)
+    if (!owner || !row.machine_id || row.started_at === null) return
+    const project = (JSON.parse(owner.code) as BancadaProtocol.Code).project
+    const built = row.built_at ?? row.started_at
+    const next: Sample = {
+      buildMs: Math.max(0, built - row.started_at),
+      runMs: Math.max(0, input.now() - built),
+      devices: row.devices_granted ?? 0,
+      ...(outcome.planned.length > 0 ? { scenarios: outcome.planned.length } : {}),
+    }
+    const known = durations.all(project, row.part).find((item) => item.machine_id === row.machine_id)
+    const samples = [...(known ? (JSON.parse(known.samples) as Sample[]) : []), next].slice(-estimates.kept)
+    db.run("INSERT OR REPLACE INTO hub_duration (project, test, machine_id, samples) VALUES (?, ?, ?, ?)", [
+      project,
+      row.part,
+      row.machine_id,
+      JSON.stringify(samples),
+    ])
   }
 
   /** Applies one message from `from`. Messages of later packages (holds, code, blobs) are not handled yet. */
   const apply = (from: string, message: BancadaProtocol.FromMachine) => {
     if (message.type === "hello") return handlers.hello(from, message)
     if (message.type === "submit") return handlers.submit(from, message)
+    if (message.type === "cancel") return handlers.cancel(from, message)
     if (message.type === "offer.reply") return handlers["offer.reply"](from, message)
     if (message.type === "attempt") return handlers.attempt(from, message)
     if (message.type === "delivered") return handlers.delivered(from, message)
   }
 
   /**
-   * Records who called and its pulse; a pulse older than the last one applied changes nothing. A machine that was
-   * silent is back: each of its `incerto` parts it still runs (its pulse lists it) returns to where it was; one it no
-   * longer lists waits for its final report.
+   * Records who called and, only from a pulse newer than the last applied, everything the pulse says: the machine's
+   * state, when it last called, its free vector, its brake and what it runs (`docs/bancada.md`, "State machine"). A
+   * repeated or late call never makes a machine "come back". An uncertain part it still runs returns to where it was;
+   * one it accepted and has not listed in two pulses in a row, without a final report, is lost.
    */
   const seen = (sync: BancadaProtocol.SyncInput) => {
     const known = machine.get(sync.machineID)
     if (!known)
       db.run(
-        "INSERT INTO hub_machine (machine_id, instance_id, name, state, protocol, last_sync_at) VALUES (?, ?, ?, 'ok', ?, ?)",
-        [sync.machineID, sync.instanceID, sync.name, sync.protocol, input.now()],
+        "INSERT INTO hub_machine (machine_id, instance_id, name, state, protocol, last_sync_at, state_since) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [sync.machineID, sync.instanceID, sync.name, sync.pulse.state, sync.protocol, input.now(), input.now()],
       )
-    db.run(
-      "UPDATE hub_machine SET instance_id = ?, name = ?, state = ?, protocol = ?, last_sync_at = ? WHERE machine_id = ?",
-      [sync.instanceID, sync.name, sync.pulse.state, sync.protocol, input.now(), sync.machineID],
-    )
-    const running = new Set(sync.pulse.running.map((item) => `${item.job}/${item.part}/${item.attempt}`))
-    for (const row of uncertain.all(sync.machineID))
-      if (row.held_state && running.has(`${row.job_id}/${row.part}/${row.attempt_n}`)) {
-        update(row, { state: row.held_state, held_state: null })
-        tell(row)
-      }
-    const stream = sync.out.stream
-    const current = db
-      .query<
-        { pulse_stream: string | null; pulse_seq: number | null },
-        [string]
-      >("SELECT pulse_stream, pulse_seq FROM hub_machine WHERE machine_id = ?")
-      .get(sync.machineID)
-    if (current?.pulse_stream === stream && (current.pulse_seq ?? -1) >= sync.pulse.seq) return
-    db.run("UPDATE hub_machine SET free = ?, brake = ?, pulse_stream = ?, pulse_seq = ? WHERE machine_id = ?", [
-      JSON.stringify(sync.pulse.free),
-      sync.pulse.brake ? 1 : 0,
-      stream,
-      sync.pulse.seq,
+    db.run("UPDATE hub_machine SET instance_id = ?, name = ?, protocol = ? WHERE machine_id = ?", [
+      sync.instanceID,
+      sync.name,
+      sync.protocol,
       sync.machineID,
     ])
+    const stream = sync.out.stream
+    if (known && known.pulse_stream === stream && (known.pulse_seq ?? -1) >= sync.pulse.seq) return
+    db.run(
+      "UPDATE hub_machine SET state = ?, state_since = CASE WHEN state = ? THEN state_since ELSE ? END, last_sync_at = ?, free = ?, brake = ?, pulse_stream = ?, pulse_seq = ? WHERE machine_id = ?",
+      [
+        sync.pulse.state,
+        sync.pulse.state,
+        input.now(),
+        input.now(),
+        JSON.stringify(sync.pulse.free),
+        sync.pulse.brake ? 1 : 0,
+        stream,
+        sync.pulse.seq,
+        sync.machineID,
+      ],
+    )
+    const running = new Set(sync.pulse.running.map((item) => `${item.job}/${item.part}/${item.attempt}`))
+    const acknowledged = input.acknowledged(sync.machineID)
+    for (const row of onMachine.all(sync.machineID)) {
+      const listed = running.has(`${row.job_id}/${row.part}/${row.attempt_n}`)
+      if (row.state === "incerto" && listed && row.held_state && row.held_state !== "oferecido") {
+        update(row, { state: row.held_state, held_state: null, missing: 0 })
+        tell(row)
+        continue
+      }
+      const accepted =
+        (live as ReadonlyArray<string>).includes(row.state) ||
+        (row.state === "incerto" && row.held_state !== "oferecido")
+      if (!accepted || (row.offer_seq ?? 0) > acknowledged) continue
+      if (listed) {
+        if (row.missing > 0) update(row, { missing: 0 })
+        continue
+      }
+      if (row.missing + 1 < 2) {
+        update(row, { missing: row.missing + 1 })
+        continue
+      }
+      // Not a confirmed end: an unsafe part does not run again.
+      ended(row, lostOutcome("a máquina não conhece mais esta tentativa"), false)
+    }
   }
 
   /**
-   * Offers each waiting part, oldest first, to the first machine that offers what it needs and has room for its
-   * minimum. A machine's room is its last pulse minus the offers it has not received yet (a pulse already counts every
-   * offer the machine applied). The order and the choice of machine are minimal here; the full scheduler replaces them.
+   * What depends on time, each round: a machine silent for `silentMs` (asleep, or gone) has its offers withdrawn and
+   * what it runs turns `incerto`, never approved nor lost by itself; away after `uncertainMs`; an uncertain part lost
+   * after `lostMs`. The silence counts only while the hub listens: from the later of the machine's last call and this
+   * hub's start (after a deploy every last call is old). An offer received and unanswered for `replyMs` is withdrawn.
    */
-  const schedule = () => {
-    const all = machines.all()
-    const room = new Map(
-      all.map((row) => [row.machine_id, row.free ? (JSON.parse(row.free) as BancadaProtocol.Vector) : undefined]),
-    )
-    /** An offer takes a build and its devices from the machine's room until its next pulse counts them. */
-    const take = (machineID: string, platform: BancadaProtocol.Platform, devices: number) => {
-      const free = room.get(machineID)
-      if (!free) return
-      room.set(machineID, {
-        ...free,
-        builds: free.builds - 1,
-        ...(platform === "none" ? {} : { [platform]: free[platform] - devices }),
-      })
+  const watch = () => {
+    const now = input.now()
+    const listening = now - input.startedAt
+    for (const row of machines.all()) {
+      const quiet = Math.min(now - row.last_sync_at, listening)
+      if ((row.state === "ok" || row.state === "reconciling") && quiet >= times.silentMs) {
+        db.run("UPDATE hub_machine SET state = 'silenciosa', state_since = ? WHERE machine_id = ?", [
+          now,
+          row.machine_id,
+        ])
+        uncertain(row)
+      }
+      if (row.state === "silenciosa" && quiet >= times.uncertainMs)
+        db.run("UPDATE hub_machine SET state = 'fora', state_since = ? WHERE machine_id = ?", [now, row.machine_id])
+      // Still reconciling long after it came back: what it runs is as uncertain as a silent machine's.
+      if (row.state === "reconciling" && now - row.state_since >= times.reconcilingMs) uncertain(row)
     }
-    for (const row of offered.all())
-      if (row.machine_id && (row.offer_seq ?? 0) > input.acknowledged(row.machine_id))
-        take(row.machine_id, (JSON.parse(row.spec) as BancadaProtocol.PartSpec).platform, row.devices_granted ?? 0)
-    for (const row of queued.all()) {
+    for (const row of inState.all("incerto")) {
+      if (now - row.since < times.lostMs || !row.machine_id) continue
+      const away = machine.get(row.machine_id)
+      cancelAttempt(
+        row.machine_id,
+        { job: row.job_id, part: row.part, attempt: row.attempt_n },
+        "a máquina não respondeu",
+      )
+      ended(row, lostOutcome(`a máquina ${away?.name ?? row.machine_id} não respondeu`), false)
+    }
+    for (const row of inState.all("oferecido")) {
+      if (!row.machine_id) continue
+      const received = (row.offer_seq ?? 0) <= input.acknowledged(row.machine_id)
+      if (received && row.acked_at === null) update(row, { acked_at: now })
+      if (!received || row.acked_at === null || now - row.acked_at < times.replyMs) continue
+      withdraw(row)
+    }
+    db.run("DELETE FROM hub_job WHERE state = 'entregue' AND closed_at < ?", [now - times.tombstoneMs])
+  }
+
+  /** A silent machine: its offers go back to the queue (an unsafe one waits as `incerto`), what it runs turns `incerto`. */
+  const uncertain = (silent: MachineRow) => {
+    for (const row of onMachine.all(silent.machine_id)) {
       const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
-      // A part with secrets needs a machine that resolves its policy (`segredos:<policy>`).
-      const needs = [...spec.needs, ...(spec.secrets ? [`segredos:${spec.secrets}`] : [])]
-      const target = all.find((candidate) => {
-        const free = room.get(candidate.machine_id)
-        if (!free || candidate.brake || free.builds < 1) return false
-        if (row.refused_by === candidate.machine_id && (candidate.pulse_seq ?? 0) <= (row.refused_pulse ?? 0))
-          return false
-        const capabilities: Record<string, unknown> = JSON.parse(candidate.capabilities)
-        if (!needs.every((need) => need in capabilities)) return false
-        return spec.platform === "none" || free[spec.platform] >= spec.devices.min
-      })
-      if (!target) continue
-      const free = room.get(target.machine_id)!
-      const proposed = spec.platform === "none" ? 0 : Math.min(spec.devices.max, free[spec.platform])
-      const owner = job.get(row.job_id)!
-      const attempt = row.attempt_n + 1
-      const seq = input.send(target.machine_id, {
-        type: "offer",
-        job: row.job_id,
-        part: row.part,
-        attempt,
-        spec,
-        origin: JSON.parse(owner.origin),
-        code: JSON.parse(owner.code),
-        devices: { min: spec.devices.min, proposed },
-      })
-      // Until the reply, `devices_granted` holds what was proposed: the most the machine may reserve for it.
-      update(row, {
-        state: "oferecido",
-        attempt_n: attempt,
-        machine_id: target.machine_id,
-        offer_seq: seq,
-        devices_granted: proposed,
-        since: input.now(),
-      })
-      take(target.machine_id, spec.platform, proposed)
+      if (row.state === "oferecido" && !spec.unsafe) {
+        withdraw(row)
+        continue
+      }
+      if (row.state !== "oferecido" && !(live as ReadonlyArray<string>).includes(row.state)) continue
+      update(row, { state: "incerto", held_state: row.state, since: input.now() })
       tell(row)
     }
   }
 
+  /** Withdraws an offer: the machine hears `attempt.cancel` when it calls, and the part goes back to the queue. */
+  const withdraw = (row: PartRow) => {
+    if (row.machine_id)
+      cancelAttempt(row.machine_id, { job: row.job_id, part: row.part, attempt: row.attempt_n }, "oferta retirada")
+    requeue(row)
+    tell(row)
+  }
+
   /**
-   * A machine silent for `silentMs` (asleep, or gone): what it runs becomes `incerto`, never approved nor lost by itself
-   * here; it returns to its real state when the machine calls again. The silence counts only while the hub listens:
-   * from the later of the machine's last call and this hub's start (after a deploy every last call is old).
+   * Offers what can go now (`scheduler.ts`), with the estimates of `estimate.ts`; tells each waiting part's origin
+   * why it waits and where it stands, when that changed (never for the estimate alone).
    */
-  const watch = () => {
-    const since = input.now() - input.silentMs
-    if (input.startedAt > since) return
-    for (const quiet of silent.all(since)) {
-      db.run("UPDATE hub_machine SET state = 'silenciosa' WHERE machine_id = ?", [quiet.machine_id])
-      for (const row of runningOn.all(quiet.machine_id)) {
-        update(row, { state: "incerto", held_state: row.state, since: input.now() })
-        tell(row)
+  const schedule = () => {
+    const now = input.now()
+    const all = machines.all()
+    const queued = inState.all("na_fila")
+    if (queued.length === 0) return
+    const offered = inState.all("oferecido")
+    const busy = (machineID: string) =>
+      onMachine.all(machineID).filter((row) => (live as ReadonlyArray<string>).includes(row.state))
+    // A machine's room is its last pulse minus the offers it has not received yet (a pulse counts the rest).
+    const views: MachineView[] = all.map((row) => {
+      const free: BancadaProtocol.Vector | undefined = row.free ? JSON.parse(row.free) : undefined
+      const pending = offered.filter(
+        (offer) => offer.machine_id === row.machine_id && (offer.offer_seq ?? 0) > input.acknowledged(row.machine_id),
+      )
+      return {
+        machineID: row.machine_id,
+        name: row.name,
+        state: row.state,
+        braked: row.brake === 1,
+        pulse: row.pulse_seq ?? 0,
+        capabilities: JSON.parse(row.capabilities),
+        ...(free
+          ? {
+              free: pending.reduce((vector, offer) => {
+                const spec: BancadaProtocol.PartSpec = JSON.parse(offer.spec)
+                return {
+                  ...vector,
+                  builds: vector.builds - 1,
+                  ...(spec.platform === "none"
+                    ? {}
+                    : { [spec.platform]: vector[spec.platform] - (offer.devices_granted ?? 0) }),
+                }
+              }, free),
+            }
+          : {}),
       }
+    })
+    const items = queued.map((row) => {
+      const owner = job.get(row.job_id)!
+      const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+      return {
+        row,
+        owner,
+        part: {
+          job: row.job_id,
+          part: row.part,
+          spec,
+          createdAt: owner.created_at,
+          index: row.idx,
+          reserved: row.reserved === 1,
+          ...(row.refused_by ? { refused: { machineID: row.refused_by, pulse: row.refused_pulse ?? 0 } } : {}),
+        } satisfies QueuedPart,
+      }
+    })
+    const byPart = new Map(items.map((item) => [`${item.part.job}/${item.part.part}`, item]))
+    const estimateOf = (item: QueuedPart, at: MachineView) => {
+      const found = byPart.get(`${item.job}/${item.part}`)!
+      const project = (JSON.parse(found.owner.code) as BancadaProtocol.Code).project
+      const samples = durations.all(project, item.part)
+      const previous: BancadaProtocol.Outcome | undefined = found.row.previous
+        ? JSON.parse(found.row.previous)
+        : undefined
+      const planned = found.row.only_scenarios
+        ? (JSON.parse(found.row.only_scenarios) as string[]).length
+        : previous?.planned.length
+      return duration({
+        here: samples
+          .filter((row) => row.machine_id === at.machineID)
+          .flatMap((row) => JSON.parse(row.samples) as Sample[]),
+        elsewhere: samples
+          .filter((row) => row.machine_id !== at.machineID)
+          .flatMap((row) => JSON.parse(row.samples) as Sample[]),
+        slow: all.find((row) => row.machine_id === at.machineID)?.speed === "lento",
+        devices: Math.max(1, item.spec.devices.min),
+        ...(planned ? { planned } : {}),
+        // A sibling part of the same request is there already: its build serves this one.
+        built: parts.all(item.job).some((row) => row.part !== item.part && row.machine_id === at.machineID),
+      })
+    }
+    const decision = choose({
+      parts: items.map((item) => item.part),
+      machines: views,
+      locks: new Set(
+        db
+          .query<{ name: string }, []>("SELECT name FROM hub_lock")
+          .all()
+          .map((row) => row.name),
+      ),
+      duration: estimateOf,
+      wait: (item, at) =>
+        wait({
+          now,
+          free: {
+            builds: at.free?.builds ?? 0,
+            devices: item.spec.platform === "none" ? 0 : (at.free?.[item.spec.platform] ?? 0),
+          },
+          ceiling: Number.POSITIVE_INFINITY,
+          min: item.spec.platform === "none" ? 0 : item.spec.devices.min,
+          braked: at.braked,
+          running: busy(at.machineID).map((row) => ({
+            endsAt: (row.started_at ?? row.since) + (row.est_ms ?? estimates.durationMs),
+            devices: row.devices_granted ?? 0,
+            building: row.state !== "rodando",
+          })),
+          ahead: [],
+        }),
+    })
+    for (const offer of decision.offers) {
+      const item = byPart.get(`${offer.job}/${offer.part}`)!
+      const at = views.find((view) => view.machineID === offer.machineID)!
+      const attempt = item.row.attempt_n + 1
+      const only: string[] | undefined = item.row.only_scenarios ? JSON.parse(item.row.only_scenarios) : undefined
+      const seq = input.send(offer.machineID, {
+        type: "offer",
+        job: offer.job,
+        part: offer.part,
+        attempt,
+        spec: item.part.spec,
+        origin: JSON.parse(item.owner.origin),
+        code: JSON.parse(item.owner.code),
+        devices: { min: item.part.spec.devices.min, proposed: offer.proposed },
+        ...(only ? { only } : {}),
+      })
+      item.part.spec.exclusive.forEach((name) =>
+        db.run("INSERT OR REPLACE INTO hub_lock (name, job_id, part, since) VALUES (?, ?, ?, ?)", [
+          name,
+          offer.job,
+          offer.part,
+          now,
+        ]),
+      )
+      record({ job: offer.job, part: offer.part, attempt }, { machine: offer.machineID, state: "oferecido" })
+      // Until the reply, `devices_granted` holds what was proposed: the most the machine may reserve for it.
+      update(item.row, {
+        state: "oferecido",
+        attempt_n: attempt,
+        machine_id: offer.machineID,
+        offer_seq: seq,
+        devices_granted: offer.proposed,
+        est_ms: estimateOf(item.part, at),
+        offered_at: now,
+        acked_at: null,
+        missing: 0,
+        reserved: 0,
+        bypassed: 0,
+        told: null,
+        since: now,
+      })
+      tell(item.row)
+    }
+    for (const bypass of decision.bypassed) {
+      const item = byPart.get(`${bypass.job}/${bypass.part}`)!
+      const bypassed = item.row.bypassed + bypass.times
+      update(item.row, { bypassed, reserved: bypassed >= reserveAfter ? 1 : item.row.reserved })
+    }
+    for (const waiting of decision.waiting) {
+      const item = byPart.get(`${waiting.job}/${waiting.part}`)!
+      const told = JSON.stringify([waiting.reason.code, waiting.reason.detail ?? null, waiting.position ?? null])
+      if (item.row.told === told) continue
+      update(item.row, { told })
+      tell(item.row, {
+        reason: waiting.reason,
+        ...(waiting.position === undefined ? {} : { position: waiting.position }),
+        ...(waiting.etaMs === undefined ? {} : { etaMs: waiting.etaMs }),
+      })
     }
   }
 

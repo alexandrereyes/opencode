@@ -17,7 +17,8 @@ const code = { project: "exemplo", commit: "3417b7e3c0ffee5d1c2b3a4f5e6d7c8b9a0f
 const passed = (ids: string[]) => ids.map((id) => ({ id, result: "passou" as const }))
 
 function world() {
-  const result = createWorld({ seed: 7, timings: { silentMs: 45_000 } })
+  // A part uncertain for an hour is lost: these scenarios test sleeping and restarts, not giving up on a machine.
+  const result = createWorld({ seed: 7, timings: { silentMs: 45_000, lostMs: 60 * 60_000 } })
   result.addMachine({ name: "Linux", hub: true, platform: "linux" })
   result.addMachine({
     name: "Mac",

@@ -51,6 +51,16 @@ export interface Ports {
 export const timings = {
   /** A machine that has not called for this long is silent. */
   silentMs: 45_000,
+  /** Silent for this long, a machine is away: parts only it can run wait for it by name. */
+  uncertainMs: 3 * 60_000,
+  /** A part uncertain for this long is lost (it runs again elsewhere only when safe). */
+  lostMs: 15 * 60_000,
+  /** A machine still reconciling after this long counts as silent for what it runs. */
+  reconcilingMs: 5 * 60_000,
+  /** An offer received and unanswered for this long is withdrawn. */
+  replyMs: 30_000,
+  /** A delivered request's tombstone stays this long. */
+  tombstoneMs: 7 * 24 * 60 * 60_000,
   /** A request the hub acknowledged and never registered closes at its origin after this long. */
   unregisteredMs: 60_000,
 }
@@ -115,8 +125,9 @@ export function createCore(ports: Ports) {
     ? makeCoordinator({
         db,
         now: ports.now,
-        silentMs: times.silentMs,
+        times,
         startedAt: ports.now(),
+        log: ports.log,
         send: (machineID, body) => messages.send(machineID, body),
         acknowledged: (machineID) => messages.acknowledged(machineID),
       })
@@ -146,6 +157,7 @@ export function createCore(ports: Ports) {
   /** A message of the hub, inside the transaction that applies it. */
   const fromHub = (message: BancadaProtocol.FromHub) => {
     if (message.type === "offer") return executor.offer(message)
+    if (message.type === "attempt.cancel") return executor.cancel(message)
     if (message.type === "cleanup") return executor.cleanup(message)
     if (message.type === "submit.ack" || message.type === "job.update" || message.type === "result")
       return origin.apply(message)
@@ -182,9 +194,11 @@ export function createCore(ports: Ports) {
         expected: BancadaProtocol.version,
       })
     messages.acked(hub, output.success.ack)
-    // A hub that changed stream (another database) may have forgotten this machine.
-    if (messages.receive(hub, output.success.out, (body) => fromHub(body as BancadaProtocol.FromHub)) === "changed")
+    // A hub that changed stream (another database) may have forgotten this machine and its requests.
+    if (messages.receive(hub, output.success.out, (body) => fromHub(body as BancadaProtocol.FromHub)) === "changed") {
       hello(true)
+      db.transaction(() => origin.resubmit())()
+    }
   }
 
   /** The hub's side of `custom.bancada/sync`: applies what the machine sent and answers with what waits for it. */
@@ -223,7 +237,10 @@ export function createCore(ports: Ports) {
   /** One round: executions starting and ending, then the queue (and, on the hub, this machine's loop to it). */
   const round = async () => {
     await executor.tick()
-    db.transaction(() => origin.unregistered(messages.acknowledged(hub)))()
+    db.transaction(() => {
+      origin.unregistered(messages.acknowledged(hub))
+      origin.forget(times.tombstoneMs)
+    })()
     if (!coordinator) return
     db.transaction(() => {
       coordinator.watch()

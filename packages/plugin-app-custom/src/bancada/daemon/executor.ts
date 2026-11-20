@@ -11,12 +11,24 @@ import { block } from "./devices/ports.js"
 /** The key of an attempt: a part of a job, and its number. */
 export type AttemptKey = { readonly job: string; readonly part: string; readonly attempt: number }
 
-/** What the launcher needs to start an attempt (the real one writes the attempt's folder, `docs/bancada.md`). */
-export type Launch = AttemptKey & {
-  readonly spec: BancadaProtocol.PartSpec
+/**
+ * An attempt where it runs: its group, the parts of one request this machine accepted together, which share a
+ * working folder, build once and run side by side (`docs/bancada.md`, "Requests with several parts").
+ */
+export type Placed = AttemptKey & { readonly group: string }
+
+/** What the launcher needs to start a group (the real one writes the group's folder, `docs/bancada.md`). */
+export type Launch = {
+  readonly job: string
+  readonly group: string
   readonly code: BancadaProtocol.Code
-  readonly devices: number
-  readonly only?: ReadonlyArray<string>
+  readonly parts: ReadonlyArray<{
+    readonly part: string
+    readonly attempt: number
+    readonly spec: BancadaProtocol.PartSpec
+    readonly devices: number
+    readonly only?: ReadonlyArray<string>
+  }>
   /** The session's repository, when the request came from this machine: the code is fetched from it, nothing travels. */
   readonly repository?: string
 }
@@ -39,18 +51,20 @@ export type Status =
 export interface Launcher {
   readonly start: (launch: Launch) => Promise<void>
   /** Rejects when it cannot tell (no answer about the runner yet): nothing changes for that attempt this round. */
-  readonly status: (key: AttemptKey) => Promise<Status>
-  /** Asks the execution to stop; it ends with `cancelado`. */
-  readonly cancel: (key: AttemptKey) => Promise<void>
+  readonly status: (key: Placed) => Promise<Status>
+  /** Asks one part to stop; it ends with `cancelado`. */
+  readonly cancel: (key: Placed) => Promise<void>
+  /** Ends a group's runner that did not answer a cancel, with proof it is that runner; its orphans go by `reap`. */
+  readonly stop: (key: Placed) => Promise<void>
   /**
-   * What attempts not in `live` still hold (their working folder) goes back once nothing they started runs: the
-   * launcher ends what they left with proof it is theirs, on its own time.
+   * What groups without a live attempt still hold (their working folder) goes back once nothing they started runs:
+   * the launcher ends what they left with proof it is theirs, on its own time.
    */
-  readonly reap: (live: ReadonlyArray<AttemptKey>) => Promise<void>
-  /** Whether an attempt still holds anything here (its folder, or the giving back still runs). */
-  readonly held: (key: AttemptKey) => boolean
-  /** After delivery: nothing of the attempt stays (its folder, the commit's ref); rejects while it still holds any. */
-  readonly cleanup: (key: AttemptKey) => Promise<void>
+  readonly reap: (live: ReadonlyArray<Placed>) => Promise<void>
+  /** Whether an attempt's group still holds anything here (its folder, or the giving back still runs). */
+  readonly held: (key: Placed) => boolean
+  /** After delivery: nothing of the group stays (its folder, the commit's ref); rejects while it still holds any. */
+  readonly cleanup: (key: Placed) => Promise<void>
 }
 
 /** What this machine offers and how much of it (`docs/bancada.md`, "Budget"), from its machine file. */
@@ -78,8 +92,15 @@ type AttemptRow = {
   readonly only_scenarios: string | null
   readonly state: string
   readonly lease_id: string
+  readonly group_id: string | null
+  readonly cancel_at: number | null
+  readonly cancel_reason: string | null
   readonly started_at: number | null
+  readonly outcome: string | null
 }
+
+/** How long an execution may take to answer a cancel before its runner is ended (`docs/bancada.md`, "Cancel"). */
+export const cancelGraceMs = 15_000
 
 /**
  * This machine's authority over what it runs (`docs/bancada.md`, "Executor"): it accepts or refuses each offer
@@ -148,23 +169,49 @@ export function makeExecutor(input: {
         input.wake()
       })
   }
-  const begin = (row: AttemptRow) => {
-    const origin: BancadaProtocol.Origin = JSON.parse(row.origin)
-    const repository = origin.machineID === input.machineID ? input.repository(row.job_id) : undefined
-    run(`start:${row.job_id}/${row.part}/${row.n}`, () =>
+  const inGroup = db.query<AttemptRow, [string, string]>(
+    "SELECT * FROM attempt WHERE job_id = ? AND group_id = ? AND state IN ('aceito', 'compilando', 'rodando') ORDER BY part",
+  )
+  const placed = (row: AttemptRow): Placed => ({
+    job: row.job_id,
+    part: row.part,
+    attempt: row.n,
+    group: row.group_id ?? `${row.part}-${row.n}`,
+  })
+  const keyOf = (row: AttemptRow): AttemptKey => ({ job: row.job_id, part: row.part, attempt: row.n })
+  const startOf = (job: string, group: string) => `start:${job}/${group}`
+  /**
+   * Starts a group (`docs/bancada.md`, "Requests with several parts"): the attempts of one request accepted together,
+   * one working folder, one build, the runs side by side; or a group again after a restart.
+   */
+  const begin = (rows: ReadonlyArray<AttemptRow>, group: string) => {
+    const first = rows[0]!
+    rows.forEach((row) =>
+      db.run("UPDATE attempt SET group_id = ? WHERE job_id = ? AND part = ? AND n = ?", [
+        group,
+        row.job_id,
+        row.part,
+        row.n,
+      ]),
+    )
+    const origin: BancadaProtocol.Origin = JSON.parse(first.origin)
+    const repository = origin.machineID === input.machineID ? input.repository(first.job_id) : undefined
+    run(startOf(first.job_id, group), () =>
       input.launcher.start({
-        job: row.job_id,
-        part: row.part,
-        attempt: row.n,
-        spec: JSON.parse(row.spec),
-        code: JSON.parse(row.code),
-        devices: row.devices,
-        ...(row.only_scenarios ? { only: JSON.parse(row.only_scenarios) } : {}),
+        job: first.job_id,
+        group,
+        code: JSON.parse(first.code),
+        parts: rows.map((row) => ({
+          part: row.part,
+          attempt: row.n,
+          spec: JSON.parse(row.spec),
+          devices: row.devices,
+          ...(row.only_scenarios ? { only: JSON.parse(row.only_scenarios) } : {}),
+        })),
         ...(repository ? { repository } : {}),
       }),
     )
   }
-  const keyOf = (row: AttemptRow): AttemptKey => ({ job: row.job_id, part: row.part, attempt: row.n })
 
   /** What this machine measured of a subject (the last samples), or its default cost before it has enough. */
   const costOf = (subject: string, fallback: Cost) => measured(samplesOf.all(subject, samples.kept), fallback)
@@ -228,7 +275,8 @@ export function makeExecutor(input: {
    * capability is gone or the part's policy is not resolved here, when not even its minimum fits.
    */
   const offer = (message: typeof BancadaProtocol.Offer.Type) => {
-    if (findAttempt.get(message.job, message.part, message.attempt)) return
+    const known = findAttempt.get(message.job, message.part, message.attempt)
+    if (known) return answerAgain(known)
     const refuse = (reason: BancadaProtocol.Reason) =>
       input.send({
         type: "offer.reply",
@@ -299,11 +347,54 @@ export function makeExecutor(input: {
     })
   }
 
-  /** After delivery nothing of the job stays (D9): the next round removes its folders, then its rows. */
-  const cleanup = (message: typeof BancadaProtocol.Cleanup.Type) =>
-    db.run("UPDATE attempt SET state = 'limpar' WHERE job_id = ? AND state IN ('concluido', 'perdido', 'cancelado')", [
-      message.job,
-    ])
+  /**
+   * An offer of an attempt this executor already has: a hub that forgot (another database) offers again what it had
+   * offered (`docs/bancada.md`, "When a side forgot"). The answer is said again (the acceptance and, past that, the
+   * last report, with the result when it ended); nothing runs twice.
+   */
+  const answerAgain = (row: AttemptRow) => {
+    if (row.state === "limpar") return
+    input.send({
+      type: "offer.reply",
+      job: row.job_id,
+      part: row.part,
+      attempt: row.n,
+      accepted: true,
+      devices: row.devices,
+    })
+    if (row.state === "aceito") return
+    input.send({
+      type: "attempt",
+      job: row.job_id,
+      part: row.part,
+      attempt: row.n,
+      state: row.state as BancadaProtocol.AttemptState,
+      ...(row.outcome ? { outcome: JSON.parse(row.outcome) } : {}),
+    })
+  }
+
+  /**
+   * The hub gave an attempt up (withdrawn, lost, replaced, cancelled): called inside the transaction that applies the
+   * message. One not started yet never starts; one that runs is asked to stop, and its runner is ended if it does not
+   * answer within `cancelGraceMs` (`docs/bancada.md`, "Cancel").
+   */
+  const cancel = (message: typeof BancadaProtocol.AttemptCancel.Type) =>
+    db.run(
+      "UPDATE attempt SET cancel_at = ?, cancel_reason = ? WHERE job_id = ? AND part = ? AND n = ? AND state IN ('aceito', 'compilando', 'rodando') AND cancel_at IS NULL",
+      [input.now(), message.reason, message.job, message.part, message.attempt],
+    )
+
+  /**
+   * After delivery nothing of the job stays (D9): its attempts are cleaned once ended (the next round removes their
+   * folders, then their rows); one still running stops, the request is over.
+   */
+  const cleanup = (message: typeof BancadaProtocol.Cleanup.Type) => {
+    db.run("UPDATE attempt SET delivered = 1 WHERE job_id = ?", [message.job])
+    db.run(
+      "UPDATE attempt SET cancel_at = ?, cancel_reason = 'o pedido já foi entregue' WHERE job_id = ? AND state IN ('aceito', 'compilando', 'rodando') AND cancel_at IS NULL",
+      [input.now(), message.job],
+    )
+  }
 
   /**
    * Starts what was accepted and follows what runs; one report per change. The round only reads what is local and
@@ -313,34 +404,47 @@ export function makeExecutor(input: {
    */
   const tick = async () => {
     const unread = { count: 0 }
-    for (const row of live.all()) {
-      const key = keyOf(row)
-      const id = `start:${key.job}/${key.part}/${key.attempt}`
-      const task = tasks.get(id)
-      if (task && !task.done) {
-        unread.count++
+    db.run("UPDATE attempt SET state = 'limpar' WHERE delivered = 1 AND state IN ('concluido', 'perdido', 'cancelado')")
+    // Groups whose start ended: started, or lost with the reason.
+    for (const [id, task] of tasks) {
+      if (!id.startsWith("start:") || !task.done) continue
+      tasks.delete(id)
+      const slash = id.indexOf("/")
+      const rows = inGroup.all(id.slice("start:".length, slash), id.slice(slash + 1))
+      if (task.failure !== undefined) {
+        rows.forEach((row) => finish(row, { state: "gone", reason: `a partida falhou: ${task.failure}` }))
         continue
       }
-      if (task) tasks.delete(id)
-      if (task?.failure !== undefined) {
-        finish(row, { state: "gone", reason: `a partida falhou: ${task.failure}` })
-        continue
-      }
-      if (task)
+      rows.forEach((row) =>
         db.run("UPDATE attempt SET started_at = ? WHERE job_id = ? AND part = ? AND n = ? AND started_at IS NULL", [
           input.now(),
           row.job_id,
           row.part,
           row.n,
-        ])
-      if (!task && row.started_at === null) {
-        begin(row)
+        ]),
+      )
+    }
+    // New groups: what one request has here not started yet (a cancelled attempt never starts).
+    const fresh = live.all().filter((row) => row.group_id === null && row.cancel_at === null)
+    new Set(fresh.map((row) => row.job_id)).forEach((job) => {
+      const rows = fresh.filter((row) => row.job_id === job).toSorted((a, b) => a.part.localeCompare(b.part))
+      begin(rows, rows.map((row) => `${row.part}-${row.n}`).join("+"))
+    })
+    for (const row of live.all()) {
+      const key = placed(row)
+      const starting = row.group_id !== null && tasks.has(startOf(row.job_id, row.group_id))
+      if (row.started_at === null && row.cancel_at !== null && !starting) {
+        finish(row, { state: "done", ending: { stage: "build", cause: "cancelado" } })
+        continue
+      }
+      if (row.started_at === null) {
         unread.count++
         continue
       }
+      if (row.cancel_at !== null) stopping(row, key)
       const status = await input.launcher.status(key).catch(() => undefined)
       if (!status || status.state === "unstarted") {
-        if (status) begin(row)
+        if (status && !starting) begin(inGroup.all(row.job_id, key.group), key.group)
         unread.count++
         continue
       }
@@ -365,14 +469,14 @@ export function makeExecutor(input: {
             "UPDATE lease SET mem_mb = mem_mb - build_mem_mb, cpu_milli = cpu_milli - build_cpu_milli, builds = 0, build_mem_mb = 0, build_cpu_milli = 0 WHERE id = ?",
             [row.lease_id],
           )
-        input.send({ type: "attempt", ...key, state: next })
+        input.send({ type: "attempt", ...keyOf(row), state: next })
       })()
     }
     if (unread.count === 0) reconciling.value = false
-    await input.launcher.reap(live.all().map(keyOf)).catch(() => undefined)
+    await input.launcher.reap(live.all().map(placed)).catch(() => undefined)
     // Until then an orphan of a dead runner may still use the machine: the budget would take another part on top.
     for (const row of holding.all())
-      if (!input.launcher.held(keyOf(row)))
+      if (!input.launcher.held(placed(row)))
         db.transaction(() => {
           db.run("UPDATE lease SET state = 'released', released_at = ? WHERE id = ? AND state = 'active'", [
             input.now(),
@@ -383,7 +487,7 @@ export function makeExecutor(input: {
     for (const row of delivered.all()) {
       const id = `cleanup:${row.job_id}/${row.part}/${row.n}`
       const task = tasks.get(id)
-      if (!task) run(id, () => input.launcher.cleanup(keyOf(row)))
+      if (!task) run(id, () => input.launcher.cleanup(placed(row)))
       if (!task?.done) continue
       // Failed (the folder is still held): asked again on the next round.
       tasks.delete(id)
@@ -399,6 +503,14 @@ export function makeExecutor(input: {
     }
   }
 
+  /** A cancel on its way: the part is asked to stop once; without an end in `cancelGraceMs`, its runner is ended. */
+  const stopping = (row: AttemptRow, key: Placed) => {
+    const id = `${key.job}/${key.part}/${key.attempt}`
+    if (!tasks.has(`cancel:${id}`)) run(`cancel:${id}`, () => input.launcher.cancel(key))
+    if (input.now() - row.cancel_at! >= cancelGraceMs && !tasks.has(`stop:${id}`))
+      run(`stop:${id}`, () => input.launcher.stop(key))
+  }
+
   /**
    * The execution ended (or never started): the hub hears how it went at once. What it held here (its folder, its
    * reservation of the budget) goes back by `reap`, once nothing it started runs. Infrastructure (a dead runner, a
@@ -409,20 +521,31 @@ export function makeExecutor(input: {
       status.state === "gone"
         ? { verdict: "infraestrutura", reason: status.reason, planned: [], scenarios: [], lost: [], approved: false }
         : judge(status.ending)
-    const state =
-      outcome.verdict === "infraestrutura" ? "perdido" : outcome.verdict === "cancelado" ? "cancelado" : "concluido"
+    // Asked to stop, it is cancelled however it ended (its runner may have been ended for not answering).
+    const cancelled = row.cancel_at !== null
+    const final: BancadaProtocol.Outcome = cancelled
+      ? { ...outcome, verdict: "cancelado", reason: row.cancel_reason ?? "cancelado", approved: false }
+      : outcome
+    const state = cancelled
+      ? "cancelado"
+      : outcome.verdict === "infraestrutura"
+        ? "perdido"
+        : outcome.verdict === "cancelado"
+          ? "cancelado"
+          : "concluido"
     db.transaction(() => {
       const changed = db.run(
         "UPDATE attempt SET state = ?, ended_at = ?, outcome = ? WHERE job_id = ? AND part = ? AND n = ? AND state = ?",
-        [state, input.now(), JSON.stringify(outcome), row.job_id, row.part, row.n, row.state],
+        [state, input.now(), JSON.stringify(final), row.job_id, row.part, row.n, row.state],
       ).changes
       if (!changed) return
-      input.send({ type: "attempt", job: row.job_id, part: row.part, attempt: row.n, state, outcome })
+      input.send({ type: "attempt", job: row.job_id, part: row.part, attempt: row.n, state, outcome: final })
     })()
   }
 
   return {
     offer,
+    cancel,
     cleanup,
     tick,
     free,

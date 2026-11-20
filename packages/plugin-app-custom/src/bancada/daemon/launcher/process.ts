@@ -4,7 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { Option, Schema } from "effect"
 import type { Ending } from "../../results.js"
-import type { AttemptKey, Launch, Launcher, Status } from "../executor.js"
+import type { Launch, Launcher, Placed, Status } from "../executor.js"
 import type { Git } from "../git.js"
 import { createOnce, runFlag, type Attempt, type Claim, type Event, type PartStatus } from "../runner.js"
 import { contractAt } from "../snapshot.js"
@@ -168,8 +168,9 @@ export function makeProcessLauncher(input: {
   readonly platform?: NodeJS.Platform
   readonly log?: (line: string) => void
 }): Launcher {
-  const folder = (key: AttemptKey) => path.join(input.state, "attempts", key.job, `${key.part}-${key.attempt}`)
-  const name = (key: AttemptKey) => `${key.job}/${key.part}/${key.attempt}`
+  const folder = (key: { job: string; group: string }) => path.join(input.state, "attempts", key.job, key.group)
+  /** A group's name: the owner of its working folder, and what a start this process gave is kept by. */
+  const name = (key: { job: string; group: string }) => `${key.job}/${key.group}`
   /** When this process last started each attempt: the grace of a start counts from here, never from a file's date. */
   const given = new Map<string, number>()
   const reaping = new Set<string>()
@@ -198,7 +199,7 @@ export function makeProcessLauncher(input: {
    * used, when old, or when the attempt ends. On Linux it is a read of `/proc`.
    */
   const platform = input.platform ?? process.platform
-  const ask = async (key: AttemptKey, claim: { pid: number; startedAt: string }): Promise<Liveness> => {
+  const ask = async (key: Placed, claim: { pid: number; startedAt: string }): Promise<Liveness> => {
     if (platform === "linux") return liveness(claim.pid, platform)
     const id = `${name(key)}:${claim.pid}:${claim.startedAt}`
     const entry = asked.get(id)
@@ -221,14 +222,14 @@ export function makeProcessLauncher(input: {
       })
     return unknown
   }
-  const forget = (key: AttemptKey) =>
+  const forget = (key: { job: string; group: string }) =>
     [...asked.keys()].filter((id) => id.startsWith(`${name(key)}:`)).forEach((id) => asked.delete(id))
   /**
    * The runner of a live attempt: a fresh heartbeat proves it alive; only a stale one asks the system. Giving back
    * (`reap`) asks the system at once: after a normal end the heartbeat stays fresh for three beats.
    */
   const runner = async (
-    key: AttemptKey,
+    key: Placed,
     dir: string,
     attempt: Stored,
     claim: { pid: number; startedAt: string },
@@ -263,12 +264,12 @@ export function makeProcessLauncher(input: {
     } satisfies Ending
   }
 
-  const status = async (key: AttemptKey): Promise<Status> => {
+  const status = async (key: Placed): Promise<Status> => {
     const answer = await follow(key)
     if (answer.state === "done" || answer.state === "gone") forget(key)
     return answer
   }
-  const follow = async (key: AttemptKey): Promise<Status> => {
+  const follow = async (key: Placed): Promise<Status> => {
     const dir = folder(key)
     const read = () => json<PartStatus>(path.join(dir, "parts", key.part, "status.json"))
     const attempt = await stored(dir)
@@ -293,7 +294,7 @@ export function makeProcessLauncher(input: {
    * process never started is started again (a restart). Past the grace, giving up takes the attempt from the runner by
    * the door it uses to take it: `runner.json` created by this process, so one that comes later leaves at once.
    */
-  const unclaimed = async (key: AttemptKey, dir: string): Promise<Status> => {
+  const unclaimed = async (key: Placed, dir: string): Promise<Status> => {
     const at = given.get(name(key))
     if (at === undefined) return { state: "unstarted" }
     if (input.now() - at <= (input.startGraceMs ?? defaults.startGraceMs)) return { state: "compilando" }
@@ -307,11 +308,16 @@ export function makeProcessLauncher(input: {
    * What an attempt that no longer lives still holds goes back only when nothing it started runs: its runner is dead,
    * and each command group without `command.end` is ended with proof it is ours (`docs/bancada.md`, "Orphans").
    */
-  const sweep = async (key: AttemptKey) => {
+  const sweep = async (key: { job: string; group: string }) => {
     const dir = folder(key)
     const attempt = await stored(dir)
     const claim = await json<Claim>(path.join(dir, "runner.json"))
-    if (attempt && claim && "pid" in claim && (await runner(key, dir, attempt, claim, "reap")) !== "dead")
+    if (
+      attempt &&
+      claim &&
+      "pid" in claim &&
+      (await runner({ ...key, part: "", attempt: 0 }, dir, attempt, claim, "reap")) !== "dead"
+    )
       return { free: false, commit: attempt.commit }
     const open = openCommands(await text(path.join(dir, "events.jsonl")))
     const grace = attempt?.timing?.killGraceMs ?? defaults.killGraceMs
@@ -348,18 +354,28 @@ export function makeProcessLauncher(input: {
     status,
 
     cancel: async (key) => {
-      const dir = folder(key)
+      const dir = path.join(folder(key), "parts", key.part)
       if (await fs.exists(dir)) await Bun.write(path.join(dir, "cancel"), String(input.now()))
+    },
+
+    stop: async (key) => {
+      const dir = folder(key)
+      const attempt = await stored(dir)
+      const claim = await json<Claim>(path.join(dir, "runner.json"))
+      if (!claim || !("pid" in claim)) return
+      await orphan(claim.pid, claim.startedAt, attempt?.timing?.killGraceMs ?? defaults.killGraceMs, platform)
     },
 
     reap: async (live) => {
       const alive = new Set(live.map(name))
       for (const held of input.workdirs.held()) {
-        const [job, part, attempt] = held.owner.split("/")
-        if (alive.has(held.owner) || reaping.has(held.owner) || !job || !part || !attempt) continue
+        const slash = held.owner.indexOf("/")
+        const job = held.owner.slice(0, slash)
+        const group = held.owner.slice(slash + 1)
+        if (alive.has(held.owner) || reaping.has(held.owner) || slash < 1 || !group) continue
         reaping.add(held.owner)
         // Off the round, and never a loose rejection (it would end this process): a failure is tried next round.
-        void sweep({ job, part, attempt: Number(attempt) })
+        void sweep({ job, group })
           .then((result) => {
             if (result.free) {
               stuck.delete(held.owner)
@@ -410,17 +426,24 @@ export function makeProcessLauncher(input: {
       throw new Error(`o código não chegou (${fetched.tried.join("; ") || "nenhuma fonte"})`)
     }
     const contract = await contractAt(input.git, workdir.path, launch.code.commit, launch.code.project)
-    const test = contract.ok ? contract.contract.tests[launch.part] : undefined
-    if (!contract.ok || !test) {
+    const missing = contract.ok ? launch.parts.filter((part) => !contract.contract.tests[part.part]) : []
+    if (!contract.ok || missing.length > 0) {
       input.workdirs.release(workdir)
-      throw new Error(contract.ok ? `o teste ${launch.part} não existe neste commit` : contract.problems.join("; "))
+      throw new Error(
+        contract.ok
+          ? missing.map((part) => `o teste ${part.part} não existe neste commit`).join("; ")
+          : contract.problems.join("; "),
+      )
     }
     const deadlines = input.deadlines ?? defaults.deadlines
+    const tests = launch.parts.map((part) => ({ part, test: contract.contract.tests[part.part]! }))
+    // One runner runs the group: the longest deadline of its parts.
+    const longest = Math.max(0, ...tests.map((item) => item.test.deadlineMin ?? 0))
     const attempt: Stored = {
       format: 1,
       job: launch.job,
-      group: `${launch.part}-${launch.attempt}`,
-      attempt: launch.attempt,
+      group: launch.group,
+      attempt: launch.parts[0]!.attempt,
       commit: launch.code.commit,
       token: input.random(),
       workdir: workdir.path,
@@ -429,27 +452,28 @@ export function makeProcessLauncher(input: {
       reused: workdir.reused === true,
       prepare: prepareCommands(launch.code.commit, contract.contract.caches),
       scrub: scrubCommands(),
-      parts: [
-        {
-          part: launch.part,
-          ...(test.build ? { build: test.build } : {}),
-          ...(test.plan ? { plan: test.plan } : {}),
-          run: test.run,
-          args: launch.spec.args,
-          ...(test.secrets ? { secrets: test.secrets } : {}),
-          ...(launch.only ? { only: launch.only } : {}),
-        },
-      ],
-      deadlines: test.deadlineMin ? { ...deadlines, runMs: test.deadlineMin * 60_000 } : deadlines,
+      parts: tests.map(({ part, test }) => ({
+        part: part.part,
+        attempt: part.attempt,
+        ...(test.build ? { build: test.build } : {}),
+        ...(test.plan ? { plan: test.plan } : {}),
+        run: test.run,
+        args: part.spec.args,
+        ...(test.secrets ? { secrets: test.secrets } : {}),
+        ...(part.only ? { only: part.only } : {}),
+      })),
+      deadlines: longest ? { ...deadlines, runMs: longest * 60_000 } : deadlines,
       ...(input.timing ? { timing: input.timing } : {}),
       lowPriority: input.lowPriority === true,
     }
-    await fs.mkdir(path.join(dir, "parts", launch.part, "out"), { recursive: true })
-    if (launch.devices === 0)
-      await Bun.write(
-        path.join(dir, "parts", launch.part, "devices.json"),
-        JSON.stringify({ versao: 1, aparelhos: [] }),
-      )
+    for (const part of launch.parts) {
+      await fs.mkdir(path.join(dir, "parts", part.part, "out"), { recursive: true })
+      if (part.devices === 0)
+        await Bun.write(
+          path.join(dir, "parts", part.part, "devices.json"),
+          JSON.stringify({ versao: 1, aparelhos: [] }),
+        )
+    }
     await Bun.write(path.join(dir, "attempt.json.tmp"), JSON.stringify(attempt, null, 2))
     await fs.rename(path.join(dir, "attempt.json.tmp"), path.join(dir, "attempt.json"))
   }
@@ -489,8 +513,13 @@ export function openCommands(text: string) {
  * the system never reuses a number that is still a live group's id, so they are ours: SIGKILL. Could not ask, or no
  * start time recorded with the leader alive: touch nothing, ask again on the next round.
  */
-export async function orphan(pid: number, startedAt: string | undefined, graceMs: number) {
-  const leader = await liveness(pid)
+export async function orphan(
+  pid: number,
+  startedAt: string | undefined,
+  graceMs: number,
+  platform: NodeJS.Platform = process.platform,
+) {
+  const leader = await liveness(pid, platform)
   if (leader.state === "unknown") return false
   if (leader.state === "alive" && (!startedAt || leader.started !== startedAt)) return startedAt !== undefined
   if (leader.state === "alive") {

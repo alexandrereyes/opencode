@@ -67,8 +67,8 @@ export function largestFit(input: {
 }
 
 /**
- * The pulse's free vector, which the hub never offers beyond: no build free unless one fits now, and as many devices
- * of each kind as fit beside a build within the ceilings.
+ * The pulse's free vector, which the hub never offers beyond: as many builds as fit together now, and as many devices
+ * of each kind as fit beside one build within the ceilings.
  */
 export function free(
   room: BancadaProtocol.Vector,
@@ -81,10 +81,12 @@ export function free(
     building
       ? Math.max(0, Math.min(ceiling, Math.floor(left.memMb / cost.memMb), Math.floor(left.cpuMilli / cost.cpuMilli)))
       : 0
+  // As many builds as fit together, not only as the budget counts: the hub offers one per build.
+  const builds = Math.min(room.builds, Math.floor(room.memMb / build.memMb), Math.floor(room.cpuMilli / build.cpuMilli))
   return {
     memMb: Math.max(0, room.memMb),
     cpuMilli: Math.max(0, room.cpuMilli),
-    builds: building ? room.builds : 0,
+    builds: building ? builds : 0,
     android: count(devices.android, room.android),
     ios: count(devices.ios, room.ios),
   }

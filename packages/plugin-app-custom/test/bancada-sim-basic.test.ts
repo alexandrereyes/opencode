@@ -123,7 +123,12 @@ describe("simulation", () => {
       expect(world.facts.delivered.get("j-bbbbbbbb")).toMatchObject([
         { part: "android", state: "concluido", outcome: { approved: false, lost: ["b2"] } },
       ])
-      expect([...world.facts.starts.values()]).toEqual([1, 1, 1])
+      // The incomplete Android part of j-bbbbbbbb ran once more for b2, and only then closed.
+      expect(Object.fromEntries(world.facts.starts)).toEqual({
+        "j-aaaaaaaa/android": 1,
+        "j-aaaaaaaa/ios": 1,
+        "j-bbbbbbbb/android": 2,
+      })
       // The hub counts the offers a machine has not received yet: it never offers more than the machine has.
       expect(world.facts.refusals.size).toBe(0)
     },

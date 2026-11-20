@@ -4,7 +4,7 @@
 import { Database } from "bun:sqlite"
 import type { Reading } from "../../src/bancada/daemon/brake"
 import { createCore, type Core, type Machine, type timings } from "../../src/bancada/daemon/core"
-import type { AttemptKey, Launch, Launcher, Status } from "../../src/bancada/daemon/executor"
+import type { AttemptKey, Launch, Launcher, Placed, Status } from "../../src/bancada/daemon/executor"
 import type { NewJob } from "../../src/bancada/daemon/origin"
 import type { BancadaProtocol } from "../../src/bancada/protocol"
 
@@ -18,6 +18,8 @@ export type Script =
       readonly exit: number
       readonly planned: ReadonlyArray<string>
       readonly scenarios: ReadonlyArray<BancadaProtocol.Scenario>
+      /** Devices the Bancada saw fall during the run (their failures are lost, not failed). */
+      readonly fell?: ReadonlyArray<string>
     }
   | { readonly vanishMs: number }
 
@@ -32,7 +34,8 @@ export type SimMachine = {
   readonly name: string
   /** Replaced by `restart`: a new core on the same database, as a restarted process. */
   core: Core
-  readonly db: Database
+  /** Replaced by `replaceDb`: another database (a wiped folder, or a copy restored from before). */
+  db: Database
   readonly config: Machine
   awake: boolean
 }
@@ -50,7 +53,16 @@ export function createWorld(options: {
   const machines = new Map<string, SimMachine>()
   const scripts = new Map<string, Script>()
   /** Executions go on whatever happens to the Bancada process; they count only the time their machine is awake. */
-  const runs = new Map<string, { awakeMs: number; readonly script: Script; cancelled: boolean }>()
+  const runs = new Map<
+    string,
+    {
+      awakeMs: number
+      readonly script: Script
+      cancelled: boolean
+      readonly only?: ReadonlyArray<string>
+      readonly unsafe: boolean
+    }
+  >()
   const facts = {
     starts: new Map<string, number>(),
     notices: new Map<string, number>(),
@@ -77,21 +89,33 @@ export function createWorld(options: {
         .padStart(8, "0"),
     ).join("")
   const key = (value: AttemptKey) => `${value.job}/${value.part}/${value.attempt}`
+  const scriptOf = (job: string, part: string, attempt: number) =>
+    scripts.get(`${job}/${part}#${attempt}`) ?? scripts.get(`${job}/${part}`)
 
   const launcher = (machine: string): Launcher => ({
     start: async (launch: Launch) => {
-      const name = key(launch)
-      if (runs.has(`${machine}:${name}`)) return
-      const script = scripts.get(`${launch.job}/${launch.part}`)
-      if (!script) throw new Error(`no script for ${launch.job}/${launch.part}`)
-      const slow = "startMs" in script ? script.startMs : undefined
+      const found = launch.parts.map((part) => {
+        const script = scriptOf(launch.job, part.part, part.attempt)
+        if (!script) throw new Error(`no script for ${launch.job}/${part.part}`)
+        return { part, script }
+      })
+      const slow = Math.max(0, ...found.map((item) => ("startMs" in item.script ? (item.script.startMs ?? 0) : 0)))
       if (slow) await new Promise<void>((resolve) => starting.push({ at: clock.now + slow, resolve }))
-      if (runs.has(`${machine}:${name}`)) return
-      runs.set(`${machine}:${name}`, { awakeMs: 0, script, cancelled: false })
-      const part = `${launch.job}/${launch.part}`
-      facts.starts.set(part, (facts.starts.get(part) ?? 0) + 1)
+      for (const { part, script } of found) {
+        const name = `${machine}:${launch.job}/${part.part}/${part.attempt}`
+        if (runs.has(name)) continue
+        runs.set(name, {
+          awakeMs: 0,
+          script,
+          cancelled: false,
+          unsafe: part.spec.unsafe,
+          ...(part.only ? { only: part.only } : {}),
+        })
+        const counted = `${launch.job}/${part.part}`
+        facts.starts.set(counted, (facts.starts.get(counted) ?? 0) + 1)
+      }
     },
-    status: async (attempt: AttemptKey): Promise<Status> => {
+    status: async (attempt: Placed): Promise<Status> => {
       const run = runs.get(`${machine}:${key(attempt)}`)
       if (!run) return { state: "gone", reason: "no execution" }
       const elapsed = run.awakeMs
@@ -108,6 +132,8 @@ export function createWorld(options: {
         ending: {
           stage: "run",
           exit: run.script.exit,
+          ...(run.script.fell ? { fell: run.script.fell } : {}),
+          ...(run.only ? { only: run.only } : {}),
           planned: { versao: 1, cenarios: run.script.planned.map((id) => ({ id })) },
           summary: {
             versao: 1,
@@ -115,12 +141,17 @@ export function createWorld(options: {
               id: item.id,
               resultado: item.result,
               ...(item.message ? { mensagem: item.message } : {}),
+              ...(item.device ? { aparelho: item.device } : {}),
             })),
           },
         },
       }
     },
     cancel: async (attempt) => {
+      const run = runs.get(`${machine}:${key(attempt)}`)
+      if (run) run.cancelled = true
+    },
+    stop: async (attempt) => {
       const run = runs.get(`${machine}:${key(attempt)}`)
       if (run) run.cancelled = true
     },
@@ -229,8 +260,21 @@ export function createWorld(options: {
     }
     for (const [job, count] of facts.notices) if (count > 1) throw new Error(`${job} was noticed ${count} times`)
     for (const [job, seqs] of facts.results) if (seqs.size > 1) throw new Error(`${job} closed ${seqs.size} times`)
-    for (const [part, count] of facts.starts)
-      if (count > 1) throw new Error(`${part} started ${count} times without a retry`)
+    // An unsafe part (a phone, real accounts, a lock, secrets) never runs twice at once, anywhere; a safe one may run
+    // on two machines when one stopped answering (the worst case is running twice, never overload), never twice on one.
+    const live = new Map<string, number>()
+    for (const [name, run] of runs) {
+      const ended =
+        run.cancelled ||
+        ("vanishMs" in run.script
+          ? run.awakeMs >= run.script.vanishMs
+          : run.awakeMs >= run.script.buildMs + run.script.runMs)
+      if (ended) continue
+      const part = name.slice(name.indexOf(":") + 1, name.lastIndexOf("/"))
+      const where = run.unsafe ? part : `${name.slice(0, name.indexOf(":"))}:${part}`
+      live.set(where, (live.get(where) ?? 0) + 1)
+    }
+    for (const [part, count] of live) if (count > 1) throw new Error(`${part} runs ${count} times at once`)
   }
 
   return {
@@ -261,11 +305,25 @@ export function createWorld(options: {
       if (config.hub) hub = machine
       return machine
     },
-    script: (job: string, part: string, script: Script) => scripts.set(`${job}/${part}`, script),
+    /** How a part runs; with `attempt`, only that attempt (a new attempt runs differently). */
+    script: (job: string, part: string, script: Script, attempt?: number) =>
+      scripts.set(attempt === undefined ? `${job}/${part}` : `${job}/${part}#${attempt}`, script),
     /** The Bancada process of a machine dies and comes back on the same database; its executions go on. */
     restart: (name: string) => {
       const machine = machines.get(name)!
       machine.core = build(machine.config, machine.db)
+      return machine.core
+    },
+    /**
+     * A machine's database is replaced and its process starts over on it: an empty one (a wiped folder, whose
+     * executions go with it) or a copy from before (`Database.deserialize`), whose executions go on.
+     */
+    replaceDb: (name: string, db: Database = new Database(":memory:")) => {
+      const machine = machines.get(name)!
+      const wiped = db.query("SELECT name FROM sqlite_master WHERE name = 'attempt'").get() === null
+      machine.db = db
+      machine.core = build(machine.config, db)
+      if (wiped) for (const [run, execution] of runs) if (run.startsWith(`${name}:`)) execution.cancelled = true
       return machine.core
     },
     /** A machine sleeps (nothing of it runs, its executions' awake time stops) or wakes. */
@@ -332,11 +390,11 @@ export function createWorld(options: {
       for (const job of facts.submitted.keys()) {
         if (facts.notices.get(job) !== 1) throw new Error(`${job} was noticed ${facts.notices.get(job) ?? 0} times`)
         for (const result of facts.delivered.get(job) ?? []) {
-          const script = scripts.get(`${job}/${result.part}`)
           if (!result.outcome?.approved) continue
+          const script = scriptOf(job, result.part, result.attempts)
           if (!script || "vanishMs" in script) throw new Error(`${job}/${result.part} approved without a run`)
-          const answered = new Set(script.scenarios.map((scenario) => scenario.id))
-          if (!script.planned.every((scenario) => answered.has(scenario)) || script.exit !== 0)
+          const answered = new Set(result.outcome.scenarios.map((scenario) => scenario.id))
+          if (result.outcome.lost.length > 0 || !result.outcome.planned.every((id) => answered.has(id)))
             throw new Error(`${job}/${result.part} approved without a result for every planned scenario`)
         }
       }

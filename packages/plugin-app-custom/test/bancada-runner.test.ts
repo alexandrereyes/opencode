@@ -4,7 +4,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { partSpec } from "../src/bancada/contract"
-import type { AttemptKey, Launcher, Status } from "../src/bancada/daemon/executor"
+import type { Launcher, Placed, Status } from "../src/bancada/daemon/executor"
 import { runGit } from "../src/bancada/daemon/git"
 import { liveness, makeProcessLauncher, openCommands, orphan } from "../src/bancada/daemon/launcher/process"
 import { awake, startOf } from "../src/bancada/daemon/runner"
@@ -82,15 +82,15 @@ async function prepare(context: Context, input: { job: string; args?: string[]; 
   })
   if (!frozen.ok) throw new Error(frozen.problems.join("\n"))
   const part = input.part ?? "simples"
-  const key: AttemptKey = { job: input.job, part, attempt: 1 }
+  const key: Placed = { job: input.job, part, attempt: 1, group: `${part}-1` }
   return {
     key,
     dir: path.join(context.state, "attempts", input.job, `${part}-1`),
     launch: {
-      ...key,
-      spec: partSpec(frozen.frozen.contract.tests[part]!, input.args ?? []),
+      job: input.job,
+      group: key.group,
       code: { project: frozen.frozen.project, commit: frozen.frozen.commit, remotes: [], inRemote: false },
-      devices: 0,
+      parts: [{ part, attempt: 1, spec: partSpec(frozen.frozen.contract.tests[part]!, input.args ?? []), devices: 0 }],
       repository: context.repository,
     },
   }
@@ -101,7 +101,7 @@ async function launch(context: Context, input: { job: string; args?: string[]; p
   return prepared
 }
 
-async function until(launcher: Launcher, key: AttemptKey, done: (status: Status) => boolean, ms = 15_000) {
+async function until(launcher: Launcher, key: Placed, done: (status: Status) => boolean, ms = 15_000) {
   const deadline = Date.now() + ms
   while (Date.now() < deadline) {
     const status = await launcher.status(key)
@@ -298,7 +298,7 @@ describe("detached execution", () => {
       }),
     )
     await Bun.write(path.join(dir, "runner.json"), JSON.stringify({ pid: gone.pid, startedAt: "1" }))
-    const key = { job: "j-rrrrrrrr", part: "simples", attempt: 1 }
+    const key = { job: "j-rrrrrrrr", part: "simples", attempt: 1, group: "simples-1" }
     await Bun.write(path.join(dir, "heartbeat"), JSON.stringify({ at: Date.now(), awakeMs: 0 }))
     expect(await context.launcher.status(key)).toEqual({ state: "compilando" })
     await Bun.write(path.join(dir, "heartbeat"), JSON.stringify({ at: Date.now() - 1_000, awakeMs: 0 }))
@@ -363,7 +363,7 @@ describe("detached execution", () => {
       path.join(dir, "runner.json"),
       JSON.stringify({ pid: runner.pid, startedAt: await startOf(runner.pid, "darwin") }),
     )
-    const key = { job: "j-vvvvvvvv", part: "simples", attempt: 1 }
+    const key = { job: "j-vvvvvvvv", part: "simples", attempt: 1, group: "simples-1" }
     const status = () => mac.status(key).catch(() => "não sei" as const)
     // A stale beat: the round asks and does not wait.
     await beat(clock.now - 5_000)
@@ -404,7 +404,7 @@ describe("detached execution", () => {
         (error: Error) => error.message,
       ),
     ).toContain("ENOENT")
-    expect(context.workdirs.held().map((held) => held.owner)).toEqual(["j-eeeeeeee/simples/1"])
+    expect(context.workdirs.held().map((held) => held.owner)).toEqual(["j-eeeeeeee/simples-1"])
     await context.launcher.reap([key])
     expect(context.workdirs.held()).toHaveLength(1)
     await reaped(context)

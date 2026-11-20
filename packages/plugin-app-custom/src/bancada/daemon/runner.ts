@@ -25,6 +25,8 @@ export type Attempt = {
   readonly scrub: ReadonlyArray<ReadonlyArray<string>>
   readonly parts: ReadonlyArray<{
     readonly part: string
+    /** This part's attempt (the parts of a group may be on different attempts); `attempt` when absent. */
+    readonly attempt?: number
     readonly build?: ReadonlyArray<string>
     readonly plan?: ReadonlyArray<string>
     readonly run: ReadonlyArray<string>
@@ -113,7 +115,16 @@ export async function runAttempt(dir: string) {
       : undefined
   caffeinate?.unref()
   tick()
-  const cancelled = () => fs.existsSync(path.join(dir, "cancel"))
+  /**
+   * A cancel: the whole group (`cancel`), or one part (`parts/<part>/cancel`). A shared step (checkout, builds) stops
+   * only when every part still open was cancelled.
+   */
+  const partCancelled = (part: string) => fs.existsSync(path.join(dir, "parts", part, "cancel"))
+  const cancelled = (part?: string) =>
+    fs.existsSync(path.join(dir, "cancel")) ||
+    (part === undefined
+      ? pending().length > 0 && pending().every((item) => partCancelled(item.part))
+      : partCancelled(part))
   const event = (type: string, extra: Record<string, unknown> = {}) =>
     fs.appendFileSync(
       path.join(dir, "events.jsonl"),
@@ -140,9 +151,11 @@ export async function runAttempt(dir: string) {
       readonly log: string
       readonly env?: Record<string, string>
       readonly deadlineMs: number
+      /** The part the command is for; a shared step has none. */
+      readonly part?: string
     },
   ): Promise<Ended> => {
-    if (cancelled()) return { cause: "cancelado" }
+    if (cancelled(options.part)) return { cause: "cancelado" }
     const child = spawn([...(attempt.lowPriority ? ["nice", "-n", "10"] : []), ...argv], {
       cwd: options.cwd,
       env: { ...process.env, ...attempt.env, ...options.env },
@@ -157,19 +170,19 @@ export async function runAttempt(dir: string) {
     const identity = startOf(child.pid).then((started) => {
       if (started) event("command.identity", { pid: child.pid, startedAt: started })
     })
-    const result = await follow(child, options.deadlineMs)
+    const result = await follow(child, options.deadlineMs, options.part)
     await identity
     signal(child.pid, "SIGKILL")
     event("command.end", { pid: child.pid })
     return result
   }
-  const follow = async (child: Bun.Subprocess, deadlineMs: number): Promise<Ended> => {
+  const follow = async (child: Bun.Subprocess, deadlineMs: number, part?: string): Promise<Ended> => {
     const started = clock.awakeMs
     for (;;) {
       const done = await Promise.race([child.exited.then(() => true), Bun.sleep(timing.pollMs).then(() => false)])
       tick()
       if (done) return exited(child)
-      const cause = cancelled() ? "cancelado" : clock.awakeMs - started > deadlineMs ? "prazo" : undefined
+      const cause = cancelled(part) ? "cancelado" : clock.awakeMs - started > deadlineMs ? "prazo" : undefined
       if (!cause) continue
       await stop(child.pid, child.exited)
       return { cause }
@@ -186,7 +199,7 @@ export async function runAttempt(dir: string) {
   const env = (part: Attempt["parts"][number]) => ({
     BANCADA_JOB: attempt.job,
     BANCADA_TESTE: part.part,
-    BANCADA_TENTATIVA: String(attempt.attempt),
+    BANCADA_TENTATIVA: String(part.attempt ?? attempt.attempt),
     BANCADA_COMMIT: attempt.commit,
     BANCADA_OUT: path.join(dir, "parts", part.part, "out"),
   })
@@ -267,6 +280,7 @@ export async function runAttempt(dir: string) {
         log: path.join(dir, "parts", part.part, "out", "plan.log"),
         env: env(part),
         deadlineMs: attempt.deadlines.buildMs,
+        part: part.part,
       })
       event("plan.end", { part: part.part, ...result })
       if (!("exit" in result) || result.exit !== 0) close(part.part, result)
@@ -279,7 +293,9 @@ export async function runAttempt(dir: string) {
     const unready = () => pending().filter((part) => !fs.existsSync(devices(dir, part.part)))
     while (unready().length > 0) {
       tick()
-      if (cancelled()) endAll({ stage: "run", cause: "cancelado" })
+      pending()
+        .filter((part) => cancelled(part.part))
+        .forEach((part) => finish(part.part, { stage: "run", cause: "cancelado" }))
       if (clock.awakeMs - waitStarted > attempt.deadlines.prepareMs)
         unready().forEach((part) =>
           finish(part.part, { stage: "run", cause: "prazo", reason: "os aparelhos não ficaram prontos" }),
@@ -302,6 +318,7 @@ export async function runAttempt(dir: string) {
             log: path.join(out, "run.log"),
             env: { ...env(part), BANCADA_DEVICES: devices(dir, part.part), ...(only ? { BANCADA_APENAS: only } : {}) },
             deadlineMs: attempt.deadlines.runMs,
+            part: part.part,
           },
         )
         event("run.end", { part: part.part, ...result })

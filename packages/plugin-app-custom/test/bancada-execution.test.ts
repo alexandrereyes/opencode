@@ -71,7 +71,7 @@ describe("execution through the Bancada process", () => {
   }, 60_000)
 
   // Starts the process from source and kills the runner while the example's run sleeps.
-  test("a runner killed mid-run loses the part: the execution died", async () => {
+  test("a runner killed mid-run loses the attempt; the part runs once more, then it is lost", async () => {
     const context = await setup()
     const submitted = await context.client.call<Bancada.Submitted>("submit", {
       id: BancadaProtocol.jobID("runner morto"),
@@ -79,17 +79,23 @@ describe("execution through the Bancada process", () => {
       diretorio: context.repository,
       testes: [{ teste: "simples", args: ["--dorme", "30"] }],
     })
-    await until(async () => (await view(context.client, submitted.job))?.parts.simples?.state === "rodando", 20_000)
-    const runner = (await Bun.file(
-      path.join(context.state, "attempts", submitted.job, "simples-1", "runner.json"),
-    ).json()) as { pid: number }
-    process.kill(runner.pid, "SIGKILL")
+    // Killed while it runs, it is infrastructure: the part runs once more (attempt 2), and that one is killed too.
+    for (const attempt of [1, 2]) {
+      await until(async () => {
+        const part = (await view(context.client, submitted.job))?.parts.simples
+        return part?.state === "rodando" && part.attempt === attempt
+      }, 20_000)
+      const runner = (await Bun.file(
+        path.join(context.state, "attempts", submitted.job, `simples-${attempt}`, "runner.json"),
+      ).json()) as { pid: number }
+      process.kill(runner.pid, "SIGKILL")
+    }
     await until(async () => (await view(context.client, submitted.job))?.state === "concluido", 20_000)
     expect((await view(context.client, submitted.job))?.result).toMatchObject([
       {
         part: "simples",
         state: "perdido",
-        attempts: 1,
+        attempts: 2,
         outcome: { verdict: "infraestrutura", reason: "a execução morreu", approved: false },
       },
     ])
@@ -185,7 +191,7 @@ async function setup() {
 
 type View = {
   readonly state: string
-  readonly parts: Record<string, { readonly state: string } | undefined>
+  readonly parts: Record<string, { readonly state: string; readonly attempt?: number } | undefined>
   readonly result?: ReadonlyArray<BancadaProtocol.PartResult>
 }
 const view = async (client: BancadaClient, job: string) =>

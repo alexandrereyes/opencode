@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
 import { CoreError, createCore, type Machine } from "../src/bancada/daemon/core"
-import type { Launcher } from "../src/bancada/daemon/executor"
+import type { Launch, Launcher } from "../src/bancada/daemon/executor"
 import { makeMessages, type Stream } from "../src/bancada/daemon/messages"
 import { migrate, NewerSchemaError, steps } from "../src/bancada/daemon/schema"
 import { BancadaProtocol } from "../src/bancada/protocol"
@@ -11,6 +11,7 @@ const idle: Launcher = {
   start: async () => {},
   status: async () => ({ state: "rodando" }),
   cancel: async () => {},
+  stop: async () => {},
   reap: async () => {},
   held: () => false,
   cleanup: async () => {},
@@ -33,18 +34,19 @@ const core = (config: Machine, launcher: Launcher = idle, db = new Database(":me
     core: createCore({ db, now: () => 1_000, random: () => `id-${++n}`, machine: config, launcher, log: () => {} }),
   }
 }
-/** What the hub would send: one offer of one device per part, in one batch. */
-const offers = (...parts: string[]): BancadaProtocol.SyncOutput => ({
+/** What the hub would send: one offer of one device per part, in one batch (of one request, or one each). */
+const offers = (...parts: string[]): BancadaProtocol.SyncOutput => batch(parts.map((part) => ["j-7qk2m9xa", part]))
+const batch = (items: ReadonlyArray<readonly [string, string]>): BancadaProtocol.SyncOutput => ({
   protocol: BancadaProtocol.version,
   ack: null,
   out: {
     stream: "hub-stream",
     base: 0,
-    messages: parts.map((part, index) => ({
+    messages: items.map(([job, part], index) => ({
       seq: index + 1,
       body: {
         type: "offer",
-        job: "j-7qk2m9xa",
+        job,
         part,
         attempt: 1,
         spec: { ...spec, part, devices: { min: 1, max: 1 } },
@@ -273,15 +275,22 @@ describe("core", () => {
     const mac = core(machine("Mac", false, 3), {
       ...idle,
       start: async (launch) => {
-        if (launch.part === "falha") throw new Error("sem processo")
-        started.push(launch.part)
+        if (launch.parts[0]!.part === "falha") throw new Error("sem processo")
+        started.push(launch.parts[0]!.part)
       },
       status: async (key) => {
         if (key.part === "muda") throw new Error("ps estourou o prazo")
         return { state: "rodando" }
       },
     })
-    mac.core.incoming(offers("falha", "muda", "segue"))
+    // Three requests: the parts of one request on one machine are one group, with one start.
+    mac.core.incoming(
+      batch([
+        ["j-aaaaaaaa", "falha"],
+        ["j-bbbbbbbb", "muda"],
+        ["j-cccccccc", "segue"],
+      ]),
+    )
     await mac.core.tick()
     expect(started).toEqual(["muda", "segue"])
     const reports = sent(mac).filter((body) => body.type === "attempt")
@@ -360,6 +369,125 @@ describe("core", () => {
     holds.value = false
     await mac.core.tick()
     expect(mac.core.outgoing().pulse.free.android).toBe(1)
+  })
+
+  test("the parts of one request offered together start as one group: one folder, one build", async () => {
+    const launches: Launch[] = []
+    const mac = core(machine("Mac", false, 3), { ...idle, start: async (launch) => void launches.push(launch) })
+    mac.core.incoming(offers("ios", "android"))
+    await mac.core.tick()
+    expect(launches.map((launch) => [launch.group, launch.parts.map((part) => part.part)])).toEqual([
+      ["android-1+ios-1", ["android", "ios"]],
+    ])
+  })
+
+  test("an offer cancelled in the same batch never starts; it is reported cancelled", async () => {
+    const started: string[] = []
+    const mac = core(machine("Mac", false, 1), { ...idle, start: async (launch) => void started.push(launch.group) })
+    const both = offers("android")
+    mac.core.incoming({
+      ...both,
+      out: {
+        ...both.out,
+        messages: [
+          ...both.out.messages,
+          {
+            seq: 2,
+            body: { type: "attempt.cancel", job: "j-7qk2m9xa", part: "android", attempt: 1, reason: "oferta retirada" },
+          },
+        ],
+      },
+    })
+    await mac.core.tick()
+    expect(started).toEqual([])
+    expect(sent(mac)).toContainEqual(
+      expect.objectContaining({
+        type: "attempt",
+        state: "cancelado",
+        outcome: expect.objectContaining({ verdict: "cancelado", reason: "oferta retirada" }),
+      }),
+    )
+  })
+
+  test("a run that does not answer a cancel has its runner ended after 15 s, and is cancelled", async () => {
+    const clock = { now: 1_000 }
+    const calls: string[] = []
+    const execution = { ended: false }
+    const db = new Database(":memory:")
+    const mac = createCore({
+      db,
+      now: () => clock.now,
+      random: () => crypto.randomUUID(),
+      log: () => {},
+      machine: machine("Mac", false, 1),
+      launcher: {
+        ...idle,
+        status: async () =>
+          execution.ended ? { state: "done", ending: { stage: "run", cause: "runner_morto" } } : { state: "rodando" },
+        cancel: async (key) => void calls.push(`cancel ${key.part}`),
+        stop: async (key) => {
+          calls.push(`stop ${key.part}`)
+          execution.ended = true
+        },
+      },
+    })
+    mac.incoming(offers("android"))
+    await mac.tick()
+    await mac.tick()
+    mac.incoming({
+      protocol: BancadaProtocol.version,
+      ack: null,
+      out: {
+        stream: "hub-stream",
+        base: 1,
+        messages: [
+          {
+            seq: 2,
+            body: { type: "attempt.cancel", job: "j-7qk2m9xa", part: "android", attempt: 1, reason: "cancelado" },
+          },
+        ],
+      },
+    })
+    await mac.tick()
+    clock.now += 14_000
+    await mac.tick()
+    expect(calls).toEqual(["cancel android"])
+    clock.now += 1_000
+    await mac.tick()
+    await mac.tick()
+    expect(calls).toEqual(["cancel android", "stop android"])
+    expect(mac.outgoing().out.messages.map((message) => message.body)).toContainEqual(
+      expect.objectContaining({ type: "attempt", state: "cancelado" }),
+    )
+  })
+
+  test("an offer of an attempt it already has is answered again: the acceptance and the last report, with the result", async () => {
+    const mac = core(machine("Mac", false, 1), {
+      ...idle,
+      status: async () => ({
+        state: "done",
+        ending: {
+          stage: "run",
+          exit: 0,
+          planned: { versao: 1, cenarios: [{ id: "a1" }] },
+          summary: { versao: 1, cenarios: [{ id: "a1", resultado: "passou" }] },
+        },
+      }),
+    })
+    mac.core.incoming(offers("android"))
+    await mac.core.tick()
+    // A hub that forgot (another database, another stream) offers the same attempt again.
+    const again = offers("android")
+    mac.core.incoming({ ...again, out: { ...again.out, stream: "hub-new" } })
+    const replies = sent(mac).filter((body) => body.type === "offer.reply" || body.type === "attempt")
+    expect(replies.slice(-2)).toEqual([
+      expect.objectContaining({ type: "offer.reply", accepted: true, devices: 1 }),
+      expect.objectContaining({
+        type: "attempt",
+        state: "concluido",
+        outcome: expect.objectContaining({ approved: true }),
+      }),
+    ])
   })
 
   test("sync is the hub's alone and refuses another protocol by name", () => {
