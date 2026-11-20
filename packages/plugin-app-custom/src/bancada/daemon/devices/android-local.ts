@@ -14,7 +14,8 @@ export function androidLocal(input: {
   readonly prefix: string
   /** The images installed for this machine's ABI (discovery). */
   readonly images: () => ReadonlyArray<Image>
-  readonly port: () => Promise<number>
+  /** A free pair of console and adb ports, held for this device from now on (`pool.ts`). */
+  readonly port: (device: string) => Promise<number>
   /** Where each emulator's output goes. */
   readonly logs: string
   readonly machine: () => string
@@ -47,7 +48,7 @@ export function androidLocal(input: {
     ready: async (device, slot) => {
       const image = device.spec as unknown as Image
       if (!(await lifecycle.exists(device.id))) await lifecycle.create(device.id, image)
-      const console = await input.port()
+      const console = await input.port(device.id)
       const serial = serialOf(console)
       const log = path.join(input.logs, `${device.id}.log`)
       const started = Date.now()
@@ -63,6 +64,12 @@ export function androidLocal(input: {
       if (!(await lifecycle.booted(serial, snapshot ? 3 * 60_000 : 6 * 60_000))) {
         await stop()
         throw new Error(`${device.id} não terminou de ligar`)
+      }
+      // What booted on the port must be this AVD: one that lost the port to another emulator is ended by its pid.
+      const runs = await lifecycle.name(serial)
+      if (runs !== device.id) {
+        await lifecycle.end(process.pid, process.started)
+        throw new Error(`${serial} roda ${runs ?? "outro emulador"}, não ${device.id}: a porta não ficou com ele`)
       }
       // The first boot (or a snapshot that did not load): trimmed, then the clean snapshot every later boot starts from.
       if (!snapshot) {
@@ -101,8 +108,12 @@ export function androidLocal(input: {
     health: (_device, run) => lifecycle.health(run.serial!, run.pid!, run.started),
     giveBack: async (device, run) => {
       if (!run.serial || !run.pid) return
-      if (!(await lifecycle.stop(device.id, run.serial, run.pid, run.started)))
-        throw new Error(`${device.id} não desligou`)
+      const stopped = await lifecycle.stop(device.id, run.serial, run.pid, run.started).catch((error: unknown) => {
+        // Its port answers another AVD: its own process, proven by pid and start time, is ended without the console.
+        input.log(`${device.id}: ${error instanceof Error ? error.message : String(error)}; ending its own process`)
+        return lifecycle.end(run.pid!, run.started)
+      })
+      if (!stopped) throw new Error(`${device.id} não desligou`)
     },
   }
 }

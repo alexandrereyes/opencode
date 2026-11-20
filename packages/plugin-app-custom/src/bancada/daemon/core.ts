@@ -745,6 +745,8 @@ export function createCore(ports: Ports) {
     cancel: (job: string) => origin.cancel(job),
     /** Whether this machine is still reading again what it started before a restart. */
     reconciling: executor.reconciling,
+    /** An exception for the apps (`alerts.ts`): raised once until cleared. */
+    alert: (id: string, kind: string, text: string) => alerts.raise(id, kind, text),
     /** An attempt uses fewer devices than granted (its plan): the rest goes back. */
     shrink: executor.shrink,
     /** Whether running devices nobody uses still fit in the budget. */

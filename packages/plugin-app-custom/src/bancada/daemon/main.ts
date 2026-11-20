@@ -203,6 +203,8 @@ export async function main() {
       // host-6's emulators in containers stay running a while for the next part (`aquecido_min`).
       ...(config.android.docker?.warmMs ? { warmMs: config.android.docker.warmMs } : {}),
       warmFits: (platform, count) => current.core?.warmFits(platform, count) ?? false,
+      discovered: () => found.current !== undefined,
+      alert: (id, text) => void current.core?.alert(id, "aparelho", text),
       simslim: () => found.current?.simslim !== undefined,
       phone: {
         find: (alias) => (offering ? config.phones : []).find((phone) => phone.alias === alias),
@@ -875,7 +877,7 @@ export function deviceDrivers(
           }),
           prefix: config.prefix,
           images: () => images,
-          port: pool.consolePort,
+          port: (id) => pool.consolePort(id),
           logs,
           machine,
           log,

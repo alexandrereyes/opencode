@@ -230,22 +230,35 @@ export function makeAndroidLifecycle(shell: Shell, tools: AndroidPaths) {
       const runs = await adbIdentity(shell, adb(serial, "emu", "avd", "name"))
       if (runs !== undefined && runs !== name) throw new Error(`${serial} roda ${runs}, não ${name}: não desligo`)
       if (runs === name) await shell.run(adb(serial, "emu", "kill"), { timeoutMs: 10_000 })
-      for (const wait of [20_000, 10_000]) {
-        const deadline = shell.now() + wait
-        while (shell.now() < deadline) {
-          if ((await shell.alive(pid, started)) === "dead") return true
-          await shell.sleep(1_000)
-        }
-        // Still there (the console did not answer): the recorded process itself, which is proof enough.
-        if ((await shell.alive(pid, started)) === "alive") shell.signal(pid, wait === 20_000 ? "SIGTERM" : "SIGKILL")
-      }
-      return (await shell.alive(pid, started)) === "dead"
+      return end(pid, started, false)
     },
+    /** The AVD the emulator on `serial` runs, as its console says; undefined when it does not answer. */
+    name: (serial: string) => adbIdentity(shell, adb(serial, "emu", "avd", "name")),
+    /**
+     * Ends the emulator process this lifecycle started (its pid and start time are the proof), whatever its port
+     * answers: one that lost its port to another never had a console of its own.
+     */
+    end: (pid: number, started?: string) => end(pid, started, true),
     /** Deletes the AVD (its files), when the Bancada recreates or retires it. */
     destroy: async (name: string) => {
       await shell.remove(path.join(tools.avdHome, `${name}.avd`))
       await shell.remove(path.join(tools.avdHome, `${name}.ini`))
     },
+  }
+
+  /** The recorded process until it is gone (TERM at once when `term`, else after its console's `kill`; then KILL). */
+  async function end(pid: number, started: string | undefined, term: boolean) {
+    if (term && (await shell.alive(pid, started)) === "alive") shell.signal(pid, "SIGTERM")
+    for (const wait of [20_000, 10_000]) {
+      const deadline = shell.now() + wait
+      while (shell.now() < deadline) {
+        if ((await shell.alive(pid, started)) === "dead") return true
+        await shell.sleep(1_000)
+      }
+      // Still there (the console did not answer): the recorded process itself, which is proof enough.
+      if ((await shell.alive(pid, started)) === "alive") shell.signal(pid, wait === 20_000 ? "SIGTERM" : "SIGKILL")
+    }
+    return (await shell.alive(pid, started)) === "dead"
   }
 }
 

@@ -67,7 +67,7 @@ type Row = {
   readonly profile: Profile
   readonly choice: string
   readonly spec: string
-  readonly state: "criado" | "ligando" | "em_uso" | "devolvendo" | "caiu" | "aquecido"
+  readonly state: "criado" | "ligando" | "em_uso" | "devolvendo" | "caiu" | "aquecido" | "isolado"
   readonly running: string | null
   readonly attempt: string | null
   readonly part_dir: string | null
@@ -108,6 +108,10 @@ export function makeDevicePool(input: {
   readonly shrink?: (key: Placed, devices: number) => void
   /** How often the pool looks for a part's plan while its first devices start. */
   readonly planPollMs?: number
+  /** Whether discovery ran once: before that this machine's drivers are not known (right after a start). */
+  readonly discovered?: () => boolean
+  /** An exception for the apps and the log (`alerts.ts`). */
+  readonly alert?: (key: string, text: string) => void
   readonly log: (line: string) => void
 }) {
   const db = input.db
@@ -203,6 +207,8 @@ export function makeDevicePool(input: {
     const held = row.phone_hold ? phone(key, dir, row.phone_hold, blocks[row.devices] ?? blocks[0]) : undefined
     if (typeof held === "string") return fail(held)
     if (row.devices === 0) return write(held ? [held] : [])
+    // Right after a start the drivers come with the first discovery: a part waits for it, a minute at most.
+    for (let waited = 0; input.discovered && !input.discovered() && waited < 60; waited++) await Bun.sleep(1_000)
     const driver = input.drivers()[spec.platform]
     const chosen = deviceFor(spec.platform, spec.device, { docker: input.docker ?? false, simslim: input.simslim() })
     if (!driver || !chosen) return fail(`esta máquina não liga aparelhos ${spec.platform}`)
@@ -341,23 +347,26 @@ export function makeDevicePool(input: {
         input.log(`${row.id} stays running for ${Math.round(input.warmMs! / 60_000)} min`)
         continue
       }
-      const given = await (driver ? driver.giveBack(device(row), running) : Promise.resolve()).then(
-        () => true,
-        (error: unknown) => {
-          input.log(`giving back ${row.id} failed: ${String(error)}`)
-          return false
-        },
+      const failure = await (driver ? driver.giveBack(device(row), running) : Promise.resolve()).then(
+        () => undefined,
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
       )
       const fell = row.state === "caiu"
       const falls = fell ? row.falls + 1 : 0
+      // Not given back: set apart from the attempt (whose reservation and folder go back) and from every part, its
+      // port still held, until a later round gives it back.
       set(row.id, {
-        state: given ? "criado" : "devolvendo",
-        running: given ? null : row.running,
-        attempt: given ? null : row.attempt,
+        state: failure === undefined ? "criado" : "isolado",
+        running: failure === undefined ? null : row.running,
+        attempt: null,
         part_dir: null,
         falls,
         quarantined_until: falls >= 2 ? input.now() + quarantineMs : row.quarantined_until,
       })
+      if (failure !== undefined) {
+        input.log(`giving back ${row.id} failed: ${failure}; set apart until it can be`)
+        input.alert?.(`isolado:${row.id}`, `${row.id} não pôde ser devolvido (${failure}); ficou separado`)
+      }
       if (falls >= 2) input.log(`${row.id} fell twice in a row: 30 min aside`)
     }
   }
@@ -377,6 +386,7 @@ export function makeDevicePool(input: {
     set(row.id, given ? { state: "criado", running: null } : { state: "aquecido" })
   }
   const warmRows = db.query<Row, []>("SELECT * FROM device WHERE state = 'aquecido' ORDER BY last_used_at, id")
+  const isolated = db.query<Row, []>("SELECT * FROM device WHERE state = 'isolado' ORDER BY id")
   /**
    * Running devices nobody uses count in the budget: beyond what the attempts accepted and not yet given their devices
    * will take, the oldest stop while they do not fit.
@@ -396,6 +406,9 @@ export function makeDevicePool(input: {
       while (spare.length > 0 && !input.warmFits(platform, spare.length)) await stop(spare.shift()!)
     }
   }
+
+  /** The ports handed out one after the other (`consolePort`). */
+  const ports = { chain: Promise.resolve() as Promise<unknown> }
 
   const run = (id: string, work: () => Promise<void>) => {
     if (tasks.has(id)) return
@@ -434,6 +447,18 @@ export function makeDevicePool(input: {
       for (const row of warmRows.all().filter((item) => input.now() - (item.last_used_at ?? 0) >= (input.warmMs ?? 0)))
         await stop(row)
       await trim()
+      // Set apart when it could not be given back: tried again every round, quietly, until it is.
+      for (const row of isolated.all()) {
+        const driver = input.drivers()[row.kind.startsWith("ios") ? "ios" : "android"]
+        if (!driver) continue
+        const given = await driver.giveBack(device(row), row.running ? JSON.parse(row.running) : {}).then(
+          () => true,
+          () => false,
+        )
+        if (!given) continue
+        set(row.id, { state: "criado", running: null })
+        input.log(`${row.id}, set apart, was given back`)
+      }
       for (const row of using.all()) {
         if (row.kind.endsWith("-fisico")) {
           const alias = (JSON.parse(row.spec) as { alias: string }).alias
@@ -466,21 +491,31 @@ export function makeDevicePool(input: {
         if (row.part_dir) await fs.appendFile(path.join(row.part_dir, "caiu"), `${row.id}\n`).catch(() => undefined)
       }
     },
-    /** A free pair of console and adb ports for a local emulator. */
-    consolePort: async () => {
-      const taken = new Set(
-        db
-          .query<{ running: string }, []>("SELECT running FROM device WHERE running IS NOT NULL")
-          .all()
-          .flatMap((row) => (JSON.parse(row.running) as Running).console ?? []),
-      )
-      for (
-        let port = input.emulatorPorts.start + (input.emulatorPorts.start % 2);
-        port < input.emulatorPorts.end;
-        port += 2
-      )
-        if (!taken.has(port) && (await free(port)) && (await free(port + 1))) return port
-      throw new Error("sem porta livre para o emulador em portas.emulador")
+    /**
+     * A free pair of console and adb ports for a local emulator, held for `device` from now on (its row's `running`):
+     * one at a time, so emulators starting together never get the same pair.
+     */
+    consolePort: (id: string) => {
+      const chosen = ports.chain.then(async () => {
+        const taken = new Set(
+          db
+            .query<{ running: string }, []>("SELECT running FROM device WHERE running IS NOT NULL")
+            .all()
+            .flatMap((row) => (JSON.parse(row.running) as Running).console ?? []),
+        )
+        for (
+          let port = input.emulatorPorts.start + (input.emulatorPorts.start % 2);
+          port < input.emulatorPorts.end;
+          port += 2
+        )
+          if (!taken.has(port) && (await free(port)) && (await free(port + 1))) {
+            set(id, { running: JSON.stringify({ console: port }) })
+            return port
+          }
+        throw new Error("sem porta livre para o emulador em portas.emulador")
+      })
+      ports.chain = chosen.catch(() => undefined)
+      return chosen
     },
   }
 }

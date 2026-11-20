@@ -123,10 +123,12 @@ describe("Android lifecycle", () => {
     expect(commands[1]).toBe(
       "detach /sdk/emulator/emulator -avd bancada-test-a36-ga-arm64-enxuto-1 -ports 5700,5701 -no-window -no-audio -no-boot-anim -no-metrics -camera-back none -camera-front none -gpu host -cores 2 -memory 2048 -snapshot bancada-limpo -no-snapshot-save > bancada-test-a36-ga-arm64-enxuto-1.log",
     )
-    expect(commands[2]).toStartWith(
+    // Booted: the AVD on the port is this one.
+    expect(commands[2]).toBe("/sdk/platform-tools/adb -s emulator-5700 emu avd name")
+    expect(commands[3]).toStartWith(
       "/sdk/platform-tools/adb -s emulator-5700 shell pm path com.google.android.googlequicksearchbox",
     )
-    expect(commands.slice(3)).toEqual([
+    expect(commands.slice(4)).toEqual([
       "/sdk/platform-tools/adb -s emulator-5700 emu avd snapshot save bancada-limpo",
       "/sdk/platform-tools/adb -s emulator-5700 shell svc wifi disable",
       "/sdk/platform-tools/adb -s emulator-5700 forward --remove-all",
@@ -147,7 +149,7 @@ describe("Android lifecycle", () => {
     ])
   })
 
-  test("a later boot comes from the snapshot: nothing trimmed nor saved; a serial running another AVD is never stopped", async () => {
+  test("a port another emulator answers: its own process ended by pid, the other never stopped, at boot or when given back", async () => {
     const it = machine(
       [
         [/getprop sys.boot_completed/, { stdout: "1\n" }],
@@ -179,12 +181,19 @@ describe("Android lifecycle", () => {
       profile: "estoque" as const,
       spec: image,
     }
-    const ready = await driver.ready(device, { start: 48_020, end: 48_039 }, key)
-    expect(it.transcript.some((line) => /avdmanager|snapshot save|pm disable-user/.test(line))).toBe(false)
-    await expect(driver.giveBack(device, ready.run)).rejects.toThrow(
-      "emulator-5702 roda abacato-e2e-1, não bancada-test-a36-ga-arm64-estoque-2: não desligo",
+    // Booted from the snapshot, but what answers on its port is another AVD (two emulators given one port).
+    await expect(driver.ready(device, { start: 48_020, end: 48_039 }, key)).rejects.toThrow(
+      "emulator-5702 roda abacato-e2e-1, não bancada-test-a36-ga-arm64-estoque-2: a porta não ficou com ele",
     )
+    expect(it.transcript.some((line) => /avdmanager|snapshot save|pm disable-user/.test(line))).toBe(false)
+    expect(it.transcript).toContain("kill -SIGTERM 4242")
     expect(it.transcript.some((line) => line.endsWith("emu kill"))).toBe(false)
+    // Given back while another AVD answers on its port: the console refuses to stop the other, its own process goes.
+    const run = await it.shell.detach(["emulator"], { log: "/state/devices/x.log" })
+    it.transcript.length = 0
+    await driver.giveBack(device, { serial: "emulator-5702", console: 5702, ...run })
+    expect(it.transcript).toEqual(["/sdk/platform-tools/adb -s emulator-5702 emu avd name", "kill -SIGTERM 4242"])
+    await it.shell.detach(["emulator"], { log: "/state/devices/x.log" })
     expect(await lifecycle.health("emulator-5702", 4242, "Thu Nov 20 10:00:00 2026")).toBe("ok")
     expect(await lifecycle.health("emulator-5702", 999, undefined)).toBe("morto")
   })
@@ -473,6 +482,101 @@ describe("device pool", () => {
     clock.now += 15 * 60_000
     await pool.watch()
     expect(calls).toEqual(["start bancada-emu-1", "keep bancada-emu-1", "stop bancada-emu-1"])
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  test("emulators starting together get ports of their own; one not given back is set apart and the attempt's reservation goes back", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-ports-"))
+    const db = new Database(":memory:")
+    migrate(db)
+    const back = { refuse: true }
+    const asked: number[] = []
+    const discovery = { done: false }
+    const pool = makeDevicePool({
+      db,
+      now: () => 1_000,
+      // Before the first discovery this machine knows no driver.
+      drivers: () => (discovery.done ? { android: fake } : {}),
+      discovered: () => discovery.done,
+      emulatorPorts: { start: 5700, end: 5799 },
+      simslim: () => false,
+      log: () => {},
+    })
+    const fake: Driver = {
+      kind: "android-emulador",
+      choose: async () => ({ key: "android:37", spec: {}, name: (n) => `bancada-test-a37-${n}` }),
+      ready: async (device) => {
+        // Each asks for its port while the others boot: none is listening yet.
+        const console = await pool.consolePort(device.id)
+        asked.push(console)
+        await Bun.sleep(20)
+        return {
+          view: { id: device.id, serial: `emulator-${console}` },
+          run: { serial: `emulator-${console}`, console },
+        }
+      },
+      health: async () => "ok",
+      giveBack: async (device) => {
+        if (back.refuse && device.id.endsWith("-3"))
+          throw new Error(`emulator-5702 roda bancada-test-a37-4, não ${device.id}: não desligo`)
+      },
+    }
+    const spec = {
+      part: "android",
+      label: "Android",
+      platform: "android",
+      needs: ["android"],
+      device: {},
+      devices: { min: 4, max: 4 },
+      exclusive: [],
+      unsafe: false,
+      build: true,
+      args: [],
+    }
+    db.run(
+      "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, state, lease_id, accepted_at) VALUES ('j-1', 'android', 1, '{}', '{}', ?, 4, 'rodando', 'l1', 0)",
+      [JSON.stringify(spec)],
+    )
+    const key = { job: "j-1", part: "android", attempt: 1, group: "g" }
+    pool.prepare(key, dir)
+    // Right after a start: it waits for discovery instead of failing for want of a driver.
+    await Bun.sleep(1_200)
+    expect(await Bun.file(path.join(dir, "devices.error")).exists()).toBe(false)
+    discovery.done = true
+    await pool.settled()
+    expect(asked.toSorted()).toEqual([5700, 5702, 5704, 5706])
+    // The attempt ends: the one whose give-back is refused is set apart, the rest goes back; nothing holds it.
+    db.run("UPDATE attempt SET state = 'perdido' WHERE job_id = 'j-1'")
+    pool.reap([])
+    await pool.settled()
+    expect(pool.busy(key)).toBe(false)
+    expect(
+      db
+        .query<
+          { id: string; state: string; attempt: string | null },
+          []
+        >("SELECT id, state, attempt FROM device ORDER BY id")
+        .all(),
+    ).toEqual([
+      { id: "bancada-test-a37-1", state: "criado", attempt: null },
+      { id: "bancada-test-a37-2", state: "criado", attempt: null },
+      { id: "bancada-test-a37-3", state: "isolado", attempt: null },
+      { id: "bancada-test-a37-4", state: "criado", attempt: null },
+    ])
+    // Its port stays its own while it is set apart; given back on a later round, it is free again.
+    expect(await pool.consolePort("bancada-test-a37-5")).not.toBe(
+      (
+        JSON.parse(
+          db.query<{ running: string }, []>("SELECT running FROM device WHERE id = 'bancada-test-a37-3'").get()!
+            .running,
+        ) as { console: number }
+      ).console,
+    )
+    back.refuse = false
+    await pool.watch()
+    expect(db.query<{ state: string }, []>("SELECT state FROM device WHERE id = 'bancada-test-a37-3'").get()).toEqual({
+      state: "criado",
+    })
     await fs.rm(dir, { recursive: true, force: true })
   })
 })
