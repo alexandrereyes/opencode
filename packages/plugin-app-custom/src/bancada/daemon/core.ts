@@ -747,6 +747,8 @@ export function createCore(ports: Ports) {
     reconciling: executor.reconciling,
     /** An attempt uses fewer devices than granted (its plan): the rest goes back. */
     shrink: executor.shrink,
+    /** Whether running devices nobody uses still fit in the budget. */
+    warmFits: executor.warmFits,
     /** A reading of the machine for the brake and the owner's presence; the brake's changes go to the log. */
     observe: (reading: Reading) => {
       const brake = executor.observe(reading)

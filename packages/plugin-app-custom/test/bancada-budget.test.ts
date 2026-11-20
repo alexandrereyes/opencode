@@ -404,6 +404,15 @@ describe("admission", () => {
     await fs.rm(root, { recursive: true, force: true })
   })
 
+  test("emulators kept running count in the budget: they fit beside what is reserved, or some must stop", () => {
+    const it = machine()
+    expect(it.core.warmFits("android", 3)).toBe(true)
+    expect(it.offer({}, { min: 1, proposed: 2 })).toMatchObject({ accepted: true, devices: 2 })
+    // A build and two emulators reserved: one more emulator, not two.
+    expect(it.core.warmFits("android", 1)).toBe(true)
+    expect(it.core.warmFits("android", 2)).toBe(false)
+  })
+
   test("what this machine measured counts instead of the default from 3 samples on", () => {
     const it = machine()
     ;[10_000, 12_000, 14_000].forEach((memMb, at) =>

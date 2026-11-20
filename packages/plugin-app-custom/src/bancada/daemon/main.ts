@@ -223,6 +223,9 @@ export async function main() {
       emulatorPorts: config.ports.emulator,
       docker: config.execution.mode === "docker",
       shrink: (key, devices) => current.core?.shrink(key, devices),
+      // host-6's emulators in containers stay running a while for the next part (`aquecido_min`).
+      ...(config.execution.mode === "docker" && config.android.docker ? { warmMs: config.android.docker.warmMs } : {}),
+      warmFits: (platform, count) => current.core?.warmFits(platform, count) ?? false,
       simslim: () => found.current?.simslim !== undefined,
       phone: {
         find: (alias) => (offering ? config.phones : []).find((phone) => phone.alias === alias),

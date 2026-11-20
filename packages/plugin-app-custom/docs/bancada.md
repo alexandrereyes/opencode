@@ -38,7 +38,9 @@ end; nothing is approved without both. The example project (`test/fixture/bancad
   image and binary, the attempt's folders mounted at the same paths, limits, labels, no Docker socket) and each
   emulator in its own container (`<prefixo>emu-<n>`, KVM, the emulators' network; Wi-Fi stays on, it is its only
   network, and the device is delivered once it routes to the execution), given back with third-party packages
-  uninstalled and the container removed; the AVD volume stays.
+  uninstalled and kept running for `aquecido_min` (`[android.docker]`), for the next part, which gets it without
+  booting; it counts in the budget, so the oldest stops first when what is reserved needs the room. Then the
+  container is removed; the AVD volume stays.
 - A part with a `plan` starts its minimum (at least one) while it builds and, once `planned.json` says how many it
   can use (`aparelhos`, else one per scenario), only that many more; what it was granted beyond goes back unstarted
   (budget and ports), so two scenarios never get four emulators. Without a plan, every device granted starts.

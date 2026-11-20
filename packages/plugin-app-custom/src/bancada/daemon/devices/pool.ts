@@ -29,6 +29,11 @@ export type Driver = {
   ) => Promise<{ readonly view: Record<string, unknown>; readonly run: Running }>
   readonly health: (device: Device, run: Running) => Promise<"ok" | "morto" | "mudo">
   readonly giveBack: (device: Device, run: Running) => Promise<void>
+  /**
+   * Given back clean but left running, to be handed to the next part (`ready` finds it running): false when it is
+   * not well enough for that (then it is given back as usual).
+   */
+  readonly keep?: (device: Device, run: Running) => Promise<boolean>
 }
 
 /** A choice of device: what makes two devices interchangeable (`key`), and how to name the `n`-th of them. */
@@ -62,13 +67,14 @@ type Row = {
   readonly profile: Profile
   readonly choice: string
   readonly spec: string
-  readonly state: "criado" | "ligando" | "em_uso" | "devolvendo" | "caiu"
+  readonly state: "criado" | "ligando" | "em_uso" | "devolvendo" | "caiu" | "aquecido"
   readonly running: string | null
   readonly attempt: string | null
   readonly part_dir: string | null
   readonly falls: number
   readonly quarantined_until: number | null
   readonly mute_since: number | null
+  readonly last_used_at: number | null
 }
 
 const muteMs = 60_000
@@ -91,6 +97,13 @@ export function makeDevicePool(input: {
   }
   /** The Docker mode: Android devices are emulators in containers. */
   readonly docker?: boolean
+  /**
+   * How long a device given back clean stays running for the next part (`aquecido_min`, host-6's emulators in
+   * containers); without it, every device is stopped when given back.
+   */
+  readonly warmMs?: number
+  /** Whether that many running devices of a platform, nobody's, still fit in this machine's budget (`executor.ts`). */
+  readonly warmFits?: (platform: "android" | "ios", count: number) => boolean
   /** Gives back what an attempt was granted beyond the devices its plan can use (`executor.ts`). */
   readonly shrink?: (key: Placed, devices: number) => void
   /** How often the pool looks for a part's plan while its first devices start. */
@@ -116,14 +129,14 @@ export function makeDevicePool(input: {
     spec: JSON.parse(row.spec),
   })
 
-  /** The free devices of a choice first, then new names: never two attempts on one device. */
+  /** The free devices of a choice first (running ones first), then new names: never two attempts on one device. */
   const take = (choice: Choice, kind: DeviceKind, profile: Profile, count: number, attempt: string, dir: string) =>
     db.transaction(() => {
       const free = db
         .query<
           Row,
           [string, number]
-        >("SELECT * FROM device WHERE choice = ? AND state = 'criado' AND COALESCE(quarantined_until, 0) <= ? ORDER BY id")
+        >("SELECT * FROM device WHERE choice = ? AND state IN ('aquecido', 'criado') AND COALESCE(quarantined_until, 0) <= ? ORDER BY state = 'aquecido' DESC, id")
         .all(choice.key, input.now())
         .slice(0, count)
       const names = new Set(
@@ -207,6 +220,8 @@ export function makeDevicePool(input: {
       })
     // With a plan, its minimum starts while the part builds and the rest only as many as the plan can use
     // (`planned.json`); what it was granted beyond that goes back before it starts.
+    // Running devices nobody needs give way to this part's reservation, when both do not fit.
+    await trim()
     const early = (await planned(dir)) ? Math.min(row.devices, Math.max(1, spec.devices.min)) : row.devices
     const first = take(choice, chosen.kind, chosen.profile, early, attemptOf(key), dir)
     const starting = start(first, 0)
@@ -316,6 +331,16 @@ export function makeDevicePool(input: {
       set(row.id, { state: "devolvendo" })
       const driver = input.drivers()[row.kind.startsWith("ios") ? "ios" : "android"]
       const running: Running = row.running ? JSON.parse(row.running) : {}
+      // Clean and running for the next part, for `warmMs` (one that fell is never kept).
+      const warm =
+        input.warmMs !== undefined && row.state !== "caiu" && driver?.keep
+          ? await driver.keep(device(row), running).catch(() => false)
+          : false
+      if (warm) {
+        set(row.id, { state: "aquecido", attempt: null, part_dir: null, falls: 0, last_used_at: input.now() })
+        input.log(`${row.id} stays running for ${Math.round(input.warmMs! / 60_000)} min`)
+        continue
+      }
       const given = await (driver ? driver.giveBack(device(row), running) : Promise.resolve()).then(
         () => true,
         (error: unknown) => {
@@ -334,6 +359,41 @@ export function makeDevicePool(input: {
         quarantined_until: falls >= 2 ? input.now() + quarantineMs : row.quarantined_until,
       })
       if (falls >= 2) input.log(`${row.id} fell twice in a row: 30 min aside`)
+    }
+  }
+
+  /** A running device nobody uses, stopped: given back as any other. */
+  const stop = async (row: Row) => {
+    set(row.id, { state: "devolvendo" })
+    const driver = input.drivers()[row.kind.startsWith("ios") ? "ios" : "android"]
+    const given = await (
+      driver ? driver.giveBack(device(row), row.running ? JSON.parse(row.running) : {}) : Promise.resolve()
+    )
+      .then(() => true)
+      .catch((error: unknown) => {
+        input.log(`stopping ${row.id} failed: ${String(error)}`)
+        return false
+      })
+    set(row.id, given ? { state: "criado", running: null } : { state: "aquecido" })
+  }
+  const warmRows = db.query<Row, []>("SELECT * FROM device WHERE state = 'aquecido' ORDER BY last_used_at, id")
+  /**
+   * Running devices nobody uses count in the budget: beyond what the attempts accepted and not yet given their devices
+   * will take, the oldest stop while they do not fit.
+   */
+  const trim = async () => {
+    if (!input.warmFits) return
+    for (const platform of ["android", "ios"] as const) {
+      const warm = warmRows.all().filter((row) => row.kind.startsWith(platform))
+      if (warm.length === 0) continue
+      const pending = db
+        .query<
+          { count: number },
+          [string, string]
+        >("SELECT (SELECT COALESCE(SUM(a.devices), 0) FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE l.state = 'active' AND a.state IN ('aceito', 'compilando', 'rodando') AND json_extract(a.spec, '$.platform') = ?) - (SELECT COUNT(*) FROM device WHERE attempt IS NOT NULL AND kind LIKE ? AND kind NOT LIKE '%-fisico') AS count")
+        .get(platform, `${platform}%`)!.count
+      const spare = warm.slice(0, Math.max(0, warm.length - Math.max(0, pending)))
+      while (spare.length > 0 && !input.warmFits(platform, spare.length)) await stop(spare.shift()!)
     }
   }
 
@@ -366,8 +426,14 @@ export function makeDevicePool(input: {
         .filter((row) => !alive.has(row.attempt) && !tasks.has(`prepare:${row.attempt}`))
         .forEach((row) => run(`release:${row.attempt}`, () => release(row.attempt)))
     },
-    /** Every 10 s: a device in use that is dead, or mute for 60 s, fell; its part's `caiu` file names it. */
+    /**
+     * Every 10 s: a device in use that is dead, or mute for 60 s, fell; its part's `caiu` file names it. A running
+     * device nobody took for `warmMs` stops, and so do the oldest while they do not fit in the budget.
+     */
     watch: async () => {
+      for (const row of warmRows.all().filter((item) => input.now() - (item.last_used_at ?? 0) >= (input.warmMs ?? 0)))
+        await stop(row)
+      await trim()
       for (const row of using.all()) {
         if (row.kind.endsWith("-fisico")) {
           const alias = (JSON.parse(row.spec) as { alias: string }).alias

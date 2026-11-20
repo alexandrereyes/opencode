@@ -822,6 +822,13 @@ export function makeExecutor(input: {
       ])
     })()
 
+  /** Whether `count` running devices of `platform` nobody uses fit in what is free now (`devices/pool.ts`). */
+  const warmFits = (platform: "android" | "ios", count: number) => {
+    const now = current()
+    const cost = times(device(platform, slim), count)
+    return now.memMb >= cost.memMb && now.cpuMilli >= cost.cpuMilli && now[platform] >= count
+  }
+
   return {
     offer,
     cancel,
@@ -829,6 +836,7 @@ export function makeExecutor(input: {
     reserveSlot,
     releaseLease,
     shrink,
+    warmFits,
     tick,
     free,
     running: (): BancadaProtocol.Pulse["running"] =>

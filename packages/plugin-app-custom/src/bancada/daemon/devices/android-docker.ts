@@ -116,6 +116,26 @@ export function androidDocker(input: {
     }
     throw new Error(`${name} ligou sem rede`)
   }
+  /** Its container running and Android booted in it. */
+  const booted = async (name: string) => {
+    const state = await docker.state(name)
+    if (state === "absent" || state === "unknown" || !state.running) return false
+    return (await shell(name, "shell", "getprop", "sys.boot_completed")).out.trim() === "1"
+  }
+  const view = (device: { id: string; profile: string }, slot: { start: number; end: number }, host?: string) => ({
+    id: device.id,
+    tipo: "android-emulador",
+    plataforma: "android",
+    serial: "emulator-5554",
+    udid: null,
+    adb: { host: device.id, porta: 5037 },
+    abi: "x86_64",
+    api,
+    perfil: device.profile,
+    portas: { inicio: slot.start, fim: slot.end },
+    host: host ?? null,
+    maquina: input.machine(),
+  })
   /** Third-party packages uninstalled, forwards and reverses gone: what a test left. */
   const clean = async (name: string) => {
     const listed = await shell(name, "shell", "pm", "list", "packages", "-3")
@@ -140,6 +160,12 @@ export function androidDocker(input: {
       const started = Date.now()
       const volume = `${device.id}-avd`
       const host = await input.host(key)
+      // Kept running by the last part (`keep`): booted and clean, only its network to the new execution is checked.
+      if (await booted(device.id)) {
+        await ready(device.id, host)
+        input.log(`${device.id} ready in ${Math.round((Date.now() - started) / 1000)} s (kept running)`)
+        return { run: { serial: "emulator-5554", container: device.id }, view: view(device, slot, host) }
+      }
       const fresh = (await docker.run(["volume", "inspect", volume])).code !== 0
       if (fresh)
         await docker.run([
@@ -161,23 +187,7 @@ export function androidDocker(input: {
       }
       await clean(device.id)
       input.log(`${device.id} ready in ${Math.round((Date.now() - started) / 1000)} s${fresh ? " (new volume)" : ""}`)
-      return {
-        run: { serial: "emulator-5554", container: device.id },
-        view: {
-          id: device.id,
-          tipo: "android-emulador",
-          plataforma: "android",
-          serial: "emulator-5554",
-          udid: null,
-          adb: { host: device.id, porta: 5037 },
-          abi: "x86_64",
-          api,
-          perfil: device.profile,
-          portas: { inicio: slot.start, fim: slot.end },
-          host: host ?? null,
-          maquina: input.machine(),
-        },
-      }
+      return { run: { serial: "emulator-5554", container: device.id }, view: view(device, slot, host) }
     },
     health: async (device) => {
       const state = await docker.state(device.id)
@@ -189,6 +199,11 @@ export function androidDocker(input: {
       const state = await docker.state(device.id)
       if (state !== "absent" && state !== "unknown" && state.running) await clean(device.id)
       await docker.run(["rm", "-f", device.id])
+    },
+    keep: async (device) => {
+      if (!(await booted(device.id))) return false
+      await clean(device.id)
+      return true
     },
   }
 }

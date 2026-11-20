@@ -374,4 +374,105 @@ describe("device pool", () => {
     ).toEqual([{ id: "bancada-test-a36-1" }, { id: "bancada-test-a36-2" }])
     await fs.rm(dir, { recursive: true, force: true })
   })
+
+  test("host-6: a device given back clean stays running for the next part, until warmMs or until it no longer fits", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-warm-"))
+    const db = new Database(":memory:")
+    migrate(db)
+    const clock = { now: 1_000_000 }
+    const room = { fits: true }
+    const calls: string[] = []
+    const running = new Set<string>()
+    const fake: Driver = {
+      kind: "android-docker",
+      choose: async () => ({ key: "docker:a36", spec: {}, name: (n) => `bancada-emu-${n}` }),
+      ready: async (device) => {
+        calls.push(`${running.has(device.id) ? "reuse" : "start"} ${device.id}`)
+        running.add(device.id)
+        return { view: { id: device.id }, run: { container: device.id } }
+      },
+      health: async () => "ok",
+      giveBack: async (device) => {
+        calls.push(`stop ${device.id}`)
+        running.delete(device.id)
+      },
+      keep: async (device) => {
+        calls.push(`keep ${device.id}`)
+        return true
+      },
+    }
+    const pool = makeDevicePool({
+      db,
+      now: () => clock.now,
+      drivers: () => ({ android: fake }),
+      emulatorPorts: { start: 5700, end: 5799 },
+      simslim: () => false,
+      docker: true,
+      warmMs: 15 * 60_000,
+      warmFits: () => room.fits,
+      log: () => {},
+    })
+    const spec = {
+      part: "android",
+      label: "Android",
+      platform: "android",
+      needs: ["android"],
+      device: {},
+      devices: { min: 1, max: 2 },
+      exclusive: [],
+      unsafe: false,
+      build: true,
+      args: [],
+    }
+    const attempt = async (n: number, devices: number) => {
+      db.run(
+        "INSERT INTO lease (id, kind, owner, android, ios, mem_mb, cpu_milli, builds, build_mem_mb, build_cpu_milli, state, created_at) VALUES (?, 'job', 'o', ?, 0, 0, 0, 0, 0, 0, 'active', 0)",
+        [`l${n}`, devices],
+      )
+      db.run(
+        "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, state, lease_id, accepted_at) VALUES ('j-1', 'android', ?, '{}', '{}', ?, ?, 'rodando', ?, 0)",
+        [n, JSON.stringify(spec), devices, `l${n}`],
+      )
+      Array.from({ length: devices }, (_, index) =>
+        db.run("INSERT INTO lease_device (lease_id, device_id, port_start, port_end) VALUES (?, NULL, ?, ?)", [
+          `l${n}`,
+          48_000 + index * 20,
+          48_019 + index * 20,
+        ]),
+      )
+      const part = path.join(dir, String(n))
+      await fs.mkdir(part)
+      pool.prepare({ job: "j-1", part: "android", attempt: n, group: "g" }, part)
+      await pool.settled()
+    }
+    const end = async (n: number) => {
+      db.run("UPDATE attempt SET state = 'limpar' WHERE n = ?", [n])
+      db.run("UPDATE lease SET state = 'released' WHERE id = ?", [`l${n}`])
+      pool.reap([])
+      await pool.settled()
+    }
+    await attempt(1, 2)
+    await end(1)
+    // Kept running, clean: the next part gets them without starting anything.
+    expect(calls).toEqual(["start bancada-emu-1", "start bancada-emu-2", "keep bancada-emu-1", "keep bancada-emu-2"])
+    calls.length = 0
+    clock.now += 60_000
+    await attempt(2, 1)
+    expect(calls).toEqual(["reuse bancada-emu-1"])
+    await end(2)
+    calls.length = 0
+    // Something else needs the room: the oldest stops first, then the next while they do not fit.
+    room.fits = false
+    await pool.watch()
+    expect(calls).toEqual(["stop bancada-emu-2", "stop bancada-emu-1"])
+    // And without that, after warmMs nobody took it, it stops too.
+    room.fits = true
+    calls.length = 0
+    await attempt(3, 1)
+    await end(3)
+    clock.now += 15 * 60_000
+    await pool.watch()
+    expect(calls).toEqual(["start bancada-emu-1", "keep bancada-emu-1", "stop bancada-emu-1"])
+    await fs.rm(dir, { recursive: true, force: true })
+  })
 })
