@@ -1,0 +1,247 @@
+{
+  "version": 1,
+  "now": 1795092060000,
+  "scope": "all",
+  "hub": "ok",
+  "counts": {
+    "running": 4,
+    "waiting": 4
+  },
+  "running": [
+    {
+      "job": "j-0142ckt1",
+      "since": 1795091820000,
+      "session": {
+        "server": {
+          "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+          "name": "Mac de Alexandre",
+          "short": "MA"
+        },
+        "sessionID": "ses_bancada_root",
+        "rootSessionID": "ses_bancada_root",
+        "title": "Fluxo do checkout"
+      },
+      "parts": [
+        {
+          "teste": "android",
+          "label": "Android",
+          "platform": "android",
+          "machine": {
+            "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+            "name": "Mac de Alexandre",
+            "short": "MA"
+          },
+          "state": "rodando",
+          "devices": 1,
+          "since": 1795091820000
+        }
+      ]
+    },
+    {
+      "job": "j-7qk2m9xa",
+      "since": 1795091700000,
+      "session": {
+        "server": {
+          "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+          "name": "Mac de Alexandre",
+          "short": "MA"
+        },
+        "sessionID": "ses_bancada_audio",
+        "rootSessionID": "ses_bancada_audio",
+        "title": "Transcrição de áudio"
+      },
+      "parts": [
+        {
+          "teste": "android",
+          "label": "Android",
+          "platform": "android",
+          "machine": {
+            "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+            "name": "Mac de Alexandre",
+            "short": "MA"
+          },
+          "state": "rodando",
+          "devices": 1,
+          "since": 1795091700000
+        },
+        {
+          "teste": "ios",
+          "label": "iOS",
+          "platform": "ios",
+          "machine": {
+            "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+            "name": "Mac de Alexandre",
+            "short": "MA"
+          },
+          "state": "rodando",
+          "devices": 1,
+          "since": 1795091940000
+        }
+      ]
+    },
+    {
+      "job": "j-pm3nt0a1",
+      "since": 1795091400000,
+      "session": {
+        "server": {
+          "instanceID": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21",
+          "name": "Linux BRS",
+          "short": "LB"
+        },
+        "sessionID": "ses_bancada_pedido",
+        "rootSessionID": "ses_bancada_pedido",
+        "title": "Polimento pedido"
+      },
+      "parts": [
+        {
+          "teste": "android",
+          "label": "Android",
+          "platform": "android",
+          "machine": {
+            "instanceID": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21",
+            "name": "Linux BRS",
+            "short": "LB"
+          },
+          "state": "rodando",
+          "devices": 1,
+          "since": 1795091400000
+        }
+      ]
+    }
+  ],
+  "waiting": [
+    {
+      "job": "j-cat4g0a1",
+      "since": 1795091760000,
+      "session": {
+        "server": {
+          "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+          "name": "Mac de Alexandre",
+          "short": "MA"
+        },
+        "sessionID": "ses_bancada_catalogo",
+        "rootSessionID": "ses_bancada_catalogo",
+        "title": "Catálogo"
+      },
+      "parts": [
+        {
+          "teste": "android",
+          "label": "Android",
+          "platform": "android",
+          "position": 1,
+          "etaMs": 180000,
+          "reason": {
+            "code": "fila",
+            "text": "na fila"
+          },
+          "since": 1795091760000
+        }
+      ]
+    },
+    {
+      "job": "j-ass1st3a",
+      "since": 1795091820000,
+      "session": {
+        "server": {
+          "instanceID": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21",
+          "name": "Linux BRS",
+          "short": "LB"
+        },
+        "sessionID": "ses_bancada_assistente",
+        "rootSessionID": "ses_bancada_assistente",
+        "title": "Assistente - ações"
+      },
+      "parts": [
+        {
+          "teste": "android-servidor",
+          "label": "Android + servidor",
+          "platform": "android",
+          "reason": {
+            "code": "trava",
+            "detail": "abacato:servidor-dev",
+            "text": "aguardando trava servidor-dev"
+          },
+          "since": 1795091820000
+        }
+      ]
+    },
+    {
+      "job": "j-emp2st1m",
+      "since": 1795091880000,
+      "session": {
+        "server": {
+          "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+          "name": "Mac de Alexandre",
+          "short": "MA"
+        },
+        "sessionID": "ses_bancada_emprestimo",
+        "rootSessionID": "ses_bancada_emprestimo",
+        "title": "Empréstimo de produto"
+      },
+      "parts": [
+        {
+          "teste": "ios",
+          "label": "iOS",
+          "platform": "ios",
+          "position": 2,
+          "etaMs": 420000,
+          "reason": {
+            "code": "orcamento",
+            "text": "aguardando um Mac"
+          },
+          "since": 1795091880000
+        }
+      ]
+    },
+    {
+      "job": "j-0143ckt2",
+      "since": 1795092000000,
+      "session": {
+        "server": {
+          "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+          "name": "Mac de Alexandre",
+          "short": "MA"
+        },
+        "sessionID": "ses_bancada_child",
+        "rootSessionID": "ses_bancada_root",
+        "title": "Fluxo do checkout",
+        "by": "Testar o checkout"
+      },
+      "parts": [
+        {
+          "teste": "android",
+          "label": "Android",
+          "platform": "android",
+          "position": 3,
+          "etaMs": 240000,
+          "reason": {
+            "code": "fila",
+            "text": "na fila"
+          },
+          "since": 1795092000000
+        }
+      ]
+    }
+  ],
+  "machines": [
+    {
+      "server": {
+        "instanceID": "3f0c1f4e-6c0b-4a57-9d55-0a4f3b1c9e21",
+        "name": "Linux BRS",
+        "short": "LB"
+      },
+      "state": "ok",
+      "running": 1
+    },
+    {
+      "server": {
+        "instanceID": "9b2e7c60-1d4f-4e0a-8a3b-5c6d7e8f9a10",
+        "name": "Mac de Alexandre",
+        "short": "MA"
+      },
+      "state": "ok",
+      "running": 3
+    }
+  ],
+  "alerts": []
+}

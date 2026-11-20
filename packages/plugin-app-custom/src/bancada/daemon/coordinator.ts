@@ -15,6 +15,9 @@ type PartRow = {
   readonly machine_id: string | null
   readonly offer_seq: number | null
   readonly devices_granted: number | null
+  readonly devices: string | null
+  /** Where it waits now, as the queue shows it: the reason, the place and the estimate (`queue`). */
+  readonly waiting: string | null
   readonly refused_by: string | null
   readonly refused_pulse: number | null
   readonly held_state: BancadaProtocol.PartState | null
@@ -208,7 +211,8 @@ export function makeCoordinator(input: {
       part: row.part,
       state: current.state,
       attempt: current.attempt_n,
-      ...(at ? { machine: { machineID: at.machine_id, name: at.name } } : {}),
+      ...(at ? { machine: { machineID: at.machine_id, name: at.name, instanceID: at.instance_id } } : {}),
+      ...(current.devices && current.state === "rodando" ? { devices: JSON.parse(current.devices) } : {}),
       ...extra,
     })
   }
@@ -429,6 +433,7 @@ export function makeCoordinator(input: {
           name: row.name,
           ...(row.platform ? { platform: row.platform } : {}),
           ...(row.hardware ? { hardware: row.hardware } : {}),
+          instanceID: row.instance_id,
         })),
         phones: all.flatMap((row) =>
           (JSON.parse(row.phones) as (typeof BancadaProtocol.CatalogPhone.Type)[]).map((phone) => ({
@@ -548,6 +553,7 @@ export function makeCoordinator(input: {
           missing: 0,
           since: input.now(),
           ...(message.state === "rodando" ? { built_at: input.now() } : {}),
+          ...(message.devices ? { devices: JSON.stringify(message.devices) } : {}),
         })
         return tell(row)
       }
@@ -1138,6 +1144,12 @@ export function makeCoordinator(input: {
       .filter((row) => row.adopt_until === null && row.needs_code === 1 && originOf(row)?.state !== "ok")
     waitingCode.forEach((row) => {
       const told = JSON.stringify(["aguardando_codigo", null, null])
+      const text = `aguardando ${originOf(row)?.name ?? "a origem"} voltar para enviar o código`
+      db.run("UPDATE hub_part SET waiting = ? WHERE job_id = ? AND part = ?", [
+        JSON.stringify({ reason: { code: "aguardando_codigo", text } }),
+        row.job_id,
+        row.part,
+      ])
       if (row.told === told) return
       const before: unknown[] | null = row.told ? JSON.parse(row.told) : null
       update(row, { told, ...(before?.[0] === "aguardando_codigo" ? {} : { reason_at: now }) })
@@ -1341,6 +1353,15 @@ export function makeCoordinator(input: {
     }
     for (const waiting of decision.waiting) {
       const item = byPart.get(`${waiting.job}/${waiting.part}`)!
+      db.run("UPDATE hub_part SET waiting = ? WHERE job_id = ? AND part = ?", [
+        JSON.stringify({
+          reason: waiting.reason,
+          ...(waiting.position === undefined ? {} : { position: waiting.position }),
+          ...(waiting.etaMs === undefined ? {} : { etaMs: waiting.etaMs }),
+        }),
+        waiting.job,
+        waiting.part,
+      ])
       const told = JSON.stringify([waiting.reason.code, waiting.reason.detail ?? null, waiting.position ?? null])
       if (item.row.told === told) continue
       // Since when it waits for this reason (a new place in the queue is the same reason).

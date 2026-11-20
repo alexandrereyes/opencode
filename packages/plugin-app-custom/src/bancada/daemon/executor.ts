@@ -171,6 +171,9 @@ export function makeExecutor(input: {
     "SELECT a.* FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE a.state = 'limpar' AND l.state <> 'active'",
   )
   /** Ended attempts whose reservation still counts: it goes back with their folder (and devices), in the giving back. */
+  const usedDevices = db.query<{ id: string; kind: string; running: string | null }, [string]>(
+    "SELECT d.id, d.kind, d.running FROM lease_device l JOIN device d ON d.id = l.device_id WHERE l.lease_id = ? ORDER BY l.rowid",
+  )
   const holding = db.query<AttemptRow, []>(
     "SELECT a.* FROM attempt a JOIN lease l ON l.id = a.lease_id WHERE a.state NOT IN ('aceito', 'compilando', 'rodando') AND l.state = 'active'",
   )
@@ -630,7 +633,9 @@ export function makeExecutor(input: {
             "UPDATE lease SET mem_mb = mem_mb - build_mem_mb, cpu_milli = cpu_milli - build_cpu_milli, builds = 0, build_mem_mb = 0, build_cpu_milli = 0 WHERE id = ?",
             [row.lease_id],
           )
-        input.send({ type: "attempt", ...keyOf(row), state: next })
+        // Running: its devices are ready, and the apps show them (`docs/bancada.md`, "App surface").
+        const devices = next === "rodando" ? usedDevices.all(row.lease_id).map(usedDevice) : []
+        input.send({ type: "attempt", ...keyOf(row), state: next, ...(devices.length ? { devices } : {}) })
       })()
     }
     if (unread.count === 0) reconciling.value = false
@@ -777,3 +782,15 @@ export function makeExecutor(input: {
 }
 
 export type Executor = ReturnType<typeof makeExecutor>
+
+/** A device of an attempt as the apps see it: its id in the resources hub, when the hub lists that kind. */
+function usedDevice(row: { id: string; kind: string; running: string | null }): typeof BancadaProtocol.UsedDevice.Type {
+  const running: { udid?: string } = row.running ? JSON.parse(row.running) : {}
+  const resourceID =
+    row.kind === "android-emulador"
+      ? `android-emulator:${row.id}`
+      : row.kind === "ios-simulador" && running.udid
+        ? `ios-simulator:${running.udid}`
+        : undefined
+  return { kind: row.kind, id: row.id, ...(resourceID ? { resourceID } : {}) }
+}

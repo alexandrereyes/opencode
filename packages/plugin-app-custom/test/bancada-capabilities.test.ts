@@ -141,6 +141,7 @@ describe("discovery", () => {
         avdmanager: `${sdk}/cmdline-tools/latest/bin/avdmanager`,
         javaHome: studio,
       },
+      simslim: `${home}/.local/bin/simslim`,
     })
   })
 

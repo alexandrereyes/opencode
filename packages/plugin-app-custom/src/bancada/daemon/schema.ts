@@ -167,6 +167,8 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       machine_id TEXT,
       offer_seq INTEGER,
       devices_granted INTEGER,
+      devices TEXT,
+      waiting TEXT,
       refused_by TEXT,
       refused_pulse INTEGER,
       held_state TEXT,
@@ -248,6 +250,22 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
     )`,
     // A hold this machine decides (`docs/bancada.md`, "Holds"): a light slot for an emulator or simulator a session
     // starts, or a phone of its catalog. `esperando` rows are the queue, in request order.
+    // The devices this machine made for attempts (`devices/pool.ts`): only these, by name, are ever stopped.
+    `CREATE TABLE device (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      profile TEXT NOT NULL,
+      choice TEXT NOT NULL,
+      spec TEXT NOT NULL,
+      state TEXT NOT NULL,
+      running TEXT,
+      attempt TEXT,
+      part_dir TEXT,
+      falls INTEGER NOT NULL DEFAULT 0,
+      quarantined_until INTEGER,
+      mute_since INTEGER,
+      last_used_at INTEGER
+    )`,
     `CREATE TABLE hold (
       id TEXT PRIMARY KEY,
       origin_machine TEXT NOT NULL,

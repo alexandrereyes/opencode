@@ -25,10 +25,13 @@ export type NewJob = {
 export type PartView = {
   readonly state: BancadaProtocol.PartState
   readonly attempt: number
-  readonly machine?: { readonly machineID: string; readonly name: string }
+  readonly machine?: { readonly machineID: string; readonly name: string; readonly instanceID?: string }
   readonly position?: number
   readonly etaMs?: number
   readonly reason?: BancadaProtocol.Reason
+  readonly devices?: ReadonlyArray<typeof BancadaProtocol.UsedDevice.Type>
+  /** When it entered its current state, as this machine heard it. */
+  readonly since?: number
 }
 
 /** Where a request is queued: the hub's queue, or this machine's own while the hub was out (`docs/bancada.md`, "Hub out"). */
@@ -194,6 +197,13 @@ export function makeOrigin(input: {
               ...(message.position === undefined ? {} : { position: message.position }),
               ...(message.etaMs === undefined ? {} : { etaMs: message.etaMs }),
               ...(message.reason ? { reason: message.reason } : {}),
+              ...(message.devices
+                ? { devices: message.devices }
+                : current?.devices && current.attempt === message.attempt
+                  ? { devices: current.devices }
+                  : {}),
+              since:
+                current && current.state === message.state && current.since !== undefined ? current.since : input.now(),
             },
       )
       return

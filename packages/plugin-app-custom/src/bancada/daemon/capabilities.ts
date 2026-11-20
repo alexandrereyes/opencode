@@ -40,6 +40,8 @@ export type Discovery = {
   /** By capability name, with its details (`docs/bancada.md`, "Discovery"). */
   readonly found: Record<string, unknown>
   readonly android?: AndroidTools
+  /** `simslim`, by absolute path, where there is one. */
+  readonly simslim?: string
 }
 
 export async function discover(probe: Probe, config: MachineConfig): Promise<Discovery> {
@@ -55,12 +57,13 @@ export async function discover(probe: Probe, config: MachineConfig): Promise<Dis
   return {
     found: {
       ...(emulators ? { android: emulators } : {}),
-      ...(ios ? { ios } : {}),
+      ...(ios ? { ios: ios.capability } : {}),
       ...phones,
       ...dotnet,
       ...others,
     },
     ...(android ? { android } : {}),
+    ...(ios?.path ? { simslim: ios.path } : {}),
   }
 }
 
@@ -200,7 +203,7 @@ async function iosCapability(probe: Probe) {
     )
     .flatMap((type) => (type.name ? [type.name] : []))
   const simslim = await which(probe, "simslim")
-  return { runtimes: available, modelos: models, simslim: simslim !== undefined }
+  return { capability: { runtimes: available, modelos: models, simslim: simslim !== undefined }, path: simslim }
 }
 
 /**

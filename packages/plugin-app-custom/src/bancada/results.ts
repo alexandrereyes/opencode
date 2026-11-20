@@ -45,7 +45,7 @@ export type Ending = {
   readonly stage: "build" | "plan" | "run"
   readonly exit?: number
   readonly signal?: string
-  readonly cause?: "prazo" | "runner_morto" | "runner_erro" | "cancelado"
+  readonly cause?: "prazo" | "runner_morto" | "runner_erro" | "cancelado" | "aparelhos"
   readonly reason?: string
   readonly planned?: unknown
   readonly summary?: unknown
@@ -136,7 +136,9 @@ export function judge(ending: Ending): BancadaProtocol.Outcome {
     )
   if (ending.cause === "prazo")
     return outcome("infraestrutura", ending.reason ? `prazo estourado: ${ending.reason}` : "prazo estourado")
-  if (ending.cause === "runner_morto") return outcome("infraestrutura", "a execução morreu")
+  if (ending.cause === "runner_morto") return outcome("infraestrutura", ending.reason ?? "a execução morreu")
+  if (ending.cause === "aparelhos")
+    return outcome("infraestrutura", `os aparelhos não ficaram prontos: ${ending.reason ?? "sem motivo"}`)
   if (ending.cause === "runner_erro")
     return outcome("infraestrutura", `o runner falhou: ${ending.reason ?? "sem motivo"}`)
   const exit = ending.exit ?? 75

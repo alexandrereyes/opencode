@@ -23,12 +23,20 @@ import { PluginTestLayer } from "../../core/test/plugin/fixture"
 // them: the Bancada's hook refuses and lets pass (`docs/bancada.md`, "Tests": 15.3). Its process lives in a folder of
 // this test, with a machine file of its own; the shell tool is a stand-in that only says it ran.
 const world: { root?: string; env?: Record<string, string | undefined> } = {}
-const names = ["OPENCODE_BANCADA", "OPENCODE_BANCADA_STATE", "OPENCODE_BANCADA_CONFIG"] as const
 
 beforeAll(async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-host-"))
   world.root = root
-  world.env = Object.fromEntries(names.map((name) => [name, process.env[name]]))
+  // The agent's environment is production's: none of it reaches the plugin here (its watch gateway would try
+  // production's port, its resources hub production's inventory).
+  world.env = Object.fromEntries(
+    Object.keys(process.env)
+      .filter((name) => name.startsWith("OPENCODE_"))
+      .map((name) => [name, process.env[name]]),
+  )
+  Object.keys(world.env).forEach((name) => delete process.env[name])
+  process.env.OPENCODE_WATCH_GATEWAY_PORT = "0"
+  process.env.OPENCODE_RESOURCES_HUB_INVENTORY = "0"
   await Bun.write(
     path.join(root, "bancada.toml"),
     `versao = 1\n[orcamento]\nmemoria_gb = 32\ncpu = 16\n[execucao]\nmodo = "processo"\n` +
@@ -45,11 +53,12 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  for (const name of names) {
-    const value = world.env?.[name]
-    if (value === undefined) delete process.env[name]
-    else process.env[name] = value
-  }
+  Object.keys(process.env)
+    .filter((name) => name.startsWith("OPENCODE_"))
+    .forEach((name) => delete process.env[name])
+  Object.entries(world.env ?? {}).forEach(([name, value]) => {
+    if (value !== undefined) process.env[name] = value
+  })
   if (!world.root) return
   const info = (await Bun.file(path.join(world.root, "state", "bancada.json"))
     .json()

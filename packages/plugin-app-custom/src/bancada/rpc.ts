@@ -95,6 +95,7 @@ export const PartView = Schema.Struct({
   position: optional(Schema.Number),
   etaMs: optional(Schema.Number),
   reason: optional(BancadaProtocol.Reason),
+  devices: optional(Schema.Array(BancadaProtocol.UsedDevice)),
 }).annotate({ identifier: "Bancada.PartView" })
 export const JobView = Schema.Struct({
   job: Schema.String,
@@ -182,6 +183,24 @@ export const Definition = Rpc.define({
       output: Schema.toStandardSchemaV1(Schema.Struct({ state: Schema.String })),
       errors,
     },
+    /**
+     * The devices and waits of a session's family (`docs/bancada.md`, "session"; fixture `session-a1-b1.json`): asked
+     * on the session's server, for the root or any subagent.
+     */
+    session: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({ sessionID: Schema.String })),
+      output: loose,
+      errors,
+    },
+    /**
+     * The queue (`docs/bancada.md`, "queue"; fixtures `queue-c2-d1-f3.json`, `queue-local.json`): the whole one on the
+     * hub, this server's own view elsewhere.
+     */
+    queue: {
+      input: Schema.toStandardSchemaV1(Schema.Struct({})),
+      output: loose,
+      errors,
+    },
     /** Another machine's call to the hub (`BancadaProtocol.SyncInput` → `SyncOutput`); only the hub takes it. */
     sync: { input: loose, output: loose, errors: between },
     /** A chunk of a transfer's file, from the machine the hub named its sender (`BancadaProtocol.BlobPut`). */
@@ -189,5 +208,19 @@ export const Definition = Rpc.define({
     /** A chunk of a transfer's file, for the machine the hub named its receiver (`BancadaProtocol.BlobGet`). */
     "blob.get": { input: loose, output: loose, errors: between },
   },
-  events: {},
+  events: {
+    /**
+     * A family's `session` or this server's `queue` changed (at most one a second; not for an estimate alone). No
+     * counts: the apps reload what it names.
+     */
+    changed: {
+      schema: Schema.toStandardSchemaV1(
+        Schema.Struct({ sessions: Schema.Array(Schema.String), queue: Schema.Boolean }),
+      ),
+    },
+    /** A new exception for the owner (`queue.alerts`). */
+    alert: {
+      schema: Schema.toStandardSchemaV1(Schema.Struct({ id: Schema.String, kind: Schema.String, text: Schema.String })),
+    },
+  },
 })

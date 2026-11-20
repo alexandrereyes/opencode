@@ -18,7 +18,17 @@ import { makeLink, type Link } from "./link.js"
 import { Invalid, makeRequests } from "./requests.js"
 import { bundle, release } from "./snapshot.js"
 import { identify } from "./bridge.js"
-import { discover as findCapabilities, systemProbe, type AndroidTools } from "./capabilities.js"
+import { discover as findCapabilities, systemProbe, type Discovery } from "./capabilities.js"
+import { makeDevicePool, withDevices, type DevicePool, type Driver } from "./devices/pool.js"
+import { androidLocal } from "./devices/android-local.js"
+import { iosSimulators } from "./devices/ios.js"
+import { androidDocker } from "./devices/android-docker.js"
+import { dockerExecutions, makeDocker, type DockerExecutions } from "./launcher/docker.js"
+import { systemShell } from "./devices/shell.js"
+import { makeAndroidLifecycle, type Image } from "../../resources/adapters/android-lifecycle.js"
+import { makeIosLifecycle } from "../../resources/adapters/ios-lifecycle.js"
+import { iosSlim } from "../catalog/slim.js"
+import type { MachineConfig } from "../machine-config.js"
 import type { Part } from "../commands.js"
 import type { Files } from "./transfers.js"
 import { makeWorkdirs, type Workdirs } from "./workdir.js"
@@ -48,6 +58,8 @@ export const limits = {
   wakeMs: 30_000,
   /** How often discovery looks at what the machine has. */
   discoverMs: 10 * 60_000,
+  /** How often the devices in use are checked. */
+  watchMs: 10_000,
 }
 
 /**
@@ -86,8 +98,6 @@ const held: {
     requests?: ReturnType<typeof makeRequests>
     /** The link to the hub, on a machine that is not the hub and knows where it is. */
     link?: Link
-    /** The Android tools discovery resolved to absolute paths: the devices use only these. */
-    android?: AndroidTools
   }
 } = {}
 
@@ -166,6 +176,43 @@ export async function main() {
     const offering = machineFile.valid
     const link = owner.current.link && !owner.current.hub ? owner.current.link : undefined
     const discovery = { at: 0 }
+    // The Docker mode: each execution in a sibling container (`launcher/docker.ts`).
+    const executions =
+      config.execution.mode === "docker"
+        ? dockerExecutions({
+            docker: makeDocker({ docker: Bun.which("docker") ?? "/usr/bin/docker" }),
+            state,
+            prefix: config.prefix,
+            machineID,
+            labels: config.labels,
+            limits: {
+              cpus: config.execution.cpus,
+              memMb: config.execution.memMb,
+              pids: config.execution.pids,
+              low: config.execution.lowPriority,
+            },
+            ...(config.android.docker ? { network: config.android.docker.network } : {}),
+            entrypoint: process.execPath,
+          })
+        : undefined
+    const found: { current?: Discovery } = {}
+    const pool = makeDevicePool({
+      db,
+      now,
+      drivers: () =>
+        deviceDrivers(found.current, config, state, () => owner.current?.name ?? "", pool, {
+          machineID,
+          ...(executions ? { executions } : {}),
+        }),
+      emulatorPorts: config.ports.emulator,
+      docker: config.execution.mode === "docker",
+      simslim: () => found.current?.simslim !== undefined,
+      log,
+    })
+    current.timers.push(setInterval(() => void pool.watch().catch(() => undefined), limits.watchMs))
+    void fs
+      .mkdir(path.join(state, "devices"), { recursive: true })
+      .then(() => Bun.write(path.join(state, "simslim-profile.json"), JSON.stringify(iosSlim)))
     current.core = createCore({
       db,
       now,
@@ -223,17 +270,23 @@ export async function main() {
       rediscover: () => {
         if (Date.now() - discovery.at >= 60_000) discover()
       },
-      launcher: makeProcessLauncher({
-        state,
-        workdirs,
-        git: runGit,
-        now,
-        random,
-        deadlines: { prepareMs: config.times.prepareMs, buildMs: config.times.buildMs, runMs: config.times.runMs },
-        lowPriority: config.execution.lowPriority,
-        wake: advance,
-        log,
-      }),
+      // Each part with devices gets them ready while it builds (`devices/pool.ts`).
+      launcher: withDevices(
+        makeProcessLauncher({
+          state,
+          workdirs,
+          git: runGit,
+          now,
+          random,
+          deadlines: { prepareMs: config.times.prepareMs, buildMs: config.times.buildMs, runMs: config.times.runMs },
+          lowPriority: config.execution.lowPriority,
+          wake: advance,
+          log,
+          ...(executions ? { container: executions } : {}),
+        }),
+        pool,
+        (key) => path.join(state, "attempts", key.job, key.group, "parts", key.part),
+      ),
     })
     current.requests = makeRequests(current.core, runGit)
     if (link) {
@@ -245,9 +298,9 @@ export async function main() {
       discovery.at = Date.now()
       if (!offering) return
       void findCapabilities(systemProbe(), config).then(
-        (found) => {
-          current.android = found.android
-          current.core?.offer(offered(config, found.found))
+        (discovered) => {
+          found.current = discovered
+          current.core?.offer(offered(config, discovered.found))
         },
         (error: unknown) => log(`discovering what the machine has failed: ${String(error)}`),
       )
@@ -300,6 +353,7 @@ export async function main() {
         requests: () => held.process?.requests,
         deliveries,
         identifyBridge,
+        state,
       }),
   })
   /**
@@ -370,6 +424,7 @@ async function admin(
     readonly requests: () => ReturnType<typeof makeRequests> | undefined
     readonly deliveries: Deliveries
     readonly identifyBridge: () => void
+    readonly state: string
   },
 ) {
   if (request.headers.get("authorization") !== `Bearer ${context.secret}`) return new Response(null, { status: 401 })
@@ -542,12 +597,19 @@ async function admin(
       })
     const notes = () =>
       core.notes().filter((note) => (context.deliveries.leases.get(`note:${note.key}`) ?? 0) <= Date.now())
-    while (Date.now() < deadline && due().length + notes().length === 0) await Bun.sleep(250)
+    // What the apps show changed: at most once a second, never for an estimate alone (`docs/bancada.md`, "changed").
+    const changes = () => core.changes()
+    const changed = { current: changes() }
+    while (Date.now() < deadline && due().length + notes().length === 0 && !changed.current) {
+      await Bun.sleep(250)
+      changed.current = changes()
+    }
     const notices = due()
     notices.forEach((notice) => context.deliveries.leases.set(notice.job, Date.now() + context.deliveries.leaseMs))
     const ready = notes()
     ready.forEach((note) => context.deliveries.leases.set(`note:${note.key}`, Date.now() + context.deliveries.leaseMs))
     return Response.json({
+      ...(changed.current ? { changed: changed.current } : {}),
       notes: ready.map((note) => ({
         key: note.key,
         sessionID: note.session_id,
@@ -564,6 +626,8 @@ async function admin(
       })),
     })
   }
+  if (method === "session") return Response.json(core.surface.session(String(field("rootSessionID") ?? "")))
+  if (method === "queue") return Response.json(core.surface.queue())
   if (method === "note.ack") {
     const key = String(field("key") ?? "")
     if (field("missing") === true) log(`the session of note ${key} no longer exists; it was dropped`)
@@ -573,6 +637,14 @@ async function admin(
   }
   if (method === "notice.ack") {
     const job = String(field("job") ?? "")
+    // Acceptance only (`docs/bancada.md`, "Acceptance"): with this file in the folder the process dies on the next
+    // ack, between the session's message and its confirmation, once.
+    const die = path.join(context.state, "teste-morre-no-ack")
+    if (await Bun.file(die).exists()) {
+      await fs.rm(die, { force: true })
+      log(`dying before the ack of ${job}, as the acceptance asked`)
+      process.exit(137)
+    }
     if (field("missing") === true) log(`the session of ${job} no longer exists; its notice was dropped`)
     core.delivered(job)
     context.deliveries.leases.delete(job)
@@ -609,7 +681,12 @@ async function admin(
  * Notices on their way to the sessions (`docs/bancada.md`, "Notice"): the instance that took each, until when; the
  * tools that wait for a request's end, and when they last asked; when an instance last asked for events.
  */
-type Deliveries = { leases: Map<string, number>; inline: Map<string, number>; polledAt: number; leaseMs: number }
+type Deliveries = {
+  leases: Map<string, number>
+  inline: Map<string, number>
+  polledAt: number
+  leaseMs: number
+}
 
 /** The answer of a call between servers, or its refusal by name (`CoreError`, status 422). */
 async function refusable(run: () => unknown) {
@@ -721,4 +798,69 @@ async function answered(core: Core, holds: ReadonlyArray<string>, ms: number) {
   const rows = () => holds.map((hold) => core.holds.find(hold))
   while (Date.now() < deadline && rows().some((row) => row?.state === "pedida")) await Bun.sleep(100)
   return rows()
+}
+
+/**
+ * The device drivers of this machine, from what discovery found: local emulators where the SDK has an emulator and
+ * executions are processes (the Docker mode has its own), simulators on a Mac with Xcode.
+ */
+export function deviceDrivers(
+  found: Discovery | undefined,
+  config: MachineConfig,
+  state: string,
+  machine: () => string,
+  pool: DevicePool,
+  host: { readonly machineID: string; readonly executions?: DockerExecutions } = { machineID: "" },
+): Partial<Record<"android" | "ios", Driver>> {
+  const docker = config.android.docker
+  if (config.execution.mode === "docker")
+    return docker && host.executions
+      ? {
+          android: androidDocker({
+            docker: makeDocker({ docker: Bun.which("docker") ?? "/usr/bin/docker" }),
+            adb: found?.android?.adb ?? "adb",
+            prefix: config.prefix,
+            machineID: host.machineID,
+            labels: config.labels,
+            image: docker.image,
+            network: docker.network,
+            cpus: docker.cpusPerEmulator,
+            memMb: docker.memMbPerEmulator,
+            host: host.executions.address,
+            machine,
+            log,
+          }),
+        }
+      : {}
+  const shell = systemShell()
+  const tools = found?.android
+  const images = (found?.found.android as { imagens?: Image[] } | undefined)?.imagens ?? []
+  const logs = path.join(state, "devices")
+  const android = tools?.emulator
+    ? androidLocal({
+        lifecycle: makeAndroidLifecycle(shell, {
+          ...tools,
+          emulator: tools.emulator,
+          avdHome: process.env.ANDROID_AVD_HOME || path.join(os.homedir(), ".android/avd"),
+        }),
+        prefix: config.prefix,
+        images: () => images,
+        port: pool.consolePort,
+        logs,
+        machine,
+        log,
+      })
+    : undefined
+  const profile = path.join(state, "simslim-profile.json")
+  const ios =
+    found?.found.ios !== undefined
+      ? iosSimulators({
+          lifecycle: makeIosLifecycle(shell, { ...(found.simslim ? { simslim: found.simslim } : {}) }),
+          prefix: config.prefix,
+          profile,
+          machine,
+          log,
+        })
+      : undefined
+  return { ...(android ? { android } : {}), ...(ios ? { ios } : {}) }
 }

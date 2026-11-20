@@ -208,8 +208,22 @@ export const Outcome = Schema.Struct({
 }).annotate({ identifier: "Bancada.Outcome" })
 export type Outcome = typeof Outcome.Type
 
-export const MachineRef = Schema.Struct({ machineID: Schema.String, name: Schema.String }).annotate({
+export const MachineRef = Schema.Struct({
+  machineID: Schema.String,
+  name: Schema.String,
+  /** The `custom.instance` id of the server that owns that machine's Bancada (what the apps key servers by). */
+  instanceID: optional(Schema.String),
+}).annotate({
   identifier: "Bancada.MachineRef",
+})
+/**
+ * A device an attempt uses, as the apps show it (`docs/bancada.md`, "App surface"): its kind, the Bancada's name for
+ * it, and its id in the resources hub when it has one (`android-emulator:<AVD>`, `ios-simulator:<UDID>`).
+ */
+export const UsedDevice = Schema.Struct({
+  kind: Schema.String,
+  id: Schema.String,
+  resourceID: optional(Schema.String),
 })
 
 export const File = Schema.Struct({
@@ -287,6 +301,8 @@ export const AttemptReport = Schema.Struct({
   outcome: optional(Outcome),
   /** A device that fell during this attempt (a fault for it; not returned to this attempt). */
   fell: optional(Schema.String),
+  /** With `rodando`: the devices it got. */
+  devices: optional(Schema.Array(UsedDevice)),
   /** It ran only some scenarios (`only`): a new attempt, whose result joins an earlier one's. */
   partial: optional(Schema.Literal(true)),
   /** At its end: what it keeps for the notice (failed scenarios' evidence, the log of a failure without them). */
@@ -372,6 +388,7 @@ export const JobUpdate = Schema.Struct({
   position: optional(Count),
   etaMs: optional(Schema.Number),
   reason: optional(Reason),
+  devices: optional(Schema.Array(UsedDevice)),
 })
 export const Offer = Schema.Struct({
   type: Schema.Literal("offer"),
@@ -488,6 +505,7 @@ export const Catalog = Schema.Struct({
       name: Schema.String,
       platform: optional(Schema.String),
       hardware: optional(Schema.String),
+      instanceID: optional(Schema.String),
     }),
   ),
   phones: Schema.Array(Schema.Struct({ ...CatalogPhone.fields, machineID: Schema.String })),

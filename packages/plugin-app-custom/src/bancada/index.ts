@@ -30,6 +30,8 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
         submit: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
         status: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
         cancel: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
+        session: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
+        queue: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
         sync: (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
         "blob.put": (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
         "blob.get": (_input, context) => Effect.fail(context.error("unavailable", off, { reason: "off" })),
@@ -72,7 +74,7 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
         ),
       catch: (error) => error,
     }).pipe(Effect.mapError((error) => refused(error, context)))
-  yield* ctx.rpc
+  const registration = yield* ctx.rpc
     .register(Bancada.Definition, {
       wake: (input, context) =>
         Effect.tryPromise({ try: () => client.call<Bancada.Wake>("wake", input), catch: (error) => error }).pipe(
@@ -116,6 +118,24 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
         }).pipe(
           Effect.mapError((error) => context.error("unavailable", unavailable(error).message, unavailable(error).data)),
         ),
+      session: (input, context) =>
+        Effect.gen(function* () {
+          const root = yield* rootOf(ctx, input.sessionID)
+          const view = yield* Effect.tryPromise({
+            try: () => client.call<Record<string, unknown>>("session", { rootSessionID: root }),
+            catch: (error) => error,
+          })
+          return yield* withAgents(ctx, view)
+        }).pipe(
+          Effect.mapError((error) => context.error("unavailable", unavailable(error).message, unavailable(error).data)),
+        ),
+      queue: (_input, context) =>
+        Effect.tryPromise({
+          try: () => client.call<Record<string, unknown>>("queue", {}),
+          catch: (error) => error,
+        }).pipe(
+          Effect.mapError((error) => context.error("unavailable", unavailable(error).message, unavailable(error).data)),
+        ),
       sync: (input, context) => relay("sync", input, context),
       "blob.put": (input, context) => relay("blob.put", input, context),
       "blob.get": (input, context) => relay("blob.get", input, context),
@@ -131,16 +151,26 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
   // second message) and then says so; without that, it goes again in 30 s (`docs/bancada.md`, "Notice").
   // Interrupted (this instance unloads), the long poll is abandoned and does not start the process again.
   yield* Effect.tryPromise((signal) =>
-    client.call<{ notices: Message[]; notes?: (Omit<Message, "job"> & { key: string })[] }>(
-      "events",
-      { waitMs: 25_000 },
-      35_000,
-      signal,
-    ),
+    client.call<{
+      notices: Message[]
+      notes?: (Omit<Message, "job"> & { key: string })[]
+      changed?: { sessions: string[]; queue: boolean; alerts: { id: string; kind: string; text: string }[] }
+    }>("events", { waitMs: 25_000 }, 35_000, signal),
   ).pipe(
     Effect.flatMap((answer) =>
       Effect.all(
         [
+          // What the apps show changed: they reload what it names (`docs/bancada.md`, "changed").
+          answer.changed
+            ? registration.events
+                .emit("changed", { sessions: answer.changed.sessions, queue: answer.changed.queue })
+                .pipe(Effect.ignore)
+            : Effect.void,
+          Effect.forEach(
+            answer.changed?.alerts ?? [],
+            (alert) => registration.events.emit("alert", alert).pipe(Effect.ignore),
+            { discard: true },
+          ),
           Effect.forEach(answer.notices, (notice) => deliver(notice), { discard: true }),
           // Notes of holds (one came out, one expired): the same way, with their own message id and wake-up.
           Effect.forEach(
@@ -268,3 +298,43 @@ function unavailable(error: unknown): { readonly message: string; readonly data:
     data: { reason: "process" },
   }
 }
+
+/**
+ * The family's views with each session's title and agent read now, from this server (`docs/bancada.md`, "session":
+ * `by`): the process knows only the titles of the moment of each request.
+ */
+const withAgents = Effect.fnUntraced(function* (ctx: Pick<Context, "session">, view: Record<string, unknown>) {
+  type By = { sessionID: string; title?: string; agent?: string }
+  const items = [...((view.using as { by: By }[]) ?? []), ...((view.waiting as { by: By }[]) ?? [])]
+  const ids = [
+    ...new Set([
+      ...items.map((item) => item.by.sessionID),
+      ...((view.members as By[]) ?? []).map((item) => item.sessionID),
+    ]),
+  ]
+  const found = new Map(
+    yield* Effect.forEach(ids, (id) =>
+      ctx.session.get({ sessionID: Session.ID.make(id) }).pipe(
+        Effect.map((session) => [id, { title: session.title, agent: session.agent }] as const),
+        Effect.orElseSucceed(() => [id, undefined] as const),
+      ),
+    ),
+  )
+  const fill = <T extends By>(by: T): T => {
+    const live = found.get(by.sessionID)
+    return {
+      ...by,
+      ...(live?.title ? { title: live.title } : {}),
+      ...(live?.agent ? { agent: live.agent } : {}),
+    }
+  }
+  return {
+    ...view,
+    using: ((view.using as { by: By }[]) ?? []).map((item) => ({ ...item, by: fill(item.by) })),
+    waiting: ((view.waiting as { by: By }[]) ?? []).map((item) => ({ ...item, by: fill(item.by) })),
+    members: ((view.members as By[]) ?? []).map((member) => {
+      const live = found.get(member.sessionID)
+      return { ...member, ...(live?.title ? { title: live.title } : {}) }
+    }),
+  }
+})

@@ -54,7 +54,7 @@ export type PartStatus = {
   readonly stage: "build" | "plan" | "run"
   readonly exit?: number
   readonly signal?: string
-  readonly cause?: "prazo" | "cancelado" | "runner_erro"
+  readonly cause?: "prazo" | "cancelado" | "runner_erro" | "aparelhos"
   readonly reason?: string
   /** How long the machine slept while the command that ended the part ran (a failure after a sleep is not the code's). */
   readonly sleptMs?: number
@@ -307,6 +307,16 @@ export async function runAttempt(dir: string) {
     const unready = () => pending().filter((part) => !fs.existsSync(devices(dir, part.part)))
     while (unready().length > 0) {
       tick()
+      // The process could not make them ready: the part ends with its reason.
+      unready()
+        .filter((part) => fs.existsSync(`${devices(dir, part.part)}`.replace(/devices\.json$/, "devices.error")))
+        .forEach((part) =>
+          finish(part.part, {
+            stage: "run",
+            cause: "aparelhos",
+            reason: fs.readFileSync(devices(dir, part.part).replace(/devices\.json$/, "devices.error"), "utf8").trim(),
+          }),
+        )
       pending()
         .filter((part) => cancelled(part.part))
         .forEach((part) => finish(part.part, { stage: "run", cause: "cancelado" }))

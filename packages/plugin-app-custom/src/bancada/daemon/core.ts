@@ -16,6 +16,7 @@ import { BancadaNotice } from "../notice.js"
 import { SessionMessage } from "@opencode/schema/session-message"
 import { makeHolds, makeMirror, type Target } from "./holds.js"
 import { makeGate } from "./gate.js"
+import { makeChanges, makeSurface, server } from "./surface.js"
 import type { Blobs } from "./blobs.js"
 import { makeTransfers, type BlobLink, type Files } from "./transfers.js"
 import { migrate } from "./schema.js"
@@ -399,6 +400,43 @@ export function createCore(ports: Ports) {
     id: () => BancadaProtocol.holdID(ports.random()),
   })
 
+  /** What the apps read (`surface.ts`). */
+  const surface = makeSurface({
+    db,
+    now: ports.now,
+    self: () => ({ machineID: self.machineID, instanceID: self.instanceID, name: self.name }),
+    hubState: () =>
+      self.hub ? "ok" : link.refused?.type === "protocol_mismatch" ? "incompatible" : link.away ? "unavailable" : "ok",
+    isHub: self.hub,
+    holds: mirror.family,
+    phone: (alias) => {
+      const found = catalog().phones.find((phone) => phone.alias === alias)
+      const own = (self.phones ?? []).find((phone) => phone.alias === alias)
+      return found ? { name: own?.name ?? found.alias, id: found.id, platform: found.platform } : undefined
+    },
+    machine: (machineID) => {
+      if (machineID === self.machineID) return server(self.instanceID, self.name)
+      const found = catalog().machines.find((item) => item.machineID === machineID)
+      return found?.instanceID ? server(found.instanceID, found.name) : undefined
+    },
+    alerts: () => alerts.active(),
+  })
+
+  const changes = makeChanges({
+    now: ports.now,
+    queue: surface.queue,
+    session: surface.session,
+    // The families with a request not delivered or a hold asked: whose `session` the apps may be showing.
+    roots: () =>
+      db
+        .query<{ root: string }, []>(
+          "SELECT root_session_id AS root FROM job WHERE state <> 'entregue' UNION SELECT root_session_id FROM grant_mirror WHERE state IN ('pedida', 'esperando', 'concedida')",
+        )
+        .all()
+        .map((row) => row.root),
+    alerts: () => alerts.active(),
+  })
+
   /** How this machine reaches the queue in this process: as the hub's own machine, or its own queue. */
   const queuePeer = self.hub ? hub : local
 
@@ -749,6 +787,10 @@ export function createCore(ports: Ports) {
     },
     /** The alerts up now. */
     alerts: alerts.active,
+    /** The apps' views: a family's devices and waits, and the queue. */
+    surface,
+    /** What the apps should reload now, if anything (`surface.ts`, `makeChanges`). */
+    changes,
     /** The hub as this machine sees it: reachable, or out since when and why (`queue.hub`). */
     hub: () =>
       self.hub
