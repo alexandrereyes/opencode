@@ -17,6 +17,8 @@ export type NewJob = {
   readonly repository?: string
   /** A snapshot of the working tree was frozen: how many files it took beyond HEAD. */
   readonly snapshot?: { readonly files: number }
+  /** The owner's commit (`HEAD` at the request, or the commit asked); `code.commit` when absent. */
+  readonly base?: string
 }
 
 /** Where each part stands, as the hub last said. */
@@ -44,6 +46,9 @@ type JobRow = {
   readonly view: string
   readonly result: string | null
   readonly snapshot: string | null
+  readonly base: string | null
+  readonly replaced: string | null
+  readonly root_session_id: string
   readonly received_at: number | null
   readonly notice_id: string | null
   readonly notice_text: string | null
@@ -59,6 +64,8 @@ export type Notice = {
   /** Drawn once, before any delivery: the same message whatever happens on the way (`synthetic` with this id). */
   readonly id: string
   readonly text: string
+  /** Whether the message wakes the session: not for a request cancelled whole (nothing to act on). */
+  readonly resume: boolean
   readonly parts: ReadonlyArray<BancadaProtocol.PartResult>
 }
 
@@ -112,7 +119,7 @@ export function makeOrigin(input: {
         request.parts.map((spec) => [spec.part, { state: "na_fila", attempt: 0, reason }]),
       )
       db.run(
-        "INSERT INTO job (id, session_id, repo_dir, root_session_id, origin, code, parts, scope, state, view, snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando_confirmacao', ?, ?, ?)",
+        "INSERT INTO job (id, session_id, repo_dir, root_session_id, origin, code, parts, scope, state, view, snapshot, base, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aguardando_confirmacao', ?, ?, ?, ?)",
         [
           request.id,
           request.sessionID,
@@ -124,6 +131,7 @@ export function makeOrigin(input: {
           scope,
           JSON.stringify(view),
           request.snapshot ? JSON.stringify(request.snapshot) : null,
+          request.base ?? request.code.commit,
           input.now(),
         ],
       )
@@ -157,6 +165,8 @@ export function makeOrigin(input: {
           replaced,
         ]),
       )
+      if (message.superseded.length)
+        db.run("UPDATE job SET replaced = ? WHERE id = ?", [JSON.stringify(message.superseded), message.job])
       const row = find.get(message.job)
       if (!row) return
       if (row.state === "aguardando_confirmacao")
@@ -298,7 +308,14 @@ export function makeOrigin(input: {
     job: row.id,
     state: row.state,
     sessionID: row.session_id,
+    ...(row.session_id !== row.root_session_id && (JSON.parse(row.origin) as BancadaProtocol.Origin).sessionTitle
+      ? { sessionTitle: (JSON.parse(row.origin) as BancadaProtocol.Origin).sessionTitle }
+      : {}),
+    rootSessionID: row.root_session_id,
     commit: (JSON.parse(row.code) as BancadaProtocol.Code).commit,
+    base: row.base ?? (JSON.parse(row.code) as BancadaProtocol.Code).commit,
+    ...(row.snapshot ? { snapshotFiles: (JSON.parse(row.snapshot) as { files: number }).files } : {}),
+    ...(row.replaced ? { replaced: JSON.parse(row.replaced) as string[] } : {}),
     labels: Object.fromEntries(
       (JSON.parse(row.parts) as BancadaProtocol.PartSpec[]).map((spec) => [spec.part, spec.label]),
     ),
@@ -334,7 +351,7 @@ export function makeOrigin(input: {
       const results: BancadaProtocol.PartResult[] = JSON.parse(row.result ?? "[]")
       const text = BancadaNotice.text({
         job,
-        commit: (JSON.parse(row.code) as BancadaProtocol.Code).commit,
+        commit: row.base ?? (JSON.parse(row.code) as BancadaProtocol.Code).commit,
         ...(row.snapshot ? { snapshot: JSON.parse(row.snapshot) } : {}),
         parts: results.map((result) => {
           const spec = specs.find((item) => item.part === result.part)
@@ -365,13 +382,17 @@ export function makeOrigin(input: {
       undefined,
     /** Results waiting to reach their sessions. */
     notices: (): Notice[] =>
-      ready.all().map((row) => ({
-        job: row.id,
-        sessionID: row.session_id,
-        id: row.notice_id!,
-        text: row.notice_text!,
-        parts: JSON.parse(row.result ?? "[]"),
-      })),
+      ready.all().map((row) => {
+        const parts: BancadaProtocol.PartResult[] = JSON.parse(row.result ?? "[]")
+        return {
+          job: row.id,
+          sessionID: row.session_id,
+          id: row.notice_id!,
+          text: row.notice_text!,
+          resume: !parts.every((part) => part.state === "cancelado"),
+          parts,
+        }
+      }),
     /** The session received the notice: once, and the hub may clean up. */
     delivered: (job: string) =>
       db.transaction(() => {

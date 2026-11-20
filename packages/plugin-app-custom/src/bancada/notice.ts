@@ -11,6 +11,7 @@ import type { BancadaProtocol } from "./protocol.js"
 
 export type Input = {
   readonly job: string
+  /** The owner's commit (`base`): never the snapshot's own. */
   readonly commit: string
   /** The snapshot of the working tree, when one was frozen: how many files it took beyond the commit. */
   readonly snapshot?: { readonly files: number }
@@ -37,11 +38,11 @@ export function text(input: Input) {
       .filter((scenario) => scenario.result === "falhou")
       .map((scenario) => ({ part, scenario })),
   )
-  const cancelled = input.parts.every((part) => part.result.state === "cancelado")
+  const several = input.parts.length > 1
   return [
-    `[Bancada] ${input.job} ${cancelled ? "foi cancelado" : "terminou"} (${code(input)})`,
+    `[Bancada] ${input.job} ${heading(verdict(input))} (${code(input)})`,
     ...input.parts.map((part) => line(part)),
-    ...failures.slice(0, limits.failures).flatMap(({ part, scenario }) => failure(part, scenario)),
+    ...failures.slice(0, limits.failures).flatMap(({ part, scenario }) => failure(part, scenario, several)),
     ...(failures.length > limits.failures
       ? [
           `… e mais ${failures.length - limits.failures} falhas${input.failuresFile ? `: a lista inteira está em ${input.failuresFile}` : ""}`,
@@ -51,10 +52,31 @@ export function text(input: Input) {
   ].join("\n")
 }
 
+/**
+ * The request's verdict, said first (`docs/bancada.md`, "Notice"): "10 aprovados, 2 sem resultado" read in a hurry
+ * would pass for approved.
+ */
+export function verdict(input: Pick<Input, "parts">): "aprovado" | "falhou" | "incompleto" | "cancelado" {
+  const results = input.parts.map((part) => part.result)
+  if (results.every((result) => result.state === "cancelado")) return "cancelado"
+  const failed = (result: BancadaProtocol.PartResult) =>
+    result.outcome?.scenarios.some((scenario) => scenario.result === "falhou") === true ||
+    ["falhou", "compilacao", "sem_relatorio"].includes(result.outcome?.verdict ?? "")
+  if (results.some(failed)) return "falhou"
+  return results.every((result) => result.outcome?.approved === true) ? "aprovado" : "incompleto"
+}
+
+function heading(value: ReturnType<typeof verdict>) {
+  if (value === "cancelado") return "foi cancelado"
+  if (value === "incompleto") return "terminou: incompleto, não é aprovação"
+  return `terminou: ${value}`
+}
+
+/** The owner's commit, with what the working tree added when it went in. */
 function code(input: Input) {
   const commit = `commit ${input.commit.slice(0, 8)}`
   if (!input.snapshot || input.snapshot.files === 0) return commit
-  return `${commit}, snapshot com ${count(input.snapshot.files, "arquivo não commitado", "arquivos não commitados")}`
+  return `${commit} mais ${count(input.snapshot.files, "arquivo não commitado", "arquivos não commitados")}`
 }
 
 /** `Android: 112 aprovados, 1 falhou, 2 ignorados; 7 refeitos (um aparelho caiu). Mac de Alexandre, 6 min.` */
@@ -95,13 +117,13 @@ function trouble(result: BancadaProtocol.PartResult) {
 }
 
 /** `✗ ReadVoice › Ouvir uma mensagem de voz que chegou`, its message, history and evidence. */
-function failure(part: Input["parts"][number], scenario: BancadaProtocol.Scenario) {
+function failure(part: Input["parts"][number], scenario: BancadaProtocol.Scenario, several: boolean) {
   const history = part.result.history?.[scenario.id]
   const evidence = (scenario.evidence ?? [])
     .map((file) => part.delivered?.files[file.split(/[\\/]/).join("-")] ?? part.delivered?.files[file])
     .filter((file): file is string => file !== undefined)
   return [
-    `✗ ${scenario.name ?? scenario.id}`,
+    `✗ ${several ? `${part.label} · ` : ""}${scenario.name ?? scenario.id}`,
     ...(scenario.message ? [`  ${scenario.message}`] : []),
     ...(history && history.of > 1 ? [`  Histórico: falhou ${history.failed} das últimas ${history.of} vezes`] : []),
     ...(evidence.length ? [`  Evidências: ${evidence.join(", ")}`] : []),

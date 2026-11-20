@@ -11,6 +11,8 @@ export type Change = { readonly path: string; readonly change: "novo" | "alterad
 export type Frozen = {
   readonly root: string
   readonly commit: string
+  /** The owner's commit: `HEAD` at the time of a snapshot, or the commit asked; never the snapshot's own. */
+  readonly base: string
   /** With `snapshot`: what entered beyond `HEAD`, new files included. */
   readonly files: ReadonlyArray<Change>
   /** Without `snapshot`: how many changed files of the working tree were left out. */
@@ -53,7 +55,10 @@ export async function freeze(input: {
 }): Promise<Freeze> {
   const git = input.git
   const top = await git(["rev-parse", "--show-toplevel"], { cwd: input.directory })
-  if (top.code !== 0) return refused(`${input.directory} não está num repositório git`)
+  if (top.code !== 0)
+    return refused(
+      `${input.directory} não está num repositório git; a Bancada testa o código de um repositório (passe em diretorio uma pasta dele)`,
+    )
   const root = top.stdout.trim()
   const head = await git(["rev-parse", "--verify", "HEAD^{commit}"], { cwd: root })
   if (head.code !== 0) return refused("o repositório ainda não tem nenhum commit")
@@ -76,6 +81,7 @@ export async function freeze(input: {
     frozen: {
       root,
       commit,
+      base: input.snapshot ? head.stdout.trim() : commit,
       files: chosen.files,
       ...(chosen.notIncluded ? { notIncluded: chosen.notIncluded } : {}),
       project: contract.contract.project,
@@ -149,7 +155,8 @@ async function existing(git: Git, root: string, name: string): Promise<Chosen> {
  */
 export async function contractAt(git: Git, root: string, commit: string, project: string) {
   const text = await git(["show", `${commit}:.bancada.toml`], { cwd: root })
-  if (text.code !== 0) return refused(`o commit ${commit.slice(0, 8)} não tem .bancada.toml na raiz do repositório`)
+  if (text.code !== 0)
+    return refused(`este repositório não usa a Bancada: o commit ${commit.slice(0, 8)} não tem .bancada.toml na raiz`)
   // `<mode> <type> <object>\t<path>`, one per NUL.
   const listed = await git(["ls-tree", "-r", "-z", commit], { cwd: root })
   const modes = new Map(

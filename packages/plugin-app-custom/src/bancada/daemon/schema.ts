@@ -59,6 +59,8 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
       acked_at INTEGER,
       confirmed_at INTEGER,
       snapshot TEXT,
+      base TEXT,
+      replaced TEXT,
       received_at INTEGER,
       notice_id TEXT,
       notice_text TEXT,

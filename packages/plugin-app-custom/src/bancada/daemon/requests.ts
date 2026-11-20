@@ -44,8 +44,11 @@ async function submit(core: Core, git: Git, request: Bancada.Request): Promise<B
       job: id,
       state: known.state,
       commit: known.commit,
+      base: known.base,
+      ...(known.replaced ? { substituiu: known.replaced } : {}),
       partes: Object.entries(known.parts).map(([teste, part]) => ({
         teste,
+        rotulo: known.labels[teste] ?? teste,
         ...(part.position === undefined ? {} : { posicao: part.position }),
         ...(part.etaMs === undefined ? {} : { etaMs: part.etaMs }),
         ...(part.reason ? { motivo: part.reason } : {}),
@@ -90,6 +93,7 @@ async function submit(core: Core, git: Git, request: Bancada.Request): Promise<B
     },
     parts,
     repository: frozen.frozen.root,
+    base: frozen.frozen.base,
     ...(request.snapshot ? { snapshot: { files: frozen.frozen.files.length } } : {}),
   })
   const changes = frozen.frozen.files.map((file) => ({ caminho: file.path, mudanca: file.change }))
@@ -97,6 +101,7 @@ async function submit(core: Core, git: Git, request: Bancada.Request): Promise<B
     job: id,
     state: row.state,
     commit: frozen.frozen.commit,
+    base: frozen.frozen.base,
     ...(request.snapshot || frozen.frozen.notIncluded
       ? {
           snapshot: {
@@ -107,6 +112,7 @@ async function submit(core: Core, git: Git, request: Bancada.Request): Promise<B
       : {}),
     partes: parts.map((part) => ({
       teste: part.part,
+      rotulo: part.label,
       motivo: { code: "aguardando_confirmacao", text: "aguardando confirmação do hub" },
     })),
   }

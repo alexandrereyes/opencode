@@ -68,10 +68,10 @@ describe("notice", () => {
       }),
     ).toBe(
       [
-        "[Bancada] j-7qk2m9xa terminou (commit 3417b7e3, snapshot com 3 arquivos não commitados)",
+        "[Bancada] j-7qk2m9xa terminou: falhou (commit 3417b7e3 mais 3 arquivos não commitados)",
         "Android: 112 aprovados, 1 falhou, 2 ignorados; 7 refeitos por queda de aparelho. Mac de Alexandre, 6 min.",
         "iOS: 23 aprovados. Mac de Alexandre, 4 min.",
-        "✗ ReadVoice › Ouvir uma mensagem de voz que chegou",
+        "✗ Android · ReadVoice › Ouvir uma mensagem de voz que chegou",
         '  Esperava "Transcrevendo…"; achou "0:07"',
         "  Histórico: falhou 1 das últimas 12 vezes",
         "  Evidências: /tmp/opencode/bancada/j-7qk2m9xa/android/read-voice.png",
@@ -97,7 +97,11 @@ describe("notice", () => {
           },
         ],
       }),
-    ).toBe(["[Bancada] j-7qk2m9xa terminou (commit 3417b7e3)", "Simples: 2 aprovados. Linux BRS, 1 min."].join("\n"))
+    ).toBe(
+      ["[Bancada] j-7qk2m9xa terminou: aprovado (commit 3417b7e3)", "Simples: 2 aprovados. Linux BRS, 1 min."].join(
+        "\n",
+      ),
+    )
   })
 
   test("a failed build: the log's last lines and where the whole log is", () => {
@@ -121,7 +125,7 @@ describe("notice", () => {
     })
     const lines = text.split("\n")
     expect(lines.slice(0, 3)).toEqual([
-      "[Bancada] j-7qk2m9xa terminou (commit 3417b7e3)",
+      "[Bancada] j-7qk2m9xa terminou: falhou (commit 3417b7e3)",
       "Android: nenhum cenário. A compilação falhou. Mac de Alexandre, 2 min.",
       "Android, fim do log (inteiro em /tmp/opencode/bancada/j-7qk2m9xa/android/build.log):",
     ])
@@ -169,7 +173,7 @@ describe("notice", () => {
       }),
     ).toBe(
       [
-        "[Bancada] j-7qk2m9xa terminou (commit 3417b7e3)",
+        "[Bancada] j-7qk2m9xa terminou: incompleto, não é aprovação (commit 3417b7e3)",
         "Invalido: nenhum cenário. Pedido inválido (saída 2 no run). Mac de Alexandre.",
         "Perdidos: 10 aprovados, 2 sem resultado; 2 refeitos (a máquina dormiu 12 min durante o run). Mac de Alexandre, 9 min.",
         "Fora: 3 aprovados, 5 sem resultado. A máquina Mac não respondeu. Mac.",
@@ -181,6 +185,41 @@ describe("notice", () => {
         parts: [part("Android", { state: "cancelado", outcome: outcome({ verdict: "cancelado" }) })],
       }),
     ).toBe(["[Bancada] j-7qk2m9xa foi cancelado (commit 3417b7e3)", "Android: cancelado."].join("\n"))
+  })
+
+  test("the plan's approved example, and the verdict of each kind of request", () => {
+    const part = (label: string, result: Partial<BancadaProtocol.PartResult>) => ({
+      label,
+      result: { part: label.toLowerCase(), state: "concluido" as const, attempts: 1, machine: mac, ...result },
+    })
+    expect(
+      BancadaNotice.text({
+        ...base,
+        parts: [
+          part("Android", { ms: 6 * 60_000, outcome: outcome({ scenarios: [...passed(112), ...ignored(2)] }) }),
+          part("iOS", { ms: 4 * 60_000, outcome: outcome({ scenarios: passed(23) }) }),
+        ],
+      }),
+    ).toBe(
+      [
+        "[Bancada] j-7qk2m9xa terminou: aprovado (commit 3417b7e3)",
+        "Android: 112 aprovados, 2 ignorados. Mac de Alexandre, 6 min.",
+        "iOS: 23 aprovados. Mac de Alexandre, 4 min.",
+      ].join("\n"),
+    )
+    const approved = part("A", { outcome: outcome({ scenarios: passed(1) }) })
+    const lost = part("B", {
+      outcome: outcome({ verdict: "incompleto", approved: false, scenarios: passed(10), lost: ["x", "y"] }),
+    })
+    const silent = part("C", {
+      outcome: outcome({ verdict: "sem_relatorio", approved: false, reason: "falhou sem relatório (saída 1)" }),
+    })
+    const cancelled = part("D", { state: "cancelado", outcome: outcome({ verdict: "cancelado", approved: false }) })
+    expect(
+      [[approved], [approved, lost], [approved, silent], [approved, cancelled], [cancelled]].map((parts) =>
+        BancadaNotice.verdict({ parts }),
+      ),
+    ).toEqual(["aprovado", "incompleto", "falhou", "incompleto", "cancelado"])
   })
 
   test("more than 20 failures: the first 20, and where the whole list is; evidence that did not arrive is said", () => {

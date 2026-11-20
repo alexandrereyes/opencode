@@ -73,7 +73,7 @@ describe("simulation: evidence of failures", () => {
     expect(new TextDecoder().decode(sim.disk.get(delivered))).toBe("evidência telas/c2.png de j-aaaaaaaa/android/1")
     expect(sim.facts.texts.get("j-aaaaaaaa")).toBe(
       [
-        "[Bancada] j-aaaaaaaa terminou (commit 3417b7e3)",
+        "[Bancada] j-aaaaaaaa terminou: falhou (commit 3417b7e3)",
         "Android: 1 aprovado, 1 falhou. Linux, 1 min.",
         "✗ Leitura › Ouvir a mensagem",
         '  Esperava "Transcrevendo…"; achou "0:07"',

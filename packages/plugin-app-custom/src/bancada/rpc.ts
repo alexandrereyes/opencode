@@ -61,7 +61,10 @@ export type Request = typeof Request.Type
 export const Submitted = Schema.Struct({
   job: BancadaProtocol.JobID,
   state: Schema.String,
+  /** The frozen commit (in a snapshot, one the Bancada made). */
   commit: Schema.String,
+  /** The owner's commit: `HEAD` at the request, or the commit asked. What the tool and the notice show. */
+  base: Schema.String,
   snapshot: optional(
     Schema.Struct({
       arquivos: Schema.Array(
@@ -70,9 +73,12 @@ export const Submitted = Schema.Struct({
       naoIncluidos: optional(Schema.Int),
     }),
   ),
+  /** Earlier requests of this session this one replaced while they waited. */
+  substituiu: optional(Schema.Array(Schema.String)),
   partes: Schema.Array(
     Schema.Struct({
       teste: Schema.String,
+      rotulo: Schema.String,
       posicao: optional(Schema.Int),
       etaMs: optional(Schema.Number),
       motivo: optional(BancadaProtocol.Reason),
@@ -95,7 +101,14 @@ export const JobView = Schema.Struct({
   /** `aguardando_confirmacao`, `na_fila`, `recebido` (its notice is being made), `concluido` (notice ready). */
   state: Schema.String,
   sessionID: Schema.String,
+  /** The session's title, when the request is a subagent's (its session is not the family's root). */
+  sessionTitle: optional(Schema.String),
+  rootSessionID: Schema.String,
   commit: Schema.String,
+  base: Schema.String,
+  /** How many uncommitted files the snapshot took beyond `base`. */
+  snapshotFiles: optional(Schema.Number),
+  replaced: optional(Schema.Array(Schema.String)),
   labels: Schema.Record(Schema.String, Schema.String),
   parts: Schema.Record(Schema.String, PartView),
   result: optional(Schema.Array(BancadaProtocol.PartResult)),
