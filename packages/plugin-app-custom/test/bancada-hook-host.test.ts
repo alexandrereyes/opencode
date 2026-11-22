@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { afterAll, beforeAll, describe, expect } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Fiber } from "effect"
 import { AbsolutePath } from "@opencode/core/schema"
 import { Watcher } from "@opencode/core/filesystem/watcher"
 import { Location } from "@opencode/core/location"
@@ -151,7 +151,7 @@ describe("the Bancada's hook in the plugin host", () => {
 describe("the Bancada's tools in the core's registry", () => {
   // The tools as a server runs them: its runtime checks what each one returns (an undeclared output is a defect).
   it.live(
-    "each tool answers; a subagent's run waits and its notice is delivered once the call completed",
+    "each tool answers; bancada_run waits in the main session and returns the result, delivered once the call completed",
     () =>
       Effect.gen(function* () {
         // This server is the hub: its requests run here.
@@ -171,7 +171,6 @@ describe("the Bancada's tools in the core's registry", () => {
         const sessions = yield* Session.Service
         const location = Location.Ref.make({ directory: AbsolutePath.make(path.join(world.root!, "projeto")) })
         const root = yield* sessions.create({ location, title: "Ferramentas" })
-        const child = yield* sessions.create({ parentID: root.id, title: "Subagente" })
         let n = 0
         const run = (sessionID: typeof root.id, name: string, input: unknown) =>
           executeTool(registry, {
@@ -189,25 +188,34 @@ describe("the Bancada's tools in the core's registry", () => {
           )
 
         // As one line each, "<status>: <text>" (Bun's toMatchObject would write its matchers into the object).
-        const asked = yield* run(root.id, "bancada_run", { testes: [{ teste: "simples", args: ["--dorme", "30"] }] })
-        expect(`${asked.status}: ${asked.text}`).toMatch(/^completed: Pedido j-[0-9a-z]{8} enviado/)
-        const job = /j-[0-9a-z]{8}/.exec(asked.text)![0]
-        const status = yield* run(root.id, "bancada_status", {})
-        expect(`${status.status}: ${status.text}`).toStartWith(`completed: ${job}:`)
+        // The call waits for the result; meanwhile the request is listed, and cancelled.
+        const asking = yield* run(root.id, "bancada_run", {
+          testes: [{ teste: "simples", args: ["--dorme", "30"] }],
+        }).pipe(Effect.forkChild({ startImmediately: true }))
+        const listed = (): Effect.Effect<string> =>
+          run(root.id, "bancada_status", {}).pipe(
+            Effect.flatMap((status) => {
+              const found = /^completed: (j-[0-9a-z]{8}):/.exec(`${status.status}: ${status.text}`)?.[1]
+              return found ? Effect.succeed(found) : Effect.sleep("200 millis").pipe(Effect.andThen(listed))
+            }),
+          )
+        const job = yield* listed()
         const cancelled = yield* run(root.id, "bancada_cancel", { job })
         expect(`${cancelled.status}: ${cancelled.text}`).toBe(
           `completed: ${job} cancelado. O que esperava saiu da fila; o que rodava está sendo parado.`,
         )
+        const asked = yield* Fiber.join(asking)
+        expect(`${asked.status}: ${asked.text}`).toStartWith(`completed: [Bancada] ${job} foi cancelado`)
         const held = yield* run(root.id, "bancada_hold", { tipo: "android", nome: "Pixel_Ferramentas" })
         expect(`${held.status}: ${held.text}`).toMatch(/^completed: Reserva r-[0-9a-z]{8} concedida/)
         const hold = /r-[0-9a-z]{8}/.exec(held.text)![0]
         const released = yield* run(root.id, "bancada_release", { reserva: hold })
         expect(`${released.status}: ${released.text}`).toBe(`completed: Reserva ${hold} solta.`)
-        // A subagent's call waits: the notice is its result, and once the call completed nothing is left to deliver.
-        const waited = yield* run(child.id, "bancada_run", { testes: [{ teste: "simples" }] })
+        // In the main session: the notice is the call's result, and once the call completed nothing is left to deliver.
+        const waited = yield* run(root.id, "bancada_run", { testes: [{ teste: "simples" }] })
         expect(`${waited.status}: ${waited.text}`).toMatch(/^completed: \[Bancada\] j-[0-9a-z]{8} terminou: aprovado/)
         const second = /j-[0-9a-z]{8}/.exec(waited.text)![0]
-        expect((yield* run(child.id, "bancada_status", {})).text).not.toContain(second)
+        expect((yield* run(root.id, "bancada_status", {})).text).not.toContain(second)
         yield* plugins.activate([shell])
       }),
     120_000,

@@ -31,10 +31,6 @@ const RunInput = Schema.Struct({
   diretorio: optional(Schema.String).annotate({
     description: "A folder inside the repository to test, when it is not this session's folder.",
   }),
-  esperar: optional(Schema.Boolean).annotate({
-    description:
-      "Whether this call waits for the result. Default: true in a subagent, false in a main session. Leave it unset unless you need the other behaviour; true in a main session blocks the conversation until the tests end.",
-  }),
 })
 const StatusInput = Schema.Struct({
   job: optional(Schema.String).annotate({
@@ -71,17 +67,11 @@ another computer. Use it whenever you need these tests; never run them yourself.
   repository without that file cannot use this tool.
 - What is tested is frozen when you call: the working tree exactly as it is now, uncommitted and new files included
   (ignored files stay out). With \`commit\`, that commit instead. Later edits do not change a request already made.
-- A run takes minutes, longer when the queue is busy. In a main session this call returns at once with the request
-  id and where each test stands. The result arrives later by itself, as a message that resumes this session. After
-  calling, go on with other work or, if there is nothing else to do, end your response. Do not wait, sleep, call
-  bancada_status to check, or call bancada_run again for the same tests.
-- In a subagent this call waits and returns the result itself.
+- The call waits until the tests end and returns their result. That takes minutes, longer when the queue is busy.
 - Never run the scripts the project reserves to the Bancada, and never start an emulator or simulator for tests: the
   Bancada does both.`,
   status: `Show where the Bancada requests of this session and its subagents stand: queue place, estimate, machine, and why
-one waits. Use it only when the user asks, or once to explain a delay. Never call it to wait for a result: results
-arrive by themselves as a message (in a subagent, as the return of bancada_run), and asking again does not make them
-come sooner.`,
+one waits; and the family's device reservations.`,
   cancel: `Cancel a Bancada request of this session or its subagents: tests still waiting leave the queue, tests running are
 stopped. Use it when the user asks or when the result is no longer needed. To test newer code you do not need to
 cancel first: a new bancada_run replaces this session's earlier request for the same tests while it still waits.`,
@@ -97,10 +87,7 @@ longer need the device: whoever waits for it gets it. The Bancada does not stop 
 
 /** The answers' fixed sentences (`docs/bancada.md`, "Tools"). */
 export const sentences = {
-  later:
-    "O resultado chega sozinho, como mensagem nesta sessão, e ela é retomada na hora. Siga com outro trabalho ou encerre sua resposta. Não espere, não consulte bancada_status e não peça de novo.",
   stopped: "A espera foi interrompida; o resultado chegará como mensagem nesta sessão.",
-  reminder: "O resultado chega sozinho como mensagem nesta sessão; não é preciso consultar de novo.",
   unavailable:
     "O processo da Bancada desta máquina não está respondendo. Tente mais uma vez em instantes; se continuar, avise o usuário. Não rode os testes de outro jeito.",
 }
@@ -135,20 +122,12 @@ export function registerBancadaTools(
               ...(input.commit ? { commit: input.commit } : { snapshot: true }),
             }
             const submitted = yield* call(() => client.call<Bancada.Submitted>("submit", request, 120_000))
-            // In a subagent the call waits for the result: its parent gets one report, with the result in it.
-            const wait = input.esperar ?? family.subagent
-            if (!wait) {
-              const placed = yield* confirmed(client, submitted.job)
-              return { content: submittedText(submitted, placed) }
-            }
             const notice = yield* waitFor(client, submitted.job, context.cancel)
             // The notice is delivered once the call's result is the session's (`hook.ts`, after the call): a call
-            // that fails from here on leaves it to come as a message.
+            // interrupted from here on (a restart, a cancel) leaves it to come as a message.
             if (notice) return { content: notice, metadata: { [noticeKey]: submitted.job } }
             const placed = yield* confirmed(client, submitted.job)
-            return {
-              content: `${submittedText(submitted, placed).replace(`\n${sentences.later}`, "")}\n${sentences.stopped}`,
-            }
+            return { content: `${submittedText(submitted, placed)}\n${sentences.stopped}` }
           }),
       })
       editor.add({
@@ -176,12 +155,10 @@ export function registerBancadaTools(
                   ? `Nenhum pedido ${input.job} nesta sessão.`
                   : "Nenhum pedido em aberto nesta sessão nem nos subagentes dela.",
               }
-            const running = jobs.some((job) => job.state !== "concluido" && job.state !== "entregue")
             return {
               content: [
                 ...jobs.map(jobText),
                 ...(holds.length ? [["Reservas:", ...holds.map((hold) => `  ${holdLine(hold)}`)].join("\n")] : []),
-                ...(running ? [sentences.reminder] : []),
               ].join("\n\n"),
             }
           }),
@@ -375,7 +352,7 @@ function waitFor(client: BancadaClient, job: string, cancel: Effect.Effect<void>
     : waiting.pipe(Effect.map((notice): string | undefined => notice))
 }
 
-/** `bancada_run`'s answer in a main session: the request, its code, each test's place, what it replaced. */
+/** The request as `bancada_run` sent it, when its wait was interrupted: its code, each test's place, what it replaced. */
 export function submittedText(submitted: Bancada.Submitted, view?: Bancada.JobView) {
   const parts = submitted.partes.map((part) => {
     const current = view?.parts[part.teste]
@@ -386,7 +363,6 @@ export function submittedText(submitted: Bancada.Submitted, view?: Bancada.JobVi
     `Pedido ${submitted.job} enviado. Código: ${codeText(submitted)}`,
     ...parts,
     ...replaced.map((job) => `Substituiu ${job}, que ainda esperava na fila.`),
-    sentences.later,
   ].join("\n")
 }
 
@@ -454,8 +430,6 @@ export const familyOf = Effect.fnUntraced(function* (ctx: Pick<Context, "session
   const root = chain.at(-1)!
   return {
     root: root.id,
-    /** A subagent's session (it has a parent): its call waits for the result by default. */
-    subagent: session.parentID !== undefined,
     directory: path.join(session.location.directory, session.subpath ?? ""),
     ...(session.title ? { title: session.title } : {}),
     ...(root.title ? { rootTitle: root.title } : {}),

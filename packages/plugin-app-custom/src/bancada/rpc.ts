@@ -54,7 +54,6 @@ export const Request = Schema.Struct({
   ).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
   snapshot: optional(Schema.Boolean),
   commit: optional(Schema.String),
-  esperar: optional(Schema.Boolean),
 }).annotate({ identifier: "Bancada.Request" })
 export type Request = typeof Request.Type
 

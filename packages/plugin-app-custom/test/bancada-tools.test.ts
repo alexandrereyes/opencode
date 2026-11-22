@@ -35,7 +35,7 @@ const view = (parts: Bancada.JobView["parts"], more: Partial<Bancada.JobView> = 
   ...more,
 })
 
-describe("bancada_run's answer", () => {
+describe("bancada_run's answer when its wait was interrupted", () => {
   test("the plan's example: the owner's commit with what the working tree added, each test's place", () => {
     const files = [
       { caminho: "src/Checkout.cs", mudanca: "alterado" as const },
@@ -67,7 +67,6 @@ describe("bancada_run's answer", () => {
         "Pedido j-7qk2m9xa enviado. Código: commit 3417b7e3 mais 3 arquivos não commitados (src/Checkout.cs alterado, tests/CheckoutTests.cs novo, README.md alterado).",
         "Android: 2º na fila, ~4 min",
         "iOS: 3º na fila, ~7 min (aguardando um Mac)",
-        sentences.later,
       ].join("\n"),
     )
   })
@@ -103,7 +102,6 @@ describe("bancada_run's answer", () => {
       "Android: aguardando o hub (o pedido fica guardado e segue quando ele voltar)",
       "iOS: preparando em Mac de Alexandre",
       "Substituiu j-aaaaaaaa, que ainda esperava na fila.",
-      sentences.later,
     ])
   })
 })

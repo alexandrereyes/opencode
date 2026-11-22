@@ -12,8 +12,8 @@ It is on only with `OPENCODE_BANCADA=1` (the installed servers' launchers set it
 ## For agents
 
 Tools (`src/bancada/tools.ts`): `bancada_run` (the tests named in the repository's `.bancada.toml`; without `commit`,
-the working tree as it is; in a subagent the call waits for the result, delivered once the call completed: a call
-that fails after the wait leaves the notice to come as a message a minute later), `bancada_status`, `bancada_cancel`,
+the working tree as it is; the call always waits for the result, delivered once the call completed: a call interrupted
+meanwhile, by a restart or a cancel, leaves the notice to come as a message a minute later), `bancada_status`, `bancada_cancel`,
 `bancada_hold` and `bancada_release` (a catalog phone, or room for an emulator or simulator the agent starts itself).
 The hook on shell commands refuses what the repository reserves to the Bancada (`fora`), a catalog phone without the
 family's hold, another family's device or a test's device, and asks for a slot when a command starts an emulator or a
