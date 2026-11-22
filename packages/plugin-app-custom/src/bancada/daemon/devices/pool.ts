@@ -106,6 +106,8 @@ export function makeDevicePool(input: {
   readonly warmFits?: (platform: "android" | "ios", count: number) => boolean
   /** Gives back what an attempt was granted beyond the devices its plan can use (`executor.ts`). */
   readonly shrink?: (key: Placed, devices: number) => void
+  /** Grants an attempt more of the devices its plan can use, as many as fit now: its count after (`executor.ts`). */
+  readonly grow?: (key: Placed, devices: number) => number
   /** How often the pool looks for a part's plan while its first devices start. */
   readonly planPollMs?: number
   /** Whether discovery ran once: before that this machine's drivers are not known (right after a start). */
@@ -167,30 +169,41 @@ export function makeDevicePool(input: {
       return ids
     })()
 
+  /**
+   * The block of the attempt's ports a device takes as it starts: the one it took before (started again), else the
+   * first nobody took.
+   */
+  const claim = (lease: string, id: string) =>
+    db.transaction(() => {
+      const block = db
+        .query<
+          { rowid: number; start: number; end: number },
+          [string, string, string]
+        >("SELECT rowid, port_start AS start, port_end AS end FROM lease_device WHERE lease_id = ? AND (device_id IS NULL OR device_id = ?) ORDER BY device_id = ? DESC, rowid LIMIT 1")
+        .get(lease, id, id)
+      if (block) db.run("UPDATE lease_device SET device_id = ? WHERE rowid = ?", [id, block.rowid])
+      return block ? { start: block.start, end: block.end } : undefined
+    })()
+
   const prepare = async (key: Placed, dir: string) => {
     const row = db
       .query<
         {
           spec: string
           devices: number
+          devices_cap: number | null
           lease_id: string
           phone_hold: string | null
           only_scenarios: string | null
         },
         [string, string, number]
       >(
-        "SELECT spec, devices, lease_id, phone_hold, only_scenarios FROM attempt WHERE job_id = ? AND part = ? AND n = ?",
+        "SELECT spec, devices, devices_cap, lease_id, phone_hold, only_scenarios FROM attempt WHERE job_id = ? AND part = ? AND n = ?",
       )
       .get(key.job, key.part, key.attempt)
     if (!row || (row.devices === 0 && !row.phone_hold)) return
     const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
     if (spec.platform === "none") return
-    const blocks = db
-      .query<
-        { rowid: number; start: number; end: number },
-        [string]
-      >("SELECT rowid, port_start AS start, port_end AS end FROM lease_device WHERE lease_id = ? ORDER BY rowid")
-      .all(row.lease_id)
     const fail = async (reason: string) => {
       input.log(`devices of ${attemptOf(key)} not ready: ${reason}`)
       await Bun.write(path.join(dir, "devices.error"), `${reason}\n`)
@@ -203,8 +216,8 @@ export function makeDevicePool(input: {
       )
       await fs.rename(path.join(dir, "devices.json.tmp"), path.join(dir, "devices.json"))
     }
-    // The phone its hold took at the offer (the last block of ports), then the devices it asks for besides.
-    const held = row.phone_hold ? phone(key, dir, row.phone_hold, blocks[row.devices] ?? blocks[0]) : undefined
+    // The phone its hold took at the offer, then the devices it asks for besides.
+    const held = row.phone_hold ? phone(key, dir, row.phone_hold, row.lease_id) : undefined
     if (typeof held === "string") return fail(held)
     if (row.devices === 0) return write(held ? [held] : [])
     // Right after a start the drivers come with the first discovery: a part waits for it, a minute at most.
@@ -214,32 +227,45 @@ export function makeDevicePool(input: {
     if (!driver || !chosen) return fail(`esta máquina não liga aparelhos ${spec.platform}`)
     const choice = await driver.choose(spec.device, chosen.profile)
     if (typeof choice === "string") return fail(choice)
-    const start = (ids: ReadonlyArray<string>, offset: number) =>
-      ids.map(async (id, at) => {
-        const index = offset + at
-        const slot = blocks[index] ?? blocks[0]!
+    const start = (ids: ReadonlyArray<string>) =>
+      ids.map(async (id) => {
+        // Its block of ports is taken before anything waits: devices starting together never share one.
+        const slot = claim(row.lease_id, id)
+        if (!slot) throw new Error("sem portas livres para o aparelho")
         const one = byAttempt.all(attemptOf(key)).find((item) => item.id === id)!
         const ready = await driver.ready(device(one), slot, key)
         set(id, { running: JSON.stringify(ready.run) })
-        db.run("UPDATE lease_device SET device_id = ? WHERE rowid = ?", [id, blocks[index]?.rowid ?? -1])
         return ready.view
       })
-    // With a plan, its minimum starts while the part builds and the rest only as many as the plan can use
-    // (`planned.json`); what it was granted beyond that goes back before it starts.
+    // With a plan, its minimum starts while the part builds, and then as many as the plan can use (`planned.json`):
+    // what it was granted beyond that goes back before it starts, what it lacks is asked for (`grow`), up to what the
+    // hub proposed, and it goes on with what it gets.
     // Running devices nobody needs give way to this part's reservation, when both do not fit.
     await trim()
-    const early = (await planned(dir)) ? Math.min(row.devices, Math.max(1, spec.devices.min)) : row.devices
+    const plan = await planned(dir)
+    const early = plan ? Math.min(row.devices, Math.max(1, spec.devices.min)) : row.devices
     const first = take(choice, chosen.kind, chosen.profile, early, attemptOf(key), dir)
-    const starting = start(first, 0)
-    const useful = early < row.devices ? await usefulDevices(key, dir, row.only_scenarios) : 0
-    const wanted = useful === undefined ? early : Math.min(row.devices, Math.max(early, useful))
-    if (wanted < row.devices) {
-      input.shrink?.(key, wanted)
-      input.log(`${attemptOf(key)} uses ${wanted} of the ${row.devices} devices granted (its plan)`)
+    const starting = start(first)
+    const most = Math.min(spec.devices.max, Math.max(row.devices, row.devices_cap ?? row.devices))
+    const useful =
+      plan && (early < row.devices || row.devices < most)
+        ? await usefulDevices(key, dir, row.only_scenarios)
+        : undefined
+    const wanted = useful === undefined ? early : Math.min(most, Math.max(early, useful))
+    const granted = wanted > row.devices ? Math.max(row.devices, input.grow?.(key, wanted) ?? row.devices) : row.devices
+    if (wanted > row.devices) {
+      input.log(`${attemptOf(key)} grows to ${granted} of the ${wanted} devices its plan can use`)
+      // The devices it was granted now may be some of those running nobody uses: they stay for it.
+      await trim()
     }
-    const more = wanted > early ? take(choice, chosen.kind, chosen.profile, wanted - early, attemptOf(key), dir) : []
+    const total = Math.min(wanted, granted)
+    if (total < row.devices) {
+      input.shrink?.(key, total)
+      input.log(`${attemptOf(key)} uses ${total} of the ${row.devices} devices granted (its plan)`)
+    }
+    const more = total > early ? take(choice, chosen.kind, chosen.profile, total - early, attemptOf(key), dir) : []
     const ids = [...first, ...more]
-    const started = await Promise.allSettled([...starting, ...start(more, early)])
+    const started = await Promise.allSettled([...starting, ...start(more)])
     const failed = started.flatMap((item) => (item.status === "rejected" ? [String(item.reason)] : []))
     if (failed.length > 0) {
       // What did start goes back with the attempt (`release`); the part ends with the reason.
@@ -259,12 +285,13 @@ export function makeDevicePool(input: {
    * `devices.json`; why not, when it is not connected. Nothing is done on the phone: not cleared, restarted nor
    * stopped, before or after.
    */
-  const phone = (key: Placed, dir: string, hold: string, slot: Range | undefined) => {
+  const phone = (key: Placed, dir: string, hold: string, lease: string) => {
     const target = db.query<{ target: string }, [string]>("SELECT target FROM hold WHERE id = ?").get(hold)
     const alias = target ? (JSON.parse(target.target) as { device: string }).device : undefined
     const found = alias ? input.phone?.find(alias) : undefined
     const serial = alias ? input.phone?.serial(alias) : undefined
     if (!found || !serial) return `o celular ${alias ?? ""} não está conectado`
+    const slot = claim(lease, `fisico:${found.alias}`)
     db.run(
       "INSERT INTO device (id, kind, profile, choice, spec, state, running, attempt, part_dir, falls, last_used_at) VALUES (?, ?, 'estoque', 'fisico', ?, 'em_uso', ?, ?, ?, 0, ?) ON CONFLICT (id) DO UPDATE SET state = 'em_uso', running = excluded.running, attempt = excluded.attempt, part_dir = excluded.part_dir, mute_since = NULL, last_used_at = excluded.last_used_at",
       [

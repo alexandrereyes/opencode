@@ -118,6 +118,7 @@ export function partSpec(test: Test, args: ReadonlyArray<string> = []): BancadaP
     // A physical device, an exclusive lock or secrets: never run again without a confirmed end (`docs/bancada.md`).
     unsafe: test.needs.some((need) => physical.includes(need)) || test.exclusive.length > 0 || Boolean(test.secrets),
     build: test.build !== undefined,
+    ...(test.plan ? { plan: true } : {}),
     args: [...test.args, ...args],
   }
 }

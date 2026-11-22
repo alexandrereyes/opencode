@@ -537,6 +537,14 @@ describe("device pool", () => {
       "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, state, lease_id, accepted_at) VALUES ('j-1', 'android', 1, '{}', '{}', ?, 4, 'rodando', 'l1', 0)",
       [JSON.stringify(spec)],
     )
+    // Its reservation's blocks of ports, one per device (`executor.ts`, `offer`).
+    const blocks = [48_000, 48_020, 48_040, 48_060]
+    blocks.forEach((start) =>
+      db.run("INSERT INTO lease_device (lease_id, device_id, port_start, port_end) VALUES ('l1', NULL, ?, ?)", [
+        start,
+        start + 19,
+      ]),
+    )
     const key = { job: "j-1", part: "android", attempt: 1, group: "g" }
     pool.prepare(key, dir)
     // Right after a start: it waits for discovery instead of failing for want of a driver.
@@ -545,6 +553,15 @@ describe("device pool", () => {
     discovery.done = true
     await pool.settled()
     expect(asked.toSorted()).toEqual([5700, 5702, 5704, 5706])
+    // Each took a block of the reservation's ports of its own as it started.
+    expect(
+      db
+        .query<{ start: number }, []>(
+          "SELECT port_start AS start FROM lease_device WHERE device_id IS NOT NULL GROUP BY device_id ORDER BY port_start",
+        )
+        .all()
+        .map((row) => row.start),
+    ).toEqual(blocks)
     // The attempt ends: the one whose give-back is refused is set apart, the rest goes back; nothing holds it.
     db.run("UPDATE attempt SET state = 'perdido' WHERE job_id = 'j-1'")
     pool.reap([])

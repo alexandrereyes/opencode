@@ -404,6 +404,74 @@ describe("admission", () => {
     await fs.rm(root, { recursive: true, force: true })
   })
 
+  test("with a plan only its minimum is reserved; after the plan it grows as far as the budget allows, up to the hub's proposal", async () => {
+    const it = machine()
+    expect(it.offer({ plan: true })).toMatchObject({ accepted: true, devices: 1 })
+    // Another request takes a device meanwhile: room for one more emulator is left.
+    expect(it.offer({ build: false }, { min: 1, proposed: 1 }, "j-8bbbbbbb")).toMatchObject({
+      accepted: true,
+      devices: 1,
+    })
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-grow-"))
+    const dir = path.join(root, "attempts", "j-7qk2m9xa", "g", "parts", "android")
+    await fs.mkdir(path.join(dir, "out"), { recursive: true })
+    await Bun.write(
+      path.join(root, "attempts", "j-7qk2m9xa", "g", "attempt.json"),
+      JSON.stringify({ parts: [{ part: "android", plan: ["scripts/plan"], run: ["scripts/run"] }] }),
+    )
+    const started: string[] = []
+    const fake: Driver = {
+      kind: "android-emulador",
+      choose: async () => ({ key: "android:36", spec: {}, name: (n) => `bancada-a36-${n}` }),
+      ready: async (device, slot) => {
+        started.push(device.id)
+        return { view: { id: device.id, portas: { inicio: slot.start, fim: slot.end } }, run: {} }
+      },
+      health: async () => "ok",
+      giveBack: async () => {},
+    }
+    const lines: string[] = []
+    const pool = makeDevicePool({
+      db: it.db,
+      now: () => 1_000,
+      drivers: () => ({ android: fake }),
+      emulatorPorts: { start: 5700, end: 5799 },
+      simslim: () => false,
+      shrink: (key, devices) => it.core.shrink(key, devices),
+      grow: (key, devices) => it.core.grow(key, devices),
+      planPollMs: 10,
+      log: (line) => lines.push(line),
+    })
+    pool.prepare({ job: "j-7qk2m9xa", part: "android", attempt: 1, group: "g" }, dir)
+    await Bun.sleep(100)
+    expect(started).toEqual(["bancada-a36-1"])
+    await Bun.write(
+      path.join(dir, "out", "planned.json"),
+      JSON.stringify({ versao: 1, cenarios: [{ id: "c1" }, { id: "c2" }, { id: "c3" }] }),
+    )
+    await pool.settled()
+    expect(lines).toContain("j-7qk2m9xa/android/1 grows to 2 of the 3 devices its plan can use")
+    expect(started).toEqual(["bancada-a36-1", "bancada-a36-2"])
+    const written = JSON.parse(await Bun.file(path.join(dir, "devices.json")).text())
+    expect(written.aparelhos.map((item: { portas: { inicio: number } }) => item.portas.inicio)).toEqual([
+      48_000, 48_040,
+    ])
+    const emulator = deviceCosts["android-emulador"]
+    expect(it.leases()).toEqual([
+      {
+        memMb: 8_192 + emulator.memMb * 2,
+        cpuMilli: 6_000 + emulator.cpuMilli * 2,
+        builds: 1,
+        android: 2,
+        state: "active",
+      },
+      { memMb: emulator.memMb, cpuMilli: emulator.cpuMilli, builds: 0, android: 1, state: "active" },
+    ])
+    // Nothing more fits: a second ask grows nothing.
+    expect(it.core.grow({ job: "j-7qk2m9xa", part: "android", attempt: 1 }, 3)).toBe(2)
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
   test("emulators kept running count in the budget: they fit beside what is reserved, or some must stop", () => {
     const it = machine()
     expect(it.core.warmFits("android", 3)).toBe(true)

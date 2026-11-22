@@ -751,6 +751,8 @@ export function createCore(ports: Ports) {
     alert: (id: string, kind: string, text: string) => alerts.raise(id, kind, text),
     /** An attempt uses fewer devices than granted (its plan): the rest goes back. */
     shrink: executor.shrink,
+    /** An attempt whose plan can use more devices than granted: as many more as fit now. Its count after. */
+    grow: executor.grow,
     /** Whether running devices nobody uses still fit in the budget. */
     warmFits: executor.warmFits,
     /** A reading of the machine for the brake and the owner's presence; the brake's changes go to the log. */

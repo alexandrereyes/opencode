@@ -61,6 +61,8 @@ describe("project contract", () => {
       exclusive: [],
       unsafe: false,
       build: true,
+      // With a plan: it reserves its minimum, and grows once the plan says how many devices it can use.
+      plan: true,
       args: ["--server", "--filtro", "Voz"],
     })
     expect(

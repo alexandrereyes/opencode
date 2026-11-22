@@ -132,6 +132,11 @@ export const PartSpec = Schema.Struct({
   unsafe: Schema.Boolean,
   /** The test has a `build`: its attempt reserves a build (one per group: the group builds once). */
   build: Schema.Boolean,
+  /**
+   * The test has a `plan`: its attempt reserves its minimum of devices, and more once its plan says it can use them
+   * (`docs/bancada.md`, "Budget").
+   */
+  plan: optional(Schema.Boolean),
   args: Schema.Array(Schema.String),
 }).annotate({ identifier: "Bancada.PartSpec" })
 export type PartSpec = typeof PartSpec.Type

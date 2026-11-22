@@ -111,6 +111,8 @@ type AttemptRow = {
   readonly code: string
   readonly spec: string
   readonly devices: number
+  /** The most it may grow to after its plan (what the hub proposed); null when it was accepted before that. */
+  readonly devices_cap: number | null
   readonly only_scenarios: string | null
   readonly state: string
   readonly lease_id: string
@@ -372,9 +374,21 @@ export function makeExecutor(input: {
       ios: device("ios", { slim: "aceita" }),
     })
 
+  /** What a test takes beside its `n` devices (its containers): measured, else the default for one that needs Docker. */
+  const extraOf = (project: string, spec: BancadaProtocol.PartSpec) => {
+    const measuredExtra = samplesOf.all(`extra:${project}/${spec.part}`, samples.kept)
+    return (n: number) =>
+      measuredExtra.length >= samples.trusted
+        ? measured(measuredExtra, zero)
+        : spec.needs.includes("docker")
+          ? times(dockerExtraPerDevice, n)
+          : zero
+  }
+
   /**
    * An attempt's peak at admission (`docs/bancada.md`, "Budget"): its project's build, its devices and what the test
-   * takes beside them, with as many devices between the offer's minimum and proposal as fit now.
+   * takes beside them, with as many devices between the offer's minimum and proposal as fit now. A test with a plan
+   * reserves only its minimum: it grows after its plan says how many it can use (`grow`).
    */
   const admit = (message: typeof BancadaProtocol.Offer.Type) => {
     const spec = message.spec
@@ -383,19 +397,15 @@ export function makeExecutor(input: {
     const build = building ? costOf(`build:${message.code.project}`, buildCost) : zero
     const platform = seat(spec)
     const unit = device(platform, spec.device)
-    const measuredExtra = samplesOf.all(`extra:${message.code.project}/${spec.part}`, samples.kept)
-    const extra = (n: number) =>
-      measuredExtra.length >= samples.trusted
-        ? measured(measuredExtra, zero)
-        : spec.needs.includes("docker")
-          ? times(dockerExtraPerDevice, n)
-          : zero
+    const extra = extraOf(message.code.project, spec)
     const devices = largestFit({
       room: current(),
       builds: building ? 1 : 0,
       platform,
       min: message.devices.min,
-      proposed: message.devices.proposed,
+      proposed: spec.plan
+        ? Math.min(message.devices.proposed, Math.max(1, message.devices.min))
+        : message.devices.proposed,
       build,
       device: unit,
       extra,
@@ -493,7 +503,7 @@ export function makeExecutor(input: {
       ]),
     )
     db.run(
-      "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, only_scenarios, state, lease_id, phone_hold, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aceito', ?, ?, ?)",
+      "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, devices_cap, only_scenarios, state, lease_id, phone_hold, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aceito', ?, ?, ?)",
       [
         message.job,
         message.part,
@@ -502,6 +512,7 @@ export function makeExecutor(input: {
         JSON.stringify(message.code),
         JSON.stringify(message.spec),
         devices,
+        Math.max(devices, message.devices.proposed),
         message.only ? JSON.stringify(message.only) : null,
         lease,
         phoneHold ?? null,
@@ -804,14 +815,20 @@ export function makeExecutor(input: {
 
   /**
    * An attempt uses fewer devices than it was granted (its plan, `devices/pool.ts`): the rest of its reservation goes
-   * back (their share of memory and CPU, their count, their ports), for the next part.
+   * back (their share of memory and CPU and of what the test takes beside them, their count, the ports no device
+   * took), for the next part.
    */
   const shrink = (key: { job: string; part: string; attempt: number }, devices: number) =>
     db.transaction(() => {
       const row = findAttempt.get(key.job, key.part, key.attempt)
       if (!row || devices >= row.devices) return
       const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
-      const back = times(device(seat(spec), spec.device), row.devices - devices)
+      const extra = extraOf((JSON.parse(row.code) as BancadaProtocol.Code).project, spec)
+      const back = add(
+        times(device(seat(spec), spec.device), row.devices - devices),
+        extra(row.devices),
+        times(extra(devices), -1),
+      )
       db.run(
         "UPDATE lease SET android = MAX(0, android - ?), ios = MAX(0, ios - ?), mem_mb = MAX(0, mem_mb - ?), cpu_milli = MAX(0, cpu_milli - ?) WHERE id = ?",
         [
@@ -822,10 +839,12 @@ export function makeExecutor(input: {
           row.lease_id,
         ],
       )
-      // The devices' blocks of ports come first (a phone's, when there is one, after them).
-      db.query<{ rowid: number }, [string]>("SELECT rowid FROM lease_device WHERE lease_id = ? ORDER BY rowid")
+      // Each device (and a phone) takes its block of ports as it starts (`devices/pool.ts`): those left go.
+      db.query<{ rowid: number }, [string]>(
+        "SELECT rowid FROM lease_device WHERE lease_id = ? AND device_id IS NULL ORDER BY rowid DESC",
+      )
         .all(row.lease_id)
-        .slice(devices, row.devices)
+        .slice(0, row.devices - devices)
         .forEach((block) => db.run("DELETE FROM lease_device WHERE rowid = ?", [block.rowid]))
       db.run("UPDATE attempt SET devices = ? WHERE job_id = ? AND part = ? AND n = ?", [
         devices,
@@ -833,6 +852,58 @@ export function makeExecutor(input: {
         key.part,
         key.attempt,
       ])
+    })()
+
+  /**
+   * An attempt whose plan can use more devices than it was granted (`devices/pool.ts`): as many more as fit in the
+   * budget now, up to what the hub proposed for it, each with its share of memory and CPU, of what the test takes
+   * beside them, and a block of ports. Its count of devices after; none more with the brake closed.
+   */
+  const grow = (key: { job: string; part: string; attempt: number }, wanted: number) =>
+    db.transaction(() => {
+      const row = findAttempt.get(key.job, key.part, key.attempt)
+      if (!row) return 0
+      const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
+      const platform = seat(spec)
+      const most = Math.min(wanted, row.devices_cap ?? row.devices, spec.devices.max)
+      if (platform === "none" || most <= row.devices || watch.brake.closed) return row.devices
+      if (!["aceito", "compilando", "rodando"].includes(row.state)) return row.devices
+      const unit = device(platform, spec.device)
+      const extra = extraOf((JSON.parse(row.code) as BancadaProtocol.Code).project, spec)
+      const now = current()
+      const cost = (more: number) => add(times(unit, more), extra(row.devices + more), times(extra(row.devices), -1))
+      const more = Array.from({ length: most - row.devices }, (_, index) => most - row.devices - index).find(
+        (count) =>
+          count <= now[platform] &&
+          cost(count).memMb <= now.memMb &&
+          cost(count).cpuMilli <= now.cpuMilli &&
+          portsFor(count) !== undefined,
+      )
+      if (more === undefined) return row.devices
+      db.run(
+        "UPDATE lease SET android = android + ?, ios = ios + ?, mem_mb = mem_mb + ?, cpu_milli = cpu_milli + ? WHERE id = ?",
+        [
+          platform === "android" ? more : 0,
+          platform === "ios" ? more : 0,
+          cost(more).memMb,
+          cost(more).cpuMilli,
+          row.lease_id,
+        ],
+      )
+      portsFor(more)!.forEach((ports) =>
+        db.run("INSERT INTO lease_device (lease_id, device_id, port_start, port_end) VALUES (?, NULL, ?, ?)", [
+          row.lease_id,
+          ports.start,
+          ports.end,
+        ]),
+      )
+      db.run("UPDATE attempt SET devices = ? WHERE job_id = ? AND part = ? AND n = ?", [
+        row.devices + more,
+        key.job,
+        key.part,
+        key.attempt,
+      ])
+      return row.devices + more
     })()
 
   /** Whether `count` running devices of `platform` nobody uses fit in what is free now (`devices/pool.ts`). */
@@ -849,6 +920,7 @@ export function makeExecutor(input: {
     reserveSlot,
     releaseLease,
     shrink,
+    grow,
     warmFits,
     tick,
     free,

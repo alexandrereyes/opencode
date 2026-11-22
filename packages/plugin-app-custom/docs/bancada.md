@@ -50,9 +50,12 @@ process finds the runner dead there (infrastructure: the part runs once more, on
   uninstalled and kept running for `aquecido_min` (`[android.docker]`), for the next part, which gets it without
   booting; it counts in the budget, so the oldest stops first when what is reserved needs the room. Then the
   container is removed; the AVD volume stays.
-- A part with a `plan` starts its minimum (at least one) while it builds and, once `planned.json` says how many it
-  can use (`aparelhos`, else one per scenario), only that many more; what it was granted beyond goes back unstarted
-  (budget and ports), so two scenarios never get four emulators. Without a plan, every device granted starts.
+- A part with a `plan` is accepted reserving its build and its minimum of devices (at least one), which start while it
+  builds. Once `planned.json` says how many it can use (`aparelhos`, else one per scenario), it asks for the ones it
+  lacks: the executor grants as many as fit in the budget then (memory, CPU, what the test takes beside each device,
+  ceilings, ports; none with the brake closed), up to what the hub proposed for it, and the part goes on with what it
+  got. Beyond what it can use goes back unstarted, so two scenarios never get four emulators. Without a plan, every
+  device granted at admission starts. Each device, and a phone, takes its block of ports as it starts.
 - Only devices of the `device` table, named with the machine's prefix, are ever stopped. A device dead, or mute for
   60 s, during a run fell: the scenarios it lost run again once elsewhere; two falls in a row put it 30 min aside.
   Emulators starting together get their console ports one at a time, each held in its row from the start, and one

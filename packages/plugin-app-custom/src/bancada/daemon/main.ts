@@ -200,6 +200,7 @@ export async function main() {
       emulatorPorts: config.ports.emulator,
       docker: config.android.docker !== undefined,
       shrink: (key, devices) => current.core?.shrink(key, devices),
+      grow: (key, devices) => current.core?.grow(key, devices) ?? 0,
       // host-6's emulators in containers stay running a while for the next part (`aquecido_min`).
       ...(config.android.docker?.warmMs ? { warmMs: config.android.docker.warmMs } : {}),
       warmFits: (platform, count) => current.core?.warmFits(platform, count) ?? false,

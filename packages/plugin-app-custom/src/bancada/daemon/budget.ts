@@ -3,7 +3,8 @@ import type { BancadaProtocol } from "../protocol.js"
 /**
  * The machine's budget (`docs/bancada.md`, "Budget"): memory, CPU and builds, plus how many emulators and simulators
  * its ceilings allow. An attempt reserves its peak at admission: its build, its devices and what the test takes beside
- * them, all at once; the build's share goes back when the build ends. Pure: the executor gives the numbers.
+ * them, all at once (one with a plan, its minimum of devices: the rest once its plan says it can use them); the
+ * build's share goes back when the build ends. Pure: the executor gives the numbers.
  */
 
 /** Memory in MB and CPU in thousandths of a core. */

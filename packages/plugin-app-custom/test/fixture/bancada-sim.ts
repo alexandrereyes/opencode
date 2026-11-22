@@ -29,6 +29,11 @@ export type Script =
       readonly scenarios: ReadonlyArray<BancadaProtocol.Scenario>
       /** Devices the Bancada saw fall during the run (their failures are lost, not failed). */
       readonly fell?: ReadonlyArray<string>
+      /**
+       * How many devices its plan can use, said once its build ended: the part asks for the ones it lacks (`grow`) or
+       * gives back the rest (`shrink`), as the device pool does.
+       */
+      readonly useful?: number
     }
   | { readonly vanishMs: number }
 
@@ -79,6 +84,10 @@ export function createWorld(options: {
       cancelled: boolean
       readonly only?: ReadonlyArray<string>
       readonly unsafe: boolean
+      /** Devices granted at its start; whether it reported running once, and asked for its plan's devices. */
+      readonly devices: number
+      ran: boolean
+      planned: boolean
     }
   >()
   const facts = {
@@ -100,6 +109,8 @@ export function createWorld(options: {
     texts: new Map<string, string>(),
     /** Every chunk a machine sent to the hub, by its offset. */
     puts: [] as { machine: string; transfer: string; offset: number }[],
+    /** What each part's plan asked for after its build, and the devices it had then. */
+    grown: [] as { machine: string; attempt: string; wanted: number; devices: number }[],
   }
   /** Starts still bringing their code, released when the virtual clock reaches them. */
   const starting: { readonly at: number; readonly resolve: () => void }[] = []
@@ -248,6 +259,9 @@ export function createWorld(options: {
           cancelled: false,
           unsafe: part.spec.unsafe,
           ...(part.only ? { only: part.only } : {}),
+          devices: part.devices,
+          ran: false,
+          planned: false,
         })
         const counted = `${launch.job}/${part.part}`
         facts.starts.set(counted, (facts.starts.get(counted) ?? 0) + 1)
@@ -263,6 +277,15 @@ export function createWorld(options: {
           ? { state: "rodando" }
           : { state: "done", ending: { stage: "run", cause: "runner_morto" } }
       if (elapsed < run.script.buildMs) return { state: "compilando" }
+      // Its plan speaks the round after its build ended (its share of the reservation went back then).
+      const useful = run.script.useful
+      if (useful !== undefined && run.ran && !run.planned) {
+        run.planned = true
+        const core = machines.get(machine)!.core
+        const devices = useful < run.devices ? (core.shrink(attempt, useful), useful) : core.grow(attempt, useful)
+        facts.grown.push({ machine, attempt: key(attempt), wanted: useful, devices })
+      }
+      run.ran = true
       if (elapsed < run.script.buildMs + run.script.runMs) return { state: "rodando" }
       const scenarios = run.script.scenarios
       // The project's two files, as a real run writes them; a failure's evidence in its output folder.
