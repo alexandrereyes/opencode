@@ -133,7 +133,7 @@ describe("two servers' Bancadas over custom.bancada", () => {
     const synthetic = async () => {
       const url = new URL(`/api/session/${session}/message`, machine.base)
       const body = (await fetch(url, { headers: machine.headers }).then((response) => response.json())) as {
-        data: { type: string; text?: string }[]
+        data: { type: string; text?: string; description?: string }[]
       }
       return body.data.filter((message) => message.type === "synthetic")
     }
@@ -144,10 +144,37 @@ describe("two servers' Bancadas over custom.bancada", () => {
         (await rpc<{ jobs: unknown[] }>(machine, "custom.bancada/status", { sessionID: session })).jobs.length === 0,
       20_000,
     )
-    expect((await synthetic()).map((message) => message.text?.split("\n")[0])).toEqual([
-      `[Bancada] ${submitted.job} terminou: aprovado (commit ${submitted.base.slice(0, 8)})`,
+    // The apps show its first line, as its description.
+    expect(
+      (await synthetic()).map((message) => ({ first: message.text?.split("\n")[0], description: message.description })),
+    ).toEqual([
+      {
+        first: `[Bancada] ${submitted.job} terminou: aprovado (commit ${submitted.base.slice(0, 8)})`,
+        description: `[Bancada] ${submitted.job} terminou: aprovado (commit ${submitted.base.slice(0, 8)})`,
+      },
     ])
-  }, 90_000)
+    // A request cancelled before it runs: its notice too.
+    const cancelled = await rpc<Bancada.Submitted>(machine, "custom.bancada/submit", {
+      id: BancadaProtocol.jobID("cancelado"),
+      sessionID: session,
+      diretorio: world.repository!,
+      testes: [{ teste: "simples" }],
+    })
+    await rpc(machine, "custom.bancada/cancel", { job: cancelled.job })
+    // It does not wake the session: it waits in the inbox until the session runs again.
+    const descriptions = async () => {
+      const url = new URL(`/api/session/${session}/inbox`, machine.base)
+      const body = (await fetch(url, { headers: machine.headers }).then((response) => response.json())) as {
+        data: { type: string; payload: { description?: string } }[]
+      }
+      return [
+        ...(await synthetic()).map((message) => message.description),
+        ...body.data.filter((item) => item.type === "synthetic").map((item) => item.payload.description),
+      ]
+    }
+    const expected = `[Bancada] ${cancelled.job} foi cancelado (commit ${cancelled.base.slice(0, 8)})`
+    await until(async () => (await descriptions()).includes(expected), 60_000)
+  }, 150_000)
 
   test("a notice for a session that no longer exists is dropped once, and its request is cleaned up", async () => {
     const machine = world.machine!

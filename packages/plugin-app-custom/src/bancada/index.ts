@@ -201,7 +201,8 @@ export const registerBancada = Effect.fn("Bancada.register")(function* (
         sessionID: Session.ID.make(notice.sessionID),
         id: SessionMessage.ID.make(notice.id),
         text: notice.text,
-        description: notice.job ? `Bancada ${notice.job}` : "Bancada",
+        // What the apps show for the message: the notice's first line ("[Bancada] j-… terminou: aprovado (…)").
+        description: notice.text.split("\n", 1)[0]!,
         metadata: { custom: { bancada: notice.job ? { job: notice.job } : {} } },
         // A request cancelled whole has nothing to act on: its notice does not wake the session.
         ...(notice.resume ? {} : { resume: false }),
