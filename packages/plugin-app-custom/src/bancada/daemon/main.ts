@@ -12,7 +12,7 @@ import { openExclusive } from "./db.js"
 import { runGit } from "./git.js"
 import { makeProcessLauncher } from "./launcher/process.js"
 import { probe } from "./probes.js"
-import { offered, parseMachineConfig } from "../machine-config.js"
+import { offered, outsideAdbScan, parseMachineConfig } from "../machine-config.js"
 import { makeBlobs, sha256 } from "./blobs.js"
 import { makeLink, type Link } from "./link.js"
 import { Invalid, makeRequests } from "./requests.js"
@@ -321,6 +321,13 @@ export async function main() {
         (key) => path.join(state, "attempts", key.job, key.group, "parts", key.part),
       ),
     })
+    // Emulators on the Mac boot from their snapshot in a second only on ports the adb server looks at.
+    if (!config.android.docker && offering && outsideAdbScan(config.ports.emulator))
+      current.core.alert(
+        "portas:emulador",
+        "aparelho",
+        `portas.emulador (${config.ports.emulator.start}-${config.ports.emulator.end}) está fora de 5554-5585, as portas que o adb procura: cada emulador demora de 4 s a 2 min a aparecer depois do snapshot. Use emulador = "5554-5585" (ou tire a linha).`,
+      )
     current.requests = makeRequests(current.core, runGit)
     if (link) {
       current.link = makeLink({ target: link.target, password: link.password, core: current.core, log })

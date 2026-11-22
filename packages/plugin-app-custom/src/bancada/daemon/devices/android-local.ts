@@ -61,6 +61,7 @@ export function androidLocal(input: {
       }
       const stop = () => lifecycle.stop(device.id, serial, process.pid, process.started).catch(() => false)
       const snapshot = await lifecycle.fromSnapshot(log, 15_000)
+      const loaded = Date.now()
       if (!(await lifecycle.booted(serial, snapshot ? 3 * 60_000 : 6 * 60_000))) {
         await stop()
         throw new Error(`${device.id} não terminou de ligar`)
@@ -80,12 +81,17 @@ export function androidLocal(input: {
         if (!(await lifecycle.save(serial)))
           input.log(`${device.id} did not keep its snapshot; it boots in full next time`)
       }
+      const answered = Date.now()
       if (!(await lifecycle.deliver(serial))) {
         await stop()
         throw new Error(`${device.id} não alcança a máquina em 10.0.2.2`)
       }
+      // Each stage apart: started (and the snapshot loaded), Android answered through adb, delivered.
+      const seconds = (from: number, to: number) => Math.round((to - from) / 1000)
       input.log(
-        `${device.id} ready in ${Math.round((Date.now() - started) / 1000)} s (${snapshot ? "snapshot" : "first boot"})`,
+        `${device.id} ready in ${seconds(started, Date.now())} s (${snapshot ? "snapshot" : "first boot"}: ` +
+          `${seconds(started, loaded)} s to start, ${seconds(loaded, answered)} s until adb answered, ` +
+          `${seconds(answered, Date.now())} s to deliver)`,
       )
       return {
         run,

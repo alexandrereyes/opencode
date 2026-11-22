@@ -554,10 +554,11 @@ export function makeDevicePool(input: {
             .all()
             .flatMap((row) => (JSON.parse(row.running) as Running).console ?? []),
         )
+        // From the top of the range down: the owner's other emulators take the first ports of adb's range.
         for (
-          let port = input.emulatorPorts.start + (input.emulatorPorts.start % 2);
-          port < input.emulatorPorts.end;
-          port += 2
+          let port = input.emulatorPorts.end - 1 - ((input.emulatorPorts.end - 1) % 2);
+          port >= input.emulatorPorts.start;
+          port -= 2
         )
           if (!taken.has(port) && (await free(port)) && (await free(port + 1))) {
             set(id, { running: JSON.stringify({ console: port }) })

@@ -67,6 +67,9 @@ process finds the runner dead there (infrastructure: the part runs once more, on
   ports as it starts. The end of an attempt tells the hub the devices it ran on, for the history.
 - Only devices of the `device` table, named with the machine's prefix, are ever stopped. A device dead, or mute for
   60 s, during a run fell: the scenarios it lost run again once elsewhere; two falls in a row put it 30 min aside.
+  Emulators on the Mac get console ports of `portas.emulador`, by default 5554-5585 (from the top down): the adb
+  server looks at those every second, so one booted from its snapshot answers in about a second; on another port it
+  waits from 4 s to 2 min for adb to hear of it (measured 11/2026), and the process raises an alert.
   Emulators starting together get their console ports one at a time, each held in its row from the start, and one
   whose port answers another AVD after the boot is ended by its own pid. One that cannot be given back is set apart
   (`isolado`, its port still held, tried again every round): its attempt's reservation and folder go back meanwhile.

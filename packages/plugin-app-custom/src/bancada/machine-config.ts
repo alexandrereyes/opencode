@@ -115,6 +115,8 @@ export type Parsed =
 const minute = 60_000
 const gb = 1024
 
+const adbScan: Range = { start: 5_554, end: 5_585 }
+
 /** The defaults that do not depend on the machine (the rest come from its memory and cores). */
 export const defaults = {
   presence: { idleMs: 5 * minute, factor: 0.6 },
@@ -126,7 +128,15 @@ export const defaults = {
     cpuIdleMinPct: 5,
     samplesToReopen: 6,
   } satisfies BrakeConfig,
-  ports: { emulator: { start: 5_700, end: 5_799 }, project: { start: 48_000, end: 49_999 } },
+  ports: { emulator: adbScan, project: { start: 48_000, end: 49_999 } },
+}
+
+/**
+ * The console and adb ports the adb server looks at every second (adb ports 5555 to 5585). An emulator booted from a
+ * snapshot on another port waits for the adb server to hear of it: 4 to 128 s on the Mac (11/2026), against 0.3 s here.
+ */
+export function outsideAdbScan(range: Range) {
+  return range.start < adbScan.start || range.end > adbScan.end
 }
 
 /** `[tempos]`: the key, its unit and its default (section "State machine" and "Holds"). */

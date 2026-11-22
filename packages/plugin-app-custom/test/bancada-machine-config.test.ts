@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { offered, parseMachineConfig, type Host, type MachineConfig } from "../src/bancada/machine-config"
+import {
+  offered,
+  outsideAdbScan,
+  parseMachineConfig,
+  type Host,
+  type MachineConfig,
+} from "../src/bancada/machine-config"
 
 const mac: Host = { memMb: 131_072, cores: 16, platform: "darwin" }
 const valid = (text: string | undefined, host = mac): MachineConfig => {
@@ -13,6 +19,12 @@ const problems = (text: string) => {
 }
 
 describe("machine file", () => {
+  test("emulator ports outside those the adb server looks at are told apart (the process raises an alert)", () => {
+    expect(outsideAdbScan({ start: 5_554, end: 5_585 })).toBe(false)
+    expect(outsideAdbScan({ start: 5_570, end: 5_585 })).toBe(false)
+    expect(outsideAdbScan({ start: 5_700, end: 5_799 })).toBe(true)
+  })
+
   test("absent, every value comes from the machine itself or the documented defaults", () => {
     expect(valid(undefined)).toEqual({
       speed: "normal",
@@ -35,7 +47,8 @@ describe("machine file", () => {
       execution: { lowPriority: false },
       link: { waitMs: 25_000, blockBytes: 1_048_576 },
       android: {},
-      ports: { emulator: { start: 5_700, end: 5_799 }, project: { start: 48_000, end: 49_999 } },
+      // The ports the adb server looks at: an emulator booted from its snapshot answers at once there.
+      ports: { emulator: { start: 5_554, end: 5_585 }, project: { start: 48_000, end: 49_999 } },
       times: {
         silentMs: 45_000,
         uncertainMs: 180_000,

@@ -552,7 +552,8 @@ describe("device pool", () => {
     expect(await Bun.file(path.join(dir, "devices.error")).exists()).toBe(false)
     discovery.done = true
     await pool.settled()
-    expect(asked.toSorted()).toEqual([5700, 5702, 5704, 5706])
+    // From the top of the range down (the owner's other emulators take its first ports).
+    expect(asked.toSorted()).toEqual([5792, 5794, 5796, 5798])
     // Each took a block of the reservation's ports of its own as it started.
     expect(
       db
