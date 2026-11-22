@@ -73,6 +73,11 @@ process finds the runner dead there (infrastructure: the part runs once more, on
   Emulators starting together get their console ports one at a time, each held in its row from the start, and one
   whose port answers another AVD after the boot is ended by its own pid. One that cannot be given back is set apart
   (`isolado`, its port still held, tried again every round): its attempt's reservation and folder go back meanwhile.
+- **Cost** (`sampler.ts`): every 10 s, the memory and CPU of each device in use (an emulator's process and those below
+  it, a simulator's processes, a container's `docker stats`) and of each build (its runner's processes while the
+  attempt builds); when one ends, its peak memory and average CPU go to `cost_sample` (the last 20 per kind and
+  profile, or per project's build). From 3 samples on, the admission, the pulse's free vector and the room for running
+  devices take their p90 instead of the catalog's defaults (`catalog/costs.ts`).
 - **Code on another machine:** a working folder takes the commit from the machine's other folders of the project
   first (no transfer), and borrows from them what a bundle needs; a bundle that still does not apply is
   infrastructure, asked again whole. Code asked through the hub that does not come in 30 min ends its attempts with

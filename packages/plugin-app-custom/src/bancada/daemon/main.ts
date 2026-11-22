@@ -26,6 +26,7 @@ import { iosSimulators } from "./devices/ios.js"
 import { androidDocker } from "./devices/android-docker.js"
 import { makeDocker } from "./devices/docker.js"
 import { systemShell } from "./devices/shell.js"
+import { makeSampler } from "./sampler.js"
 import { makeAndroidLifecycle, type Image } from "../../resources/adapters/android-lifecycle.js"
 import { makeIosLifecycle } from "../../resources/adapters/ios-lifecycle.js"
 import { iosSlim } from "../catalog/slim.js"
@@ -46,6 +47,8 @@ export const limits = {
   tickMs: 1_000,
   /** How often the machine is read for the brake and the owner's presence. */
   probeMs: 5_000,
+  /** How often what devices and builds take is measured (`sampler.ts`). */
+  sampleMs: 10_000,
   /** How often unused working folders and expired transfers go (also once, a little after the start). */
   sweepMs: 60 * 60_000,
   firstSweepMs: 60_000,
@@ -354,6 +357,20 @@ export async function main() {
         .catch((error: unknown) => log(`reading the machine failed: ${String(error)}`))
     reading()
     current.timers.push(setInterval(reading, limits.probeMs))
+    // What devices and builds really take, every 10 s: the admission uses it from 3 samples on.
+    const sampler = makeSampler({
+      db,
+      now,
+      state,
+      run: (argv) => systemShell().run(argv, { timeoutMs: 8_000 }),
+      log,
+    })
+    current.timers.push(
+      setInterval(
+        () => void sampler.take().catch((error: unknown) => log(`measuring costs failed: ${String(error)}`)),
+        limits.sampleMs,
+      ),
+    )
     advance()
     return current.core
   }
