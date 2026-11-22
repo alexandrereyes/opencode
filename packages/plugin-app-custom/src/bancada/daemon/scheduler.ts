@@ -48,6 +48,8 @@ export type Decision = {
     readonly position?: number
     /** How long until it starts, when it can be told. */
     readonly etaMs?: number
+    /** The machine it waits for room on (the one it would go to). */
+    readonly machineID?: string
   }>
   /** Waiting parts a newer part went past on a machine they could use (once per offer). */
   readonly bypassed: ReadonlyArray<{ readonly job: string; readonly part: string; readonly times: number }>
@@ -144,7 +146,13 @@ export function schedule(input: {
   }
   const offered = new Set<QueuedPart>()
   const offers: Array<Decision["offers"][number] & { readonly at: QueuedPart }> = []
-  const waiting: Array<{ part: QueuedPart; reason: BancadaProtocol.Reason; etaMs?: number; ranked: boolean }> = []
+  const waiting: Array<{
+    part: QueuedPart
+    reason: BancadaProtocol.Reason
+    etaMs?: number
+    machineID?: string
+    ranked: boolean
+  }> = []
 
   for (const part of order) {
     const lock = part.spec.exclusive.find((name) => locks.has(name))
@@ -183,6 +191,7 @@ export function schedule(input: {
         part,
         reason: why(part, choice.machine, choice.wait),
         ...(Number.isFinite(choice.wait.ms) ? { etaMs: choice.wait.ms } : {}),
+        machineID: choice.machine.machineID,
         ranked: true,
       })
       continue
@@ -246,6 +255,7 @@ export function schedule(input: {
       reason: wait.reason,
       ...(wait.ranked ? { position: ranked.indexOf(wait) + 1 } : {}),
       ...(wait.etaMs === undefined ? {} : { etaMs: wait.etaMs }),
+      ...(wait.machineID === undefined ? {} : { machineID: wait.machineID }),
     })),
     bypassed,
   }

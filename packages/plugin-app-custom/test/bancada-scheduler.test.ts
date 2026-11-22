@@ -86,16 +86,32 @@ describe("queue", () => {
       },
     )
     expect(decision.offers).toEqual([])
-    // The queue explains j-a's wait; nothing that runs on Linux frees enough for j-c; an iOS part waits for a Mac.
+    // The queue explains j-a's wait; nothing that runs on Linux frees enough for j-c; an iOS part waits for a Mac. Each
+    // says the machine it waits for room on: none of what runs there grows meanwhile.
     expect(decision.waiting).toEqual([
-      { job: "j-b", part: "ios", reason: { code: "orcamento", text: "aguardando um Mac" }, position: 1, etaMs: 30_000 },
-      { job: "j-a", part: "android", reason: { code: "fila", text: "na fila" }, position: 2, etaMs: 120_000 },
+      {
+        job: "j-b",
+        part: "ios",
+        reason: { code: "orcamento", text: "aguardando um Mac" },
+        position: 1,
+        etaMs: 30_000,
+        machineID: "mac2",
+      },
+      {
+        job: "j-a",
+        part: "android",
+        reason: { code: "fila", text: "na fila" },
+        position: 2,
+        etaMs: 120_000,
+        machineID: "mac",
+      },
       {
         job: "j-c",
         part: "android",
         reason: { code: "orcamento", text: "aguardando folga" },
         position: 3,
         etaMs: 300_000,
+        machineID: "linux",
       },
     ])
   })

@@ -28,6 +28,7 @@ describe("machine file", () => {
         // Measured: past 6 emulators the suite stops getting shorter (AbacatoV3).
         maxAndroid: 6,
         maxIos: 6,
+        scenariosPerDevice: 6,
         presence: { idleMs: 300_000, factor: 0.6 },
       },
       brake: { memFreeMinPct: 20, swapGrowthMb: 256, loadPerCoreMax: 3, cpuIdleMinPct: 5, samplesToReopen: 6 },
@@ -92,6 +93,7 @@ cpu         = 13
 compilacoes = 1
 max_android = 8
 max_ios     = 6
+cenarios_por_aparelho = 4
 presenca    = { ocioso_min = 5, fator = 0.6 }
 
 [freio]
@@ -153,7 +155,7 @@ politica   = "negar"
       prefix: "bancada-test-",
       labels: ["purpose=bancada-test"],
       secrets: ["opencode-skills"],
-      budget: { memMb: 98_304, cpuMilli: 13_000, builds: 1, maxAndroid: 8, maxIos: 6 },
+      budget: { memMb: 98_304, cpuMilli: 13_000, builds: 1, maxAndroid: 8, maxIos: 6, scenariosPerDevice: 4 },
       execution: { lowPriority: true },
       link: { waitMs: 10_000, blockBytes: 524_288 },
       android: {

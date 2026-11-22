@@ -49,6 +49,24 @@ export function duration(input: {
   return Math.round((run + build) * (input.here.length > 0 ? 1 : factor))
 }
 
+/**
+ * How long one scenario takes on one device of a machine (its run, the devices' preparation included), from the
+ * executions that counted their scenarios: there, else elsewhere (× 3 on a slow machine); undefined without them.
+ */
+export function perScenario(input: {
+  readonly here: ReadonlyArray<Sample>
+  readonly elsewhere: ReadonlyArray<Sample>
+  readonly slow: boolean
+}) {
+  const counted = (samples: ReadonlyArray<Sample>) =>
+    samples.filter((sample) => sample.scenarios !== undefined && sample.scenarios > 0)
+  const here = counted(input.here)
+  const history = here.length > 0 ? here : counted(input.elsewhere)
+  if (history.length === 0) return undefined
+  const each = median(history.map((sample) => (sample.runMs * Math.max(1, sample.devices)) / sample.scenarios!))
+  return Math.round(each * (here.length > 0 || !input.slow ? 1 : defaults.slow))
+}
+
 /** What a machine runs now, as the hub knows it: when each attempt should end and what it holds until then. */
 export type Running = { readonly endsAt: number; readonly devices: number; readonly building: boolean }
 

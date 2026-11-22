@@ -268,10 +268,19 @@ describe("admission", () => {
       log: () => {},
     })
     let seq = 0
+    /** The hub's answer without messages: what its queue says waits for room here. */
+    const hear = (waiting: { android: number; ios: number }) =>
+      core.incoming({
+        protocol: BancadaProtocol.version,
+        ack: null,
+        out: { stream: "hub-stream", base: seq, messages: [] },
+        waiting,
+      })
     const offer = (
       part: Partial<BancadaProtocol.PartSpec> = {},
       devices = { min: 1, proposed: 3 },
       job = "j-7qk2m9xa",
+      more: Partial<typeof BancadaProtocol.Offer.Type> = {},
     ) => {
       seq++
       core.incoming({
@@ -292,6 +301,7 @@ describe("admission", () => {
                 origin: { instanceID: "i", machineID: "m", name: "Linux", sessionID: "s", rootSessionID: "s" },
                 code,
                 devices,
+                ...more,
               },
             },
           ],
@@ -311,8 +321,73 @@ describe("admission", () => {
         .all()
     const ports = () =>
       db.query("SELECT port_start AS start, port_end AS end FROM lease_device ORDER BY port_start").all()
-    return { db, core, execution, offer, leases, ports }
+    return { db, core, execution, offer, hear, leases, ports }
   }
+
+  /**
+   * An attempt's folder as its runner makes it (the part has a plan), the plan's scenarios written when the test says,
+   * and a pool whose emulators get ready when the test lets them (all at once by default).
+   */
+  async function attempt(it: ReturnType<typeof machine>) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-useful-"))
+    const dir = path.join(root, "attempts", "j-7qk2m9xa", "g", "parts", "android")
+    await fs.mkdir(path.join(dir, "out"), { recursive: true })
+    await Bun.write(
+      path.join(root, "attempts", "j-7qk2m9xa", "g", "attempt.json"),
+      JSON.stringify({ parts: [{ part: "android", plan: ["scripts/plan"], run: ["scripts/run"] }] }),
+    )
+    const started: string[] = []
+    const lines: string[] = []
+    const gate = { held: new Set<string>(), open: new Map<string, () => void>() }
+    const fake: Driver = {
+      kind: "android-emulador",
+      choose: async () => ({ key: "android:36", spec: {}, name: (n) => `bancada-a36-${n}` }),
+      ready: async (device, slot) => {
+        started.push(device.id)
+        if (gate.held.has(device.id)) await new Promise<void>((resolve) => gate.open.set(device.id, resolve))
+        return { view: { id: device.id, portas: { inicio: slot.start, fim: slot.end } }, run: {} }
+      },
+      health: async () => "ok",
+      giveBack: async () => {},
+    }
+    const pool = makeDevicePool({
+      db: it.db,
+      now: () => 1_000,
+      drivers: () => ({ android: fake }),
+      emulatorPorts: { start: 5700, end: 5799 },
+      simslim: () => false,
+      shrink: (key, devices) => it.core.shrink(key, devices),
+      grow: (key, devices) => it.core.grow(key, devices),
+      planPollMs: 10,
+      log: (line) => lines.push(line),
+    })
+    return {
+      root,
+      dir,
+      pool,
+      started,
+      lines,
+      /** Its emulators with these names stay booting until `release`. */
+      hold: (...ids: string[]) => ids.forEach((id) => gate.held.add(id)),
+      release: (id: string) => gate.open.get(id)?.(),
+      plan: (scenarios: ReadonlyArray<{ id: string; grupo?: string }>) =>
+        Bun.write(path.join(dir, "out", "planned.json"), JSON.stringify({ versao: 1, cenarios: scenarios })),
+      written: async () =>
+        (
+          JSON.parse(await Bun.file(path.join(dir, "devices.json")).text()) as { aparelhos: { id: string }[] }
+        ).aparelhos.map((item) => item.id),
+      until: async (condition: () => boolean) => {
+        for (let n = 0; n < 200 && !condition(); n++) await Bun.sleep(10)
+        expect(condition()).toBe(true)
+      },
+    }
+  }
+  const key = { job: "j-7qk2m9xa", part: "android", attempt: 1, group: "g" }
+  const scenarios = (count: number, groups?: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `c${index + 1}`,
+      ...(groups ? { grupo: `f${index % groups}` } : {}),
+    }))
 
   test("the peak is reserved with as many devices as fit; the build's share goes back when the run starts", async () => {
     const it = machine()
@@ -345,48 +420,21 @@ describe("admission", () => {
     expect(it.ports()).toEqual([])
   })
 
-  test("granted 3 and the plan has 2 scenarios: 1 starts while it builds, 1 more after the plan; the third goes back unstarted", async () => {
+  test("the Bancada decides the devices: 8 scenarios in 2 groups are worth 2 of the 3 granted; 1 starts while it builds, 1 more after the plan, the third goes back unstarted", async () => {
     const it = machine()
     expect(it.offer()).toMatchObject({ accepted: true, devices: 3 })
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-useful-"))
-    const dir = path.join(root, "attempts", "j-7qk2m9xa", "g", "parts", "android")
-    await fs.mkdir(path.join(dir, "out"), { recursive: true })
-    await Bun.write(
-      path.join(root, "attempts", "j-7qk2m9xa", "g", "attempt.json"),
-      JSON.stringify({ parts: [{ part: "android", plan: ["scripts/plan"], run: ["scripts/run"] }] }),
-    )
-    const started: string[] = []
-    const fake: Driver = {
-      kind: "android-emulador",
-      choose: async () => ({ key: "android:36", spec: {}, name: (n) => `bancada-a36-${n}` }),
-      ready: async (device, slot) => {
-        started.push(device.id)
-        return { view: { id: device.id, portas: { inicio: slot.start, fim: slot.end } }, run: {} }
-      },
-      health: async () => "ok",
-      giveBack: async () => {},
-    }
-    const pool = makeDevicePool({
-      db: it.db,
-      now: () => 1_000,
-      drivers: () => ({ android: fake }),
-      emulatorPorts: { start: 5700, end: 5799 },
-      simslim: () => false,
-      shrink: (key, devices) => it.core.shrink(key, devices),
-      planPollMs: 10,
-      log: () => {},
-    })
-    pool.prepare({ job: "j-7qk2m9xa", part: "android", attempt: 1, group: "g" }, dir)
+    const at = await attempt(it)
+    at.pool.prepare(key, at.dir)
     await Bun.sleep(100)
-    expect(started).toEqual(["bancada-a36-1"])
+    expect(at.started).toEqual(["bancada-a36-1"])
+    // An older project's `aparelhos` and `estimativa_s` are read and ignored.
     await Bun.write(
-      path.join(dir, "out", "planned.json"),
-      JSON.stringify({ versao: 1, cenarios: [{ id: "c1" }, { id: "c2" }] }),
+      path.join(at.dir, "out", "planned.json"),
+      JSON.stringify({ versao: 1, aparelhos: 8, estimativa_s: 60, cenarios: scenarios(8, 2) }),
     )
-    await pool.settled()
-    expect(started).toEqual(["bancada-a36-1", "bancada-a36-2"])
-    const written = JSON.parse(await Bun.file(path.join(dir, "devices.json")).text())
-    expect(written.aparelhos.map((item: { id: string }) => item.id)).toEqual(["bancada-a36-1", "bancada-a36-2"])
+    await at.pool.settled()
+    expect(at.started).toEqual(["bancada-a36-1", "bancada-a36-2"])
+    expect(await at.written()).toEqual(["bancada-a36-1", "bancada-a36-2"])
     const emulator = deviceCosts["android-emulador"]
     expect(it.leases()).toEqual([
       {
@@ -401,10 +449,10 @@ describe("admission", () => {
       { start: 48_000, end: 48_019 },
       { start: 48_020, end: 48_039 },
     ])
-    await fs.rm(root, { recursive: true, force: true })
+    await fs.rm(at.root, { recursive: true, force: true })
   })
 
-  test("with a plan only its minimum is reserved; after the plan it grows as far as the budget allows, up to the hub's proposal", async () => {
+  test("with a plan only its minimum is reserved; 18 scenarios are worth 3, it gets 2 while another request runs, and the third once that one ends before its run", async () => {
     const it = machine()
     expect(it.offer({ plan: true })).toMatchObject({ accepted: true, devices: 1 })
     // Another request takes a device meanwhile: room for one more emulator is left.
@@ -412,64 +460,70 @@ describe("admission", () => {
       accepted: true,
       devices: 1,
     })
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-bancada-grow-"))
-    const dir = path.join(root, "attempts", "j-7qk2m9xa", "g", "parts", "android")
-    await fs.mkdir(path.join(dir, "out"), { recursive: true })
-    await Bun.write(
-      path.join(root, "attempts", "j-7qk2m9xa", "g", "attempt.json"),
-      JSON.stringify({ parts: [{ part: "android", plan: ["scripts/plan"], run: ["scripts/run"] }] }),
-    )
-    const started: string[] = []
-    const fake: Driver = {
-      kind: "android-emulador",
-      choose: async () => ({ key: "android:36", spec: {}, name: (n) => `bancada-a36-${n}` }),
-      ready: async (device, slot) => {
-        started.push(device.id)
-        return { view: { id: device.id, portas: { inicio: slot.start, fim: slot.end } }, run: {} }
-      },
-      health: async () => "ok",
-      giveBack: async () => {},
-    }
-    const lines: string[] = []
-    const pool = makeDevicePool({
-      db: it.db,
-      now: () => 1_000,
-      drivers: () => ({ android: fake }),
-      emulatorPorts: { start: 5700, end: 5799 },
-      simslim: () => false,
-      shrink: (key, devices) => it.core.shrink(key, devices),
-      grow: (key, devices) => it.core.grow(key, devices),
-      planPollMs: 10,
-      log: (line) => lines.push(line),
-    })
-    pool.prepare({ job: "j-7qk2m9xa", part: "android", attempt: 1, group: "g" }, dir)
-    await Bun.sleep(100)
-    expect(started).toEqual(["bancada-a36-1"])
-    await Bun.write(
-      path.join(dir, "out", "planned.json"),
-      JSON.stringify({ versao: 1, cenarios: [{ id: "c1" }, { id: "c2" }, { id: "c3" }] }),
-    )
-    await pool.settled()
-    expect(lines).toContain("j-7qk2m9xa/android/1 grows to 2 of the 3 devices its plan can use")
-    expect(started).toEqual(["bancada-a36-1", "bancada-a36-2"])
-    const written = JSON.parse(await Bun.file(path.join(dir, "devices.json")).text())
-    expect(written.aparelhos.map((item: { portas: { inicio: number } }) => item.portas.inicio)).toEqual([
-      48_000, 48_040,
-    ])
+    const at = await attempt(it)
+    at.hold("bancada-a36-2")
+    at.pool.prepare(key, at.dir)
+    await at.plan(scenarios(18))
+    await at.until(() => at.started.length === 2)
+    expect(at.lines).toContain("j-7qk2m9xa/android/1 has 2 of the 3 devices its scenarios are worth")
+    // The other request ends while the second emulator still boots: the next round grows to the third.
+    it.db.run("UPDATE lease SET state = 'released' WHERE owner = 'j-8bbbbbbb/android/1'")
+    await at.until(() => at.started.length === 3)
+    expect(at.lines).toContain("j-7qk2m9xa/android/1 has 3 of the 3 devices its scenarios are worth")
+    at.release("bancada-a36-2")
+    await at.pool.settled()
+    expect(await at.written()).toEqual(["bancada-a36-1", "bancada-a36-2", "bancada-a36-3"])
     const emulator = deviceCosts["android-emulador"]
-    expect(it.leases()).toEqual([
-      {
-        memMb: 8_192 + emulator.memMb * 2,
-        cpuMilli: 6_000 + emulator.cpuMilli * 2,
-        builds: 1,
-        android: 2,
-        state: "active",
-      },
-      { memMb: emulator.memMb, cpuMilli: emulator.cpuMilli, builds: 0, android: 1, state: "active" },
+    expect(it.leases()).toMatchObject([
+      { memMb: 8_192 + emulator.memMb * 3, cpuMilli: 6_000 + emulator.cpuMilli * 3, android: 3, state: "active" },
+      { state: "released" },
     ])
-    // Nothing more fits: a second ask grows nothing.
-    expect(it.core.grow({ job: "j-7qk2m9xa", part: "android", attempt: 1 }, 3)).toBe(2)
-    await fs.rm(root, { recursive: true, force: true })
+    await fs.rm(at.root, { recursive: true, force: true })
+  })
+
+  test("its devices ready, it runs with what it has: room that frees later is not waited for", async () => {
+    const it = machine()
+    expect(it.offer({ plan: true })).toMatchObject({ accepted: true, devices: 1 })
+    expect(it.offer({ build: false }, { min: 2, proposed: 2 }, "j-8bbbbbbb")).toMatchObject({ devices: 2 })
+    const at = await attempt(it)
+    at.pool.prepare(key, at.dir)
+    await at.plan(scenarios(12))
+    await at.pool.settled()
+    expect(at.lines).toContain("j-7qk2m9xa/android/1 has 1 of the 2 devices its scenarios are worth")
+    expect(await at.written()).toEqual(["bancada-a36-1"])
+    await fs.rm(at.root, { recursive: true, force: true })
+  })
+
+  test("while the queue says a part waits for room here for Android, no attempt grows its Android devices; iOS does not hold it", () => {
+    const it = machine()
+    expect(it.offer({ plan: true })).toMatchObject({ accepted: true, devices: 1 })
+    const attempt = { job: "j-7qk2m9xa", part: "android", attempt: 1 }
+    it.hear({ android: 1, ios: 0 })
+    expect(it.core.grow(attempt, 3)).toBe(1)
+    it.hear({ android: 0, ios: 2 })
+    expect(it.core.grow(attempt, 3)).toBe(3)
+    // Never beyond its test's maximum.
+    expect(it.core.grow(attempt, 5)).toBe(3)
+  })
+
+  test("how many scenarios are worth a device: the machine file's without history; with it, as many as take that many times 30 s there", () => {
+    const it = machine({ scenariosPerDevice: 4 })
+    const perDevice = (job: string) =>
+      it.db.query<{ per_device: number }, [string]>("SELECT per_device FROM attempt WHERE job_id = ?").get(job)!
+        .per_device
+    it.offer({ plan: true })
+    expect(perDevice("j-7qk2m9xa")).toBe(4)
+    // Scenarios of 15 s there: 8 of them take what 4 of 30 s do; of a minute, 2; of 10 minutes, still 1.
+    it.offer({ build: false }, { min: 1, proposed: 1 }, "j-8bbbbbbb", { scenarioMs: 15_000 })
+    expect(perDevice("j-8bbbbbbb")).toBe(8)
+    it.offer({ build: false, devices: { min: 0, max: 0 }, platform: "none" }, { min: 0, proposed: 0 }, "j-9ccccccc", {
+      scenarioMs: 60_000,
+    })
+    expect(perDevice("j-9ccccccc")).toBe(2)
+    it.offer({ build: false, devices: { min: 0, max: 0 }, platform: "none" }, { min: 0, proposed: 0 }, "j-9ddddddd", {
+      scenarioMs: 600_000,
+    })
+    expect(perDevice("j-9ddddddd")).toBe(1)
   })
 
   test("emulators kept running count in the budget: they fit beside what is reserved, or some must stop", () => {

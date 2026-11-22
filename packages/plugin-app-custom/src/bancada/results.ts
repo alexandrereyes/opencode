@@ -10,11 +10,16 @@ import type { BancadaProtocol } from "./protocol.js"
  * failed. The project writes those files with Portuguese keys; everything else is this package's.
  */
 
-/** `planned.json`, written before any device is touched. */
-const Planned = Schema.Struct({
+/**
+ * `planned.json`, written before any device is touched: the scenarios, each with its `grupo` when some must share a
+ * device. How many devices and how long are the Bancada's to decide: an older project's `aparelhos` and `estimativa_s`
+ * are read and ignored.
+ */
+export const Planned = Schema.Struct({
   versao: Schema.Literal(1),
-  aparelhos: Schema.optional(Schema.Int),
-  cenarios: Schema.Array(Schema.Struct({ id: Schema.String, nome: Schema.optional(Schema.String) })),
+  cenarios: Schema.Array(
+    Schema.Struct({ id: Schema.String, nome: Schema.optional(Schema.String), grupo: Schema.optional(Schema.String) }),
+  ),
 })
 /** `summary.json`, written at the end. */
 const Summary = Schema.Struct({

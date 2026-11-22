@@ -44,6 +44,8 @@ export interface Machine {
   readonly hardware?: string
   /** The names of the devices the Bancada makes here start with it (the machine file's `prefixo`). */
   readonly prefix?: string
+  /** How many scenarios are worth one device without history (`cenarios_por_aparelho`). */
+  readonly scenariosPerDevice?: number
 }
 
 /**
@@ -226,6 +228,7 @@ export function createCore(ports: Ports) {
       brake: self.brake ?? defaults.brake,
       ports: self.ports ?? defaults.ports.project,
       docker: self.docker ?? false,
+      scenariosPerDevice: self.scenariosPerDevice ?? defaults.scenariosPerDevice,
     },
     launcher: ports.launcher,
     ...(ports.rediscover ? { missed: ports.rediscover } : {}),
@@ -580,6 +583,7 @@ export function createCore(ports: Ports) {
     if (Result.isFailure(output)) throw new CoreError("invalid", output.failure.message)
     link.okAt = ports.now()
     link.refused = undefined
+    executor.waiting(hub, output.success.waiting)
     messages.acked(hub, output.success.ack)
     // A hub that changed stream (another database) may have forgotten this machine and its requests.
     if (messages.receive(hub, output.success.out, (body) => fromQueue(fromHub(body))) === "changed") {
@@ -610,6 +614,7 @@ export function createCore(ports: Ports) {
     protocol: BancadaProtocol.version,
     out: messages.outgoing<BancadaProtocol.FromHub>(machineID),
     ack: messages.ack(machineID),
+    waiting: queue.waitingFor(machineID),
   })
 
   /** The hub's side of `custom.bancada/sync`: applies what the machine sent and answers with what waits for it. */
@@ -642,6 +647,7 @@ export function createCore(ports: Ports) {
     for (const _ of Array.from({ length: 8 })) {
       const input = call(queuePeer, 0)
       const output = serve(input)
+      executor.waiting(queuePeer, output.waiting)
       messages.acked(queuePeer, output.ack)
       messages.receive(queuePeer, output.out, (body) => fromQueue(fromHub(body)))
       if (input.out.messages.length === 0 && output.out.messages.length === 0) return
@@ -751,7 +757,7 @@ export function createCore(ports: Ports) {
     alert: (id: string, kind: string, text: string) => alerts.raise(id, kind, text),
     /** An attempt uses fewer devices than granted (its plan): the rest goes back. */
     shrink: executor.shrink,
-    /** An attempt whose plan can use more devices than granted: as many more as fit now. Its count after. */
+    /** An attempt whose scenarios are worth more devices than granted: as many more as fit now. Its count after. */
     grow: executor.grow,
     /** Whether running devices nobody uses still fit in the budget. */
     warmFits: executor.warmFits,

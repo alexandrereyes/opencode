@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite"
 import { BancadaProtocol } from "../protocol.js"
 import type { Alerts } from "./alerts.js"
 import { join } from "../results.js"
-import { duration, defaults as estimates, wait, type Sample } from "./estimate.js"
+import { duration, defaults as estimates, perScenario, wait, type Sample } from "./estimate.js"
 import { needs, reserveAfter, schedule as choose, seat, type MachineView, type QueuedPart } from "./scheduler.js"
 
 type PartRow = {
@@ -160,6 +160,8 @@ export function makeCoordinator(input: {
   const scenarios = db.query<{ last: string }, [string, string, string]>(
     "SELECT last FROM hub_scenario WHERE project = ? AND test = ? AND scenario_id = ?",
   )
+  /** Parts waiting for room on each machine, by the kind of device they take: as the last `schedule` found them. */
+  const waitingOn = new Map<string, { android: number; ios: number }>()
   const durations = db.query<{ machine_id: string; samples: string }, [string, string]>(
     "SELECT machine_id, samples FROM hub_duration WHERE project = ? AND test = ?",
   )
@@ -560,7 +562,8 @@ export function makeCoordinator(input: {
       const outcome = message.outcome ?? lostOutcome("a execução terminou sem resultado")
       keep(row, from, message)
       // A failed build says nothing about how long the test takes.
-      if (message.state === "concluido" && outcome.verdict !== "compilacao") sample(row, outcome)
+      if (message.state === "concluido" && outcome.verdict !== "compilacao")
+        sample(row, outcome, message.devices?.length || undefined)
       // A new attempt that ran only some scenarios, adopted by a hub that lost the earlier one's result: it never
       // approves the part alone, nor runs again (`docs/bancada.md`, "When a side forgot").
       const forgotten =
@@ -824,8 +827,11 @@ export function makeCoordinator(input: {
     update(row, { evidence: JSON.stringify([...(JSON.parse(row.evidence) as BancadaProtocol.Evidence[]), entry]) })
   }
 
-  /** A concluded attempt's times feed the estimates of that project's test on that machine (the last 10). */
-  const sample = (row: PartRow, outcome: BancadaProtocol.Outcome) => {
+  /**
+   * A concluded attempt's times feed the estimates of that project's test on that machine (the last 10), with the
+   * devices it ran on (as its end says; what it was granted at admission before).
+   */
+  const sample = (row: PartRow, outcome: BancadaProtocol.Outcome, devices?: number) => {
     const owner = job.get(row.job_id)
     if (!owner || !row.machine_id || row.started_at === null) return
     const project = (JSON.parse(owner.code) as BancadaProtocol.Code).project
@@ -833,7 +839,7 @@ export function makeCoordinator(input: {
     const next: Sample = {
       buildMs: Math.max(0, built - row.started_at),
       runMs: Math.max(0, input.now() - built),
-      devices: row.devices_granted ?? 0,
+      devices: devices ?? row.devices_granted ?? 0,
       ...(outcome.planned.length > 0 ? { scenarios: outcome.planned.length } : {}),
     }
     const known = durations.all(project, row.part).find((item) => item.machine_id === row.machine_id)
@@ -1136,6 +1142,7 @@ export function makeCoordinator(input: {
   const schedule = () => {
     const now = input.now()
     const all = machines.all()
+    waitingOn.clear()
     // A part of a request this hub forgot waits for the machines to list what they run (`adopt`); one that needs the
     // origin's bundle, for the origin to be `ok`.
     const originOf = (row: PartRow) => machine.get(job.get(row.job_id)?.origin_machine ?? "")
@@ -1235,17 +1242,12 @@ export function makeCoordinator(input: {
       }
     })
     const byPart = new Map(items.map((item) => [`${item.part.job}/${item.part.part}`, item]))
-    const estimateOf = (item: QueuedPart, at: MachineView) => {
+    /** The history of a part's test on a machine and on the others. */
+    const historyOf = (item: QueuedPart, at: MachineView) => {
       const found = byPart.get(`${item.job}/${item.part}`)!
       const project = (JSON.parse(found.owner.code) as BancadaProtocol.Code).project
       const samples = durations.all(project, item.part)
-      const previous: BancadaProtocol.Outcome | undefined = found.row.previous
-        ? JSON.parse(found.row.previous)
-        : undefined
-      const planned = found.row.only_scenarios
-        ? (JSON.parse(found.row.only_scenarios) as string[]).length
-        : previous?.planned.length
-      return duration({
+      return {
         here: samples
           .filter((row) => row.machine_id === at.machineID)
           .flatMap((row) => JSON.parse(row.samples) as Sample[]),
@@ -1253,6 +1255,18 @@ export function makeCoordinator(input: {
           .filter((row) => row.machine_id !== at.machineID)
           .flatMap((row) => JSON.parse(row.samples) as Sample[]),
         slow: all.find((row) => row.machine_id === at.machineID)?.speed === "lento",
+      }
+    }
+    const estimateOf = (item: QueuedPart, at: MachineView) => {
+      const found = byPart.get(`${item.job}/${item.part}`)!
+      const previous: BancadaProtocol.Outcome | undefined = found.row.previous
+        ? JSON.parse(found.row.previous)
+        : undefined
+      const planned = found.row.only_scenarios
+        ? (JSON.parse(found.row.only_scenarios) as string[]).length
+        : previous?.planned.length
+      return duration({
+        ...historyOf(item, at),
         devices: Math.max(1, item.spec.devices.min),
         ...(planned ? { planned } : {}),
         // A sibling part of the same request is there already: its build serves this one.
@@ -1308,6 +1322,7 @@ export function makeCoordinator(input: {
       const at = views.find((view) => view.machineID === offer.machineID)!
       const attempt = item.row.attempt_n + 1
       const only: string[] | undefined = item.row.only_scenarios ? JSON.parse(item.row.only_scenarios) : undefined
+      const scenarioMs = perScenario(historyOf(item.part, at))
       const seq = input.send(offer.machineID, {
         type: "offer",
         job: offer.job,
@@ -1318,6 +1333,7 @@ export function makeCoordinator(input: {
         code: JSON.parse(item.owner.code),
         devices: { min: item.part.spec.devices.min, proposed: offer.proposed },
         ...(only ? { only } : {}),
+        ...(scenarioMs === undefined ? {} : { scenarioMs }),
       })
       item.part.spec.exclusive.forEach((name) =>
         db.run("INSERT OR REPLACE INTO hub_lock (name, job_id, part, since) VALUES (?, ?, ?, ?)", [
@@ -1354,6 +1370,11 @@ export function makeCoordinator(input: {
     }
     for (const waiting of decision.waiting) {
       const item = byPart.get(`${waiting.job}/${waiting.part}`)!
+      const platform = seat(item.part.spec)
+      if (waiting.machineID && platform !== "none") {
+        const counts = waitingOn.get(waiting.machineID) ?? { android: 0, ios: 0 }
+        waitingOn.set(waiting.machineID, { ...counts, [platform]: counts[platform] + 1 })
+      }
       db.run("UPDATE hub_part SET waiting = ? WHERE job_id = ? AND part = ?", [
         JSON.stringify({
           reason: waiting.reason,
@@ -1376,7 +1397,15 @@ export function makeCoordinator(input: {
     }
   }
 
-  return { apply, seen, schedule, watch, taken }
+  return {
+    apply,
+    seen,
+    schedule,
+    watch,
+    taken,
+    /** Parts of the queue that wait for room on a machine, by the kind of device they take (`schedule`). */
+    waitingFor: (machineID: string) => waitingOn.get(machineID) ?? { android: 0, ios: 0 },
+  }
 }
 
 export type Coordinator = ReturnType<typeof makeCoordinator>

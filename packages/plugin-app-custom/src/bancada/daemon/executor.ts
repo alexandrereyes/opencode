@@ -101,7 +101,12 @@ export type Limits = {
   readonly ports: Range
   /** Executions in containers: an Android device is an emulator in a container. */
   readonly docker: boolean
+  /** How many scenarios are worth one device without history (`cenarios_por_aparelho`). */
+  readonly scenariosPerDevice: number
 }
+
+/** The scenario the machine file's `cenarios_por_aparelho` counts: with history, a device takes that many times it. */
+export const referenceScenarioMs = 30_000
 
 type AttemptRow = {
   readonly job_id: string
@@ -111,8 +116,8 @@ type AttemptRow = {
   readonly code: string
   readonly spec: string
   readonly devices: number
-  /** The most it may grow to after its plan (what the hub proposed); null when it was accepted before that. */
-  readonly devices_cap: number | null
+  /** How many scenarios are worth one of its devices (`devices/pool.ts`); null when accepted before r27. */
+  readonly per_device: number | null
   readonly only_scenarios: string | null
   readonly state: string
   readonly lease_id: string
@@ -503,7 +508,7 @@ export function makeExecutor(input: {
       ]),
     )
     db.run(
-      "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, devices_cap, only_scenarios, state, lease_id, phone_hold, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aceito', ?, ?, ?)",
+      "INSERT INTO attempt (job_id, part, n, origin, code, spec, devices, per_device, only_scenarios, state, lease_id, phone_hold, accepted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aceito', ?, ?, ?)",
       [
         message.job,
         message.part,
@@ -512,7 +517,10 @@ export function makeExecutor(input: {
         JSON.stringify(message.code),
         JSON.stringify(message.spec),
         devices,
-        Math.max(devices, message.devices.proposed),
+        // Without history, the machine file's; with it, as many as take that many reference scenarios here.
+        message.scenarioMs
+          ? Math.max(1, Math.round((limits.scenariosPerDevice * referenceScenarioMs) / message.scenarioMs))
+          : limits.scenariosPerDevice,
         message.only ? JSON.stringify(message.only) : null,
         lease,
         phoneHold ?? null,
@@ -789,6 +797,8 @@ export function makeExecutor(input: {
         outcome: final,
         ...(row.only_scenarios ? { partial: true } : {}),
         ...(kept.length ? { evidence: kept.map(({ file: _, ...declared }) => declared) } : {}),
+        // The devices it ran on, for the history (it may have grown after its admission).
+        ...((devices) => (devices.length ? { devices } : {}))(usedDevices.all(row.lease_id).map(usedDevice)),
       })
     })()
   }
@@ -854,10 +864,14 @@ export function makeExecutor(input: {
       ])
     })()
 
+  /** What each queue this machine reaches (the hub, its own) said waits for room here, at its last answer. */
+  const queued = new Map<string, { readonly android: number; readonly ios: number }>()
+
   /**
-   * An attempt whose plan can use more devices than it was granted (`devices/pool.ts`): as many more as fit in the
-   * budget now, up to what the hub proposed for it, each with its share of memory and CPU, of what the test takes
-   * beside them, and a block of ports. Its count of devices after; none more with the brake closed.
+   * An attempt whose scenarios are worth more devices than it was granted (`devices/pool.ts`): as many more as fit in
+   * the budget now, up to its test's maximum, each with its share of memory and CPU, of what the test takes beside
+   * them, and a block of ports. Its count of devices after; none more with the brake closed, nor while a part of the
+   * queue waits for room on this machine for the same kind of device (it goes first).
    */
   const grow = (key: { job: string; part: string; attempt: number }, wanted: number) =>
     db.transaction(() => {
@@ -865,8 +879,9 @@ export function makeExecutor(input: {
       if (!row) return 0
       const spec: BancadaProtocol.PartSpec = JSON.parse(row.spec)
       const platform = seat(spec)
-      const most = Math.min(wanted, row.devices_cap ?? row.devices, spec.devices.max)
+      const most = Math.min(wanted, spec.devices.max)
       if (platform === "none" || most <= row.devices || watch.brake.closed) return row.devices
+      if ([...queued.values()].some((counts) => counts[platform] > 0)) return row.devices
       if (!["aceito", "compilando", "rodando"].includes(row.state)) return row.devices
       const unit = device(platform, spec.device)
       const extra = extraOf((JSON.parse(row.code) as BancadaProtocol.Code).project, spec)
@@ -921,6 +936,9 @@ export function makeExecutor(input: {
     releaseLease,
     shrink,
     grow,
+    /** A queue's answer said what waits for room here (absent: a hub of an older release, which says nothing). */
+    waiting: (peer: string, counts: { readonly android: number; readonly ios: number } | undefined) =>
+      void (counts ? queued.set(peer, counts) : queued.delete(peer)),
     warmFits,
     tick,
     free,

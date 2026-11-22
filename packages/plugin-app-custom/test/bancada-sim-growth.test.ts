@@ -55,7 +55,7 @@ function world(seed: number) {
 const ask = (sim: ReturnType<typeof world>) =>
   sim.submit("host-6", { id: "j-tsvq4me7", sessionID: "ses_a", rootSessionID: "ses_a", code, parts })
 const granted = (sim: ReturnType<typeof world>) =>
-  sim.machines.get("Mac")!.db.query("SELECT part, devices, devices_cap AS cap FROM attempt ORDER BY part").all()
+  sim.machines.get("Mac")!.db.query("SELECT part, devices, per_device AS perDevice FROM attempt ORDER BY part").all()
 
 describe("simulation: devices after the plan", () => {
   test("j-tsvq4me7: the Mac takes the three parts at once with one build and each one's minimum; the plan uses 1 device each, nothing grows", async () => {
@@ -64,12 +64,12 @@ describe("simulation: devices after the plan", () => {
     await sim.advance(1_000)
     ask(sim)
     await sim.advance(3_000)
-    // Accepted at once, none refused: each reserves its minimum, the hub's proposal is how far it may grow.
+    // Accepted at once, none refused: each reserves its minimum; without history, 6 scenarios are worth a device.
     expect(sim.facts.refusals.size).toBe(0)
     expect(granted(sim)).toEqual([
-      { part: "android", devices: 1, cap: 2 },
-      { part: "android-servidor", devices: 1, cap: 2 },
-      { part: "ios", devices: 1, cap: 4 },
+      { part: "android", devices: 1, perDevice: 6 },
+      { part: "android-servidor", devices: 1, perDevice: 6 },
+      { part: "ios", devices: 1, perDevice: 6 },
     ])
     expect(
       sim.machines.get("Mac")!.db.query("SELECT SUM(builds) AS builds FROM lease WHERE state = 'active'").get(),
@@ -90,19 +90,19 @@ describe("simulation: devices after the plan", () => {
     )
   })
 
-  test("the three plans ask for 4 devices in the same round: each grows as far as the budget allows, up to the hub's proposal, never beyond", async () => {
+  test("the three parts are worth 4 devices each and say so in the same round: they grow while the budget allows, never beyond", async () => {
     const sim = world(23)
     parts.forEach((part) => sim.script("j-tsvq4me7", part.part, run(4)))
     await sim.advance(1_000)
     ask(sim)
     await sim.advance(10 * 60_000)
     sim.settle()
-    // After the build 7 cores are free: Android grows to its proposal (2 cores), Android + servidor too (3 cores, its
-    // containers count), iOS gets the last 2 cores' worth (one simulator more), not the 4 it was proposed.
+    // After the build 7 cores are free: Android takes 3 more emulators (6 cores), beyond the 2 the hub proposed; what
+    // is left fits no other device of the others (Android + servidor's containers count).
     expect(sim.facts.grown.map((item) => [item.attempt, item.wanted, item.devices])).toEqual([
-      ["j-tsvq4me7/android/1", 4, 2],
-      ["j-tsvq4me7/android-servidor/1", 4, 2],
-      ["j-tsvq4me7/ios/1", 4, 2],
+      ["j-tsvq4me7/android/1", 4, 4],
+      ["j-tsvq4me7/android-servidor/1", 4, 1],
+      ["j-tsvq4me7/ios/1", 4, 1],
     ])
     // The world checks every step that no machine reserved beyond its budget; all ran on the Mac and passed.
     expect(sim.facts.peak.get("Mac")).toBe(6)
@@ -132,4 +132,77 @@ describe("simulation: devices after the plan", () => {
     },
     30_000,
   )
+
+  /** The Mac as it is now (`cpu = 20`) with the hub on a machine without devices; one build at a time. */
+  function busy(seed: number, busyMs = 120_000) {
+    const sim = createWorld({ seed })
+    sim.addMachine({ name: "host-6", hub: true, platform: "linux" })
+    sim.addMachine({
+      name: "Mac",
+      capabilities: { android: {} },
+      capacity: { memMb: 96 * 1024, cpuMilli: 20_000, builds: 1, android: 6, ios: 0 },
+    })
+    // Another request holds 5 emulators (2 minutes by default): the hub proposes the next one a single device.
+    sim.script("j-5emzzz01", "android", { ...run(5), buildMs: 0, runMs: busyMs, useful: undefined })
+    sim.submit("host-6", {
+      id: "j-5emzzz01",
+      sessionID: "ses_b",
+      rootSessionID: "ses_b",
+      code,
+      parts: [spec("android", { devices: { min: 5, max: 5 }, build: false, plan: false })],
+    })
+    return sim
+  }
+
+  test("j-3a1pc4x6: offered one device while the Mac was busy, it grows to what its scenarios are worth once the other request ended during its build", async () => {
+    const sim = busy(31)
+    sim.script("j-3a1pc4x6", "android", { ...run(4), buildMs: 180_000 })
+    await sim.advance(5_000)
+    sim.submit("host-6", {
+      id: "j-3a1pc4x6",
+      sessionID: "ses_a",
+      rootSessionID: "ses_a",
+      code,
+      parts: [spec("android")],
+    })
+    await sim.advance(5_000)
+    expect(
+      sim.machines
+        .get("host-6")!
+        .db.query("SELECT devices_granted AS granted FROM hub_part WHERE job_id = 'j-3a1pc4x6'")
+        .get(),
+    ).toEqual({ granted: 1 })
+    await sim.advance(10 * 60_000)
+    sim.settle()
+    expect(sim.facts.grown).toEqual([{ machine: "Mac", attempt: "j-3a1pc4x6/android/1", wanted: 4, devices: 4 }])
+    expect(sim.facts.delivered.get("j-3a1pc4x6")).toMatchObject([{ state: "concluido", machine: { name: "Mac" } }])
+  })
+
+  test("a part of the queue waiting for room on the Mac for Android: the part whose plan spoke does not grow, and it runs with what it has", async () => {
+    const sim = busy(32, 10 * 60_000)
+    sim.script("j-3a1pc4x6", "android", { ...run(4), buildMs: 180_000 })
+    sim.script("j-espera01", "android", { ...run(1), useful: undefined })
+    await sim.advance(5_000)
+    sim.submit("host-6", {
+      id: "j-3a1pc4x6",
+      sessionID: "ses_a",
+      rootSessionID: "ses_a",
+      code,
+      parts: [spec("android")],
+    })
+    await sim.advance(5_000)
+    // Another request comes while it builds, needing a build and 2 emulators: it waits for room on the Mac, where
+    // 3 more emulators would fit once the build ended.
+    sim.submit("host-6", {
+      id: "j-espera01",
+      sessionID: "ses_c",
+      rootSessionID: "ses_c",
+      code,
+      parts: [spec("android", { devices: { min: 2, max: 2 }, plan: false })],
+    })
+    await sim.advance(20 * 60_000)
+    sim.settle()
+    expect(sim.facts.grown).toEqual([{ machine: "Mac", attempt: "j-3a1pc4x6/android/1", wanted: 4, devices: 1 }])
+    expect(sim.facts.delivered.get("j-espera01")).toMatchObject([{ state: "concluido", machine: { name: "Mac" } }])
+  })
 })

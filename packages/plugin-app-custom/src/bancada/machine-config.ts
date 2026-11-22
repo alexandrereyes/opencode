@@ -43,6 +43,11 @@ export type MachineConfig = {
     readonly builds: number
     readonly maxAndroid: number
     readonly maxIos: number
+    /**
+     * How many scenarios are worth one device without history (`cenarios_por_aparelho`); with history, as many as
+     * take that many times 30 s there.
+     */
+    readonly scenariosPerDevice: number
     /** While the owner used the Mac in the last `idleMs`, new admissions get `factor` of the budget. */
     readonly presence: { readonly idleMs: number; readonly factor: number }
   }
@@ -113,6 +118,7 @@ const gb = 1024
 /** The defaults that do not depend on the machine (the rest come from its memory and cores). */
 export const defaults = {
   presence: { idleMs: 5 * minute, factor: 0.6 },
+  scenariosPerDevice: 6,
   brake: {
     memFreeMinPct: 20,
     swapGrowthMb: 256,
@@ -235,7 +241,7 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
   const budgetRaw = section(
     raw,
     "orcamento",
-    ["memoria_gb", "cpu", "compilacoes", "max_android", "max_ios", "presenca"],
+    ["memoria_gb", "cpu", "compilacoes", "max_android", "max_ios", "cenarios_por_aparelho", "presenca"],
     problems,
   )
   const presenceRaw = section(budgetRaw, "presenca", ["ocioso_min", "fator"], problems, "orcamento.")
@@ -257,6 +263,12 @@ export function parseMachineConfig(text: string | undefined, host: Host): Parsed
       "orcamento.max_ios",
       { min: 0, integer: true },
       Math.min(worthRunning.ios, Math.floor(host.cores * 0.4)),
+    ),
+    scenariosPerDevice: read.number(
+      budgetRaw.cenarios_por_aparelho,
+      "orcamento.cenarios_por_aparelho",
+      { min: 1, integer: true },
+      defaults.scenariosPerDevice,
     ),
     presence: {
       idleMs:

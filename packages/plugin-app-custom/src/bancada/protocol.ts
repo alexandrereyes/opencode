@@ -410,6 +410,11 @@ export const Offer = Schema.Struct({
   devices: Schema.Struct({ min: Count, proposed: Count }),
   /** A new attempt runs only these scenarios (the ones without a result). */
   only: optional(Schema.Array(Schema.String)),
+  /**
+   * How long one scenario of this test took on one device of that machine, from its history (`hub_duration`): how many
+   * scenarios are worth a device there (`docs/bancada.md`, "Devices").
+   */
+  scenarioMs: optional(Schema.Number),
 })
 export const AttemptCancel = Schema.Struct({
   type: Schema.Literal("attempt.cancel"),
@@ -587,7 +592,13 @@ const syncInput = <S extends Schema.Top>(message: S) =>
     waitMs: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 25_000 })),
   })
 const syncOutput = <S extends Schema.Top>(message: S) =>
-  Schema.Struct({ protocol: Schema.Number, out: stream(message), ack: Ack })
+  Schema.Struct({
+    protocol: Schema.Number,
+    out: stream(message),
+    ack: Ack,
+    /** Parts of the queue waiting for this machine, by the kind of device they take: none of it grows meanwhile. */
+    waiting: optional(Schema.Struct({ android: Count, ios: Count })),
+  })
 
 export const SyncInput = syncInput(FromMachine).annotate({ identifier: "Bancada.SyncInput" })
 export type SyncInput = typeof SyncInput.Type

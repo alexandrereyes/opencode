@@ -343,8 +343,10 @@ export const steps: ReadonlyArray<ReadonlyArray<string>> = [
   ],
   // When an executor first asked for a request's code: past `limits.codeWaitMs` it gives up (`transfers.ts`).
   ["ALTER TABLE code_in ADD COLUMN first_asked_at INTEGER"],
-  // The most devices an attempt with a plan may grow to: what the hub proposed for it (`executor.ts`, `grow`).
+  // What the hub proposed for an attempt with a plan (r26, unused since r27: it grows to what its scenarios are worth).
   ["ALTER TABLE attempt ADD COLUMN devices_cap INTEGER"],
+  // How many scenarios are worth one of its devices, decided at its admission (`devices/pool.ts`, `usefulDevices`).
+  ["ALTER TABLE attempt ADD COLUMN per_device INTEGER"],
 ]
 
 /** A database written by a newer release: opening it could corrupt it, so this release stays unavailable. */

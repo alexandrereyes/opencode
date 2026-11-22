@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { duration, wait, type Sample } from "../src/bancada/daemon/estimate"
+import { duration, perScenario, wait, type Sample } from "../src/bancada/daemon/estimate"
 
 const minute = 60_000
 const sample = (runMs: number, buildMs = minute, devices = 1, scenarios?: number): Sample => ({
@@ -36,6 +36,14 @@ describe("estimate", () => {
     expect(duration({ here: [sample(2 * minute, 0)], elsewhere, slow: true, devices: 1, built: false })).toBe(
       2 * minute,
     )
+  })
+
+  test("per scenario: what one scenario took on one device there, else elsewhere (× 3 on a slow machine); nothing without counted history", () => {
+    // 20 scenarios in 4 minutes on 4 devices: 48 s each; 10 in 5 minutes on 1: 30 s; the median of 48 s and 30 s.
+    const here = [sample(4 * minute, 0, 4, 20), sample(5 * minute, 0, 1, 10), sample(9 * minute, 0)]
+    expect(perScenario({ here, elsewhere: [], slow: false })).toBe(39_000)
+    expect(perScenario({ here: [], elsewhere: here, slow: true })).toBe(117_000)
+    expect(perScenario({ here: [sample(9 * minute, 0)], elsewhere: [], slow: false })).toBeUndefined()
   })
 
   test("wait: none when it fits now; else until enough of what runs ends (the queue), or room (the budget)", () => {

@@ -286,6 +286,7 @@ export async function main() {
         docker: config.android.docker !== undefined,
         phones: offering ? config.phones : [],
         prefix: config.prefix,
+        scenariosPerDevice: config.budget.scenariosPerDevice,
         ...(hardware ? { hardware } : {}),
       },
       timings: {

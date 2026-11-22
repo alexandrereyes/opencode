@@ -2,12 +2,15 @@ import type { Database } from "bun:sqlite"
 import fs from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
-import type { Range } from "../../machine-config.js"
+import { Option, Schema } from "effect"
+import { defaults, type Phone, type Range } from "../../machine-config.js"
 import type { BancadaProtocol } from "../../protocol.js"
+import { BancadaResults } from "../../results.js"
 import type { Launcher, Placed } from "../executor.js"
-import type { Phone } from "../../machine-config.js"
 import { seat } from "../scheduler.js"
 import { deviceFor, type DeviceKind, type Profile } from "./types.js"
+
+const decodePlanned = Schema.decodeUnknownOption(BancadaResults.Planned)
 
 /**
  * The devices of this machine's attempts (`docs/bancada.md`, "Devices"): chosen or created for a part when its attempt
@@ -108,7 +111,7 @@ export function makeDevicePool(input: {
   readonly shrink?: (key: Placed, devices: number) => void
   /** Grants an attempt more of the devices its plan can use, as many as fit now: its count after (`executor.ts`). */
   readonly grow?: (key: Placed, devices: number) => number
-  /** How often the pool looks for a part's plan while its first devices start. */
+  /** How often the pool looks for a part's plan, and for room for the devices it lacks while the others start. */
   readonly planPollMs?: number
   /** Whether discovery ran once: before that this machine's drivers are not known (right after a start). */
   readonly discovered?: () => boolean
@@ -191,14 +194,14 @@ export function makeDevicePool(input: {
         {
           spec: string
           devices: number
-          devices_cap: number | null
+          per_device: number | null
           lease_id: string
           phone_hold: string | null
           only_scenarios: string | null
         },
         [string, string, number]
       >(
-        "SELECT spec, devices, devices_cap, lease_id, phone_hold, only_scenarios FROM attempt WHERE job_id = ? AND part = ? AND n = ?",
+        "SELECT spec, devices, per_device, lease_id, phone_hold, only_scenarios FROM attempt WHERE job_id = ? AND part = ? AND n = ?",
       )
       .get(key.job, key.part, key.attempt)
     if (!row || (row.devices === 0 && !row.phone_hold)) return
@@ -237,35 +240,45 @@ export function makeDevicePool(input: {
         set(id, { running: JSON.stringify(ready.run) })
         return ready.view
       })
-    // With a plan, its minimum starts while the part builds, and then as many as the plan can use (`planned.json`):
-    // what it was granted beyond that goes back before it starts, what it lacks is asked for (`grow`), up to what the
-    // hub proposed, and it goes on with what it gets.
+    // With a plan, its minimum starts while the part builds; once the plan said its scenarios, as many as they are
+    // worth (`usefulDevices`): what it was granted beyond goes back unstarted, what it lacks is asked for (`grow`) every
+    // round while the devices it has still start, and it runs with what it has once they are all ready.
     // Running devices nobody needs give way to this part's reservation, when both do not fit.
     await trim()
     const plan = await planned(dir)
     const early = plan ? Math.min(row.devices, Math.max(1, spec.devices.min)) : row.devices
-    const first = take(choice, chosen.kind, chosen.profile, early, attemptOf(key), dir)
-    const starting = start(first)
-    const most = Math.min(spec.devices.max, Math.max(row.devices, row.devices_cap ?? row.devices))
-    const useful =
-      plan && (early < row.devices || row.devices < most)
-        ? await usefulDevices(key, dir, row.only_scenarios)
-        : undefined
-    const wanted = useful === undefined ? early : Math.min(most, Math.max(early, useful))
-    const granted = wanted > row.devices ? Math.max(row.devices, input.grow?.(key, wanted) ?? row.devices) : row.devices
-    if (wanted > row.devices) {
-      input.log(`${attemptOf(key)} grows to ${granted} of the ${wanted} devices its plan can use`)
+    const ids = take(choice, chosen.kind, chosen.profile, early, attemptOf(key), dir)
+    const starts = start(ids)
+    const useful = plan ? await usefulDevices(key, dir, row, spec.devices.max) : undefined
+    const wanted = useful === undefined ? early : Math.max(early, useful)
+    if (wanted < row.devices) {
+      input.shrink?.(key, wanted)
+      input.log(`${attemptOf(key)} uses ${wanted} of the ${row.devices} devices granted (its plan)`)
+    }
+    const count = { granted: Math.min(wanted, row.devices), started: early, asked: false }
+    for (;;) {
+      const granted =
+        count.granted < wanted && input.grow ? Math.max(count.granted, input.grow(key, wanted)) : count.granted
+      if (granted > count.granted || (!count.asked && granted < wanted)) {
+        count.asked = true
+        input.log(`${attemptOf(key)} has ${granted} of the ${wanted} devices its scenarios are worth`)
+      }
       // The devices it was granted now may be some of those running nobody uses: they stay for it.
-      await trim()
+      if (granted > count.granted) await trim()
+      count.granted = granted
+      if (count.granted > count.started) {
+        const more = take(choice, chosen.kind, chosen.profile, count.granted - count.started, attemptOf(key), dir)
+        ids.push(...more)
+        starts.push(...start(more))
+        count.started = count.granted
+      }
+      const settled = await Promise.race([
+        Promise.allSettled(starts).then(() => true),
+        Bun.sleep(input.planPollMs ?? 1_000).then(() => false),
+      ])
+      if (settled) break
     }
-    const total = Math.min(wanted, granted)
-    if (total < row.devices) {
-      input.shrink?.(key, total)
-      input.log(`${attemptOf(key)} uses ${total} of the ${row.devices} devices granted (its plan)`)
-    }
-    const more = total > early ? take(choice, chosen.kind, chosen.profile, total - early, attemptOf(key), dir) : []
-    const ids = [...first, ...more]
-    const started = await Promise.allSettled([...starting, ...start(more)])
+    const started = await Promise.allSettled(starts)
     const failed = started.flatMap((item) => (item.status === "rejected" ? [String(item.reason)] : []))
     if (failed.length > 0) {
       // What did start goes back with the attempt (`release`); the part ends with the reason.
@@ -324,31 +337,42 @@ export function makeDevicePool(input: {
   }
 
   /**
-   * How many devices a part's plan can use, once it said (`planned.json`: `aparelhos`, else one per scenario; a run
-   * again of some scenarios, at most one per scenario): undefined when the part ended or its attempt is gone first,
-   * all it was granted when it reached its run without a plan's word.
+   * How many devices a part's scenarios are worth, once its plan said them (`planned.json`; a run again of some
+   * scenarios, only those): never more than its groups (scenarios of one `grupo` share a device, one without a group is
+   * a group of its own), one per `per_device` scenarios (decided at its admission), at most its test's maximum.
+   * Undefined when the part ended or its attempt is gone first; what it was granted when it reached its run without a
+   * plan's word.
    */
-  const usefulDevices = async (key: Placed, dir: string, only: string | null) => {
+  const usefulDevices = async (
+    key: Placed,
+    dir: string,
+    row: { readonly devices: number; readonly per_device: number | null; readonly only_scenarios: string | null },
+    max: number,
+  ) => {
     const group = path.dirname(path.dirname(dir))
     const live = db.query<{ state: string }, [string, string, number]>(
       "SELECT state FROM attempt WHERE job_id = ? AND part = ? AND n = ? AND state IN ('aceito', 'compilando', 'rodando')",
     )
+    const asked = row.only_scenarios ? new Set(JSON.parse(row.only_scenarios) as string[]) : undefined
     for (;;) {
-      const plan = await Bun.file(path.join(dir, "out", "planned.json"))
-        .json()
-        .catch(() => undefined)
-      const scenarios: unknown = plan?.cenarios
-      if (Array.isArray(scenarios)) {
-        const asked = only ? (JSON.parse(only) as unknown[]).length : scenarios.length
-        const said = Number.isInteger(plan.aparelhos) && plan.aparelhos > 0 ? (plan.aparelhos as number) : Infinity
-        return Math.min(said, scenarios.length, asked)
+      const plan = Option.getOrUndefined(
+        decodePlanned(
+          await Bun.file(path.join(dir, "out", "planned.json"))
+            .json()
+            .catch(() => undefined),
+        ),
+      )
+      if (plan) {
+        const scenarios = plan.cenarios.filter((scenario) => !asked || asked.has(scenario.id))
+        const groups = new Set(scenarios.map((scenario) => scenario.grupo ?? `\u0000${scenario.id}`)).size
+        return Math.min(max, groups, Math.ceil(scenarios.length / (row.per_device ?? defaults.scenariosPerDevice)))
       }
       if (await Bun.file(path.join(dir, "status.json")).exists()) return undefined
       if (!live.get(key.job, key.part, key.attempt)) return undefined
       const events = await Bun.file(path.join(group, "events.jsonl"))
         .text()
         .catch(() => "")
-      if (events.includes('"devices.wait"')) return Infinity
+      if (events.includes('"devices.wait"')) return row.devices
       await Bun.sleep(input.planPollMs ?? 500)
     }
   }

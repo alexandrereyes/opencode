@@ -25,8 +25,12 @@ simulator.
 `plan`, `run`, `args`; `caches`; `fora`. The commands get `BANCADA_JOB`, `BANCADA_TESTE`, `BANCADA_TENTATIVA`,
 `BANCADA_COMMIT`, `BANCADA_OUT`, and the `run` gets `BANCADA_DEVICES` (the `devices.json`, one device per line) and,
 on a new attempt, `BANCADA_APENAS`; every command gets `BANCADA_DOCKER_LABEL`, which what it starts in Docker carries
-(the Bancada removes those containers, networks and volumes once the attempt's commands ended). The `run` writes `planned.json` before touching a device and `summary.json` at the
-end; nothing is approved without both. The example project (`test/fixture/bancada-exemplo/`) is the reference: its
+(the Bancada removes those containers, networks and volumes once the attempt's commands ended). The `plan` (without
+one, the `run`) writes `planned.json` before touching a device, and the `run` writes `summary.json` at the end; nothing
+is approved without both. `planned.json` is only the scenarios, `{ "versao": 1, "cenarios": [{ "id", "nome"?,
+"grupo"? }] }`: scenarios of one `grupo` must share a device (the `run` shares the scenarios out among the devices it
+gets). How many devices and how long it takes are the Bancada's to decide; an older project's `aparelhos` and
+`estimativa_s` are read and ignored. The example project (`test/fixture/bancada-exemplo/`) is the reference: its
 `run` proves each device arrived ready.
 
 ## Execution
@@ -51,11 +55,16 @@ process finds the runner dead there (infrastructure: the part runs once more, on
   booting; it counts in the budget, so the oldest stops first when what is reserved needs the room. Then the
   container is removed; the AVD volume stays.
 - A part with a `plan` is accepted reserving its build and its minimum of devices (at least one), which start while it
-  builds. Once `planned.json` says how many it can use (`aparelhos`, else one per scenario), it asks for the ones it
-  lacks: the executor grants as many as fit in the budget then (memory, CPU, what the test takes beside each device,
-  ceilings, ports; none with the brake closed), up to what the hub proposed for it, and the part goes on with what it
-  got. Beyond what it can use goes back unstarted, so two scenarios never get four emulators. Without a plan, every
-  device granted at admission starts. Each device, and a phone, takes its block of ports as it starts.
+  builds. Once `planned.json` says its scenarios (on a new attempt, only those it runs), the Bancada decides how many
+  devices they are worth: `min(the test's max, groups, ceil(scenarios / k))`, a scenario without `grupo` being a
+  group of its own. `k` is the machine file's `orcamento.cenarios_por_aparelho` (6); with history of that test on
+  that machine (`hub_duration`, else the others', × 3 on a slow one), as many scenarios as take `k` × 30 s there on
+  one device. What it was granted beyond goes back unstarted; what it lacks it asks for every round while its devices
+  start: the executor grants as many as fit in the budget then (memory, CPU, what the test takes beside each device,
+  ceilings, ports), none with the brake closed nor while a part of the queue waits for room on that machine for the
+  same kind of device (the hub says so in every `sync` answer, `waiting`). Once the devices it has are ready it runs
+  with them. Without a plan, every device granted at admission starts. Each device, and a phone, takes its block of
+  ports as it starts. The end of an attempt tells the hub the devices it ran on, for the history.
 - Only devices of the `device` table, named with the machine's prefix, are ever stopped. A device dead, or mute for
   60 s, during a run fell: the scenarios it lost run again once elsewhere; two falls in a row put it 30 min aside.
   Emulators starting together get their console ports one at a time, each held in its row from the start, and one
