@@ -39,8 +39,8 @@ export interface Context {
   readonly event: EventDomain
   readonly experimental: {
     readonly terminal: Pick<ExperimentalApi<unknown>["persistentPty"], "read">
-    /** Stateless generation with a model and a prompt: no session, history or tools. */
-    readonly generate: ExperimentalGenerateApi<unknown> & {
+    /** Stateless generation with a model and a prompt: no session, history or tools. Video jobs are server-only for now. */
+    readonly generate: Omit<ExperimentalGenerateApi<unknown>, "video"> & {
       /** `text` as the deltas arrive, in process (no HTTP route); a failed call is not retried. */
       readonly textStream: (input: {
         readonly prompt: string

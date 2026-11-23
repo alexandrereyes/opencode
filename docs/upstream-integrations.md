@@ -34,7 +34,7 @@ resolved as dropped.
 ## Customizations in upstream code
 
 Every custom change that remains in upstream-owned packages after the plugin offload of 2026-10-30 (branch
-`plugin-offload` from `2bf5bb098`), against the integrated upstream revision `73abe63ac` (2.3.0). Each was kept because
+`plugin-offload` from `2bf5bb098`), against the integrated upstream revision `de291ab7b` (2.3.2). Each was kept because
 the custom plugin (`packages/plugin-app-custom`) cannot provide it through upstream's plugin API without losing behavior
 or guarantees; the plugin never calls the server's own HTTP API as a workaround.
 
@@ -42,7 +42,8 @@ or guarantees; the plugin never calls the server's own HTTP API as a workaround.
 
 Measured with `git diff --numstat --diff-filter=M 79349e840 HEAD` at the offload (against `73abe63ac` after the
 2026-11-13 integration: 31 files, +565, −28 in the first set and 53 files, +1053, −46 in the second, which now include
-the later customizations listed below):
+the later customizations listed below; against `de291ab7b` after the 2026-11-22 integration, without the
+`packages/cli/{script,test}/custom-` files: 32 files, +567, −26 and 56 files, +1057, −44):
 
 - `packages/{core,server,protocol,schema,plugin,client,tui}/src`, `packages/cli/src` and `packages/cli/script`: **43 →
   23 modified files, +698 → +442 lines, −30 → −19 lines**.
@@ -137,9 +138,12 @@ context has no equivalent for any of them; each is an upstream proposal candidat
   ignored it). Consumers: `custom.archive`, `sessions` `archive`. Exit: upstream fixes its host.
 - `experimental.generate.textStream`, with `Generate.textStream` in `packages/core/src/generate.ts` (the model
   resolution of `text` shared as `chatModel`; tests in `core/test/generate.test.ts`, stubs in
-  `core/test/tool-image-generate.test.ts`, `server/test/{generate,schema-error}.test.ts` and the test hosts): the stateless `text` generation as its deltas arrive,
+  `core/test/{tool-image-generate,video-generation}.test.ts`, `server/test/{generate,schema-error,video-generate}.test.ts`
+  and the test hosts): the stateless `text` generation as its deltas arrive,
   in process only (no HTTP route or Client type), not retried, a failed stream failing as
-  `ProviderRequestError` (upstream removed the `provider-error` event in #60812; provider failures fail the stream). Upstream's `generate.text` returns only at the end, so a plugin cannot tell a slow reply
+  `ProviderRequestError` (upstream removed the `provider-error` event in #60812; provider failures fail the stream). The
+  plugin context's `experimental.generate` is upstream's `Omit<ExperimentalGenerateApi, "video">` (video jobs are
+  server-only, #64140) plus `textStream`. Upstream's `generate.text` returns only at the end, so a plugin cannot tell a slow reply
   that keeps streaming from a stalled one. Consumer: `custom.dictation` (5 s inactivity limit,
   `packages/plugin-app-custom/docs/dictation-review.md`). Exit: upstream ships a streamed stateless generation.
 
@@ -186,7 +190,9 @@ Other customizations:
   (2026-11-05) `run-coordinator.ts` did not change; `execution.ts` and `runner/llm.ts` changed only in #60974 (trace)
   and #61421 (perf). At `73abe63ac` (2.3.0) upstream's `start`/`settle` are unchanged (it only adds `draining` and
   `interruption`) and the first two tests still fail on upstream's `run-coordinator.ts` and `execution.ts`, so the
-  patch stays. Upstream's subagent reports (#63209) run in `settled`, so the patch now skips `settled` only for the
+  patch stays. At `de291ab7b` (2.3.2) `run-coordinator.ts` is unchanged, `execution.ts` only provides the Code Mode
+  background job (`CodeModeJob.Current`, #64343) and shares the `wake` closure, and the first two tests still fail
+  with upstream's two files, so the patch stays. Upstream's subagent reports (#63209) run in `settled`, so the patch now skips `settled` only for the
   idle wake: an interruption before `started` settles as upstream (`subagent-report.test.ts`, "reports a
   creation-tick cancellation exactly once"). Five empty-inbox wakes of `core/test/subagent-report.test.ts` that stand
   in for a notified child use an explicit resume, as in `session-move.test.ts`; in production such a wake follows an
@@ -280,8 +286,10 @@ services/site/src/docs/content/build/plugins/server.mdx
 packages/core/src/generate.ts
 packages/core/test/generate.test.ts
 packages/core/test/tool-image-generate.test.ts
+packages/core/test/video-generation.test.ts
 packages/server/test/generate.test.ts
 packages/server/test/schema-error.test.ts
+packages/server/test/video-generate.test.ts
 # message.list cursor
 packages/schema/src/session-message-page.ts
 packages/schema/test/session-message-page.test.ts
@@ -391,6 +399,73 @@ The upstream-owned files that name the default branch (`AGENTS.md`,
 `services/update`) switch to `dev` with the first integration from `dev`. In the
 `AGENTS.md` conflict, keep the custom branch guidance and replace `v2` and
 `origin/v2` with `dev` and `upstream/dev`.
+
+## V2 integration — 2026-11-22
+
+### Baselines
+
+- Custom parent: `7a10fefbc4`.
+- Integrated upstream: `de291ab7b1c6e2ea6a3dd2faffeb40967c02f537` (`upstream/dev`, source of the published 2.3.2
+  `latest` release, `metadata.github.sha` on 2026-11-22; 192 commits after `73abe63ac`). `upstream/dev` was 303 commits
+  ahead (`23fd3da786`) when the merge started; those are not integrated.
+- Local integration branch: `merge-upstream-232`.
+- Runtime: Bun 1.4.4, unchanged.
+
+The upstream-owned `packages/app`, `packages/ui`, `packages/session-ui`, `packages/gui-plugins`, `packages/stories`,
+`packages/tui`, `packages/sdk` and `packages/ai` trees match the integrated upstream revision exactly.
+
+Why now: 2.3.2 carries #64542 and #64544, which send the system prompt as a leading `developer` input item on every
+Responses route (`lowerConversation` in `packages/ai/src/protocols/open-responses.ts`, also used by `/compact`)
+instead of the top-level `instructions` field, which GPT-6.2 never caches. The `llm-proxy` provider uses
+`@opencode/ai/providers/openai/responses`, that is `OpenAIResponses.route`, so its requests now start with the
+`additional_tools` item (only on models whose `capabilities.tools.updates` include `add`) and then the system prompt as
+`developer`, with no `instructions`. Custom code does not touch `packages/ai`, `core/src/session/affinity.ts` or
+`core/src/session/model-request.ts`, so there was nothing to reconcile there.
+
+### Integration points
+
+- Conflicts: `core/src/generate.ts` (upstream's video jobs, #64140, and a reformatted model resolution: `chatModel`
+  keeps upstream's formatting and the `LLMEvent` import joins upstream's import list), `plugin/src/effect/plugin.ts`
+  (upstream now omits `video` from the plugin's `experimental.generate`; the custom type is that plus `textStream`) and
+  `server/test/schema-error.test.ts` (both imports).
+- Upstream's new `core/test/video-generation.test.ts` and `server/test/video-generate.test.ts` stub `Generate.Service`
+  without `textStream`; both gain `textStream: () => Stream.die("unused")`, as the other stubs (listed above).
+- Clean merges in custom files, checked by reading: `core/src/job.ts` (upstream's `BlockingParent` and Code Mode
+  recovery next to the custom `backgrounded`), `core/src/session/execution.ts` (see "A wake with nothing to promote"),
+  `core/src/session/store.ts` (case-insensitive title search with `GLOB`, #64259; `session.scan` untouched),
+  `server/src/process.ts` (`Schedule` became `Automation`, #64160; `PrivateEnv.load()` still runs first),
+  `plugin/src/{effect,promise}/session.ts`, `AGENTS.md` (upstream's flag wording) and `bun.lock` (`bun install
+  --frozen-lockfile` passes). `packages/protocol/openapi.json` passes `check:generated` and `bun run generate` in
+  `packages/client` leaves the generated files unchanged.
+- Behavior that arrives with the merge and that the operator or the native apps may notice: the system prompt as a
+  `developer` message on Responses (above); experimental schedules become automations, and the migration
+  `20261116043204_automation` drops the `schedule` table, carrying over only ungated, uncounted live schedules (the
+  database of the host-6 server had none, read-only check on 2026-11-22). Earlier releases still read `schedule`, so
+  after this migration a rollback is not database-compatible: restore the backup taken before activation; background compaction runs by default (#64290); Code Mode
+  changes sit behind the opt-in-only `full_codemode` flag; CLAUDE.md is read where no AGENTS.md exists (#64474,
+  #64533); the read, webfetch and websearch tools return simpler structured output (#64361, #64534, #64471); GPT 6.2
+  Sol and Astra join the ChatGPT model list (#64508).
+
+### Validation
+
+- `bun install --frozen-lockfile`; `bun typecheck` in Schema, Util, Protocol, Plugin, AI, Core, Server, Client, CLI,
+  SDK, TUI, App and the custom plugin; `check:generated` in `packages/protocol`; root `bun run lint` (warnings only);
+  Prettier on the resolved files; `bun run custom:upstream-check` after the merge commit.
+- Targeted suites in a clean environment (`env -i` with an empty `HOME`, `TMPDIR`, `PATH`, `LC_ALL=C`): AI Responses,
+  compaction, conversation-lowering, tool-update and recorded cache cases, 324 pass; Core `generate`,
+  `tool-image-generate`, `video-generation`, `session-execution`, `subagent-report`, `session-move`, `job`,
+  `session-scan`, `session-family`, `config/skill`, `mcp-oauth`, `plugin/{pending,session-controls}`,
+  `config/config` and `integration`, 288 pass; Server `generate`, `schema-error`, `video-generate`, `mcp` and `shell`,
+  10 pass; Schema `session-scan` and `session-message-page`; Util `private-env`. The custom plugin suite: 928 pass, 15
+  skipped, 2 failures, both in `resources-ios-simulator.test.ts` because `@expo/serve-sim` is `arm64`-only and is not
+  installed on this x86_64 Linux host (environment, not the merge).
+- A throwaway compile of a `gpt-6.2-astra` request through `@opencode/ai/providers/openai/responses` with the
+  `llm-proxy` settings shows no `instructions` and the system prompt as the first `input` item, `role: "developer"`.
+- Build as `custom:prepare` does, into a temporary directory: plugin build, `script/build.ts --single --skip-install`
+  (Linux x64, embedded `packages/app`), `--version` and `--help`, and the bundled `custom-plugin.ts`. The binary served
+  `/api/project`, `/api/skill` and `/api/mcp` with 200 on an isolated port, home and database.
+- Not done (Mac only or out of scope): the macOS release build and `custom-smoke.ts`, the iOS simulator resource tests,
+  a sandbox check with the native apps, and a real request through `llm-proxy` measuring cached tokens.
 
 ## V2 integration — 2026-11-13
 
