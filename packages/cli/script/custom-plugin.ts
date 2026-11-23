@@ -1,18 +1,14 @@
 import plugin from "../../plugin-app-custom/src/index"
 import { flag, main } from "../../plugin-app-custom/src/resources/hub/main"
-import { BancadaDaemon } from "../../plugin-app-custom/src/bancada/daemon/main"
 import { Plugin } from "@opencode/plugin/effect"
 import type { RpcClient } from "@opencode/plugin/effect/rpc"
 import type { Rpc } from "@opencode/schema/rpc"
 import type { Tool } from "@opencode/schema/tool"
 import { Effect, Schema } from "effect"
 
-// The release ships one plugin file; the resources hub and the Bancada run from it as separate processes
-// (`BUN_BE_BUN=1 opencode plugin/index.js --opencode-resources-hub`, `… --opencode-bancada`). A copy of it in an
-// attempt's folder is that attempt's runner (`… runner.js --opencode-bancada-run <folder>`), which the bundled
-// `bancada/daemon/runner.ts` starts by itself when it loads.
+// The release ships one plugin file; the resources hub runs from it as a separate process
+// (`BUN_BE_BUN=1 opencode plugin/index.js --opencode-resources-hub`).
 if (process.argv.includes(flag)) await main()
-if (process.argv.includes(BancadaDaemon.flag)) await BancadaDaemon.main()
 
 // Bundled codecs must execute in their defining runtime. Standard Schema is
 // the public host boundary; do not pass bundled Effect Schema ASTs to the host.

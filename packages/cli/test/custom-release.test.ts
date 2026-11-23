@@ -1131,53 +1131,6 @@ test("the launcher pins the resources hub port the 4096 proxy forwards to", asyn
   expect(custom.server).toContain("export OPENCODE_RESOURCES_HUB_PORT='4300'")
 })
 
-test("bin/serve turns the Bancada on (manual.json can turn it off) and wakes it beside the server", async () => {
-  const home = await fixture()
-  const calls: { path: string; authorization: string | null; body: unknown }[] = []
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: async (request) => {
-      calls.push({
-        path: new URL(request.url).pathname,
-        authorization: request.headers.get("authorization"),
-        body: await request.json().catch(() => undefined),
-      })
-      return Response.json({ output: { protocol: 1, state: "ok" } })
-    },
-  })
-  try {
-    const config = { ...(await settings(home)), port: server.port! }
-    const output = scripts(home, config)
-    expect(output.server).toContain("export OPENCODE_BANCADA='1'")
-    expect(output.server).toContain(`export OPENCODE_BANCADA_SELF='http://127.0.0.1:${server.port}'`)
-    expect(scripts(home, { ...config, environment: { OPENCODE_BANCADA: "0" } }).server).toContain(
-      "export OPENCODE_BANCADA='0'",
-    )
-    // A password with the characters curl's config quotes; it never reaches argv.
-    await Bun.write(`${home}/password`, 'se"cr\\et\n')
-    await Bun.write(`${home}/serve`, output.server)
-    await Bun.write(`${home}/releases/${first}/server-config.json`, "{}")
-    await Bun.write(`${home}/releases/${first}/bin/opencode`, "#!/bin/sh\nexit 0\n")
-    await chmod(`${home}/releases/${first}/bin/opencode`, 0o755)
-    expect(Bun.spawnSync(["/bin/sh", `${home}/serve`]).exitCode).toBe(0)
-    const deadline = Date.now() + 10_000
-    while (Date.now() < deadline && calls.length === 0) await Bun.sleep(100)
-    expect(calls).toEqual([
-      {
-        path: "/api/rpc/custom.bancada/wake",
-        authorization: `Basic ${Buffer.from('opencode:se"cr\\et').toString("base64")}`,
-        body: { input: {} },
-      },
-    ])
-    // Answered: it wakes once.
-    await Bun.sleep(2_500)
-    expect(calls).toHaveLength(1)
-  } finally {
-    await server.stop(true)
-  }
-}, 20_000)
-
 test("manual.json mycred keeps secrets out of the server's environment: bin/private-env prints them for the server", async () => {
   const home = await fixture()
   const variables = {

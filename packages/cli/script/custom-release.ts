@@ -410,9 +410,6 @@ export function discardPlainServeRecovery(database: string) {
 export function scripts(home: string, config: Awaited<ReturnType<typeof settings>>) {
   const environment = Object.entries({
     OPENCODE_RESOURCES_HUB_PORT: String(resourcesHubPort),
-    // The Bancada runs on installed servers (manual.json can turn it off with "0"); the server wakes itself with it.
-    OPENCODE_BANCADA: "1",
-    OPENCODE_BANCADA_SELF: `http://127.0.0.1:${config.port}`,
     ...config.environment,
     OPENCODE_DB: config.database,
     OPENCODE_CONFIG_DIR: config.config,
@@ -434,39 +431,11 @@ ${environment}${secrets}
 release=$(cd ${quote(`${home}/current`)} && pwd -P)
 export OPENCODE_CONFIG_CONTENT="$(cat "$release/server-config.json")"
 cd ${quote(home)}
-${bancadaWake(home, config.port)}
 exec "$release/bin/opencode" serve --service --hostname 127.0.0.1 --port ${config.port}
 `,
     tui: launcher(home, config.port, environment),
     privateEnv: config.mycred ? privateEnv(config.mycred) : undefined,
   }
-}
-
-/**
- * The Bancada's alarm clock (plugin-app-custom `docs/bancada.md`, "Who wakes the plugin"): a server that restarts
- * with no client loads no plugin, so nothing would start its Bancada. Beside the server, in the background, it calls
- * `custom.bancada/wake` until that answers (2 minutes at most). The password goes to curl on its standard input
- * (`-K -`), never in argv.
- */
-function bancadaWake(home: string, port: number) {
-  return `if [ "\${OPENCODE_BANCADA-}" = 1 ]; then
-  (
-    tries=0
-    while [ "$tries" -lt 60 ]; do
-      tries=$((tries + 1))
-      sleep 2
-      password=$(cat ${quote(`${home}/password`)} 2>/dev/null) || continue
-      [ -n "$password" ] || continue
-      escaped=$(printf '%s' "$password" | sed 's/[\\\\"]/\\\\&/g')
-      if printf 'user = "opencode:%s"\\n' "$escaped" |
-        curl -q --silent --fail --noproxy '*' --max-time 10 -K - -X POST \\
-          --header 'content-type: application/json' --data '{"input":{}}' --output /dev/null \\
-          "http://127.0.0.1:${port}/api/rpc/custom.bancada/wake"; then
-        exit 0
-      fi
-    done
-  ) >/dev/null 2>&1 &
-fi`
 }
 
 function launcher(home: string, port: number, environment: string) {

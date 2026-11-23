@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# Um comando que, neste repositório, só a Bancada roda (`fora` do .bancada.toml): o hook recusa rodá-lo por fora.
-echo "por-fora: rodou"
