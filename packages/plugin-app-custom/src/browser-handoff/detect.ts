@@ -3,7 +3,8 @@
  * `demonstrate` tools block until he clicks the in-page Continue (or the toolbar button), and report nothing over MCP
  * meanwhile, so such a call that is still running after `limits.graceMs` is taken as waiting.
  */
-import { browseName } from "./calls.js"
+import type { TabRef } from "../resources/adapters/browse-relay.js"
+import { browseName, tabRef } from "./calls.js"
 
 /** browse's default wording in pt-BR, for a call without a message. */
 export const messages = {
@@ -20,15 +21,16 @@ export const maxMessage = 1_000
 
 /**
  * The handoff a browse call asks for: its message (the call's `message`, whitespace collapsed, clipped to
- * `maxMessage`; browse's default wording without one) and its `tab`, or `undefined` for any other call.
+ * `maxMessage`; browse's default wording without one) and its `tab` (browse's integer or a chosen id), or `undefined`
+ * for any other call.
  */
-export function detect(tool: string, input: unknown): { readonly message: string; readonly tab?: number } | undefined {
+export function detect(tool: string, input: unknown): { readonly message: string; readonly tab?: TabRef } | undefined {
   const name = browseName(tool)
   if (name !== "handoff" && name !== "demonstrate") return undefined
   const fields = typeof input === "object" && input !== null ? input : {}
   const given =
     "message" in fields && typeof fields.message === "string" ? fields.message.replace(/\s+/g, " ").trim() : ""
-  const tab = "tab" in fields && Number.isInteger(fields.tab) ? Number(fields.tab) : undefined
+  const tab = "tab" in fields ? tabRef(fields.tab) : undefined
   const chars = Array.from(given || messages[name])
   const message = chars.length <= maxMessage ? chars.join("") : `${chars.slice(0, maxMessage - 1).join("")}…`
   return { message, ...(tab === undefined ? {} : { tab }) }

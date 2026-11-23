@@ -5,16 +5,25 @@ import type { Entry } from "../../src/resources/adapters/types"
 import type { Resources } from "../../src/resources/rpc"
 
 /**
- * browse 0.1.0's relay as its HTTP API answers (`POST /tools/call`, `POST /tools/cancel`, `GET /extension/status`),
- * without a browser: tabs with an owner (`OpenCode-Browser-Owner`; lent ones and unclaimed ones are everyone's), a
- * screenshot of `view` CSS pixels, an `eval` that answers `page`, and every other tool answering `{}`. Every call is
- * kept in `calls`, with its owner and key. `env` points the relay client at it (port and token file).
+ * browse 0.1.5's relay as its HTTP API answers (`POST /tools/call`, `POST /tools/cancel`, `GET /extension/status`),
+ * without a browser: every tab listed to every caller (chosen `id`, `opener`, `lastUsed` as given), a screenshot of
+ * `view` CSS pixels, an `eval` that answers `page`, and every other tool answering `{}`. Every call is kept in
+ * `calls`, as sent, with its key. `env` points the relay client at it (port and token file).
  */
 
 export const token = "relay-token-0123456789abcdefghijklmnopqrstuvwxyzAB"
 
-export type FakeTab = { tab: number; url: string; title: string; owner?: string; lent?: boolean }
-export type Call = { readonly name: string; readonly arguments: Record<string, unknown>; readonly owner?: string }
+export type FakeTab = {
+  tab: number
+  url: string
+  title: string
+  lent?: boolean
+  id?: string
+  group?: string
+  opener?: number
+  lastUsed?: string
+}
+export type Call = { readonly name: string; readonly arguments: Record<string, unknown> }
 
 export async function fakeRelay() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "fake-browse-"))
@@ -39,16 +48,14 @@ export async function fakeRelay() {
     hold: new Set<string>(),
   }
   const waiters = new Set<() => void>()
-  const visible = (owner: string | null) =>
-    state.tabs.filter((tab) => tab.lent || tab.owner === undefined || owner === null || tab.owner === owner)
   const text = (value: unknown) => ({ content: [{ type: "text", text: JSON.stringify(value) }] })
   const failure = (message: string) => ({ content: [{ type: "text", text: message }], isError: true })
 
-  const answer = (name: string, args: Record<string, unknown>, owner: string | null) => {
+  const answer = (name: string, args: Record<string, unknown>) => {
     if (name === "tabs" && (args.action ?? "list") === "list")
-      return text({ tabs: visible(owner).map(({ owner: _, ...tab }) => tab) })
-    if (args.tab !== undefined && !visible(owner).some((tab) => tab.tab === args.tab))
-      return failure(`Tab ${String(args.tab)} isn't a browse tab you can use.`)
+      return text({ tabs: state.tabs.map((tab) => ({ lent: false, busy: false, ...tab })) })
+    if (args.tab !== undefined && !state.tabs.some((item) => item.tab === args.tab))
+      return failure(`Tab ${args.tab} is gone.`)
     if (name === "screenshot") {
       const width = Math.round(state.view.width * state.view.scale)
       const height = Math.round(state.view.height * state.view.scale)
@@ -93,12 +100,11 @@ export async function fakeRelay() {
         return Response.json({ stopped: true })
       }
       if (url.pathname !== "/tools/call") return Response.json({ error: "Not found" }, { status: 404 })
-      const owner = request.headers.get("opencode-browser-owner")
       const key = request.headers.get("opencode-browser-call") ?? ""
       const name = body.name ?? ""
       const args = body.arguments ?? {}
       keys.push(key)
-      calls.push({ name, arguments: args, ...(owner ? { owner } : {}) })
+      calls.push({ name, arguments: args })
       if (state.hold.has(name))
         await new Promise<void>((resolve) => {
           const wake = () => {
@@ -108,7 +114,7 @@ export async function fakeRelay() {
           }
           waiters.add(wake)
         })
-      return Response.json(answer(name, args, owner))
+      return Response.json(answer(name, args))
     },
   })
   return {
@@ -147,7 +153,11 @@ export function useRelay(relay: { readonly env: Record<string, string> }) {
   }
 }
 
-export function browseEntry(meta: Partial<Resources.ChromeMeta> & { readonly browse: string }): Entry {
+/** A session's browse resource holding `tabs` (none: an entry from before rev. 2026-11-22, which holds its target). */
+export function browseEntry(
+  meta: Partial<Resources.ChromeMeta> & { readonly browse: string },
+  tabs?: readonly number[],
+): Entry {
   return {
     id: `chrome:browse:${meta.browse}`,
     kind: "chrome",
@@ -156,13 +166,17 @@ export function browseEntry(meta: Partial<Resources.ChromeMeta> & { readonly bro
     discoveredAt: 1,
     lastUsedAt: 1,
     updatedAt: 1,
+    ...(tabs ? { tabs: tabs.map((tab) => ({ tab })) } : {}),
   }
 }
 
 /** A browse resource while a handoff waits on its tab (`handoffCapabilities`). */
-export function handoffEntry(meta: Partial<Resources.ChromeMeta> & { readonly browse: string }): Entry {
+export function handoffEntry(
+  meta: Partial<Resources.ChromeMeta> & { readonly browse: string },
+  tabs?: readonly number[],
+): Entry {
   return {
-    ...browseEntry(meta),
+    ...browseEntry(meta, tabs),
     handoff: { id: "brw_1", sessionID: "ses_1", message: "Entre", since: 1 },
     capabilities: { navigation: false, tabs: false, focus: true },
   }

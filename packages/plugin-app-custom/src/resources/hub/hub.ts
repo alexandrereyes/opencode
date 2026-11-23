@@ -4,9 +4,11 @@ import type { Server, ServerWebSocket } from "bun"
 import { optional } from "@opencode/schema/schema"
 import { Option, Schema } from "effect"
 import { identity, repair } from "../adapters/android-emulator.js"
+import { BrowseTab, tabNumber } from "../adapters/browse-relay.js"
 import { namespaceOf, sameNamespace } from "../adapters/chrome.js"
+import { heldTabs } from "../adapters/chrome-browse.js"
 import { jpeg, size } from "../adapters/process.js"
-import type { Adapter, Entry, Image, StoredActivity, StreamSink } from "../adapters/types.js"
+import type { Adapter, Entry, Image, Probe, StoredActivity, StreamSink } from "../adapters/types.js"
 import type { Simulator } from "../discovery.js"
 import { makeMachine } from "../machine.js"
 import type { Device, Use } from "../processes.js"
@@ -95,6 +97,8 @@ export interface Lock {
   readonly meta: Resources.Meta
   readonly owner?: Resources.Owner
   readonly expiresAt: number
+  /** rev. 2026-11-22: a browse resource's tabs, which no session's browse call may name while he holds it. */
+  readonly tabs?: readonly BrowseTab[]
 }
 
 const StoredEntry = Schema.Struct({
@@ -121,6 +125,7 @@ const StoredEntry = Schema.Struct({
       }),
     ),
   ),
+  tabs: optional(Schema.Array(BrowseTab)),
 })
 const decodeStored = Schema.decodeUnknownOption(Schema.Array(StoredEntry))
 const decodeUpsert = Schema.decodeUnknownOption(Upsert)
@@ -324,6 +329,10 @@ export function createHub(options: HubOptions) {
     // While a browse handoff waits, an agent's call never moves its resource off the handoff's tab.
     const meta =
       existing?.handoff && !input.handoff && input.meta.kind === "chrome" ? untargeted(input.meta) : input.meta
+    const claimed = claimTab(id, input.meta, input.handoff !== undefined)
+    const held = existing ? heldTabs(existing) : []
+    const tabs =
+      claimed === undefined || held.some((item) => item.tab === claimed) ? existing?.tabs : [...held, { tab: claimed }]
     const entry: Entry = {
       id,
       kind: input.kind,
@@ -344,19 +353,44 @@ export function createHub(options: HubOptions) {
         : {}),
       ...((input.handoff ?? existing?.handoff) ? { handoff: input.handoff ?? existing?.handoff } : {}),
       ...((machineID ?? existing?.machine) ? { machine: machineID ?? existing?.machine } : {}),
+      ...(tabs ? { tabs } : {}),
     }
     entries.set(id, entry)
     changed(id)
     void probe([entry.kind])
-    // A stream that follows another tab, or without the handoff's locks, switches without ending.
+    // A stream that follows another tab, shows other tabs, or lacks the handoff's locks switches without ending.
     if (
       existing &&
       lives.has(id) &&
       (chromeOf(existing)?.targetID !== chromeOf(entry)?.targetID ||
+        JSON.stringify(existing.tabs) !== JSON.stringify(entry.tabs) ||
         JSON.stringify(capabilitiesOf(existing)) !== JSON.stringify(capabilitiesOf(entry)))
     )
       void options.adapters[entry.kind].update?.(entry).catch(() => undefined)
     return view(entry)
+  }
+
+  /**
+   * rev. 2026-11-22 (browse 0.1.5, where every agent sees every tab): the tab a browse registration names
+   * (`meta.targetID`, browse's integer by now) is its session's and leaves every other resource: a tab belongs to one
+   * resource at a time, the one whose session used it last. A tab a handoff waits on stays with it, unless another
+   * handoff takes it (browse cancels the first). Returns the tab, or nothing to claim.
+   */
+  const claimTab = (id: string, meta: Resources.Meta, handoff: boolean) => {
+    const tab = meta.kind === "chrome" && meta.browse !== undefined ? tabNumber(meta.targetID) : undefined
+    if (tab === undefined) return undefined
+    const others = [...entries.values()].filter((other) => other.id !== id && browseOf(other) !== undefined)
+    if (!handoff && others.some((other) => other.handoff && tabNumber(chromeOf(other)?.targetID) === tab))
+      return undefined
+    others
+      .filter((other) => heldTabs(other).some((item) => item.tab === tab))
+      .forEach((other) => {
+        const next: Entry = { ...other, tabs: heldTabs(other).filter((item) => item.tab !== tab), updatedAt: now() }
+        entries.set(other.id, next)
+        changed(other.id)
+        if (lives.has(other.id)) void options.adapters[other.kind].update?.(next).catch(() => undefined)
+      })
+    return tab
   }
 
   /**
@@ -390,15 +424,29 @@ export function createHub(options: HubOptions) {
     // A browse resource's tab is the agent's call's, or the probe's (`upsert` probes at once); `upsert` keeps a waiting
     // handoff's.
     const browse = input.meta.kind === "chrome" && input.meta.browse !== undefined
-    const meta = adapter.identify && !browse ? await adapter.identify(input.meta).catch(() => input.meta) : input.meta
+    const meta = browse
+      ? await integerTarget(input.meta, adapter.identify)
+      : adapter.identify
+        ? await adapter.identify(input.meta).catch(() => input.meta)
+        : input.meta
     // A browse resource says where its Chrome runs, for "Abrir no Chrome".
     const machineID = meta.kind === "chrome" && browse ? await machine(meta.cdp).catch(() => undefined) : undefined
     return upsert({ ...input, meta }, machineID)
   }
 
   /**
-   * A browse handoff's resource exists only once its tab is known: the adapter must identify it (the relay lists it for
-   * the owner), else the registration fails and the handoff gets no resource. `machine` is the hub's.
+   * rev. 2026-11-22: a browse call may name its tab by a chosen id (`work-mail`); its resource follows browse's integer
+   * for it, or keeps its tab when the relay does not list that id.
+   */
+  const integerTarget = async (meta: Resources.Meta, identify: Adapter["identify"]) => {
+    if (meta.kind !== "chrome" || meta.targetID === undefined || tabNumber(meta.targetID) !== undefined) return meta
+    const found = identify ? await identify(meta).catch(() => undefined) : undefined
+    return found ?? untargeted(meta)
+  }
+
+  /**
+   * A browse handoff's resource exists only once its tab is known: the adapter must identify it (the relay lists it,
+   * by integer or chosen id), else the registration fails and the handoff gets no resource. `machine` is the hub's.
    */
   const handoff = async (input: Upsert, handoff: Resources.Handoff) => {
     const identify = options.adapters[input.kind].identify
@@ -600,40 +648,72 @@ export function createHub(options: HubOptions) {
 
   const probeNow = async (kinds?: readonly Resources.Kind[]) => {
     const at = now()
-    const byKind = Object.groupBy(
-      [...entries.values()].filter((entry) => entry.status !== "gone" && (!kinds || kinds.includes(entry.kind))),
-      (entry) => entry.kind,
+    const probed = [...entries.values()].filter(
+      (entry) => entry.status !== "gone" && (!kinds || kinds.includes(entry.kind)),
     )
-    const results = await Promise.all(
+    const byKind = Object.groupBy(probed, (entry) => entry.kind)
+    const results: ReadonlyMap<string, Probe>[] = await Promise.all(
       Object.entries(byKind).map(([kind, list]) =>
         options.adapters[kind as Resources.Kind].probe(list ?? []).catch((error) => {
           console.error(`resources hub: ${kind} probe failed`, error)
-          return new Map()
+          return new Map<string, Probe>()
         }),
       ),
     )
-    // A browse resource lasts as long as its owner has tabs: once the relay lists none (`gone`), it goes at once.
+    // A browse resource's tabs as the probe found them, kept consistent with registrations made while it ran (each
+    // queues another probe, which settles what they changed).
+    const before = new Map(probed.map((entry) => [entry.id, entry]))
+    const tabsAfter = (id: string, found: Probe) => {
+      const entry = entries.get(id)
+      const started = before.get(id)
+      if (!entry || !started || !found.tabs) return undefined
+      const elsewhere = new Set(
+        [...entries.values()]
+          .filter((other) => other.id !== id && browseOf(other) !== undefined)
+          .flatMap((other) => heldTabs(other).map((item) => item.tab)),
+      )
+      return settled(heldTabs(started), heldTabs(entry), found.tabs, elsewhere)
+    }
+    // A browse call moved its resource to another tab while the probe ran: the next probe checks that one.
+    const retargeted = (entry: Entry) =>
+      browseOf(entry) !== undefined && chromeOf(before.get(entry.id) ?? entry)?.targetID !== chromeOf(entry)?.targetID
+    // A browse resource lasts as long as it holds tabs: once the relay lists none of them (`gone`), it goes at once,
+    // unless a registration gave it one meanwhile.
     const ended = results.flatMap((result) =>
       [...result.entries()].flatMap(([id, found]) => {
         const entry = entries.get(id)
-        return entry && found.status === "gone" && browseOf(entry) ? [id] : []
+        return entry && found.status === "gone" && browseOf(entry) && !tabsAfter(id, found)?.length ? [id] : []
       }),
     )
     ended.forEach((id) => remove(id))
     const updated = results.flatMap((result) =>
       [...result.entries()].flatMap(([id, found]) => {
         const entry = entries.get(id)
-        if (!entry) return []
-        const meta = found.meta ? (found.exact ? found.meta : mergeMeta(entry.meta, found.meta)) : entry.meta
-        if (found.status === entry.status && JSON.stringify(meta) === JSON.stringify(entry.meta)) return []
+        if (!entry || (found.status === "gone" && browseOf(entry))) return []
+        const meta =
+          found.meta && !retargeted(entry) ? (found.exact ? found.meta : mergeMeta(entry.meta, found.meta)) : entry.meta
+        const tabs = tabsAfter(id, found) ?? entry.tabs
+        if (
+          found.status === entry.status &&
+          JSON.stringify(meta) === JSON.stringify(entry.meta) &&
+          JSON.stringify(tabs) === JSON.stringify(entry.tabs)
+        )
+          return []
         // Who started it says nothing once it stopped: the next start (by anyone) is another run.
         const { startedBy: _, ...rest } = entry
-        entries.set(id, { ...(found.status === "running" ? entry : rest), status: found.status, meta, updatedAt: at })
-        // The session moved to another tab: a live viewer follows it.
+        entries.set(id, {
+          ...(found.status === "running" ? entry : rest),
+          status: found.status,
+          meta,
+          ...(tabs ? { tabs } : {}),
+          updatedAt: at,
+        })
+        // The session moved to another tab, or gained or lost one: a live viewer follows it.
         if (
           found.status === "running" &&
           browseOf(entry) &&
-          chromeOf(entry)?.targetID !== (meta as Resources.ChromeMeta).targetID
+          (chromeOf(entry)?.targetID !== (meta as Resources.ChromeMeta).targetID ||
+            JSON.stringify(tabs) !== JSON.stringify(entry.tabs))
         )
           void options.adapters[entry.kind].update?.(entries.get(id)!).catch(() => undefined)
         // A stream follows the device it was opened on: stop it when the resource stops or moved to another one.
@@ -1064,6 +1144,7 @@ export function createHub(options: HubOptions) {
               meta: entry.meta,
               ...(entry.owner ? { owner: entry.owner } : {}),
               expiresAt: lock.expiresAt,
+              ...(browseOf(entry) === undefined ? {} : { tabs: heldTabs(entry) }),
             },
           ]
         }),
@@ -1430,6 +1511,23 @@ export function browseOf(entry: Pick<Entry, "meta">) {
 
 function chromeOf(entry: Pick<Entry, "meta">) {
   return entry.meta.kind === "chrome" ? entry.meta : undefined
+}
+
+/**
+ * A browse resource's tabs after a probe that started when it held `before`: the ones the probe found, except those a
+ * registration moved to another resource meanwhile or another resource holds now, and the ones registrations added.
+ */
+function settled(
+  before: readonly BrowseTab[],
+  current: readonly BrowseTab[],
+  probed: readonly BrowseTab[],
+  elsewhere: ReadonlySet<number>,
+) {
+  const has = (tabs: readonly BrowseTab[], tab: number) => tabs.some((item) => item.tab === tab)
+  return [
+    ...probed.filter((item) => has(current, item.tab) || (!has(before, item.tab) && !elsewhere.has(item.tab))),
+    ...current.filter((item) => !has(before, item.tab) && !has(probed, item.tab)),
+  ]
 }
 
 function untargeted(meta: Resources.ChromeMeta): Resources.ChromeMeta {

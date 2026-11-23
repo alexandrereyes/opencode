@@ -175,20 +175,25 @@ describe("control lock", () => {
     expect(blocking("curl http://127.0.0.1:9333/json", locks)).toBe(browser)
   })
 
-  test("a browse tab Alexandre controls: `browse` commands naming it, its relay, never the number elsewhere", () => {
+  test("a browse resource Alexandre controls: `browse` commands naming one of its tabs, its relay, never elsewhere", () => {
     const tab: Lock = {
       id: "chrome:browse:mcp-1a2b3c4d",
       kind: "chrome",
       label: "Navegador · loja.example",
       meta: { kind: "chrome", cdp: "http://127.0.0.1:19988", browse: "mcp-1a2b3c4d", targetID: "1836872126" },
       expiresAt: 0,
+      tabs: [{ tab: 1836872126 }, { tab: 1836872130, id: "work-mail" }],
     }
     expect(blocking("browse click --tab 1836872126 --x 10 --y 20", [tab])).toBe(tab)
-    expect(blocking(`browse fill --json '{"tab":1836872126,"selector":"#q","value":"x"}'`, [tab])).toBe(tab)
-    expect(blocking("browse tabs close mcp-1a2b3c4d", [tab])).toBe(tab)
+    expect(blocking(`browse fill --json '{"tab":1836872130,"selector":"#q","value":"x"}'`, [tab])).toBe(tab)
+    expect(blocking("browse --tab work-mail snapshot", [tab])).toBe(tab)
     expect(blocking("curl -s -X POST http://127.0.0.1:19988/tools/call", [tab])).toBe(tab)
     expect(blocking("browse click --tab 1836872127 --x 10 --y 20", [tab])).toBeUndefined()
-    expect(blocking("echo 1836872126 > /tmp/n", [tab])).toBeUndefined()
+    expect(blocking("browse --tab work-mail-2 snapshot", [tab])).toBeUndefined()
+    expect(blocking("echo 1836872126 work-mail > /tmp/n", [tab])).toBeUndefined()
+    // A hub from before rev. 2026-11-22 names only the followed tab.
+    const { tabs: _, ...older } = tab
+    expect(blocking("browse click --tab 1836872126 --x 10 --y 20", [older])).toBe(older)
     // It is no playwright-cli session: the default one stays free.
     expect(blocking("playwright-cli snapshot", [tab], "/tmp")).toBeUndefined()
     expect(browseRefusal()).toContain("Não tente contornar a trava por outra aba, por outra sessão, pelo shell")

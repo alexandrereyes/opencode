@@ -4,12 +4,33 @@ import path from "node:path"
 import { Option, Schema } from "effect"
 
 /**
- * A client of browse's relay (browse 0.1.0, `docs/browse-handoff-remoto.md`): its tools over `POST /tools/call`, as
- * the agent's own browse MCP server calls them, for one owner. browse gives clients no CDP and no sessions any more:
- * an agent's tabs are the ones its calls opened under its owner id (`browseOwner`), and every call names its `tab`.
+ * A client of browse's relay (browse 0.1.5, `docs/browse-handoff-remoto.md`): its tools over `POST /tools/call`, as
+ * the agent's own browse MCP server calls them. browse gives clients no CDP and no sessions, and since 0.1.1 no owners
+ * either: every call sees and may use every tab, by browse's integer `tab` or a chosen id (`work-mail`). Which tabs are
+ * an OpenCode session's is the plugin's to know (`BrowseTab`).
  *
  * The relay token is read per call, goes only into the `authorization` header and never into a message or a log.
  */
+
+/** A tab as a call names it: browse's integer, or a chosen id (a lowercase slug that starts with a letter). */
+export type TabRef = number | string
+
+/** browse's integer a reference stands for when it is one (a chosen id never reads as a number). */
+export function tabNumber(ref: TabRef | undefined) {
+  if (typeof ref === "number") return Number.isInteger(ref) ? ref : undefined
+  return ref !== undefined && /^\d+$/.test(ref.trim()) ? Number(ref.trim()) : undefined
+}
+
+/**
+ * rev. 2026-11-22: a tab a browse resource holds (`Entry.tabs`): one its session's calls named or opened, or a popup
+ * one of those opened. `id` is its chosen id and `group` its group label, as the relay last listed them.
+ */
+export const BrowseTab = Schema.Struct({
+  tab: Schema.Int,
+  id: Schema.optional(Schema.String),
+  group: Schema.optional(Schema.String),
+})
+export type BrowseTab = typeof BrowseTab.Type
 
 /** browse's default relay port; a relay that finds it taken moves to 19990–19997 and says so in `relay.json`. */
 export const defaultPort = 19988
@@ -80,12 +101,10 @@ export type Output = typeof Output.Type
 const decodeOutput = Schema.decodeUnknownOption(Output)
 
 /**
- * Calls browse tool `name` for `owner` (`OpenCode-Browser-Owner`: the call sees that owner's tabs, the ones Alexandre
- * lent and the ones nobody claims; without it, every tab). The call has its own key: when `signal` aborts or
- * `timeoutMs` passes the relay is told to stop it (`POST /tools/cancel`), which also takes down a card it shows.
+ * Calls browse tool `name`. The call has its own key: when `signal` aborts or `timeoutMs` passes the relay is told to
+ * stop it (`POST /tools/cancel`), which also takes down a card it shows.
  */
 export async function callTool(
-  owner: string,
   name: string,
   args: Record<string, unknown>,
   options: { readonly signal?: AbortSignal; readonly timeoutMs?: number; readonly env?: Env } = {},
@@ -112,7 +131,6 @@ export async function callTool(
       authorization,
       "content-type": "application/json",
       "opencode-browser-client": "opencode",
-      "opencode-browser-owner": owner,
       "opencode-browser-call": key,
     },
     body: JSON.stringify({ name, arguments: args }),

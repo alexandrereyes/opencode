@@ -4,7 +4,7 @@ import { Effect, Exit, Schema, Scope } from "effect"
 import { Session } from "@opencode/schema/session"
 import { Project } from "@opencode/schema/project"
 import { AbsolutePath } from "@opencode/schema/schema"
-import { browseOwner, callTab, resultJson } from "../src/browser-handoff/calls"
+import { browseOwner, callTab, closedGroup, namedTabs, resultJson } from "../src/browser-handoff/calls"
 import { detect, maxMessage, messages } from "../src/browser-handoff/detect"
 import {
   afterOutcome,
@@ -41,14 +41,16 @@ test("browse's handoff and demonstrate calls wait on Alexandre, with the call's 
   const instruction = "Aqui em Contas de serviço: clique em Gerar nova chave privada e copie o JSON. ".repeat(4).trim()
   expect(detect("browse_handoff", { message: instruction, tab: 1 })?.message).toBe(instruction)
   expect(Array.from(detect("browse_handoff", { message: "a".repeat(3_000), tab: 1 })!.message)).toHaveLength(maxMessage)
-  // Without a tab (browse refuses it at once) it waits on nothing the apps can show.
+  // A chosen id (browse 0.1.2) names the tab too; without one (browse refuses it at once) it waits on nothing the apps
+  // can show.
+  expect(detect("browse_handoff", { message: "x", tab: " work-mail " })).toEqual({ message: "x", tab: "work-mail" })
   expect(detect("browse_handoff", { message: "x" })).toEqual({ message: "x" })
   for (const tool of ["browse_click", "browse_execute", "browse_navigate", "handoff", "shell"])
     expect(detect(tool, { message: "x", tab: 1 })).toBeUndefined()
 })
 
-test("browse's owner of a session and the tab a call acts on", () => {
-  // `mcp-` and the first 8 hex digits of the SHA-256 of the trimmed session ID, as browse's MCP server derives it.
+test("a session's resource ID, the tab a call works in and every tab it names", () => {
+  // `mcp-` and the first 8 hex digits of the SHA-256 of the trimmed session ID, the owner browse 0.1.0 derived.
   expect(browseOwner("ses_0123456789abcdefghijklmn")).toBe("mcp-666f6415")
   expect(browseOwner(" ses_0123456789abcdefghijklmn\n")).toBe("mcp-666f6415")
   expect(callTab("click", { tab: 7, x: 1, y: 2 })).toBe(7)
@@ -56,10 +58,19 @@ test("browse's owner of a session and the tab a call acts on", () => {
   expect(callTab("navigate", { url: "x" }, `{\n  "url": "x",\n  "tab": 9\n}\nWarning: slow`)).toBe(9)
   expect(callTab("navigate", { tab: 3, url: "x" }, { tab: 9 })).toBe(3)
   expect(callTab("tabs", { action: "new" }, '{"tab":11}')).toBe(11)
+  // A chosen id: browse's integer when the result names it (`navigate`, `handoff`), else the id itself; never an
+  // integer read from a result that is the page's own JSON (`eval`).
+  expect(callTab("navigate", { tab: "work-mail", url: "x" }, { tab: 9 })).toBe(9)
+  expect(callTab("eval", { tab: "work-mail", expression: "x" }, { tab: 9 })).toBe("work-mail")
   // Closing tabs names them but follows none; a result without a tab says nothing.
   expect(callTab("tabs", { action: "close", tab: 9 }, { closed: [9] })).toBeUndefined()
   expect(callTab("navigate", { url: "x" }, "browse failed")).toBeUndefined()
   expect(resultJson('{"a":1}\nNote: browse has an update')).toEqual({ a: 1 })
+  expect(namedTabs("tabs", { action: "close", tab: 1, tabs: [2, "work-mail", ""] })).toEqual([1, 2, "work-mail"])
+  expect(namedTabs("tabs", { action: "new", id: "work-mail" })).toEqual(["work-mail"])
+  expect(namedTabs("navigate", { url: "x" })).toEqual([])
+  expect(closedGroup("tabs", { action: "close", group: "loja" })).toBe("loja")
+  expect(closedGroup("tabs", { action: "list", group: "loja" })).toBeUndefined()
 })
 
 /** One Location's handoffs over a shared registry, with a short grace period on the real clock. */

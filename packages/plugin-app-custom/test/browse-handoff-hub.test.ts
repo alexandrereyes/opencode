@@ -50,7 +50,7 @@ function fakeChrome() {
     identify: async (meta) => {
       if (meta.kind !== "chrome" || !meta.browse) return meta
       if (!state.tab) throw new Error("A sessão do browse não tem aba aberta.")
-      return { ...meta, targetID: "TAB1", url: "http://127.0.0.1:5191/", title: "Entrar · Abacato" }
+      return { ...meta, targetID: meta.targetID ?? "1", url: "http://127.0.0.1:5191/", title: "Entrar · Abacato" }
     },
     focus: async (entry) => {
       if (state.focusFails) throw new Error("browse blocked Target.activateTarget")
@@ -130,7 +130,7 @@ test("a handoff's resource has its own ID, label, capabilities, handoff and mach
     label: "Navegador · 127.0.0.1:5191",
     purpose: "Entre com a senha",
     owner: { sessionID: "ses_child", rootSessionID: "ses_root", agent: "build" },
-    meta: { kind: "chrome", cdp: "http://127.0.0.1:19988", browse: "login", targetID: "TAB1" },
+    meta: { kind: "chrome", cdp: "http://127.0.0.1:19988", browse: "login", targetID: "1" },
     capabilities: { navigation: false, tabs: false, focus: true },
     handoff: {
       id: "brw_1",
@@ -227,7 +227,7 @@ test("navigation and tab switching are refused with not_allowed and never applie
     { type: "navigate", action: "back" },
     { type: "navigate", action: "forward" },
     { type: "navigate", action: "reload" },
-    { type: "navigate", action: "tab", target: "TAB2" },
+    { type: "navigate", action: "tab", target: "2" },
     { type: "button", button: "back" },
   ]
   for (const event of refused) {
@@ -436,17 +436,17 @@ test("a handoff on a browse session's resource locks it in place and, when it en
     id: "chrome:browse:login",
     purpose: "Entre com a senha",
     capabilities: Resources.handoffCapabilities,
-    meta: { targetID: "TAB1" },
+    meta: { targetID: "1" },
     handoff: { id: "brw_1" },
   })
   expect(fake.updated.at(-1)).toMatchObject({ handoff: { id: "brw_1" }, capabilities: Resources.handoffCapabilities })
   expect(viewer.messages.some((message) => !(message instanceof Uint8Array) && message.type === "end")).toBe(false)
   // An agent's call meanwhile, on another of its tabs, keeps the handoff, its locks and its tab.
-  const tabbed = { ...used, meta: { ...used.meta, targetID: "TAB9" } }
+  const tabbed = { ...used, meta: { ...used.meta, targetID: "9" } }
   expect(await client.upsert({ ...tabbed, activity: { ...used.activity, call: "call_2" } })).toMatchObject({
     handoff: { id: "brw_1" },
     capabilities: Resources.handoffCapabilities,
-    meta: { targetID: "TAB1" },
+    meta: { targetID: "1" },
   })
   await client.finish("chrome:browse:login", Resources.handoffEndReasons.completed)
   expect(await viewer.next((message) => message.type === "end")).toEqual({
@@ -464,9 +464,9 @@ test("a handoff on a browse session's resource locks it in place and, when it en
   await again.opened
   await again.next((message) => message.type === "hello")
   expect(await client.upsert({ ...tabbed, activity: { ...used.activity, call: "call_3" } })).toMatchObject({
-    meta: { targetID: "TAB9" },
+    meta: { targetID: "9" },
   })
-  expect(fake.updated.at(-1)).toMatchObject({ meta: { targetID: "TAB9" } })
+  expect(fake.updated.at(-1)).toMatchObject({ meta: { targetID: "9" } })
   again.ws.close()
   hub.close()
 })

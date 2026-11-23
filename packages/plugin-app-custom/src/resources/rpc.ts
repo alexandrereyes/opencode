@@ -115,8 +115,9 @@ export const ChromeMeta = Schema.Struct({
   cdp: optional(Schema.String),
   /**
    * rev. 2026-11-07 (`browse-handoff-remoto.md`): a browse resource, reached through the browse relay at `cdp`. Since
-   * rev. 2026-11-16 (browse 0.1.0) browse's owner of an OpenCode session's tabs (`mcp-` and 8 hex digits): only its tabs
-   * are shown, and only its handoff's tab while one waits.
+   * rev. 2026-11-16 an OpenCode session's ID among them (`mcp-` and 8 hex digits, browse 0.1.0's owner of its tabs);
+   * since rev. 2026-11-22 (browse 0.1.5, which shows every tab to every agent) the tabs shown are the ones that
+   * session's calls named or opened, and only its handoff's tab while one waits.
    */
   browse: optional(Schema.String),
   /** CDP target (page) the viewer follows; for a browse resource (rev. 2026-11-16), browse's integer tab ID. */
