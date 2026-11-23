@@ -527,7 +527,9 @@ by serial and proves, with the running emulators' ini files or the console's `em
 entry's AVD now (`verify`, as for input), before `adb -s <serial> emu kill`; it waits up to 15 s for the emulator to
 leave the running list, and the hub probes at once, so the answer arrives with the resource `stopped`. Another
 machine's emulator is never a resource here ([Discovery](#discovery)), so it cannot be stopped. Through a
-[Mac hub](#mac-hub-server-in-the-container), only emulators this server's agents started can be.
+[Mac hub](#mac-hub-server-in-the-container), only emulators this server's agents started can be. Never a device of the
+rig (rev. 2026-11-23, AVD or simulator named `rig-…`): shutting it down would break a batch of tests or a reservation,
+so it has no `capabilities.stop` and `stop` answers `unsupported`.
 
 ## Control lock
 

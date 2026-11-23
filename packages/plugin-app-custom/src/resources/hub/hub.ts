@@ -310,13 +310,16 @@ export function createHub(options: HubOptions) {
 
   /**
    * A session's browse resource: the handoff's locks while one waits, else `browseCapabilities`. An Android emulator
-   * known by its AVD can be shut down (`stop`).
+   * known by its AVD can be shut down (`stop`), unless it is the rig's.
    */
   const capabilitiesOf = (entry: Entry): Resources.Capabilities | undefined =>
     entry.capabilities ??
     (browseOf(entry)
       ? Resources.browseCapabilities
-      : entry.meta.kind === "android-emulator" && identity(entry) !== undefined && options.adapters[entry.kind].stop
+      : entry.meta.kind === "android-emulator" &&
+          identity(entry) !== undefined &&
+          !rigs(entry) &&
+          options.adapters[entry.kind].stop
         ? { stop: true }
         : undefined)
 
@@ -542,13 +545,13 @@ export function createHub(options: HubOptions) {
 
   /**
    * `custom.resources/stop`: an Android emulator of this Mac, running, that no agent uses now and Alexandre does not
-   * control; the adapter proves it is that AVD before `emu kill`, and the probe then marks it stopped.
+   * control; the adapter proves it is that AVD before `emu kill`, and the probe then marks it stopped. Never the rig's.
    */
   const stop = async (id: string) => {
     const entry = entries.get(id)
     if (!entry) return "not_found" as const
     const adapter = options.adapters[entry.kind]
-    if (!adapter.stop) return "unsupported" as const
+    if (!adapter.stop || rigs(entry)) return "unsupported" as const
     if (entry.status !== "running") return "gone" as const
     const state = view(entry).state
     if (state === "agent" || state === "user") return "busy" as const
@@ -1597,4 +1600,13 @@ function page(value: string | undefined) {
 
 function status(code: number) {
   return new Response(null, { status: code })
+}
+
+/**
+ * An emulator or simulator of the rig (`rig-…`, its servers' prefix): shutting it down would break a batch of tests or a
+ * reservation, so the hub never offers it.
+ */
+function rigs(entry: Entry) {
+  const names = [entry.name, identity(entry), entry.meta.kind === "ios-simulator" ? entry.meta.name : undefined]
+  return names.some((name) => name?.startsWith("rig-"))
 }

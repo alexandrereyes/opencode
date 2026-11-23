@@ -249,7 +249,7 @@ afterEach(async () => {
 })
 
 /** A hub over the production Android adapter and the fake world, served on loopback. */
-async function serveHub(clock: { value: number }) {
+async function serveHub(clock: { value: number }, simulators: Partial<Adapter> = {}) {
   const fake = fakeAndroid()
   const unused: Adapter = {
     kind: "ios-simulator",
@@ -261,7 +261,7 @@ async function serveHub(clock: { value: number }) {
   const file = path.join(directory, "resources.json")
   const hub = createHub({
     adapters: {
-      "ios-simulator": unused,
+      "ios-simulator": { ...unused, ...simulators },
       "android-emulator": createAdapter(fake.io),
       chrome: { ...unused, kind: "chrome" },
     },
@@ -356,5 +356,33 @@ describe("hub", () => {
     // Other kinds have no stop.
     await hub.register({ kind: "ios-simulator", meta: { kind: "ios-simulator", udid: "SIM" }, owner: caller })
     expect(await (await stop("ios-simulator:SIM")).json()).toEqual({ reason: "unsupported" })
+  })
+
+  test("never offers to shut down a device of the rig: a batch or a reservation runs on it", async () => {
+    const clock = { value: 1_000_000 }
+    const stopped: string[] = []
+    const { hub, admin, fake } = await serveHub(clock, { stop: async (entry) => void stopped.push(entry.id) })
+    const stop = (id: string) => admin(`/admin/resources/${encodeURIComponent(id)}/stop`, { method: "POST" })
+    fake.running.push({ pid: 0, serial: "emulator-5584", consolePort: 5584, grpcPort: 8584, avd: "rig-a1" })
+    await hub.register({ kind: "android-emulator", meta: { kind: "android-emulator", avd: "rig-a1" }, owner: caller })
+    await hub.register({
+      kind: "ios-simulator",
+      meta: { kind: "ios-simulator", udid: "RIG", name: "rig-i1" },
+      owner: caller,
+    })
+    await hub.register({
+      kind: "ios-simulator",
+      meta: { kind: "ios-simulator", udid: "SIM", name: "iPhone 17" },
+      owner: caller,
+    })
+    await hub.probe()
+    clock.value += 3_600_000
+    expect(hub.view(hub.entries.get("android-emulator:rig-a1")!).capabilities).toBeUndefined()
+    expect(await (await stop("android-emulator:rig-a1")).json()).toEqual({ reason: "unsupported" })
+    expect(await (await stop("ios-simulator:RIG")).json()).toEqual({ reason: "unsupported" })
+    expect(fake.commands.filter((command) => command.endsWith("emu kill"))).toEqual([])
+    // Another simulator, where its adapter can stop one: stopped.
+    expect((await stop("ios-simulator:SIM")).status).toBe(200)
+    expect(stopped).toEqual(["ios-simulator:SIM"])
   })
 })
