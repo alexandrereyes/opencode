@@ -98,7 +98,11 @@ Browse handoffs (rev. 2026-11-07, `browse-handoff-remoto.md`): the upsert also t
 `changed`, `POST /admin/resources/<id>/focus` (409 `unsupported`, 502 when the browser refuses). Since rev. 2026-11-09
 the plugin also registers a session's browse resource whenever its agents use the browser (upsert with `meta { cdp,
 browse, targetID? }`, no `capabilities`): it stays while the session's owner has tabs (rev. 2026-11-16), and `end` keeps
-it. While a handoff waits on it, an upsert without `handoff` never changes its `targetID`.
+it. While a handoff waits on it, an upsert without `handoff` never changes its `targetID`. Since rev. 2026-11-22
+(browse 0.1.5, where every agent sees every tab) the hub keeps each browse resource's own tabs (`tabs`, persisted, not
+in `Resource`): a browse upsert's `targetID` may be a chosen tab id (`work-mail`), which the hub resolves to browse's
+integer, and the tab joins that resource and leaves any other; `GET /admin/locks` gives a locked browse resource's
+`tabs: [{ tab, id?, group? }]`. See [browse-handoff-remoto.md](browse-handoff-remoto.md), "Sessions and tabs".
 
 ### Remote hub (server on Linux)
 
@@ -494,10 +498,12 @@ wheel event; `key` maps DOM key names to `Input.dispatchKeyEvent`; `text` is `In
 `navigate` uses `Page.navigate` (addresses without a scheme get `http://` for local hosts, `https://` otherwise),
 history entries, `Page.reload`, and `tab` re-targets the stream (`Target.activateTarget` brings it to front).
 
-**Browse tabs** (rev. 2026-11-16, `adapters/chrome-browse.ts`, `adapters/browse-relay.ts`). A `chrome:browse:<owner>`
-resource is an OpenCode session's tabs in Alexandre's own Chrome, reached through browse 0.1.0's relay (`POST
-/tools/call` with the relay token and the session's owner; browse gives clients no CDP). Liveness is the owner's
-`tabs` (no relay or no browser → `stopped`, no tab left → `gone`); frames are polled `screenshot`s in CSS pixels
+**Browse tabs** (rev. 2026-11-16, rev. 2026-11-22, `adapters/chrome-browse.ts`, `adapters/browse-relay.ts`). A
+`chrome:browse:<owner>` resource is an OpenCode session's tabs in Alexandre's own Chrome, reached through browse 0.1.5's
+relay (`POST /tools/call` with the relay token; browse gives clients no CDP and, since 0.1.1, shows every tab to every
+caller, so the hub keeps the tabs the session's calls named or opened and their popups). Liveness is one `tabs` list
+per probe for every browse resource (no relay or no browser → `stopped`, none of its tabs left → `gone`); frames are
+polled `screenshot`s in CSS pixels
 (every 250 ms in control, 1 s watching, 2 s on economy); input goes through `click`, `drag`, `scroll`, `press`,
 `type` and `navigate`, and `meta` comes from `eval` in browse's isolated world. The contract and its trade-offs are in
 [browse-handoff-remoto.md](browse-handoff-remoto.md), "Live view".
@@ -529,8 +535,9 @@ machine's emulator is never a resource here ([Discovery](#discovery)), so it can
 refuses `shell` commands that name it (UDID or simulator name, adb serial or AVD, `-s=<session>`, CDP port) or
 target it implicitly (`simctl … booted`, `adb` without `-s`, `playwright-cli` without `-s` for the `default`
 session) with "Alexandre está usando … ; aguarde". For a session's browse resource (rev. 2026-11-09, rev. 2026-11-16,
-`browse-handoff-remoto.md` section 0) it also refuses that session's browse calls that touch a tab, and `browse` CLI
-commands that name its tab or owner. Every input renews the lock; after 2 minutes without input
+rev. 2026-11-22, `browse-handoff-remoto.md` section 0) it also refuses that session's browse calls that touch a tab,
+any session's browse call naming one of its tabs (integer or chosen id, or a group holding one), and `browse` CLI
+commands that name one of its tabs. Every input renews the lock; after 2 minutes without input
 (`limits.controlIdleMs`) or on `release`, the hub queues a `released` event and one plugin instance adds a
 `session.synthetic` message (without resuming) to the owner session: "Alexandre interagiu com … Reavalie a tela".
 Only watching never blocks the agent.

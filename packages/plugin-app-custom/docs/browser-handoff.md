@@ -1,12 +1,13 @@
 # Browser handoffs
 
-Rev. 2026-11-16 (browse 0.1.0: its `handoff` and `demonstrate` tools). Earlier: 2026-11-07. When an agent drives
-Alexandre's Chrome through [browse](https://github.com/anomalyco/browse) and asks him to do something only a person can
-(login, 2FA, captcha, payment), browse's `handoff` tool blocks until he clicks **Continue** in the tab (or browse's
-toolbar button), for up to 10 minutes; `demonstrate` does the same while it records what he shows. browse reports
-nothing over MCP meanwhile (no progress, no elicitation), and core drops MCP progress anyway, so without this module the
-session only looks like it is working. This module makes such a call attention of kind `browser`: "Precisa de você" in
-the apps, the Live Activity, the watch and one push. It uses public plugin APIs only; no core change.
+Rev. 2026-11-22 (browse 0.1.5: a handoff's `tab` may be a chosen id). Earlier: 2026-11-16 (browse 0.1.0: its
+`handoff` and `demonstrate` tools), 2026-11-07. When an agent drives Alexandre's Chrome through
+[browse](https://github.com/anomalyco/browse) and asks him to do something only a person can (login, 2FA, captcha,
+payment), browse's `handoff` tool blocks until he clicks **Continue** in the tab (or browse's toolbar button), for up to
+10 minutes; `demonstrate` does the same while it records what he shows. browse reports nothing over MCP meanwhile (no
+progress, no elicitation), and core drops MCP progress anyway, so without this module the session only looks like it is
+working. This module makes such a call attention of kind `browser`: "Precisa de você" in the apps, the Live Activity,
+the watch and one push. It uses public plugin APIs only; no core change.
 
 ## Detection
 
@@ -17,7 +18,8 @@ the apps, the Live Activity, the watch and one push. It uses public plugin APIs 
   `browse_demonstrate`, `browse.demonstrate`; `detect.ts`). The message is the call's `message`, whitespace collapsed
   and clipped to 1000 characters (rev. 2026-11-17, was 120: the apps' card and Resolver show the whole instruction;
   the Live Activity and the push clip their copies to 120); without one, `Conclua a etapa no navegador e clique em Continue` (`Demonstre o fluxo…`
-  for `demonstrate`). Its `tab` is where the resource of `browse-handoff-remoto.md` shows it.
+  for `demonstrate`). Its `tab` (browse's integer, or since rev. 2026-11-22 a chosen id like `work-mail`, which the hub
+  resolves to the integer) is where the resource of `browse-handoff-remoto.md` shows it.
 - It **waits** once it has run for 3 s (`limits.graceMs`, the permission alert delay), unless it ended before.
 - It **ends** on `execute.after` (same input object, or the same message and tab in the same tool part when a hook
   replaced it),
@@ -32,9 +34,9 @@ the apps, the Live Activity, the watch and one push. It uses public plugin APIs 
 ### False positives and misses
 
 Since rev. 2026-11-16 the tool itself says it hands off, so there is no heuristic left: a `handoff` call that browse
-refuses at once (no `tab`, another owner's tab) ends within the grace period and never shows. browse's own `execute`
-(for clients without a code mode, or `OPENCODE_BROWSER_TOOLS=execute`) is no longer read: OpenCode gets the plain
-tools, and code passed to `execute` is not inspected for `handoff(` any more.
+refuses at once (no `tab`, a tab that is not open, an unknown chosen id) ends within the grace period and never shows.
+browse's own `execute` (for clients without a code mode, or `OPENCODE_BROWSER_TOOLS=execute`) is no longer read:
+OpenCode gets the plain tools, and code passed to `execute` is not inspected for `handoff(` any more.
 
 ## RPC `custom.browser-handoffs`
 
@@ -70,8 +72,9 @@ Precedence everywhere: question > permission > browser > failed > working > unre
 ## Finishing it from the apps
 
 Rev. 2026-11-07: a waiting handoff also gets a `resourceID`, the resource that shows its tab in the viewer; see
-`browse-handoff-remoto.md`. Rev. 2026-11-16: every handoff whose `tab` the relay lists for the session's owner gets one
-(browse 0.1.0 names the tab in the call; nothing is guessed).
+`browse-handoff-remoto.md`. Rev. 2026-11-16: every handoff whose `tab` the relay lists gets one (browse names the tab in
+the call; nothing is guessed). Rev. 2026-11-22: also by chosen id; the tab joins the session's resource and leaves any
+other session's.
 
 ## Compatibility
 
@@ -82,8 +85,8 @@ Rev. 2026-11-07: a waiting handoff also gets a `resourceID`, the resource that s
 ## Tests
 
 `docs/live-activity/state-browser.json` is the normative Live Activity state with a handoff, shared with the
-apps' tests. `test/browser-handoff.test.ts` (detection, the owner and tab of a call, grace period, every way a call ends
-with browse 0.1.0's own answers, two Locations, the tracker, the notifier, Sessões and the family).
+apps' tests. `test/browser-handoff.test.ts` (detection, the resource ID and the tabs of a call, grace period, every way
+a call ends with browse's own answers, two Locations, the tracker, the notifier, Sessões and the family).
 `script/e2e-browser-handoff.ts` runs real Luna 6 / low prompts on an owned sandbox against `test/fixture/browse-mcp.ts`,
 a fake browse whose `handoff` blocks until a release file appears: no relay, no Chrome. It checks every surface above,
 the clear on Continue and on interruption, and that a browse call that is no handoff never shows; `--keep-waiting`

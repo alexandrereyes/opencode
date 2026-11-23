@@ -84,16 +84,28 @@ test("a call that runs past the grace period registers its tab as in use, and it
 
 test("the tab a call opens comes from its result, also with browse's warnings after it; failures register nothing new", async () => {
   const { browse, upserts, close } = await setup()
-  // `navigate` without `tab` opens one; OpenCode passes text it cannot parse as JSON (a warning follows) as is.
+  // `navigate` without `tab` opens one; OpenCode passes text it cannot parse as JSON (a warning follows) as is. It
+  // names no tab while it runs, so it registers only once it answers.
   await run(browse.before(call("n", "browse_navigate", { url: "https://loja.example" })))
+  await Bun.sleep(80)
+  expect(upserts).toEqual([])
   const text = `{\n  "url": "https://loja.example/",\n  "title": "Loja",\n  "tab": 9\n}\nWarning: The page has a cookie banner`
   await run(browse.after(done("n", "browse_navigate", { url: "https://loja.example" }, text)))
-  await run(browse.before(call("t", "browse_tabs", { action: "new" })))
-  await run(browse.after(done("t", "browse_tabs", { action: "new" }, { tab: 11, url: "about:blank" })))
+  const named = { action: "new", id: "work-mail", url: "https://mail.example" }
+  await run(browse.before(call("t", "browse_tabs", named)))
+  await run(browse.after(done("t", "browse_tabs", named, { tab: 11, id: "work-mail", url: "about:blank" })))
+  // A chosen id: as browse's integer when the result says it, else as named (the hub resolves it).
+  await run(browse.before(call("g", "browse_navigate", { tab: "work-mail", url: "https://mail.example/inbox" })))
+  await run(browse.after(done("g", "browse_navigate", { tab: "work-mail", url: "x" }, { tab: 11, url: "x" })))
+  await run(browse.before(call("c", "browse_click", { tab: "work-mail", ref: "e3" })))
+  await run(browse.after(done("c", "browse_click", { tab: "work-mail", ref: "e3" }, { clicked: true })))
   expect(shown(upserts)).toEqual([
     ["9", false],
     ["11", false],
+    ["11", false],
+    ["work-mail", false],
   ])
+  upserts.length = 0
   // A quick call that failed, or closed tabs, gives none; a long one that failed only closes its activity.
   await run(browse.before(call("f", "browse_click", { tab: 9, x: 1, y: 1 })))
   await run(browse.after({ ...call("f", "browse_click", { tab: 9, x: 1, y: 1 }), status: "error" }))
@@ -102,7 +114,7 @@ test("the tab a call opens comes from its result, also with browse's warnings af
   await run(browse.before(call("w", "browse_wait_for", { tab: 11, text: "Pronto" })))
   await Bun.sleep(80)
   await run(browse.after({ ...call("w", "browse_wait_for", { tab: 11, text: "Pronto" }), status: "error" }))
-  expect(shown(upserts).slice(2)).toEqual([
+  expect(shown(upserts)).toEqual([
     ["11", true],
     [undefined, false],
   ])
@@ -126,31 +138,45 @@ test("the tools that touch no tab are never checked nor registered", async () =>
   await close()
 })
 
-test("while Alexandre controls a session's browse tab its calls are refused; other sessions' go on", async () => {
+test("while Alexandre controls a session's browse resource its calls are refused, and so is any call on its tabs", async () => {
   const lock: Lock = {
     id: `chrome:browse:${owner}`,
     kind: "chrome",
     label: "Navegador · loja.example",
     meta: { kind: "chrome", cdp, browse: owner, targetID: "7" },
     expiresAt: 0,
+    tabs: [{ tab: 7 }, { tab: 8, id: "work-mail", group: "loja" }],
   }
   const { browse, upserts, close } = await setup({ locks: [lock] })
   const refused = async (tool: string, input: object, sessionID = S) => {
     const exit = await Effect.runPromiseExit(browse.before(call("x", tool, input, sessionID)))
     return Exit.isFailure(exit) ? JSON.stringify(exit.cause) : undefined
   }
-  // Any tab of the session, the one he holds or not: the agent would only switch tabs around the lock.
-  expect(await refused("browse_click", { tab: 7, x: 1, y: 1 })).toContain("Alexandre está controlando pelo app")
+  // Its own session: any tab, the one he holds or not: the agent would only switch tabs around the lock.
+  expect(await refused("browse_click", { tab: 7, x: 1, y: 1 })).toContain("você receberá um aviso")
   expect(await refused("browse_navigate", { url: "https://x.example" })).toContain("pela CLI do browse")
-  expect(await refused("browse_handoff", { tab: 8, message: "Entre" })).toBeDefined()
-  expect(await refused("browse_tabs", { action: "close", tab: 7 })).toBeDefined()
-  // What touches no tab, and other sessions, go through.
+  expect(await refused("browse_click", { tab: 99, x: 1, y: 1 })).toBeDefined()
+  // Every agent may use every tab (browse 0.1.5): another session naming one of its tabs, by integer or chosen id,
+  // closing it or its group, or opening its chosen id (which answers with that tab) is refused too.
+  const other = "ses_other"
+  for (const [tool, input] of [
+    ["browse_click", { tab: 7, x: 1, y: 1 }],
+    ["browse_type", { tab: "work-mail", text: "x" }],
+    ["browse_handoff", { tab: 8, message: "Entre" }],
+    ["browse_tabs", { action: "close", tabs: [3, "work-mail"] }],
+    ["browse_tabs", { action: "close", group: "loja" }],
+    ["browse_tabs", { action: "new", id: "work-mail" }],
+  ] as const)
+    expect(await refused(tool, input, other)).toContain("uma aba de outra sessão")
+  // Its own tabs, new ones and what touches no tab go through.
+  expect(await refused("browse_click", { tab: 9, x: 1, y: 1 }, other)).toBeUndefined()
+  expect(await refused("browse_navigate", { url: "https://x.example" }, other)).toBeUndefined()
+  expect(await refused("browse_tabs", { action: "new", id: "outra" }, other)).toBeUndefined()
   expect(await refused("browse_tabs", { action: "list" })).toBeUndefined()
   expect(await refused("browse_status", {})).toBeUndefined()
   expect(await refused("shell", { command: "ls" })).toBeUndefined()
-  expect(await refused("browse_click", { tab: 7, x: 1, y: 1 }, "ses_other")).toBeUndefined()
   await Bun.sleep(80)
-  expect(upserts.map((item) => item.meta.kind === "chrome" && item.meta.browse)).toEqual([browseOwner("ses_other")])
+  expect(upserts.map((item) => item.meta.kind === "chrome" && item.meta.browse)).toEqual([browseOwner(other)])
   await close()
 })
 
@@ -169,8 +195,8 @@ test("a hub that is down, hangs or cannot be reached never refuses or holds the 
     }
     // Each wait is cut short: two calls with their grace periods, not the hub's own timeouts.
     expect(Date.now() - started).toBeLessThan(1_500)
-    // The writes were attempted all the same (a hub that comes back gets them).
-    expect(upserts.length).toBeGreaterThanOrEqual(4)
+    // The writes were attempted all the same (a hub that comes back gets them): the click's while it ran and both ends.
+    expect(upserts).toHaveLength(3)
     await close()
   }
 })

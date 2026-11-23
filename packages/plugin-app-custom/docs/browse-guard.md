@@ -13,8 +13,8 @@ end script (`src/browse-guard/`, `test/browse-guard.test.ts`, `script/e2e-browse
 ## What changed for the agents
 
 Nothing they could still call is refused. The plugin's other browse rules stay: while Alexandre controls a session's
-browse tab, its browse calls and the `browse` commands that name the tab are refused (`browse-handoff-remoto.md`,
-section 0).
+browse tab, its browse calls, any session's calls on its tabs and the `browse` commands that name them are refused
+(`browse-handoff-remoto.md`, section 0).
 
 ## Rules in `~/.config/opencode/opencode.json`
 

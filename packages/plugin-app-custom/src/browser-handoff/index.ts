@@ -3,7 +3,7 @@ import { Effect, Scope, Stream } from "effect"
 import type { Context } from "../context.js"
 import { Resources } from "../resources/rpc.js"
 import { hubSettings, makeHubClient, type HubClient } from "../resources/supervisor.js"
-import { relayEndpoint } from "../resources/adapters/browse-relay.js"
+import { relayEndpoint, type TabRef } from "../resources/adapters/browse-relay.js"
 import { browseOwner } from "./calls.js"
 import { detect } from "./detect.js"
 import { limits, sharedRegistry, wire, type Entry, type Registry } from "./registry.js"
@@ -52,10 +52,13 @@ export const endedTypes = [
 
 /** A waiting handoff as its resource needs it. */
 export type Waiting = Pick<Entry, "id" | "sessionID" | "message" | "since"> & {
-  /** browse's owner of the session's tabs (`browseOwner`). */
+  /** The session's browse resource ID suffix (`browseOwner`). */
   readonly browse: string
-  /** The tab the call waits on (`handoff`'s and `demonstrate`'s `tab`). */
-  readonly tab: number
+  /**
+   * The tab the call waits on (`handoff`'s and `demonstrate`'s `tab`): browse's integer or a chosen id, which the hub
+   * resolves to the integer.
+   */
+  readonly tab: TabRef
   readonly agent?: string
 }
 
@@ -73,9 +76,9 @@ export interface HandoffResources {
 }
 
 /**
- * How a call that `execute.after` reports ended its handoff (browse 0.1.0). A call that returns ended with Continue
- * (`{"outcome":"continued","tab":…}`); any other outcome makes browse fail it with its JSON as the error text, which
- * the MCP tool reports as is:
+ * How a call that `execute.after` reports ended its handoff (browse 0.1.0 to 0.1.5). A call that returns ended with
+ * Continue (`{"outcome":"continued","tab":…}`); any other outcome makes browse fail it with its JSON as the error text,
+ * which the MCP tool reports as is:
  *
  * - `{"outcome":"timeout",…}` (its 10 minutes, or the call's `timeoutSeconds`) → `timeout`;
  * - `{"outcome":"cancelled",…}` (another handoff replaced it on the tab) → `cancelled`;
@@ -143,7 +146,7 @@ export function makeHandoffs(input: {
       )
     })
 
-  const start = (handoff: Omit<Waiting, "tab"> & { readonly tab?: number }) =>
+  const start = (handoff: Omit<Waiting, "tab"> & { readonly tab?: TabRef }) =>
     Effect.gen(function* () {
       if (!input.registry.has((entry) => entry.id === handoff.id)) return
       const tab = handoff.tab

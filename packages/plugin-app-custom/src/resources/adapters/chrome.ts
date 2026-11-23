@@ -204,7 +204,10 @@ export function makeChromeAdapter(options: { readonly daemonDir?: string } = {})
       await opening?.then((browser) => browser.cdp.close()).catch(() => undefined)
     },
 
-    /** A browse handoff's tab, as its owner sees it; fails when the relay or the tab cannot be reached. */
+    /**
+     * A browse tab named by integer or chosen id, as the relay lists it; fails when the relay or the tab cannot be
+     * reached.
+     */
     identify: (meta) => browse.identify(meta),
 
     async close() {

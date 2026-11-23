@@ -5,13 +5,14 @@ import path from "node:path"
 import { callTool, RelayError, relayPort, relayTokenFile } from "../src/resources/adapters/browse-relay"
 import { makeChromeAdapter } from "../src/resources/adapters/chrome"
 import { browseSettings } from "../src/resources/adapters/chrome-browse"
+import { createHub, type Lock } from "../src/resources/hub/hub"
 import { browseEntry, fakeRelay, handoffEntry, token, useRelay } from "./fixture/fake-browse"
 import { watch } from "./fixture/fake-chrome"
 
 /**
- * The Chrome adapter's browse mode (`docs/browse-handoff-remoto.md`, rev. 2026-11-16) and its relay client against a
- * fake browse 0.1.0 relay: an owner's tabs and nothing else, frames polled from `screenshot`, input through browse's
- * tools, and the token kept out of every message.
+ * The Chrome adapter's browse mode (`docs/browse-handoff-remoto.md`, rev. 2026-11-22) and its relay client against a
+ * fake browse 0.1.5 relay, which lists every agent's tabs to every caller: a resource's own tabs and nothing else,
+ * frames polled from `screenshot`, input through browse's tools, and the token kept out of every message.
  */
 
 const saved = { ...browseSettings }
@@ -29,11 +30,16 @@ async function relay() {
 }
 
 const A = "mcp-aaaa0001"
-const tabsOf = (owner: string) => [
-  { tab: 10, url: "http://127.0.0.1:5191/", title: "Entrar · Abacato", owner },
+const B = "mcp-bbbb0002"
+/** A's tabs are 10 and 12 (14 is a popup 10 opened); B's is 13 (16 its popup); 11 is lent and 15 the CLI's. */
+const relayTabs = () => [
+  { tab: 10, url: "http://127.0.0.1:5191/", title: "Entrar · Abacato", lastUsed: "2026-11-22T10:00:00Z" },
   { tab: 11, url: "https://mail.example/", title: "Caixa de entrada", lent: true },
-  { tab: 12, url: "http://127.0.0.1:5191/ajuda", title: "Ajuda", owner },
-  { tab: 13, url: "https://banco.example/extrato", title: "Extrato · Banco do Alexandre", owner: "mcp-bbbb0002" },
+  { tab: 12, url: "http://127.0.0.1:5191/ajuda", title: "Ajuda", id: "ajuda", lastUsed: "2026-11-22T10:05:00Z" },
+  { tab: 13, url: "https://banco.example/extrato", title: "Extrato · Banco do Alexandre", group: "banco" },
+  { tab: 14, url: "https://login.example/oauth", title: "Login", opener: 10 },
+  { tab: 15, url: "https://cli.example/", title: "CLI" },
+  { tab: 16, url: "https://banco.example/pix", title: "Pix", opener: 13 },
 ]
 
 test("the relay client finds the relay's port and token where browse keeps them", async () => {
@@ -62,20 +68,20 @@ test("the relay client finds the relay's port and token where browse keeps them"
   expect(await relayPort({ ...env, OPENCODE_BROWSER_PORT: "19995" })).toBe(19995)
 })
 
-test("a call goes as its owner with a key of its own; tool errors, a refused token and no relay fail apart", async () => {
+test("a call goes with a key of its own; tool errors, a refused token and no relay fail apart", async () => {
   const fake = await relay()
-  fake.state.tabs = tabsOf(A)
-  await callTool(A, "tabs", { action: "list" })
-  expect(fake.calls).toEqual([{ name: "tabs", arguments: { action: "list" }, owner: A }])
+  fake.state.tabs = relayTabs()
+  await callTool("tabs", { action: "list" })
+  expect(fake.calls).toEqual([{ name: "tabs", arguments: { action: "list" } }])
   expect(fake.keys[0]).toMatch(/^[0-9a-f-]{36}$/)
-  // Another owner's tab: the tool's own refusal.
-  const refused = await callTool(A, "click", { tab: 13, x: 1, y: 1 }).catch((error: unknown) => error)
+  // A tab that went away: the tool's own refusal.
+  const refused = await callTool("click", { tab: 99, x: 1, y: 1 }).catch((error: unknown) => error)
   expect(refused).toBeInstanceOf(RelayError)
-  expect(refused).toMatchObject({ reason: "tool", message: "Tab 13 isn't a browse tab you can use." })
+  expect(refused).toMatchObject({ reason: "tool", message: "Tab 99 is gone." })
   // An aborted call is stopped at the relay too (which takes down a card it shows).
   fake.state.hold.add("handoff")
   const controller = new AbortController()
-  const waiting = callTool(A, "handoff", { tab: 10, message: "x" }, { signal: controller.signal }).catch(
+  const waiting = callTool("handoff", { tab: 10, message: "x" }, { signal: controller.signal }).catch(
     (error: unknown) => error,
   )
   const deadline = Date.now() + 5_000
@@ -87,23 +93,26 @@ test("a call goes as its owner with a key of its own; tool errors, a refused tok
 
   // A wrong token: refused, and no message carries either token.
   await Bun.write(fake.tokenFile, "not-the-token\n")
-  const wrong = (await callTool(A, "tabs", {}).catch((error: unknown) => error)) as RelayError
+  const wrong = (await callTool("tabs", {}).catch((error: unknown) => error)) as RelayError
   expect(wrong.reason).toBe("refused")
   expect(wrong.message).not.toContain("not-the-token")
   expect(wrong.message).not.toContain(token)
   await Bun.write(fake.tokenFile, `${token}\n`)
   // No relay listening: down, which the probe reads as stopped.
   fake.server.stop(true)
-  expect(await callTool(A, "tabs", {}).catch((error: unknown) => error)).toMatchObject({ reason: "down" })
+  expect(await callTool("tabs", {}).catch((error: unknown) => error)).toMatchObject({ reason: "down" })
 })
 
-test("the probe follows the resource's tab among its owner's, never another owner's, and tells gone from stopped", async () => {
+test("one list per probe: each resource keeps its own tabs and their popups, never another's, and tells gone from stopped", async () => {
   const fake = await relay()
-  fake.state.tabs = tabsOf(A)
+  fake.state.tabs = relayTabs()
   const adapter = makeChromeAdapter()
   stops.push(() => adapter.close())
-  const probe = async (entry: ReturnType<typeof browseEntry>) => (await adapter.probe([entry])).get(entry.id)
-  expect(await probe(browseEntry({ browse: A, targetID: "10" }))).toEqual({
+  const a = browseEntry({ browse: A, targetID: "10" }, [10, 12])
+  const b = browseEntry({ browse: B, targetID: "13" }, [13])
+  const both = await adapter.probe([a, b])
+  expect(fake.calls).toEqual([{ name: "tabs", arguments: { action: "list" } }])
+  expect(both.get(a.id)).toEqual({
     status: "running",
     meta: {
       kind: "chrome",
@@ -113,34 +122,38 @@ test("the probe follows the resource's tab among its owner's, never another owne
       url: "http://127.0.0.1:5191/",
       title: "Entrar · Abacato",
     },
+    // The popup its tab opened joins it; the lent tab, B's and the CLI's never do.
+    tabs: [{ tab: 10 }, { tab: 12, id: "ajuda" }, { tab: 14 }],
   })
-  // Its tab closed (or none yet): the owner's newest, never a lent one nor another owner's.
-  expect((await probe(browseEntry({ browse: A, targetID: "99" })))?.meta).toMatchObject({ targetID: "12" })
-  expect((await probe(browseEntry({ browse: A })))?.meta).toMatchObject({ targetID: "12" })
-  // A lent tab the agent works in is followed.
-  expect((await probe(browseEntry({ browse: A, targetID: "11" })))?.meta).toMatchObject({ targetID: "11" })
+  expect(both.get(b.id)).toMatchObject({ meta: { targetID: "13" }, tabs: [{ tab: 13, group: "banco" }, { tab: 16 }] })
+  const probe = async (entry: ReturnType<typeof browseEntry>) => (await adapter.probe([entry])).get(entry.id)
+  // Its tab closed: the one of its own a call used last.
+  expect(await probe(browseEntry({ browse: A, targetID: "99" }, [10, 12, 99]))).toMatchObject({
+    meta: { targetID: "12" },
+    tabs: [{ tab: 10 }, { tab: 12, id: "ajuda" }, { tab: 14 }],
+  })
+  // A popup another resource holds stays its.
+  const held = await adapter.probe([a, browseEntry({ browse: "mcp-cccc0003", targetID: "14" }, [14])])
+  expect(held.get(a.id)?.tabs).toEqual([{ tab: 10 }, { tab: 12, id: "ajuda" }])
+  // An entry from before rev. 2026-11-22 holds the tab it followed.
+  expect((await probe(browseEntry({ browse: A, targetID: "12" })))?.tabs).toEqual([{ tab: 12, id: "ajuda" }])
   // While a handoff waits only its tab counts.
-  expect((await probe(handoffEntry({ browse: A, targetID: "10" })))?.meta).toMatchObject({ targetID: "10" })
-  expect((await probe(handoffEntry({ browse: A, targetID: "99" })))?.status).toBe("stopped")
-  // Every list went as the owner, and nothing of another owner's came out.
-  expect(fake.calls.every((call) => call.owner === A)).toBe(true)
-  // One list per owner and probe.
-  fake.calls.length = 0
-  await adapter.probe([browseEntry({ browse: A, targetID: "10" }), { ...browseEntry({ browse: A }), id: "other" }])
-  expect(fake.calls).toHaveLength(1)
+  expect((await probe(handoffEntry({ browse: A, targetID: "10" }, [10, 12])))?.meta).toMatchObject({ targetID: "10" })
+  expect((await probe(handoffEntry({ browse: A, targetID: "99" }, [12, 99])))?.status).toBe("stopped")
 
-  // An owner without tabs is gone while a browser is connected; with none (asleep, restarting) only stopped.
-  expect((await probe(browseEntry({ browse: "mcp-cccc0003" })))?.status).toBe("gone")
+  // None of its tabs open is gone while a browser is connected; with none (asleep, restarting) its tabs stay.
+  expect(await probe(browseEntry({ browse: A, targetID: "98" }, [98]))).toEqual({ status: "gone", tabs: [] })
+  fake.state.tabs = []
   fake.state.connected = false
-  expect((await probe(browseEntry({ browse: "mcp-cccc0003" })))?.status).toBe("stopped")
+  expect(await probe(a)).toEqual({ status: "stopped" })
   // No relay says nothing about the tabs.
   fake.server.stop(true)
-  expect((await probe(browseEntry({ browse: A, targetID: "10" })))?.status).toBe("stopped")
+  expect(await probe(a)).toEqual({ status: "stopped" })
 
-  // A handoff's resource is the call's own tab, as its owner sees it.
+  // A tab a registration names, by integer or chosen id, followed by its integer once the relay lists it.
   const live = await relay()
-  live.state.tabs = tabsOf(A)
-  expect(await adapter.identify!({ kind: "chrome", browse: A, targetID: "12" })).toEqual({
+  live.state.tabs = relayTabs()
+  expect(await adapter.identify!({ kind: "chrome", browse: A, targetID: "ajuda" })).toEqual({
     kind: "chrome",
     browse: A,
     targetID: "12",
@@ -148,15 +161,16 @@ test("the probe follows the resource's tab among its owner's, never another owne
     url: "http://127.0.0.1:5191/ajuda",
     title: "Ajuda",
   })
-  await expect(adapter.identify!({ kind: "chrome", browse: A, targetID: "13" })).rejects.toThrow(
+  expect(await adapter.identify!({ kind: "chrome", browse: A, targetID: "13" })).toMatchObject({ targetID: "13" })
+  await expect(adapter.identify!({ kind: "chrome", browse: A, targetID: "inbox" })).rejects.toThrow(
     "A aba do handoff não está aberta.",
   )
 })
 
-test("the viewer gets frames in CSS pixels, the page's state and its owner's tabs; input goes through browse's tools", async () => {
+test("the viewer gets frames in CSS pixels, the page's state and its own tabs; input goes through browse's tools", async () => {
   Object.assign(browseSettings, { controlledMs: 10, watchingMs: 10, stateMs: 0, holdMs: 60_000 })
   const fake = await relay()
-  fake.state.tabs = tabsOf(A)
+  fake.state.tabs = relayTabs()
   // A page browse scaled down to half (past its 8000 px limit): frames are half the CSS size.
   fake.state.view = { width: 1280, height: 800, scale: 0.5 }
   fake.state.page = {
@@ -168,7 +182,7 @@ test("the viewer gets frames in CSS pixels, the page's state and its owner's tab
   }
   const adapter = makeChromeAdapter()
   stops.push(() => adapter.close())
-  const entry = browseEntry({ browse: A, targetID: "10" })
+  const entry = browseEntry({ browse: A, targetID: "10" }, [10, 12])
   const viewer = watch(adapter, entry)
   stops.push(() => viewer.stop())
   await viewer.until(() => viewer.frames.length > 0 && viewer.states.at(-1)?.url !== "")
@@ -244,17 +258,23 @@ test("the viewer gets frames in CSS pixels, the page's state and its owner's tab
     { tab: 10, action: "reload", waitUntil: "commit" },
     { tab: 10, action: "back", waitUntil: "commit" },
   ])
-  // Another of the owner's tabs from the tab menu; never another owner's, nor a lent tab it does not follow.
-  await adapter.input!(entry, { type: "navigate", action: "tab", target: "13" })
-  await adapter.input!(entry, { type: "navigate", action: "tab", target: "11" })
-  await adapter.input!(entry, { type: "navigate", action: "tab", target: "12" })
+  // Another of its tabs from the tab menu; never another session's, nor a lent or CLI tab it does not hold.
+  for (const target of ["13", "11", "15", "12"])
+    await adapter.input!(entry, { type: "navigate", action: "tab", target })
   await viewer.until(
     () => viewer.states.at(-1)?.targetID === "12" && fake.named("screenshot").at(-1)?.arguments.tab === 12,
   )
   expect(new Set(fake.calls.map((call) => call.arguments.tab).filter((tab) => tab !== undefined))).toEqual(
     new Set([10, 12]),
   )
-  expect(fake.calls.every((call) => call.owner === A)).toBe(true)
+  // The resource gains a tab (the hub tells the view): Alexandre's pick stays, and the tab menu shows it.
+  const grown = { ...entry, tabs: [{ tab: 10 }, { tab: 12 }, { tab: 14 }] }
+  await adapter.update!(grown)
+  await viewer.until(() => viewer.states.at(-1)?.tabs.length === 3)
+  expect(viewer.states.at(-1)?.targetID).toBe("12")
+  // His pick goes to another session: the view follows the resource's tab again.
+  await adapter.update!({ ...grown, tabs: [{ tab: 10 }, { tab: 14 }] })
+  await viewer.until(() => viewer.states.at(-1)?.targetID === "10" && viewer.states.at(-1)?.tabs.length === 2)
   expect(JSON.stringify(viewer.states)).not.toContain(token)
   // "Abrir no Chrome": browse brings no tab forward, so focus fails and the Mac app selects the tab itself.
   await expect(adapter.focus!(entry)).rejects.toThrow("O browse não traz abas para a frente")
@@ -263,15 +283,15 @@ test("the viewer gets frames in CSS pixels, the page's state and its owner's tab
 test("while a handoff waits the viewer keeps to its tab, cannot navigate, and ends when that tab closes", async () => {
   Object.assign(browseSettings, { controlledMs: 10, watchingMs: 10, stateMs: 0 })
   const fake = await relay()
-  fake.state.tabs = tabsOf(A)
+  fake.state.tabs = relayTabs()
   const adapter = makeChromeAdapter()
   stops.push(() => adapter.close())
-  const free = browseEntry({ browse: A, targetID: "12" })
+  const free = browseEntry({ browse: A, targetID: "12" }, [10, 12])
   const viewer = watch(adapter, free)
   stops.push(() => viewer.stop())
   await viewer.until(() => viewer.states.at(-1)?.tabs.length === 2)
   // A handoff starts on tab 10 (the hub calls `update` with the entry's handoff and locks): only that tab, no navigation.
-  const locked = handoffEntry({ browse: A, targetID: "10" })
+  const locked = handoffEntry({ browse: A, targetID: "10" }, [10, 12])
   await adapter.update!(locked)
   await viewer.until(
     () => viewer.states.at(-1)?.targetID === "10" && fake.named("screenshot").at(-1)?.arguments.tab === 10,
@@ -292,16 +312,115 @@ test("while a handoff waits the viewer keeps to its tab, cannot navigate, and en
   fake.state.tabs = fake.state.tabs.filter((tab) => tab.tab !== 10)
   expect(await viewer.streaming).toEqual(new Error("A aba do handoff foi fechada."))
 
-  // Without a handoff, a followed tab that closes gives way to the owner's newest.
-  fake.state.tabs = tabsOf(A)
+  // Without a handoff, a followed tab that closes gives way to the one of its own a call used last.
+  fake.state.tabs = relayTabs()
   await adapter.forget!(free)
-  const other = watch(adapter, free)
+  const other = watch(adapter, browseEntry({ browse: A, targetID: "12" }, [10, 12, 15]))
   stops.push(() => other.stop())
   await other.until(() => other.states.at(-1)?.targetID === "12")
+  // 10 was used; 15, newer, never was.
   fake.state.tabs = fake.state.tabs.filter((tab) => tab.tab !== 12)
   await other.until(() => other.states.at(-1)?.targetID === "10")
   expect((await adapter.snapshot(free)).mime).toBe("image/jpeg")
   expect(fake.named("screenshot").filter((call) => call.arguments.quality === 80)).toEqual([
-    { name: "screenshot", arguments: { tab: 10, format: "jpeg", quality: 80, scale: "css" }, owner: A },
+    { name: "screenshot", arguments: { tab: 10, format: "jpeg", quality: 80, scale: "css" } },
   ])
+})
+
+/** The real hub and Chrome adapter over the fake relay, as the plugin registers sessions' browse calls. */
+async function hubOver(fake: Awaited<ReturnType<typeof relay>>, file: string) {
+  const adapter = makeChromeAdapter()
+  stops.push(() => adapter.close())
+  const hub = createHub({
+    adapters: { "ios-simulator": adapter, "android-emulator": adapter, chrome: adapter },
+    secret: "hub-secret",
+    file,
+    machine: async () => undefined,
+  })
+  stops.push(() => hub.close())
+  const use = (browse: string, targetID: string) =>
+    hub.register({ kind: "chrome", meta: { kind: "chrome", cdp: fake.endpoint, browse, targetID }, used: true })
+  const held = (browse: string) =>
+    hub.entries
+      .get(`chrome:browse:${browse}`)
+      ?.tabs?.map((item) => item.tab)
+      .toSorted((a, b) => a - b)
+  const followed = (browse: string) => {
+    const meta = hub.entries.get(`chrome:browse:${browse}`)?.meta
+    return meta?.kind === "chrome" ? meta.targetID : undefined
+  }
+  return { hub, use, held, followed }
+}
+
+test("sessions sharing the relay: each resource holds the tabs its calls named or opened, and a tab is one's at a time", async () => {
+  const fake = await relay()
+  fake.state.tabs = relayTabs()
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "browse-tabs-"))
+  stops.push(() => fs.rm(directory, { recursive: true, force: true }))
+  const file = path.join(directory, "resources.json")
+  const { hub, use, held, followed } = await hubOver(fake, file)
+  await use(A, "10")
+  // A chosen id is followed, and held, as browse's integer.
+  await use(A, "ajuda")
+  await use(B, "13")
+  await hub.probe(["chrome"])
+  expect([held(A), followed(A)]).toEqual([[10, 12, 14], "12"])
+  expect([held(B), followed(B)]).toEqual([[13, 16], "13"])
+  // B uses A's tab: it moves to B, which follows it; A keeps the rest.
+  await use(B, "10")
+  await hub.probe(["chrome"])
+  expect([held(A), followed(A)]).toEqual([[12, 14], "12"])
+  expect([held(B), followed(B)]).toEqual([[10, 13, 16], "10"])
+  // A chosen id the relay does not list changes nothing.
+  await use(A, "inbox")
+  expect([held(A), followed(A)]).toEqual([[12, 14], "12"])
+
+  // While Alexandre controls A the hub's locks name its tabs, for the plugin to refuse every session's calls on them.
+  await hub.control(`chrome:browse:${A}`, "take")
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: hub.fetch, websocket: hub.websocket })
+  stops.push(() => server.stop(true))
+  const locks = (await fetch(`http://127.0.0.1:${server.port}/admin/locks`, {
+    headers: { authorization: "Bearer hub-secret" },
+  }).then((response) => response.json())) as { locks: Lock[] }
+  expect(locks.locks.map((lock) => lock.tabs)).toEqual([[{ tab: 12, id: "ajuda" }, { tab: 14 }]])
+
+  // Tabs survive a restart of the hub.
+  const deadline = Date.now() + 5_000
+  while (
+    !(
+      await Bun.file(file)
+        .text()
+        .catch(() => "")
+    ).includes('"tab":10') &&
+    Date.now() < deadline
+  )
+    await Bun.sleep(20)
+  const restarted = await hubOver(fake, file)
+  await restarted.hub.start()
+  expect(restarted.held(B)).toEqual([10, 13, 16])
+})
+
+test("registrations while a probe runs are kept: their tabs stay, and a resource they gave a tab is not removed", async () => {
+  const fake = await relay()
+  fake.state.tabs = [...relayTabs(), { tab: 98, url: "https://loja.example/", title: "Loja" }]
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "browse-tabs-"))
+  stops.push(() => fs.rm(directory, { recursive: true, force: true }))
+  const { hub, use, held, followed } = await hubOver(fake, path.join(directory, "resources.json"))
+  await use(A, "98")
+  await use(B, "10")
+  await hub.probe(["chrome"])
+  // A's only tab closes, and a probe starts: it will find A gone and B as it was. Meanwhile A names 12 and B 13.
+  fake.state.tabs = relayTabs()
+  fake.state.hold.add("tabs")
+  const lists = fake.named("tabs").length
+  const probing = hub.probe(["chrome"])
+  const deadline = Date.now() + 5_000
+  while (fake.named("tabs").length === lists && Date.now() < deadline) await Bun.sleep(5)
+  await use(A, "12")
+  await use(B, "13")
+  fake.release()
+  await probing
+  await hub.probe(["chrome"])
+  expect([held(A), followed(A)]).toEqual([[12], "12"])
+  expect([held(B), followed(B)]).toEqual([[10, 13, 14, 16], "13"])
 })

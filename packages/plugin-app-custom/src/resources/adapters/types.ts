@@ -1,5 +1,6 @@
 import type { Hello, Input, Profile } from "../protocol.js"
 import type { Resources } from "../rpc.js"
+import type { BrowseTab } from "./browse-relay.js"
 
 /** Registry entry as the hub stores it. `Resource` (the RPC shape) is derived from it plus control and time. */
 export interface Entry {
@@ -27,6 +28,11 @@ export interface Entry {
   readonly handoff?: Resources.Handoff
   /** A browse resource's machine (`Resources.Resource.machine`), computed by the hub. Never persisted. */
   readonly machine?: string
+  /**
+   * rev. 2026-11-22 (browse 0.1.5): a browse resource's tabs, the ones its session's calls named or opened and the
+   * popups those opened; each tab is one resource's at a time. Persisted; not in `Resources.Resource`.
+   */
+  readonly tabs?: readonly BrowseTab[]
 }
 
 /** One agent shell command that named a resource; `call` is its tool call, open until the command ends. */
@@ -45,6 +51,8 @@ export interface Probe {
   readonly meta?: Resources.Meta
   /** `meta` replaces the stored metadata instead of merging, so fields that no longer hold (a stale serial) go. */
   readonly exact?: boolean
+  /** A browse resource's tabs as the relay lists them now (closed ones gone, popups added); absent leaves them. */
+  readonly tabs?: readonly BrowseTab[]
 }
 
 export interface Image {
@@ -105,7 +113,8 @@ export interface Adapter {
   input?(entry: Entry, event: Input): Promise<void>
   /**
    * Completes a registration's metadata from the device before the hub matches it (Android: the AVD that runs on a
-   * bare serial now). Failures leave the metadata as it was.
+   * bare serial now; browse: browse's integer for the tab `targetID` names by integer or chosen id, which must be
+   * open). Failures leave the metadata as it was.
    */
   identify?(meta: Resources.Meta): Promise<Resources.Meta>
   recover?(): Promise<void>
@@ -121,8 +130,9 @@ export interface Adapter {
   /** The resource left the registry: close what the adapter keeps open for it. */
   forget?(entry: Entry): Promise<void>
   /**
-   * The entry's followed target or capabilities changed while it may be streaming (a browse handoff started, or the
-   * session moved to another tab): follow the new target and apply the new locks without ending the stream.
+   * The entry's followed target, tabs or capabilities changed while it may be streaming (a browse handoff started, the
+   * session moved to another tab or gained or lost one): follow the new target and apply the new locks without ending
+   * the stream.
    */
   update?(entry: Entry): Promise<void>
 }
