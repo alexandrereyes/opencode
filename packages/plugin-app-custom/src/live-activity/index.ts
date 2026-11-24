@@ -458,8 +458,14 @@ export function makeHub(options: HubOptions) {
   /** A session's Progresso while it shows (`docs/progress.md`); none before the hub has started. */
   const progress = (sessionID: string, now: number) => runtime.current?.tracker.progress(sessionID, now)
 
-  /** The background shells someone waits on below a session (`Tracker.background`); unknown before the hub starts. */
-  const background = (sessionID: string, now: number) => runtime.current?.tracker.background(sessionID, now)
+  /**
+   * How many background shells someone waits on below a session (`Tracker.background`); unknown until the hub has
+   * rebuilt its state, since an empty tracker would claim none.
+   */
+  const background = (sessionID: string, now: number) => {
+    const running = runtime.current
+    return running && Deferred.isDoneUnsafe(running.ready) ? running.tracker.background(sessionID, now) : undefined
+  }
 
   return { join, handlers, notifications, summaries, view, members, runtime, progress, background }
 }

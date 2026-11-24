@@ -691,8 +691,7 @@ test("a subagent's background shell is its family's work until an hour after the
   expect(view(T).state.focus?.activity).toBe("Rodando rig run android")
   expect(view(T).roots.get(ids.live)?.working).toBe(true)
   // The family snapshot's tasks, the app's "Respondeu · 1 tarefa rodando".
-  const rig = { id: "sh_rig", sessionID: "ses_android", command: "rig run android", started: T - 40 * minute }
-  expect(tracker.background(ids.live, T)).toEqual([rig])
+  expect(tracker.background(ids.live, T)).toBe(1)
   // An hour after the subagent last ran, a shell still running is taken as left behind (a dev server); the hub wakes
   // then to say so.
   const detached = T - 30 * minute + limits.detachMs
@@ -700,33 +699,34 @@ test("a subagent's background shell is its family's work until an hour after the
   expect(row(detached - 1)).toMatchObject({ status: "working" })
   expect(view(detached).state.counts.working).toBe(0)
   expect(view(detached).roots.get(ids.live)?.working).toBe(false)
-  expect(tracker.background(ids.live, detached)).toEqual([])
+  expect(tracker.background(ids.live, detached)).toBe(0)
   // Continuing that subagent makes its shells work again, for an hour after that turn too.
   await run(tracker.apply(execution("started", "ses_android", detached), detached))
   await run(tracker.apply(execution("succeeded", "ses_android", detached + minute), detached))
   expect(row(detached + minute + limits.detachMs - 1)).toMatchObject({ status: "working" })
   expect(view(detached + minute + limits.detachMs).state.counts.working).toBe(0)
 
-  // After a restart, the live job of an idle subagent is listed by `ctx.job.background()` and counts the same way.
+  // After a restart, the live job of an idle subagent is listed by `ctx.job.background()` and counts the same way. A
+  // shutdown left the subagent's idle time before the turn that started it: the hour counts from the shell's start.
   const restarted = world()
   restarted.add(
     session(ids.live, {
       outcome: "succeeded",
-      time: { created: T - 3_600_000, updated: T - minute, idle: T - minute },
+      time: { created: T - 4 * 3_600_000, updated: T - minute, idle: T - minute },
     }),
   )
   restarted.add(
     session("ses_android", {
       parentID: ids.live,
       outcome: "succeeded",
-      time: { created: T - 3_000_000, updated: T - 2 * minute, idle: T - 2 * minute },
+      time: { created: T - 4 * 3_600_000, updated: T - 3 * 3_600_000, idle: T - 3 * 3_600_000 },
     }),
   )
   restarted.background.push(shellJob("ses_android", "sh_rig", T - 40 * minute, "rig run android"))
   const rebuilt = makeTracker(restarted.ctx)
   await run(rebuilt.rebuild(T))
   expect(rebuilt.derive(T, host).state.counts.working).toBe(1)
-  expect(rebuilt.derive(T - 2 * minute + limits.detachMs, host).state.counts.working).toBe(0)
+  expect(rebuilt.derive(T - 40 * minute + limits.detachMs, host).state.counts.working).toBe(0)
 })
 
 test.each(["completed", "error", "cancelled"] as const)(

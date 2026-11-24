@@ -146,9 +146,10 @@ does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agor
   run, so the parent wakes too: a subagent's tests or build in the background are its family's work, and the family
   stays working while the subagent and the root wait on them. A shell still running an hour after its subagent last
   ran is taken as left behind (a dev server): it no longer keeps the family working, holds back "Avisar ao terminar"
-  or describes the focus, and `custom.navigation` lists it apart (`detachedCount`, `detachedTitle`). The derived
-  state's `wakeAt` includes that moment. Continuing the subagent makes its shells count again, for an hour after
-  that turn too. From rev. 2026-11-06 until this one a subagent's shells stopped counting as soon as its turn ended,
+  or describes the focus, and `custom.navigation` lists it apart (`detachedCount`, `detachedTitle`), deciding each
+  shell with the same function (`detachesAt` in `tracker.ts`). The derived state's `wakeAt` includes that moment, so
+  the activity, the watch and the alerts move then, and `changed` goes out. Shells of an archived subagent never
+  count. Continuing the subagent makes its shells count again, for an hour after that turn too. From rev. 2026-11-06 until this one a subagent's shells stopped counting as soon as its turn ended,
   which, once subagents reported each idle, showed the root as finished in every gap between reports.
 - **Status precedence per session:** question > permission > failed > working > idle (rev. 2026-11-05: a session
   whose own last run failed is stopped with an error, never working, even while its subagents or background shells

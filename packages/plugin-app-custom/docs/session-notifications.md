@@ -48,8 +48,9 @@ The Live Activity hub's tracker is the source of truth, with its "working" roll-
 session works while its own execution, any descendant's execution, or an unfinished background shell of the family
 that someone waits on runs: one of the top-level session, or of a subagent that executes or ran in the last hour
 (rev. 2026-11-24, `live-activity.md`). So "Terminou" waits for a subagent's tests in the background, whose end wakes
-the subagent and its report the root; a shell still running an hour after its subagent last ran (a dev server) does
-not hold back the end. For each known, unarchived top-level session:
+the subagent and its report the root. A shell a subagent left on (a dev server) holds back the end, "Terminou" and
+"Parou com erro" alike, until an hour after that subagent last ran; from rev. 2026-11-06 to then it held back nothing.
+For each known, unarchived top-level session:
 
 1. The work must be seen by this process (a stop that happened while the server was down alerts nothing). A session
    first seen idle after startup that worked meanwhile (it started and failed between two evaluations) counts.

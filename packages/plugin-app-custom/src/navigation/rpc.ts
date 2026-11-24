@@ -46,9 +46,10 @@ export const Info = Schema.Struct({
   /** The title (a shell's command) of the newest such work. */
   backgroundTitle: Schema.String.pipe(Schema.optional),
   /**
-   * Shells of a subagent that has not run for an hour (a dev server it left on): taken as left behind, they never keep
-   * the family working (rev. 2026-11-24; from rev. 2026-11-06, as soon as its turn ended). Absent on servers before
-   * rev. 2026-11-06, which counted them in `backgroundCount`.
+   * Shells of a subagent that has not run for an hour since they started (a dev server it left on): taken as left
+   * behind, they never keep the family working (rev. 2026-11-24, decided per shell, so a row may carry both counts;
+   * from rev. 2026-11-06, as soon as its turn ended). Absent on servers before rev. 2026-11-06, which counted them in
+   * `backgroundCount`.
    */
   detachedCount: Schema.Int.pipe(Schema.optional),
   /** The command of the newest such shell. */

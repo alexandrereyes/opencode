@@ -249,8 +249,8 @@ type Entry = {
 }
 
 /**
- * A shell a session started that has not finished. It keeps its family working while someone waits on it (`detachesAt`):
- * its owner is top-level, still executes or ran in the last `limits.detachMs`. Past that, it is only listed.
+ * A shell a session started that has not finished. It keeps its family working while someone waits on it
+ * (`detachesAt`): its owner is top-level, still executes or ran in the last `limits.detachMs`. Past that, it is listed.
  */
 type Shell = { readonly sessionID: string; readonly command: string; readonly startedAt: number }
 
@@ -304,7 +304,7 @@ export type Derived = {
    * activity (working) or unread since. Another server's rows interleave by it (`docs/unified-summary.md`).
    */
   readonly order: ReadonlyMap<string, number>
-  /** When the state changes by itself next (an idle or failed row expiring). */
+  /** When the state changes by itself next (an idle or failed row expiring, a subagent's shell detaching). */
   readonly wakeAt?: number
   /** Top-level session → its oldest pending request of the attention kind (subagents included); watch-only. */
   readonly requests: ReadonlyMap<string, string>
@@ -313,6 +313,29 @@ export type Derived = {
   /** Every pending question and permission of an unarchived top-level session or its descendants. */
   readonly pending: readonly Pending[]
   readonly autoApprove: boolean
+}
+
+/**
+ * When nobody waits on a background shell any longer (rev. 2026-11-24), `custom.navigation`'s rule too: never while its
+ * owner is top-level or executes. Its end wakes its owner, and since upstream 2.3.0 a subagent reports to its parent
+ * every time it goes idle (with `state="running"` while its shells run), so the parent wakes too: a subagent's shell is
+ * its family's work until `limits.detachMs` after the subagent last ran (its latest idle transition, or the shell's
+ * start when that is later: a shutdown leaves the idle time where it was). Past that, a shell it left running (a dev
+ * server) is listed apart (`detachedCount`). An unknown or archived owner waits on nothing. Until rev. 2026-11-06
+ * nothing expired; from then to this revision a subagent's shells stopped counting as soon as its turn ended.
+ */
+export function detachesAt(
+  owner: {
+    readonly parentID?: string
+    readonly running: boolean
+    readonly archived: boolean
+    readonly idleAt?: number
+  },
+  startedAt: number,
+) {
+  if (owner.archived) return -Infinity
+  if (!owner.parentID || owner.running) return Infinity
+  return Math.max(owner.idleAt ?? 0, startedAt) + limits.detachMs
 }
 
 /**
@@ -530,21 +553,12 @@ export function makeTracker(ctx: TrackerContext) {
     return top && !top.parentID ? top : undefined
   }
 
-  /**
-   * When nobody waits on the shell any longer (rev. 2026-11-24): never while its owner is top-level or executes. Its
-   * end wakes its owner, and since upstream 2.3.0 a subagent reports to its parent every time it goes idle (with
-   * `state="running"` while its shells run), so the parent wakes too: a subagent's shell is its family's work until
-   * `limits.detachMs` after the subagent last ran. Past that, a shell it left running (a dev server) is listed apart
-   * (`custom.navigation`'s `detachedCount`). Until rev. 2026-11-06 nothing expired; from then to this revision a
-   * subagent's shells stopped counting as soon as its turn ended.
-   */
-  const detachesAt = (shell: Shell) => {
+  /** When the shell stops being its family's work (`detachesAt`). */
+  const detaches = (shell: Shell) => {
     const owner = sessions.get(shell.sessionID)
-    if (owner === undefined) return -Infinity
-    if (!owner.parentID || owner.running) return Infinity
-    return Math.max(owner.idleAt ?? 0, shell.startedAt) + limits.detachMs
+    return owner ? detachesAt(owner, shell.startedAt) : -Infinity
   }
-  const waitedShells = (now: number) => [...shells.values()].filter((shell) => now < detachesAt(shell))
+  const waitedShells = (now: number) => [...shells.values()].filter((shell) => now < detaches(shell))
 
   const worked = (id: string, at: number) => {
     const top = rootOf(id)
@@ -785,14 +799,11 @@ export function makeTracker(ctx: TrackerContext) {
   }
 
   /**
-   * The background shells someone waits on (`detachesAt`) of the session and its descendants at any depth, oldest
-   * first: what the app's "Respondeu · N tarefas rodando" counts (`custom.session-family`'s `background`).
+   * How many background shells someone waits on (`detachesAt`) the session and its descendants at any depth have:
+   * the tasks of the app's "Respondeu · N tarefas rodando" (`custom.session-family`'s `backgroundCount`).
    */
   const background = (sessionID: string, now: number) =>
-    [...shells.entries()]
-      .filter(([, shell]) => now < detachesAt(shell) && within(shell.sessionID, sessionID))
-      .map(([id, shell]) => ({ id, sessionID: shell.sessionID, command: shell.command, started: shell.startedAt }))
-      .toSorted((a, b) => a.started - b.started || a.id.localeCompare(b.id))
+    waitedShells(now).filter((shell) => within(shell.sessionID, sessionID)).length
 
   /** Computes the contract state; also moves the focus, which must stay put while it keeps working. */
   const derive = (now: number, host: string): Derived => {
@@ -979,7 +990,7 @@ export function makeTracker(ctx: TrackerContext) {
             : [],
       ),
       // A subagent's shell stops being work by itself: its family may stop working then.
-      ...[...shells.values()].map(detachesAt).filter((at) => at > now && at !== Infinity),
+      ...[...shells.values()].map(detaches).filter((at) => Number.isFinite(at) && at > now),
     ]
     const attention = waiting.map(
       (row): LiveActivity.Attention => ({

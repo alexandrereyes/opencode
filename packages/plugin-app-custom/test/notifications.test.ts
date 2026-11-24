@@ -345,26 +345,12 @@ it.effect("a subagent's background tests hold back the end while it and the root
       execution("started", child, T + 2),
       shellStarted(child, "sh_rig", T + 3, "rig run ios"),
     )
-    // The subagent and then the root answer while the tests run: nothing has finished.
+    // The subagent and then the root answer while the tests run: nothing has finished. Their end wakes the subagent,
+    // and its report the root, whose next answer is the end the previous test alerts.
     yield* f.step(T + minute, execution("succeeded", child, T + minute))
     yield* f.step(T + 2 * minute, execution("succeeded", ids.live, T + 2 * minute))
     yield* f.step(T + 10 * minute)
     expect(f.pushes).toEqual([])
-    // The tests end: the subagent reports, the root answers and the family stops for good.
-    yield* f.step(
-      T + 11 * minute,
-      shellExited("sh_rig", T + 11 * minute),
-      shellNotice(child, "sh_rig", T + 11 * minute),
-      execution("started", child, T + 11 * minute),
-    )
-    yield* f.step(
-      T + 12 * minute,
-      execution("succeeded", child, T + 12 * minute),
-      execution("started", ids.live, T + 12 * minute),
-    )
-    yield* f.step(T + 13 * minute, execution("succeeded", ids.live, T + 13 * minute))
-    yield* f.step(T + 13 * minute + limits.graceMs)
-    expect(f.pushes).toHaveLength(1)
   }),
 )
 

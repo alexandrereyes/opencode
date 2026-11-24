@@ -97,26 +97,25 @@ test("carries the Progresso of each active descendant showing one, and omits it 
   expect("progress" in none).toBe(false)
 })
 
-test("carries the family's waited background shells while the hub knows them, none included (rev. 2026-11-24)", async () => {
+test("counts the family's waited background shells once the hub knows them, zero included (rev. 2026-11-24)", async () => {
   const root = session("ses_root")
-  const shells = [{ id: "sh_rig", sessionID: "ses_child", command: "rig run ios", started: 5 }]
-  const read = (background?: (sessionID: string) => typeof shells) =>
+  const read = (background: (sessionID: string) => number | undefined) =>
     Effect.runPromise(
       snapshot(
         {
           family: () => Effect.succeed({ count: 1, cost: 0, data: [], active: [] }),
           get: () => Effect.fail(new Error("unused")),
           pending: () => Effect.succeed([]),
-          ...(background ? { background } : {}),
+          background,
         },
         root.id,
       ),
     )
-  const result = await read((sessionID) => (sessionID === root.id ? shells : []))
-  expect(Schema.decodeUnknownSync(Family.Snapshot)(result).background).toEqual(shells)
-  // An empty list says nothing runs; without the hub the field is absent, as on older servers.
-  expect((await read(() => [])).background).toEqual([])
-  expect("background" in (await read())).toBe(false)
+  const result = await read((sessionID) => (sessionID === root.id ? 2 : undefined))
+  expect(Schema.decodeUnknownSync(Family.Snapshot)(result).backgroundCount).toBe(2)
+  // Zero says nothing runs; before the hub is ready the field is absent, as on older servers.
+  expect((await read(() => 0)).backgroundCount).toBe(0)
+  expect("backgroundCount" in (await read(() => undefined))).toBe(false)
 })
 
 test("propagates missing root instead of returning an empty successful snapshot", async () => {

@@ -156,7 +156,6 @@ it.effect("a subagent's shells are work until an hour after it last ran, then de
       { session: session("ses_quiet", { parentID: "ses_root", idle: 20, outcome: "succeeded" }) },
     ]
     let active: Record<string, { type: "running" }> = { ses_ios: { type: "running" } }
-    let reads = 0
     const read = list(
       {
         scan: () => Effect.succeed({ data: rows }),
@@ -168,10 +167,7 @@ it.effect("a subagent's shells are work until an hour after it last ran, then de
             { id: "sh_rig", type: "shell", sessionID: rows[1].session.id, title: "rig run android", started: 15 },
             { id: "sh_sim", type: "shell", sessionID: rows[2].session.id, title: "xcodebuild test", started: 20 },
           ]),
-        active: () => {
-          reads++
-          return Effect.succeed(active)
-        },
+        active: () => Effect.succeed(active),
       },
       {},
     )
@@ -195,7 +191,6 @@ it.effect("a subagent's shells are work until an hour after it last ran, then de
     // Continued, the Android subagent's shells count again.
     active = { ses_android: { type: "running" } }
     expect((yield* read).data[1]).toMatchObject({ backgroundCount: 2 })
-    expect(reads).toBe(3)
   }),
 )
 

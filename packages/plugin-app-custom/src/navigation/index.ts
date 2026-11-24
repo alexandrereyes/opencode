@@ -5,7 +5,7 @@ import { Clock, DateTime, Effect, Schema } from "effect"
 import { Navigation } from "./rpc.js"
 import { Session } from "@opencode/schema/session"
 import { sharedHub } from "../live-activity/index.js"
-import { limits, type SessionProgress } from "../live-activity/tracker.js"
+import { detachesAt, type SessionProgress } from "../live-activity/tracker.js"
 import { sharedRegistry, wire } from "../browser-handoff/registry.js"
 import type { BrowserHandoffs } from "../browser-handoff/rpc.js"
 
@@ -87,14 +87,15 @@ export const list = Effect.fn("Navigation.list")(function* (
       const sessionQuestions = questions.get(row.session.id) ?? []
       const sessionBackground = background.get(row.session.id) ?? []
       const newestHandoff = (handoffs.get(row.session.id) ?? []).toSorted((a, b) => b.since - a.since)[0]
-      const newest = sessionBackground[0]
-      // A shell's end wakes its owner, whose report then wakes its parent: work while the owner is top-level,
-      // executes or ran in the last hour. Past that (a dev server it left on) it is listed, not counted as work. The
-      // Live Activity hub's `detachesAt` applies the same rule.
-      const waited =
-        !row.session.parentID ||
-        Object.hasOwn(active, row.session.id) ||
-        (newest !== undefined && now < Math.max(idle ?? 0, newest.started) + limits.detachMs)
+      // The Live Activity hub's rule: work while its end wakes someone, apart once a subagent left it (a dev server).
+      const owner = {
+        parentID: row.session.parentID,
+        running: Object.hasOwn(active, row.session.id),
+        archived: false,
+        idleAt: idle,
+      }
+      const waited = sessionBackground.filter((job) => now < detachesAt(owner, job.started))
+      const detached = sessionBackground.filter((job) => now >= detachesAt(owner, job.started))
       const progress = ctx.progress?.(row.session.id, now)
       return {
         session: encodeSession(row.session),
@@ -120,16 +121,16 @@ export const list = Effect.fn("Navigation.list")(function* (
               ...(newestHandoff.resourceID ? { browserResourceID: newestHandoff.resourceID } : {}),
             }
           : {}),
-        ...(newest && waited
+        ...(waited[0]
           ? {
-              backgroundCount: sessionBackground.length,
-              ...(newest.title ? { backgroundTitle: newest.title } : {}),
+              backgroundCount: waited.length,
+              ...(waited[0].title ? { backgroundTitle: waited[0].title } : {}),
             }
           : {}),
-        ...(newest && !waited
+        ...(detached[0]
           ? {
-              detachedCount: sessionBackground.length,
-              ...(newest.title ? { detachedTitle: newest.title } : {}),
+              detachedCount: detached.length,
+              ...(detached[0].title ? { detachedTitle: detached[0].title } : {}),
             }
           : {}),
         ...(progress ? { progress } : {}),
