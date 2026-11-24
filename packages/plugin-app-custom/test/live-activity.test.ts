@@ -670,44 +670,44 @@ test("an idle session with a background shell is working until the shell ends (r
   expect(view(T + minute).counts.working).toBe(0)
 })
 
-test("a shell a subagent left running after its turn keeps nothing working; a running sibling does (rev. 2026-11-06)", async () => {
-  const server = world()
-  const tracker = makeTracker(server.ctx)
-  const view = (now: number) => tracker.derive(now, host).state
-  const row = (now: number) => view(now).sessions.find((item) => item.sessionID === ids.live)
+test("a subagent's background shell is its family's work until an hour after the subagent last ran (rev. 2026-11-24)", async () => {
+  const tracker = makeTracker(world().ctx)
+  const view = (now: number) => tracker.derive(now, host)
+  const row = (now: number) => view(now).state.sessions.find((item) => item.sessionID === ids.live)
   await run(
     Effect.gen(function* () {
       yield* tracker.apply(created(ids.live, T - 60 * minute), T)
       yield* tracker.apply(execution("started", ids.live, T - 50 * minute), T)
-      for (const child of ["ses_android", "ses_ios"]) {
-        yield* tracker.apply(created(child, T - 45 * minute, ids.live), T)
-        yield* tracker.apply(execution("started", child, T - 45 * minute), T)
-      }
-      // The Android subagent starts its emulator in the background, answers and ends its turn.
-      yield* tracker.apply(shellStarted("ses_android", "sh_emu", T - 40 * minute, "android-emulator -avd Pixel"), T)
+      yield* tracker.apply(created("ses_android", T - 45 * minute, ids.live), T)
+      yield* tracker.apply(execution("started", "ses_android", T - 45 * minute), T)
+      // The subagent runs its tests in the background and ends its turn; its report says they still run.
+      yield* tracker.apply(shellStarted("ses_android", "sh_rig", T - 40 * minute, "rig run android"), T)
       yield* tracker.apply(execution("succeeded", "ses_android", T - 30 * minute), T)
-    }),
-  )
-  // The iOS subagent still executes: the family works, and the emulator does not describe that work.
-  expect(row(T)).toMatchObject({ status: "working" })
-  expect(view(T).focus?.activity ?? "").not.toContain("android-emulator")
-  await run(
-    Effect.gen(function* () {
-      yield* tracker.apply(execution("succeeded", "ses_ios", T - 20 * minute), T)
       yield* tracker.apply(execution("succeeded", ids.live, T - 10 * minute), T)
     }),
   )
-  // Everything answered; the emulator still runs but nobody waits on it.
-  expect(view(T).counts.working).toBe(0)
-  expect(row(T)).toMatchObject({ status: "idle" })
-  expect(tracker.derive(T, host).roots.get(ids.live)?.working).toBe(false)
-  // Continuing that subagent makes its shells its family's work again, until its turn ends.
-  await run(tracker.apply(execution("started", "ses_android", T), T))
+  // Nothing executes, but the tests' end wakes the subagent and its report the root: the family works on them.
   expect(row(T)).toMatchObject({ status: "working" })
-  await run(tracker.apply(execution("succeeded", "ses_android", T + minute), T))
-  expect(view(T + minute).counts.working).toBe(0)
+  expect(view(T).state.focus?.activity).toBe("Rodando rig run android")
+  expect(view(T).roots.get(ids.live)?.working).toBe(true)
+  // The family snapshot's tasks, the app's "Respondeu · 1 tarefa rodando".
+  const rig = { id: "sh_rig", sessionID: "ses_android", command: "rig run android", started: T - 40 * minute }
+  expect(tracker.background(ids.live, T)).toEqual([rig])
+  // An hour after the subagent last ran, a shell still running is taken as left behind (a dev server); the hub wakes
+  // then to say so.
+  const detached = T - 30 * minute + limits.detachMs
+  expect(view(T).wakeAt).toBe(detached)
+  expect(row(detached - 1)).toMatchObject({ status: "working" })
+  expect(view(detached).state.counts.working).toBe(0)
+  expect(view(detached).roots.get(ids.live)?.working).toBe(false)
+  expect(tracker.background(ids.live, detached)).toEqual([])
+  // Continuing that subagent makes its shells work again, for an hour after that turn too.
+  await run(tracker.apply(execution("started", "ses_android", detached), detached))
+  await run(tracker.apply(execution("succeeded", "ses_android", detached + minute), detached))
+  expect(row(detached + minute + limits.detachMs - 1)).toMatchObject({ status: "working" })
+  expect(view(detached + minute + limits.detachMs).state.counts.working).toBe(0)
 
-  // After a restart, the live job of an idle subagent is listed by `ctx.job.background()` and still counts for none.
+  // After a restart, the live job of an idle subagent is listed by `ctx.job.background()` and counts the same way.
   const restarted = world()
   restarted.add(
     session(ids.live, {
@@ -722,15 +722,11 @@ test("a shell a subagent left running after its turn keeps nothing working; a ru
       time: { created: T - 3_000_000, updated: T - 2 * minute, idle: T - 2 * minute },
     }),
   )
-  restarted.background.push(shellJob("ses_android", "sh_emu", T - 40 * minute, "android-emulator -avd Pixel"))
+  restarted.background.push(shellJob("ses_android", "sh_rig", T - 40 * minute, "rig run android"))
   const rebuilt = makeTracker(restarted.ctx)
   await run(rebuilt.rebuild(T))
-  expect(rebuilt.derive(T, host).state.counts.working).toBe(0)
-  // The same job of a top-level session is waited on: its end wakes that session.
-  restarted.background.push(shellJob(ids.live, "sh_watch", T - 5 * minute, "bun test --watch"))
-  const own = makeTracker(restarted.ctx)
-  await run(own.rebuild(T))
-  expect(own.derive(T, host).state.counts.working).toBe(1)
+  expect(rebuilt.derive(T, host).state.counts.working).toBe(1)
+  expect(rebuilt.derive(T - 2 * minute + limits.detachMs, host).state.counts.working).toBe(0)
 })
 
 test.each(["completed", "error", "cancelled"] as const)(

@@ -5,7 +5,7 @@ import { Session } from "@opencode/schema/session"
 import { SessionFamily } from "@opencode/schema/session-family"
 import { Form } from "@opencode/schema/form"
 import { Permission } from "@opencode/schema/permission"
-import { Effect, Schema } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { sharedHub } from "../live-activity/index.js"
 import type { SessionProgress } from "../live-activity/tracker.js"
 import { Family } from "./rpc.js"
@@ -22,9 +22,11 @@ type FamilyContext = {
   readonly get: Plugin.Context["session"]["get"]
   readonly pending: Requests["pending"]
   /** A session's Progresso while it shows; the Live Activity hub folds the same events for every Location. */
-  readonly progress?: (sessionID: string) => SessionProgress | undefined
+  readonly progress?: (sessionID: string, now: number) => SessionProgress | undefined
   /** Browse handoffs waiting now, any Location (`docs/browser-handoff.md`). */
   readonly handoffs?: () => readonly BrowserHandoffs.Handoff[]
+  /** The family's background shells someone waits on, from the same hub; `undefined` until it starts. */
+  readonly background?: (sessionID: string, now: number) => Family.Snapshot["background"]
 }
 
 export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyContext, sessionID: Session.ID) {
@@ -54,12 +56,14 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
   yield* Effect.forEach([...new Set([...permissions, ...forms, ...handoffs].map((item) => item.sessionID))], depthOf)
   const order = (a: { sessionID: string; created?: number }, b: { sessionID: string; created?: number }) =>
     (members.get(a.sessionID) ?? -1) - (members.get(b.sessionID) ?? -1) || (a.created ?? 0) - (b.created ?? 0)
+  const now = yield* Clock.currentTimeMillis
   // The subagent lists show each active descendant's Progresso; one that waits on its own subagents keeps it in its
   // own conversation and Sessões row.
   const progress = family.active.flatMap((item) => {
-    const value = ctx.progress?.(item.id)
+    const value = ctx.progress?.(item.id, now)
     return value ? [[item.id, value] as const] : []
   })
+  const background = ctx.background?.(sessionID, now)
   const browser = handoffs
     .filter((item) => (members.get(item.sessionID) ?? -1) >= 0)
     .toSorted((a, b) => (members.get(a.sessionID) ?? -1) - (members.get(b.sessionID) ?? -1) || a.since - b.since)
@@ -77,6 +81,7 @@ export const snapshot = Effect.fn("Family.snapshot")(function* (ctx: FamilyConte
       .map((item) => encodePermission(item)),
     ...(progress.length > 0 ? { progress: Object.fromEntries(progress) } : {}),
     ...(browser.length > 0 ? { browser } : {}),
+    ...(background ? { background } : {}),
   }
 })
 
@@ -105,8 +110,9 @@ export const registerFamily = Effect.fn("Family.register")(function* (ctx: Conte
             family: ctx.session.family,
             get: ctx.session.get,
             pending: ctx.request.pending,
-            progress: (sessionID) => sharedHub().progress(sessionID),
+            progress: (sessionID, now) => sharedHub().progress(sessionID, now),
             handoffs: () => sharedRegistry().waiting().map(wire),
+            background: (sessionID, now) => sharedHub().background(sessionID, now),
           },
           input.sessionID,
         ).pipe(

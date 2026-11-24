@@ -9,7 +9,7 @@ import { Project } from "@opencode/schema/project"
 import { AbsolutePath } from "@opencode/schema/schema"
 import { Session } from "@opencode/schema/session"
 import type { SessionScan } from "@opencode/schema/session-scan"
-import { DateTime, Effect, Schema } from "effect"
+import { Clock, DateTime, Effect, Schema } from "effect"
 import { Preferences } from "../preferences/rpc.js"
 import { Master } from "../master/rpc.js"
 import type { SessionProgress } from "../live-activity/tracker.js"
@@ -24,7 +24,7 @@ export type InventoryContext = {
   /** Root of the managed chats, whose sessions have no project of their own. */
   chats?: () => Effect.Effect<string | undefined>
   /** A session's Progresso while it shows (`docs/progress.md`); absent in tests without the Live Activity hub. */
-  progress?: (sessionID: string) => SessionProgress | undefined
+  progress?: (sessionID: string, now: number) => SessionProgress | undefined
 }
 
 /** Progresso of a running session: `done` of `total` completed, and the item in hand. */
@@ -145,6 +145,7 @@ export const inventory = Effect.fn("Sessions.inventory")(function* (ctx: Invento
   }
   const marks = ctx.marks ? yield* ctx.marks() : { pinned: [], notify: [] }
   const chatsRoot = ctx.chats ? yield* ctx.chats() : undefined
+  const now = yield* Clock.currentTimeMillis
   return {
     rows,
     active,
@@ -152,7 +153,7 @@ export const inventory = Effect.fn("Sessions.inventory")(function* (ctx: Invento
     roots,
     marks: { pinned: new Set(marks.pinned), notify: new Set(marks.notify) },
     projects: yield* projects(rows, chatsRoot),
-    progress: ctx.progress ?? (() => undefined),
+    progress: (sessionID) => ctx.progress?.(sessionID, now),
   } satisfies Inventory
 })
 

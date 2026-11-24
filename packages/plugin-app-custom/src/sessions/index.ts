@@ -253,7 +253,7 @@ export const registerSessions = Effect.fn("Sessions.register")(function* (ctx: O
         claim: (input) => chats.claim(input).pipe(Effect.asVoid),
         confirm: (input) => chats.confirm(input).pipe(Effect.asVoid),
       },
-      progress: (sessionID) => sharedHub().progress(sessionID),
+      progress: (sessionID, now) => sharedHub().progress(sessionID, now),
     }),
   )
 })
@@ -355,7 +355,7 @@ export type SessionsContext = {
     confirm: (input: Allocation & { sessionID: Session.ID }) => Effect.Effect<void, unknown>
   }
   /** A session's Progresso while it shows; absent in tests without the Live Activity hub. */
-  progress?: (sessionID: string) => SessionProgress | undefined
+  progress?: (sessionID: string, now: number) => SessionProgress | undefined
 }
 
 export function registerTools(editor: ToolEditor, ctx: SessionsContext) {

@@ -97,6 +97,28 @@ test("carries the Progresso of each active descendant showing one, and omits it 
   expect("progress" in none).toBe(false)
 })
 
+test("carries the family's waited background shells while the hub knows them, none included (rev. 2026-11-24)", async () => {
+  const root = session("ses_root")
+  const shells = [{ id: "sh_rig", sessionID: "ses_child", command: "rig run ios", started: 5 }]
+  const read = (background?: (sessionID: string) => typeof shells) =>
+    Effect.runPromise(
+      snapshot(
+        {
+          family: () => Effect.succeed({ count: 1, cost: 0, data: [], active: [] }),
+          get: () => Effect.fail(new Error("unused")),
+          pending: () => Effect.succeed([]),
+          ...(background ? { background } : {}),
+        },
+        root.id,
+      ),
+    )
+  const result = await read((sessionID) => (sessionID === root.id ? shells : []))
+  expect(Schema.decodeUnknownSync(Family.Snapshot)(result).background).toEqual(shells)
+  // An empty list says nothing runs; without the hub the field is absent, as on older servers.
+  expect((await read(() => [])).background).toEqual([])
+  expect("background" in (await read())).toBe(false)
+})
+
 test("propagates missing root instead of returning an empty successful snapshot", async () => {
   const missing = new Error("Session.NotFoundError")
   const result = await Effect.runPromise(

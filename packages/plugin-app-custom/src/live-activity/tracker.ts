@@ -14,6 +14,11 @@ export const limits = {
   idleMs: 30 * 60_000,
   /** A failure is forgotten after this long even when nobody viewed the session. */
   failedMs: 24 * 3_600_000,
+  /**
+   * A subagent's background shell stays its family's work this long after the subagent last ran (rev. 2026-11-24,
+   * `detachesAt`): past it, a shell left running (a dev server) is only listed.
+   */
+  detachMs: 60 * 60_000,
   title: 80,
   project: 40,
   host: 40,
@@ -244,8 +249,8 @@ type Entry = {
 }
 
 /**
- * A shell a session started that has not finished. It keeps its family working while someone waits on it (`waited`):
- * its owner is top-level or still executes. A shell a subagent left running after its turn is only listed.
+ * A shell a session started that has not finished. It keeps its family working while someone waits on it (`detachesAt`):
+ * its owner is top-level, still executes or ran in the last `limits.detachMs`. Past that, it is only listed.
  */
 type Shell = { readonly sessionID: string; readonly command: string; readonly startedAt: number }
 
@@ -447,7 +452,7 @@ export function makeTracker(ctx: TrackerContext) {
     const roots = new Set(
       [
         ...[...sessions.values()].filter((entry) => entry.running).map((entry) => entry.id),
-        ...waitedShells().map((shell) => shell.sessionID),
+        ...waitedShells(now).map((shell) => shell.sessionID),
       ].flatMap((id) => rootOf(id) ?? []),
     )
     for (const root of roots) {
@@ -526,16 +531,20 @@ export function makeTracker(ctx: TrackerContext) {
   }
 
   /**
-   * Someone waits on the shell (rev. 2026-11-06): its end wakes only its owner, which then answers Alexandre when it is
-   * top-level, or its parent while it still executes. A subagent whose turn ended already delivered its result, so the
-   * shells it left running (an emulator, a dev server) never keep its family working (`custom.navigation`'s
-   * `detachedCount`).
+   * When nobody waits on the shell any longer (rev. 2026-11-24): never while its owner is top-level or executes. Its
+   * end wakes its owner, and since upstream 2.3.0 a subagent reports to its parent every time it goes idle (with
+   * `state="running"` while its shells run), so the parent wakes too: a subagent's shell is its family's work until
+   * `limits.detachMs` after the subagent last ran. Past that, a shell it left running (a dev server) is listed apart
+   * (`custom.navigation`'s `detachedCount`). Until rev. 2026-11-06 nothing expired; from then to this revision a
+   * subagent's shells stopped counting as soon as its turn ended.
    */
-  const waited = (shell: Shell) => {
+  const detachesAt = (shell: Shell) => {
     const owner = sessions.get(shell.sessionID)
-    return owner !== undefined && (!owner.parentID || owner.running)
+    if (owner === undefined) return -Infinity
+    if (!owner.parentID || owner.running) return Infinity
+    return Math.max(owner.idleAt ?? 0, shell.startedAt) + limits.detachMs
   }
-  const waitedShells = () => [...shells.values()].filter(waited)
+  const waitedShells = (now: number) => [...shells.values()].filter((shell) => now < detachesAt(shell))
 
   const worked = (id: string, at: number) => {
     const top = rootOf(id)
@@ -741,14 +750,14 @@ export function makeTracker(ctx: TrackerContext) {
 
   /**
    * The session or a descendant at any depth executes, or a background shell of one of them that someone waits on
-   * (`waited`) still runs: the working family of Sessões and of the rows below (`family` in `derive`), taken below
+   * (`detachesAt`) still runs: the working family of Sessões and of the rows below (`family` in `derive`), taken below
    * `entry`; never after its own failed run (`failedStop`).
    */
-  const working = (entry: Entry) =>
+  const working = (entry: Entry, now: number) =>
     !failedStop(entry) &&
     (entry.running ||
       [...sessions.values()].some((other) => other.running && !other.archived && within(other.id, entry.id)) ||
-      waitedShells().some((shell) => within(shell.sessionID, entry.id)))
+      waitedShells(now).some((shell) => within(shell.sessionID, entry.id)))
   const within = (id: string, ancestor: string) => {
     const visit = (current: Entry | undefined, depth: number): boolean =>
       current !== undefined &&
@@ -762,18 +771,28 @@ export function makeTracker(ctx: TrackerContext) {
    * executes, or a subagent or background shell it started still runs) and its list still has an open item. The
    * web shows it only while the session itself executes; the apps keep it while the work it planned goes on.
    */
-  const progressOf = (entry: Entry): SessionProgress | undefined => {
-    if (entry.archived || gates.get(entry.directory) !== true || !working(entry)) return undefined
+  const progressOf = (entry: Entry, now: number): SessionProgress | undefined => {
+    if (entry.archived || gates.get(entry.directory) !== true || !working(entry, now)) return undefined
     const todos = entry.todos ?? []
     const summary = summarize(todos)
     return summary ? { ...summary, todos } : undefined
   }
 
   /** The Progresso of a session this process tracks, for Sessões (`custom.navigation`) and Mestra's tools. */
-  const progress = (sessionID: string) => {
+  const progress = (sessionID: string, now: number) => {
     const entry = sessions.get(sessionID)
-    return entry ? progressOf(entry) : undefined
+    return entry ? progressOf(entry, now) : undefined
   }
+
+  /**
+   * The background shells someone waits on (`detachesAt`) of the session and its descendants at any depth, oldest
+   * first: what the app's "Respondeu · N tarefas rodando" counts (`custom.session-family`'s `background`).
+   */
+  const background = (sessionID: string, now: number) =>
+    [...shells.entries()]
+      .filter(([, shell]) => now < detachesAt(shell) && within(shell.sessionID, sessionID))
+      .map(([id, shell]) => ({ id, sessionID: shell.sessionID, command: shell.command, started: shell.startedAt }))
+      .toSorted((a, b) => a.started - b.started || a.id.localeCompare(b.id))
 
   /** Computes the contract state; also moves the focus, which must stay put while it keeps working. */
   const derive = (now: number, host: string): Derived => {
@@ -791,14 +810,14 @@ export function makeTracker(ctx: TrackerContext) {
       if (top) executing.set(top.id, [...(executing.get(top.id) ?? []), entry])
     }
     // Unfinished shells (background jobs) of each family that someone waits on, at any depth.
-    const background = new Map<string, Shell[]>()
-    for (const shell of waitedShells()) {
+    const shelled = new Map<string, Shell[]>()
+    for (const shell of waitedShells(now)) {
       const top = rootOf(shell.sessionID)
-      if (top) background.set(top.id, [...(background.get(top.id) ?? []), shell])
+      if (top) shelled.set(top.id, [...(shelled.get(top.id) ?? []), shell])
     }
     const family = (entry: Entry) => {
       const members = executing.get(entry.id) ?? []
-      const jobs = background.get(entry.id) ?? []
+      const jobs = shelled.get(entry.id) ?? []
       const latest = members.toSorted((a, b) => b.activityAt - a.activityAt || a.id.localeCompare(b.id))[0]
       const newest = jobs.toSorted((a, b) => b.startedAt - a.startedAt)[0]
       const starts = [
@@ -867,7 +886,7 @@ export function makeTracker(ctx: TrackerContext) {
     state.focus = focused?.entry.id
     // A session with a Progresso shows it instead of its subagent count (rev. 2026-10-30).
     const progress = (row: (typeof rows)[number]): LiveActivity.Progress | undefined => {
-      const todos = progressOf(row.entry)
+      const todos = progressOf(row.entry, now)
       if (todos)
         return { done: todos.done, total: todos.total, unit: "todos", current: clip(todos.current, limits.activity) }
       const children = [...sessions.values()].filter(
@@ -951,13 +970,17 @@ export function makeTracker(ctx: TrackerContext) {
           [`unread:${row.entry.id}`, { title: "Não lida", body: `${row.ref.title} · ${row.ref.project}` }] as const,
       ),
     ])
-    const expiries = rows.flatMap((row) =>
-      row.status === "idle" && idle(row.entry) && row.entry.ended
-        ? [row.entry.ended.at + limits.idleMs]
-        : row.status === "failed" && row.entry.ended
-          ? [row.entry.ended.at + limits.failedMs]
-          : [],
-    )
+    const expiries = [
+      ...rows.flatMap((row) =>
+        row.status === "idle" && idle(row.entry) && row.entry.ended
+          ? [row.entry.ended.at + limits.idleMs]
+          : row.status === "failed" && row.entry.ended
+            ? [row.entry.ended.at + limits.failedMs]
+            : [],
+      ),
+      // A subagent's shell stops being work by itself: its family may stop working then.
+      ...[...shells.values()].map(detachesAt).filter((at) => at > now && at !== Infinity),
+    ]
     const attention = waiting.map(
       (row): LiveActivity.Attention => ({
         ...row.ref,
@@ -1056,7 +1079,7 @@ export function makeTracker(ctx: TrackerContext) {
     const live = new Set(
       [
         ...[...sessions.values()].filter((entry) => entry.running).map((entry) => entry.id),
-        ...waitedShells().map((shell) => shell.sessionID),
+        ...waitedShells(now).map((shell) => shell.sessionID),
       ].flatMap((id) => rootOf(id)?.id ?? []),
     )
     for (const entry of sessions.values()) {
@@ -1068,7 +1091,7 @@ export function makeTracker(ctx: TrackerContext) {
     }
   }
 
-  return { rebuild, apply, refreshPending, refreshHandoffs, derive, prune, sessions, progress }
+  return { rebuild, apply, refreshPending, refreshHandoffs, derive, prune, sessions, progress, background }
 }
 
 export type Tracker = ReturnType<typeof makeTracker>

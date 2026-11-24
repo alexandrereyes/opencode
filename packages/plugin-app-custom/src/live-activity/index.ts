@@ -456,9 +456,12 @@ export function makeHub(options: HubOptions) {
   const join = (member: Member) => Effect.acquireRelease(attach(member), () => detach(member))
 
   /** A session's Progresso while it shows (`docs/progress.md`); none before the hub has started. */
-  const progress = (sessionID: string) => runtime.current?.tracker.progress(sessionID)
+  const progress = (sessionID: string, now: number) => runtime.current?.tracker.progress(sessionID, now)
 
-  return { join, handlers, notifications, summaries, view, members, runtime, progress }
+  /** The background shells someone waits on below a session (`Tracker.background`); unknown before the hub starts. */
+  const background = (sessionID: string, now: number) => runtime.current?.tracker.background(sessionID, now)
+
+  return { join, handlers, notifications, summaries, view, members, runtime, progress, background }
 }
 
 export type Hub = ReturnType<typeof makeHub>

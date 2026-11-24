@@ -1,11 +1,11 @@
 import { Plugin } from "@opencode/plugin/effect"
 import type { Context } from "../context.js"
 import type { Requests } from "../request-times.js"
-import { DateTime, Effect, Schema } from "effect"
+import { Clock, DateTime, Effect, Schema } from "effect"
 import { Navigation } from "./rpc.js"
 import { Session } from "@opencode/schema/session"
 import { sharedHub } from "../live-activity/index.js"
-import type { SessionProgress } from "../live-activity/tracker.js"
+import { limits, type SessionProgress } from "../live-activity/tracker.js"
 import { sharedRegistry, wire } from "../browser-handoff/registry.js"
 import type { BrowserHandoffs } from "../browser-handoff/rpc.js"
 
@@ -15,10 +15,10 @@ interface NavigationContext {
   readonly scan: Plugin.Context["session"]["scan"]
   readonly pending: Requests["pending"]
   readonly background: Plugin.Context["job"]["background"]
-  /** Executing sessions at any depth: a subagent's shells count as its family's work only while it executes. */
+  /** Executing sessions at any depth: an executing subagent's shells are always its family's work. */
   readonly active: Plugin.Context["session"]["active"]
   /** A session's Progresso while it shows; the Live Activity hub folds the same events for every Location. */
-  readonly progress?: (sessionID: string) => SessionProgress | undefined
+  readonly progress?: (sessionID: string, now: number) => SessionProgress | undefined
   /** Browse handoffs waiting now, any Location (`docs/browser-handoff.md`). */
   readonly handoffs?: () => readonly BrowserHandoffs.Handoff[]
 }
@@ -36,7 +36,7 @@ export const registerNavigation = Effect.fn("Navigation.register")(function* (ct
             pending: requests.pending,
             background: jobs.background,
             active: sessions.active,
-            progress: (sessionID) => sharedHub().progress(sessionID),
+            progress: (sessionID, now) => sharedHub().progress(sessionID, now),
             handoffs: () => sharedRegistry().waiting().map(wire),
           },
           input,
@@ -67,8 +67,9 @@ export const list = Effect.fn("Navigation.list")(function* (
     (yield* ctx.background()).filter((job) => job.type !== "subagent").toSorted((a, b) => b.started - a.started),
     (job) => job.sessionID,
   )
-  // Unreadable, nothing executes: a subagent's shells are listed apart rather than kept working forever.
+  // Unreadable, nothing executes: a subagent's shells then count only until they detach.
   const active = background.size > 0 ? yield* ctx.active().pipe(Effect.orElseSucceed(() => ({}))) : {}
+  const now = yield* Clock.currentTimeMillis
   return {
     ...(page.next === undefined ? {} : { next: page.next }),
     data: page.data.map((row) => {
@@ -87,10 +88,14 @@ export const list = Effect.fn("Navigation.list")(function* (
       const sessionBackground = background.get(row.session.id) ?? []
       const newestHandoff = (handoffs.get(row.session.id) ?? []).toSorted((a, b) => b.since - a.since)[0]
       const newest = sessionBackground[0]
-      // A shell's end wakes only its owner. A subagent whose turn ended already delivered its result, so nobody
-      // waits on the shells it left running (an emulator, a dev server): they are listed, not counted as work.
-      const waited = !row.session.parentID || Object.hasOwn(active, row.session.id)
-      const progress = ctx.progress?.(row.session.id)
+      // A shell's end wakes its owner, whose report then wakes its parent: work while the owner is top-level,
+      // executes or ran in the last hour. Past that (a dev server it left on) it is listed, not counted as work. The
+      // Live Activity hub's `detachesAt` applies the same rule.
+      const waited =
+        !row.session.parentID ||
+        Object.hasOwn(active, row.session.id) ||
+        (newest !== undefined && now < Math.max(idle ?? 0, newest.started) + limits.detachMs)
+      const progress = ctx.progress?.(row.session.id, now)
       return {
         session: encodeSession(row.session),
         ...(row.messageAt === undefined ? {} : { messageAt: row.messageAt }),

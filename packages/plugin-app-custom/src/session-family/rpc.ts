@@ -25,6 +25,14 @@ export const Snapshot = Schema.Struct({
    * oldest first. Absent when none waits, and on older servers.
    */
   browser: Schema.Array(BrowserHandoffs.Handoff).pipe(Schema.optional),
+  /**
+   * rev. 2026-11-24: the background shells someone waits on of the session and its descendants at any depth, oldest
+   * first, by the Live Activity hub's rule (`docs/live-activity.md`): what "Respondeu · N tarefas rodando" counts.
+   * Present, possibly empty, while the hub runs; absent before it starts and on older servers.
+   */
+  background: Schema.Array(
+    Schema.Struct({ id: Schema.String, sessionID: Schema.String, command: Schema.String, started: Schema.Number }),
+  ).pipe(Schema.optional),
 })
 export type Snapshot = typeof Snapshot.Type
 

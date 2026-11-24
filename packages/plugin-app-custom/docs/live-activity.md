@@ -139,11 +139,17 @@ does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agor
   executes. It stops counting when the task ends; the completion notice then wakes the session as a new execution.
   Without any known turn of the top-level session, `startedAt` falls back to the earliest start among executing
   descendants and unfinished tasks. With only tasks pending, `activity` describes the newest one (`Rodando <command>`).
-- **Detached shells (rev. 2026-11-06):** a shell counts only while someone waits on it: its owner is the top-level
-  session, or a subagent that still executes. A shell's end wakes only its owner, and a subagent whose turn ended has
-  already delivered its result, so a shell it left running (an emulator, a dev server) never keeps the family working,
-  nor holds back "Avisar ao terminar" or describes the focus. Continuing that subagent makes its shells count again
-  until its turn ends. `custom.navigation` lists them apart (`detachedCount`, `detachedTitle`).
+- **Detached shells (rev. 2026-11-24):** a shell counts while someone waits on it: its owner is the top-level
+  session, a subagent that executes, or a subagent that ran less than an hour ago (`limits.detachMs`, from its latest
+  idle transition or the shell's start, whichever is later). A shell's end wakes its owner, and since upstream 2.3.0
+  (`609ee05a23`) a subagent reports to its parent every time it goes idle, with `state="running"` while its shells
+  run, so the parent wakes too: a subagent's tests or build in the background are its family's work, and the family
+  stays working while the subagent and the root wait on them. A shell still running an hour after its subagent last
+  ran is taken as left behind (a dev server): it no longer keeps the family working, holds back "Avisar ao terminar"
+  or describes the focus, and `custom.navigation` lists it apart (`detachedCount`, `detachedTitle`). The derived
+  state's `wakeAt` includes that moment. Continuing the subagent makes its shells count again, for an hour after
+  that turn too. From rev. 2026-11-06 until this one a subagent's shells stopped counting as soon as its turn ended,
+  which, once subagents reported each idle, showed the root as finished in every gap between reports.
 - **Status precedence per session:** question > permission > failed > working > idle (rev. 2026-11-05: a session
   whose own last run failed is stopped with an error, never working, even while its subagents or background shells
   still run; they keep their own state in its Agentes, and its Progresso hides. Between 2026-10-29 and then, that
@@ -489,8 +495,8 @@ The legacy direct `session.synthetic` notice remains accepted. A rebuild uses th
 the same source as Sessões, not historical tool results: a launch marked `running` in the transcript cannot revive
 a process that already ended, even when its cancellation notice is still parked in the inbox. Background subagents
 need nothing extra: the child session executes and rolls up. A long-lived background process (a dev server) of the
-top-level session keeps it working until it exits; one a subagent left behind after its turn does not (rev.
-2026-11-06, `waited` in `tracker.ts`).
+top-level session keeps it working until it exits; one of a subagent, until an hour after the subagent last ran
+(rev. 2026-11-24, `detachesAt` in `tracker.ts`).
 
 **Unread (rev. 2026-10-28).** The rule is `custom.navigation`'s `unreadAt` as the web and iOS lists combine it: a
 nonarchived top-level session whose `time.idle` is newer than `time.viewed`, either after a success or failure newer

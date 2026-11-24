@@ -39,14 +39,16 @@ export const Info = Schema.Struct({
   browserResourceID: Schema.String.pipe(Schema.optional),
   /**
    * Background work other than subagents (shell commands) still running for this session that someone waits on: the
-   * session is top-level or still executes, so its end wakes a turn that reaches Alexandre. It keeps the family working.
+   * session is top-level, still executes or ran in the last hour (rev. 2026-11-24), so its end wakes a turn that
+   * reaches Alexandre. It keeps the family working.
    */
   backgroundCount: Schema.Int.pipe(Schema.optional),
   /** The title (a shell's command) of the newest such work. */
   backgroundTitle: Schema.String.pipe(Schema.optional),
   /**
-   * Shells a subagent left running after its turn ended (an emulator, a dev server): nobody waits on them, so they
-   * never keep the family working (rev. 2026-11-06). Absent on older servers, which counted them in `backgroundCount`.
+   * Shells of a subagent that has not run for an hour (a dev server it left on): taken as left behind, they never keep
+   * the family working (rev. 2026-11-24; from rev. 2026-11-06, as soon as its turn ended). Absent on servers before
+   * rev. 2026-11-06, which counted them in `backgroundCount`.
    */
   detachedCount: Schema.Int.pipe(Schema.optional),
   /** The command of the newest such shell. */

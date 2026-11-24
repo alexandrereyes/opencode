@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test"
 import { Effect, Schema } from "effect"
+import { TestClock } from "effect/testing"
+import { it } from "../../core/test/lib/effect"
+import { limits } from "../src/live-activity/tracker"
 import { Session } from "@opencode/schema/session"
 import { Form } from "@opencode/schema/form"
 import { Permission } from "@opencode/schema/permission"
@@ -144,58 +147,57 @@ test("counts background work other than subagents and names the newest", async (
   expect(Schema.decodeUnknownSync(Navigation.Page)(result).data[0].backgroundCount).toBe(2)
 })
 
-test("shells of a subagent whose turn ended are detached; an executing subagent's still count (rev. 2026-11-06)", async () => {
-  const rows = [
-    { session: session("ses_root", { idle: 30, outcome: "succeeded" }) },
-    { session: session("ses_android", { parentID: "ses_root", idle: 20, outcome: "succeeded" }) },
-    { session: session("ses_ios", { parentID: "ses_root" }) },
-    { session: session("ses_quiet", { parentID: "ses_root", idle: 20, outcome: "succeeded" }) },
-  ]
-  let reads = 0
-  const read = (active: Record<string, { type: "running" }>) =>
-    Effect.runPromise(
-      list(
-        {
-          scan: () => Effect.succeed({ data: rows }),
-          pending: () => Effect.succeed([]),
-          background: () =>
-            Effect.succeed([
-              { id: "sh_root", type: "shell", sessionID: rows[0].session.id, title: "bun run dev", started: 5 },
-              { id: "sh_old", type: "shell", sessionID: rows[1].session.id, title: "adb logcat", started: 10 },
-              {
-                id: "sh_emu",
-                type: "shell",
-                sessionID: rows[1].session.id,
-                title: "android-emulator -avd Pixel",
-                started: 15,
-              },
-              { id: "sh_sim", type: "shell", sessionID: rows[2].session.id, title: "xcodebuild test", started: 20 },
-            ]),
-          active: () => {
-            reads++
-            return Effect.succeed(active)
-          },
+it.effect("a subagent's shells are work until an hour after it last ran, then detached (rev. 2026-11-24)", () =>
+  Effect.gen(function* () {
+    const rows = [
+      { session: session("ses_root", { idle: 30, outcome: "succeeded" }) },
+      { session: session("ses_android", { parentID: "ses_root", idle: 20, outcome: "succeeded" }) },
+      { session: session("ses_ios", { parentID: "ses_root" }) },
+      { session: session("ses_quiet", { parentID: "ses_root", idle: 20, outcome: "succeeded" }) },
+    ]
+    let active: Record<string, { type: "running" }> = { ses_ios: { type: "running" } }
+    let reads = 0
+    const read = list(
+      {
+        scan: () => Effect.succeed({ data: rows }),
+        pending: () => Effect.succeed([]),
+        background: () =>
+          Effect.succeed([
+            { id: "sh_root", type: "shell", sessionID: rows[0].session.id, title: "bun run dev", started: 5 },
+            { id: "sh_old", type: "shell", sessionID: rows[1].session.id, title: "adb logcat", started: 10 },
+            { id: "sh_rig", type: "shell", sessionID: rows[1].session.id, title: "rig run android", started: 15 },
+            { id: "sh_sim", type: "shell", sessionID: rows[2].session.id, title: "xcodebuild test", started: 20 },
+          ]),
+        active: () => {
+          reads++
+          return Effect.succeed(active)
         },
-        {},
-      ),
+      },
+      {},
     )
-  const result = await read({ ses_ios: { type: "running" } })
-  // The top-level session's own shell wakes it: work. The Android subagent already answered: listed apart.
-  expect(result.data[0]).toMatchObject({ backgroundCount: 1, backgroundTitle: "bun run dev" })
-  expect(result.data[0]).not.toHaveProperty("detachedCount")
-  expect(result.data[1]).toMatchObject({ detachedCount: 2, detachedTitle: "android-emulator -avd Pixel" })
-  expect(result.data[1]).not.toHaveProperty("backgroundCount")
-  expect(result.data[1]).not.toHaveProperty("backgroundTitle")
-  // The iOS subagent still executes: its shell is work its parent waits on.
-  expect(result.data[2]).toMatchObject({ backgroundCount: 1, backgroundTitle: "xcodebuild test" })
-  expect(result.data[2]).not.toHaveProperty("detachedCount")
-  expect(result.data[3]).not.toHaveProperty("backgroundCount")
-  expect(result.data[3]).not.toHaveProperty("detachedCount")
-  expect(Schema.decodeUnknownSync(Navigation.Page)(result).data[1]).toMatchObject({ detachedCount: 2 })
-  // Continued, the Android subagent's shells count again.
-  expect((await read({ ses_android: { type: "running" } })).data[1]).toMatchObject({ backgroundCount: 2 })
-  expect(reads).toBe(2)
-})
+    // The Android subagent ran (until 20) less than an hour ago: its shells' end wakes it, its report the root.
+    const fresh = yield* read
+    expect(fresh.data[1]).toMatchObject({ backgroundCount: 2, backgroundTitle: "rig run android" })
+    expect(fresh.data[1]).not.toHaveProperty("detachedCount")
+    // An hour later they are taken as left behind: listed apart. A top-level session's own shell and an executing
+    // subagent's are always work.
+    yield* TestClock.setTime(20 + limits.detachMs)
+    const late = yield* read
+    expect(late.data[0]).toMatchObject({ backgroundCount: 1, backgroundTitle: "bun run dev" })
+    expect(late.data[0]).not.toHaveProperty("detachedCount")
+    expect(late.data[1]).toMatchObject({ detachedCount: 2, detachedTitle: "rig run android" })
+    expect(late.data[1]).not.toHaveProperty("backgroundCount")
+    expect(late.data[1]).not.toHaveProperty("backgroundTitle")
+    expect(late.data[2]).toMatchObject({ backgroundCount: 1, backgroundTitle: "xcodebuild test" })
+    expect(late.data[3]).not.toHaveProperty("backgroundCount")
+    expect(late.data[3]).not.toHaveProperty("detachedCount")
+    expect(Schema.decodeUnknownSync(Navigation.Page)(late).data[1]).toMatchObject({ detachedCount: 2 })
+    // Continued, the Android subagent's shells count again.
+    active = { ses_android: { type: "running" } }
+    expect((yield* read).data[1]).toMatchObject({ backgroundCount: 2 })
+    expect(reads).toBe(3)
+  }),
+)
 
 test("reads the running set only when some background work exists", async () => {
   let reads = 0

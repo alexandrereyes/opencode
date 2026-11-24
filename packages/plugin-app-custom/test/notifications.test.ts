@@ -331,26 +331,39 @@ it.effect("subagents and background shells keep the family working; a wake insid
   }),
 )
 
-it.effect("a shell a subagent left running after its turn does not hold back the end (rev. 2026-11-06)", () =>
+it.effect("a subagent's background tests hold back the end while it and the root wait on them (rev. 2026-11-24)", () =>
   Effect.gen(function* () {
     const f = setup()
     yield* f.registry.register(iphone, T)
     yield* f.watch(ids.live)
-    const child = "ses_child_emulator"
+    const child = "ses_child_tests"
     yield* f.step(
       T,
       created(ids.live, T - minute),
       execution("started", ids.live, T),
       created(child, T + 1, ids.live),
       execution("started", child, T + 2),
-      shellStarted(child, "sh_emu", T + 3, "android-emulator -avd Pixel"),
+      shellStarted(child, "sh_rig", T + 3, "rig run ios"),
     )
-    // The subagent answers and leaves its emulator on; the root still works.
+    // The subagent and then the root answer while the tests run: nothing has finished.
     yield* f.step(T + minute, execution("succeeded", child, T + minute))
-    yield* f.step(T + 2 * minute)
+    yield* f.step(T + 2 * minute, execution("succeeded", ids.live, T + 2 * minute))
+    yield* f.step(T + 10 * minute)
     expect(f.pushes).toEqual([])
-    yield* f.step(T + 3 * minute, execution("succeeded", ids.live, T + 3 * minute))
-    yield* f.step(T + 3 * minute + limits.graceMs)
+    // The tests end: the subagent reports, the root answers and the family stops for good.
+    yield* f.step(
+      T + 11 * minute,
+      shellExited("sh_rig", T + 11 * minute),
+      shellNotice(child, "sh_rig", T + 11 * minute),
+      execution("started", child, T + 11 * minute),
+    )
+    yield* f.step(
+      T + 12 * minute,
+      execution("succeeded", child, T + 12 * minute),
+      execution("started", ids.live, T + 12 * minute),
+    )
+    yield* f.step(T + 13 * minute, execution("succeeded", ids.live, T + 13 * minute))
+    yield* f.step(T + 13 * minute + limits.graceMs)
     expect(f.pushes).toHaveLength(1)
   }),
 )

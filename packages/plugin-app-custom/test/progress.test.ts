@@ -6,7 +6,7 @@ import type { Push } from "../src/live-activity/apns"
 import { makeHub, type Member } from "../src/live-activity/index"
 import { fit, limits as pushLimits, makeLifecycle, makeRegistry } from "../src/live-activity/lifecycle"
 import { LiveActivity } from "../src/live-activity/rpc"
-import { makeTracker, type Event } from "../src/live-activity/tracker"
+import { limits, makeTracker, type Event } from "../src/live-activity/tracker"
 import { current, latest, parse, summarize, type Todo } from "../src/progress/todos"
 import {
   T,
@@ -114,7 +114,7 @@ test("events folded into the progress situation produce state-progress.json", as
   const state = tracker.derive(T, host).state
   expect(state).toEqual(await fixture("state-progress"))
   expect(Schema.decodeUnknownSync(LiveActivity.AgentsState)(await fixture("state-progress"))).toEqual(state)
-  expect(tracker.progress(ids.live)).toEqual({
+  expect(tracker.progress(ids.live, T)).toEqual({
     done: 3,
     finished: 4,
     total: 7,
@@ -131,7 +131,7 @@ test("without experimental.todo the row keeps its subagent count and nothing sho
   await run(Effect.forEach(todowrite(ids.live, T, "call_again", plan), (event) => tracker.apply(event, T)))
   const state = tracker.derive(T, host).state
   expect(state.focus?.progress).toEqual({ done: 2, total: 3, unit: "subagents" })
-  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress(ids.live, T)).toBeUndefined()
 })
 
 test("the list shows while the session's family works and still has an open item", async () => {
@@ -150,8 +150,8 @@ test("the list shows while the session's family works and still has an open item
   expect(tracker.derive(T, host).state.sessions[0]?.progress).toMatchObject({ done: 3, total: 7, unit: "todos" })
   // A subagent has its own list, which never changes its top-level session's.
   await apply(todowrite("ses_child_1", T0 + 3 * minute, "call_child", [{ content: "Filho", status: "pending" }]))
-  expect(tracker.progress(ids.live)?.current).toBe("Atualizar a Live Activity e o relógio")
-  expect(tracker.progress("ses_child_1")).toMatchObject({ done: 0, total: 1, current: "Filho" })
+  expect(tracker.progress(ids.live, T)?.current).toBe("Atualizar a Live Activity e o relógio")
+  expect(tracker.progress("ses_child_1", T)).toMatchObject({ done: 0, total: 1, current: "Filho" })
   expect(tracker.derive(T, host).state.focus?.progress?.current).toBe("Atualizar a Live Activity e o relógio")
   // A call that never succeeds changes nothing.
   await apply([
@@ -166,17 +166,17 @@ test("the list shows while the session's family works and still has an open item
       data: { sessionID: ids.live, id: "call_2", input: { todos: [] } },
     },
   ])
-  expect(tracker.progress(ids.live)?.done).toBe(3)
+  expect(tracker.progress(ids.live, T)?.done).toBe(3)
   // Its own run ended while the subagent still works: the list it planned stays (rev. 2026-11-02).
   await apply([execution("succeeded", ids.live, T0 + 5 * minute)])
   expect(tracker.derive(T, host).state.sessions[0]).toMatchObject({
     status: "working",
     progress: { done: 3, total: 7, unit: "todos" },
   })
-  expect(tracker.progress(ids.live)?.done).toBe(3)
+  expect(tracker.progress(ids.live, T)?.done).toBe(3)
   // The whole family stopped: it no longer shows.
   await apply([execution("succeeded", "ses_child_1", T0 + 5 * minute + 30_000)])
-  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress(ids.live, T)).toBeUndefined()
   // Every item finished: nothing shows although it works again.
   await apply([
     execution("started", ids.live, T0 + 6 * minute),
@@ -185,7 +185,7 @@ test("the list shows while the session's family works and still has an open item
       { content: "b", status: "cancelled" },
     ]),
   ])
-  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress(ids.live, T)).toBeUndefined()
 })
 
 test("a grandchild or a background shell keeps an idle session's list showing until the family stops", async () => {
@@ -208,23 +208,26 @@ test("a grandchild or a background shell keeps an idle session's list showing un
     execution("succeeded", ids.live, T0 + 6 * minute),
   ])
   // Only the grandchild runs: both lists above it stay, each its own.
-  expect(tracker.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
-  expect(tracker.progress("ses_child_1")).toMatchObject({ done: 0, total: 1, current: "Revisar o snapshot" })
+  expect(tracker.progress(ids.live, T)).toMatchObject({ done: 3, total: 7 })
+  expect(tracker.progress("ses_child_1", T)).toMatchObject({ done: 0, total: 1, current: "Revisar o snapshot" })
   await apply([execution("succeeded", "ses_grandchild", T0 + 7 * minute)])
-  expect(tracker.progress(ids.live)).toBeUndefined()
-  expect(tracker.progress("ses_child_1")).toBeUndefined()
-  // A shell the finished grandchild left running is waited on by nobody (rev. 2026-11-06): no work, no list.
-  await apply([shellStarted("ses_grandchild", "sh_left", T0 + 8 * minute, "android-emulator -avd Pixel")])
-  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress(ids.live, T)).toBeUndefined()
+  expect(tracker.progress("ses_child_1", T)).toBeUndefined()
+  // A shell the finished grandchild left running is the family's work for an hour after it last ran (rev. 2026-11-24):
+  // its end wakes the grandchild, whose report wakes the sessions above it.
+  await apply([shellStarted("ses_grandchild", "sh_left", T0 + 7 * minute, "rig run android")])
+  expect(tracker.progress(ids.live, T0 + 8 * minute)?.done).toBe(3)
+  expect(tracker.progress(ids.live, T0 + 7 * minute + limits.detachMs)).toBeUndefined()
+  await apply([shellExited("sh_left", T0 + 8 * minute)])
   // A background shell of the session itself is work of the family: its end wakes it.
   await apply([shellStarted(ids.live, "sh_1", T0 + 8 * minute, "bun test")])
-  expect(tracker.progress(ids.live)?.done).toBe(3)
+  expect(tracker.progress(ids.live, T)?.done).toBe(3)
   expect(tracker.derive(T0 + 8 * minute, host).state.sessions[0]).toMatchObject({
     status: "working",
     progress: { done: 3, total: 7, unit: "todos" },
   })
   await apply([shellExited("sh_1", T0 + 9 * minute)])
-  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress(ids.live, T)).toBeUndefined()
 })
 
 test("a rebuild reads the list of an idle top-level session whose subagent or background shell still runs", async () => {
@@ -236,7 +239,7 @@ test("a rebuild reads the list of an idle top-level session whose subagent or ba
   server.transcripts.set(ids.live, [todoMessage("msg_1", T - 2 * minute, plan)])
   const tracker = makeTracker(server.ctx)
   await run(tracker.rebuild(T))
-  expect(tracker.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
+  expect(tracker.progress(ids.live, T)).toMatchObject({ done: 3, total: 7 })
   expect(tracker.derive(T, host).state.focus?.progress).toMatchObject({ done: 3, total: 7, unit: "todos" })
 
   // No subagent, only a shell its transcript moved to the background and never closed.
@@ -256,7 +259,7 @@ test("a rebuild reads the list of an idle top-level session whose subagent or ba
   shelled.background.push(shellJob(ids.live, "sh_9", T - 2 * minute, "bun run build"))
   const rebuilt = makeTracker(shelled.ctx)
   await run(rebuilt.rebuild(T))
-  expect(rebuilt.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
+  expect(rebuilt.progress(ids.live, T)).toMatchObject({ done: 3, total: 7 })
 })
 
 test("a subagent that starts while its idle top-level session's list is unknown reads that list", async () => {
@@ -267,9 +270,9 @@ test("a subagent that starts while its idle top-level session's list is unknown 
   server.transcripts.set(ids.live, [todoMessage("msg_1", T - 2 * minute, plan)])
   const tracker = makeTracker(server.ctx)
   await run(tracker.rebuild(T - minute))
-  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress(ids.live, T)).toBeUndefined()
   await run(tracker.apply(execution("started", "ses_child_1", T), T))
-  expect(tracker.progress(ids.live)).toMatchObject({ done: 3, total: 7 })
+  expect(tracker.progress(ids.live, T)).toMatchObject({ done: 3, total: 7 })
 })
 
 test("a resumed session reads its list from the transcript, and a revert reads it again before the boundary", async () => {
@@ -284,15 +287,15 @@ test("a resumed session reads its list from the transcript, and a revert reads i
   const tracker = makeTracker(server.ctx)
   await run(tracker.rebuild(T - 6 * minute))
   // Not running at the rebuild: nothing read yet.
-  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress(ids.live, T)).toBeUndefined()
   await run(tracker.apply(execution("started", ids.live, T - 5 * minute), T - 5 * minute))
-  expect(tracker.progress(ids.live)?.done).toBe(3)
+  expect(tracker.progress(ids.live, T)?.done).toBe(3)
   server.add(session(ids.live, { revert: { messageID: "msg_2" } }))
   await run(tracker.apply({ type: "session.revert.staged", created: T, data: { sessionID: ids.live } }, T))
-  expect(tracker.progress(ids.live)?.current).toBe("Primeiro plano")
+  expect(tracker.progress(ids.live, T)?.current).toBe("Primeiro plano")
   server.add(session(ids.live))
   await run(tracker.apply({ type: "session.revert.cleared", created: T, data: { sessionID: ids.live } }, T))
-  expect(tracker.progress(ids.live)?.total).toBe(7)
+  expect(tracker.progress(ids.live, T)?.total).toBe(7)
 })
 
 test("an imported or forked session reads the list its history brought on its first run", async () => {
@@ -302,9 +305,9 @@ test("an imported or forked session reads the list its history brought on its fi
   server.transcripts.set(ids.live, [userMessage("msg_1", T0 - minute), todoMessage("msg_2", T0, plan)])
   const tracker = makeTracker(server.ctx)
   await run(tracker.apply(created(ids.live, T0), T0))
-  expect(tracker.progress(ids.live)).toBeUndefined()
+  expect(tracker.progress(ids.live, T)).toBeUndefined()
   await run(tracker.apply(execution("started", ids.live, T0 + minute), T0 + minute))
-  expect(tracker.progress(ids.live)).toMatchObject({
+  expect(tracker.progress(ids.live, T)).toMatchObject({
     done: 3,
     total: 7,
     current: "Atualizar a Live Activity e o relógio",
@@ -352,8 +355,8 @@ test("the hub asks the session's own Location whether experimental.todo is on", 
           ...todowrite(ids.deploy, T0 + minute, "call_2", plan),
         ])
         for (let round = 0; round < 10; round++) yield* Effect.promise(() => Bun.sleep(1))
-        expect(hub.progress(ids.live)?.total).toBe(7)
-        expect(hub.progress(ids.deploy)).toBeUndefined()
+        expect(hub.progress(ids.live, T)?.total).toBe(7)
+        expect(hub.progress(ids.deploy, T)).toBeUndefined()
       }),
     ),
   )
