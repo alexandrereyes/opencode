@@ -670,7 +670,7 @@ test("an idle session with a background shell is working until the shell ends (r
   expect(view(T + minute).counts.working).toBe(0)
 })
 
-test("a subagent's background shell is its family's work until an hour after the subagent last ran (rev. 2026-11-24)", async () => {
+test("a subagent's background shell is its family's work until 90 minutes after the subagent last ran (rev. 2026-11-24)", async () => {
   const tracker = makeTracker(world().ctx)
   const view = (now: number) => tracker.derive(now, host)
   const row = (now: number) => view(now).state.sessions.find((item) => item.sessionID === ids.live)
@@ -692,7 +692,7 @@ test("a subagent's background shell is its family's work until an hour after the
   expect(view(T).roots.get(ids.live)?.working).toBe(true)
   // The family snapshot's tasks, the app's "Respondeu · 1 tarefa rodando".
   expect(tracker.background(ids.live, T)).toBe(1)
-  // An hour after the subagent last ran, a shell still running is taken as left behind (a dev server); the hub wakes
+  // 90 minutes after the subagent last ran, a shell still running is taken as left behind (a dev server); the hub wakes
   // then to say so.
   const detached = T - 30 * minute + limits.detachMs
   expect(view(T).wakeAt).toBe(detached)
@@ -700,14 +700,14 @@ test("a subagent's background shell is its family's work until an hour after the
   expect(view(detached).state.counts.working).toBe(0)
   expect(view(detached).roots.get(ids.live)?.working).toBe(false)
   expect(tracker.background(ids.live, detached)).toBe(0)
-  // Continuing that subagent makes its shells work again, for an hour after that turn too.
+  // Continuing that subagent makes its shells work again, for 90 minutes after that turn too.
   await run(tracker.apply(execution("started", "ses_android", detached), detached))
   await run(tracker.apply(execution("succeeded", "ses_android", detached + minute), detached))
   expect(row(detached + minute + limits.detachMs - 1)).toMatchObject({ status: "working" })
   expect(view(detached + minute + limits.detachMs).state.counts.working).toBe(0)
 
   // After a restart, the live job of an idle subagent is listed by `ctx.job.background()` and counts the same way. A
-  // shutdown left the subagent's idle time before the turn that started it: the hour counts from the shell's start.
+  // shutdown left the subagent's idle time before the turn that started it: the limit counts from the shell's start.
   const restarted = world()
   restarted.add(
     session(ids.live, {

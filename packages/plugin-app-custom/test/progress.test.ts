@@ -213,8 +213,8 @@ test("a grandchild or a background shell keeps an idle session's list showing un
   await apply([execution("succeeded", "ses_grandchild", T0 + 7 * minute)])
   expect(tracker.progress(ids.live, T)).toBeUndefined()
   expect(tracker.progress("ses_child_1", T)).toBeUndefined()
-  // A shell the finished grandchild left running is the family's work for an hour after it last ran (rev. 2026-11-24):
-  // its end wakes the grandchild, whose report wakes the sessions above it.
+  // A shell the finished grandchild left running is the family's work for 90 minutes after it last ran (rev.
+  // 2026-11-24): its end wakes the grandchild, whose report wakes the sessions above it.
   await apply([shellStarted("ses_grandchild", "sh_left", T0 + 7 * minute, "rig run android")])
   expect(tracker.progress(ids.live, T0 + 8 * minute)?.done).toBe(3)
   expect(tracker.progress(ids.live, T0 + 7 * minute + limits.detachMs)).toBeUndefined()

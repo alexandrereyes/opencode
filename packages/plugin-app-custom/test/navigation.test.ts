@@ -147,7 +147,7 @@ test("counts background work other than subagents and names the newest", async (
   expect(Schema.decodeUnknownSync(Navigation.Page)(result).data[0].backgroundCount).toBe(2)
 })
 
-it.effect("a subagent's shells are work until an hour after it last ran, then detached (rev. 2026-11-24)", () =>
+it.effect("a subagent's shells are work until 90 minutes after it last ran, then detached (rev. 2026-11-24)", () =>
   Effect.gen(function* () {
     const rows = [
       { session: session("ses_root", { idle: 30, outcome: "succeeded" }) },
@@ -171,11 +171,11 @@ it.effect("a subagent's shells are work until an hour after it last ran, then de
       },
       {},
     )
-    // The Android subagent ran (until 20) less than an hour ago: its shells' end wakes it, its report the root.
+    // The Android subagent ran (until 20) less than 90 minutes ago: its shells' end wakes it, its report the root.
     const fresh = yield* read
     expect(fresh.data[1]).toMatchObject({ backgroundCount: 2, backgroundTitle: "rig run android" })
     expect(fresh.data[1]).not.toHaveProperty("detachedCount")
-    // An hour later they are taken as left behind: listed apart. A top-level session's own shell and an executing
+    // 90 minutes later they are taken as left behind: listed apart. A top-level session's own shell and an executing
     // subagent's are always work.
     yield* TestClock.setTime(20 + limits.detachMs)
     const late = yield* read

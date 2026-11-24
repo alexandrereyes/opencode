@@ -39,14 +39,14 @@ export const Info = Schema.Struct({
   browserResourceID: Schema.String.pipe(Schema.optional),
   /**
    * Background work other than subagents (shell commands) still running for this session that someone waits on: the
-   * session is top-level, still executes or ran in the last hour (rev. 2026-11-24), so its end wakes a turn that
+   * session is top-level, still executes or ran in the last 90 minutes (rev. 2026-11-24), so its end wakes a turn that
    * reaches Alexandre. It keeps the family working.
    */
   backgroundCount: Schema.Int.pipe(Schema.optional),
   /** The title (a shell's command) of the newest such work. */
   backgroundTitle: Schema.String.pipe(Schema.optional),
   /**
-   * Shells of a subagent that has not run for an hour since they started (a dev server it left on): taken as left
+   * Shells of a subagent that has not run for 90 minutes since they started (a dev server it left on): taken as left
    * behind, they never keep the family working (rev. 2026-11-24, decided per shell, so a row may carry both counts;
    * from rev. 2026-11-06, as soon as its turn ended). Absent on servers before rev. 2026-11-06, which counted them in
    * `backgroundCount`.

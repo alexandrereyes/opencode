@@ -18,7 +18,7 @@ export const limits = {
    * A subagent's background shell stays its family's work this long after the subagent last ran (rev. 2026-11-24,
    * `detachesAt`): past it, a shell left running (a dev server) is only listed.
    */
-  detachMs: 60 * 60_000,
+  detachMs: 90 * 60_000,
   title: 80,
   project: 40,
   host: 40,
