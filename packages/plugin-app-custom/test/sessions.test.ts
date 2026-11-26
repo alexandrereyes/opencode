@@ -13,6 +13,7 @@ import { SessionInbox } from "@opencode/schema/session-inbox"
 import { TestClock } from "effect/testing"
 import { it } from "../../core/test/lib/effect"
 import type { PendingSnapshot } from "@opencode/plugin/effect/request"
+import type { BackgroundJob } from "@opencode/plugin/effect/job"
 import { Preferences } from "../src/preferences/rpc"
 import {
   AnswerInput,
@@ -64,6 +65,10 @@ const child = session("ses_child", { parentID: root.id, title: "Subagente" })
 const master = session(self, { agent: agentID })
 const other = session("ses_other", { title: "Outra sessão", time: { created: 1, updated: 3 } })
 const worker = session("ses_worker", { parentID: other.id, title: "Subagente da outra", agent: "general" })
+
+function shell(sessionID: Session.ID): BackgroundJob {
+  return { id: "job_rig", type: "shell", sessionID, title: "rig run", started: 1 }
+}
 
 function catalogModel(providerID: string, id: string, variants: string[] = [], enabled = true) {
   return {
@@ -165,7 +170,7 @@ const profile: Preferences.Profile = {
 
 function fixture(
   input: {
-    wait?: SessionsContext["session"]["wait"]
+    background?: BackgroundJob[]
     rows?: Session.Info[]
     active?: string[]
     messages?: Record<string, unknown[]>
@@ -241,7 +246,7 @@ function fixture(
         calls.interrupted.push(sessionID)
         return Effect.succeed({ interrupted: true })
       },
-      wait: input.wait ?? (() => Effect.void),
+      wait: () => Effect.void,
       form: {
         reply: (reply) => {
           calls.replies.push(reply)
@@ -279,6 +284,7 @@ function fixture(
         })
       },
     },
+    job: { background: () => Effect.succeed(input.background ?? []) },
     request: { pending: () => Effect.succeed(pending) },
     message: {
       list: ({ sessionID }) => Effect.succeed({ data: decodeMessages(input.messages?.[sessionID] ?? []), cursor: {} }),
@@ -504,6 +510,32 @@ test("list aggregates subagent requests and work, unread, failed, marks and coun
   expect(await filtered({ directory: "/other" })).toEqual([read.id])
 })
 
+test.each([
+  { owner: child.id, idleMinutes: 5, state: "running", count: 1 },
+  { owner: child.id, idleMinutes: 91, state: "idle", count: 0 },
+  { owner: root.id, idleMinutes: 91, state: "running", count: 1 },
+])(
+  "family shell owned by $owner after $idleMinutes idle minutes: $state",
+  async ({ owner, idleMinutes, state, count }) => {
+    const f = fixture({
+      rows: [master, root, child].map((row) =>
+        row.id === owner
+          ? { ...row, time: { ...row.time, idle: DateTime.makeUnsafe(now - idleMinutes * 60_000) } }
+          : row,
+      ),
+      background: [shell(owner), { ...shell(root.id), id: "job_agent", type: "subagent" }],
+    })
+    f.pending.length = 0
+    const listed = (await f.run("list", { state })).output
+    expect(listed).toMatchObject({
+      counts: { running: count },
+      sessions: [{ id: root.id, state, outcome: "succeeded" }],
+    })
+    if (count) expect(listed.sessions[0]).toHaveProperty("backgroundRunning", count)
+    if (!count) expect(listed.sessions[0]).not.toHaveProperty("backgroundRunning")
+  },
+)
+
 test("session list also enforces its serialized output budget", async () => {
   const rows = Array.from({ length: 50 }, (_, index) =>
     session(`ses_long_${index}`, { location: { directory: "/" + "x".repeat(1000) + index } }),
@@ -539,6 +571,7 @@ const assistant = (id: string, sessionID: string, text: string, extra: unknown[]
 test("status reports last reply, run error, changed files and subagents with total cost", async () => {
   const f = fixture({
     active: [child.id],
+    background: [shell(child.id)],
     messages: {
       [root.id]: [
         {
@@ -572,6 +605,7 @@ test("status reports last reply, run error, changed files and subagents with tot
     lastReply: "Corrigi o login.",
     error: "Sem cota",
     filesChanged: ["src/auth.ts"],
+    backgroundShells: [{ sessionID: child.id, command: "rig run" }],
     subagents: { total: 1, running: [{ sessionID: child.id, title: "Subagente" }] },
     cost: 0.5,
   })
@@ -760,15 +794,50 @@ test("control rejects children, self and archived sessions before side effects, 
 })
 
 it.effect(
-  "wait timeout uses the caller's clock and never interrupts the target",
+  "wait timeout uses the caller's clock and never interrupts a family with a background shell",
   Effect.gen(function* () {
-    const f = fixture({ wait: () => Effect.never })
+    const f = fixture({ background: [shell(child.id)] })
+    f.pending.length = 0
     const waiting = yield* f
       .effect("wait", { sessionID: root.id, timeoutSeconds: 2 })
       .pipe(Effect.forkChild({ startImmediately: true }))
     yield* TestClock.adjust("2 seconds")
-    expect((yield* Fiber.join(waiting)).output).toMatchObject({ timedOut: true, session: { id: root.id } })
+    expect((yield* Fiber.join(waiting)).output).toMatchObject({
+      timedOut: true,
+      session: { id: root.id, state: "running" },
+    })
     expect(f.calls.interrupted).toEqual([])
+  }),
+)
+
+it.effect(
+  "wait follows the shell completion into its subagent's next run before confirming the family is idle",
+  Effect.gen(function* () {
+    const background = [{ ...shell(self), id: "job_unrelated" }, shell(child.id)]
+    const active: string[] = []
+    const f = fixture({
+      // A managed chat skips the real .git stat in status, so filesystem I/O cannot mask an early return.
+      rows: [master, { ...root, location: { directory: AbsolutePath.make("/chats/test") } }, child],
+      background,
+      active,
+    })
+    f.pending.length = 0
+    const waiting = yield* f.effect("wait", { sessionID: root.id }).pipe(Effect.forkChild({ startImmediately: true }))
+    yield* TestClock.adjust("1 second")
+    expect(waiting.pollUnsafe()).toBeUndefined()
+    background.pop()
+    yield* TestClock.adjust("500 millis")
+    active.push(child.id)
+    yield* TestClock.adjust("1 second")
+    active.pop()
+    yield* TestClock.adjust("500 millis")
+    active.push(root.id)
+    yield* TestClock.adjust("1 second")
+    active.pop()
+    yield* TestClock.adjust("500 millis")
+    expect(waiting.pollUnsafe()).toBeUndefined()
+    yield* TestClock.adjust("500 millis")
+    expect((yield* Fiber.join(waiting)).output).toMatchObject({ timedOut: false, session: { state: "idle" } })
   }),
 )
 

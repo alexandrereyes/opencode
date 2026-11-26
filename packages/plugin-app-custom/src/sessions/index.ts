@@ -31,6 +31,7 @@ import {
   preferenceSessionID,
   summary,
   terms,
+  waitForFamily,
 } from "./inventory.js"
 import { addRead, sessionMessageText } from "./read.js"
 
@@ -202,6 +203,9 @@ const Status = Schema.Struct({
   lastReply: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(Schema.String),
   filesChanged: Schema.optionalKey(Schema.Array(Schema.String)),
+  backgroundShells: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ sessionID: Session.ID, command: Schema.optionalKey(Schema.String) })),
+  ),
   subagents: Schema.optionalKey(
     Schema.Struct({ total: Schema.Number, cost: Schema.Number, running: Schema.Array(Owner) }),
   ),
@@ -216,6 +220,7 @@ export const registerSessions = Effect.fn("Sessions.register")(function* (ctx: O
   yield* ctx.tool.transform((editor) =>
     registerTools(editor, {
       session: ctx.session,
+      job: ctx.job,
       request: ctx.request,
       message: ctx.message,
       permission: ctx.permission,
@@ -337,6 +342,7 @@ export type SessionsContext = {
     | "family"
   >
   request: Plugin.Context["request"]
+  job: Pick<Plugin.Context["job"], "background">
   message: Pick<Plugin.Context["message"], "list">
   permission: Pick<Plugin.Context["permission"], "reply">
   vcs: Pick<Plugin.Context["vcs"], "get">
@@ -367,6 +373,7 @@ export function registerTools(editor: ToolEditor, ctx: SessionsContext) {
   const snapshot = (self: Session.ID) =>
     inventory({
       session: ctx.session,
+      job: ctx.job,
       request: ctx.request,
       marks: () =>
         ctx.preferences.get().pipe(
@@ -404,7 +411,7 @@ export function registerTools(editor: ToolEditor, ctx: SessionsContext) {
   }
   add(
     "list",
-    "List Alexandre's top-level sessions (never this one) with state, unread, failed, pending requests and running subagents. Newest activity first; counts cover every match, sessions are limited (default 20, max 50).",
+    "List Alexandre's top-level sessions (never this one) with state, unread, failed and pending requests. Running includes subagents and background shells the family still waits on (backgroundRunning). Newest activity first; counts cover every match (default 20 rows, max 50).",
     ListInput,
     Schema.Struct({ counts: Counts, sessions: Schema.Array(Costed), truncated: Schema.Boolean }),
     (input, caller) =>
@@ -517,7 +524,7 @@ export function registerTools(editor: ToolEditor, ctx: SessionsContext) {
   )
   add(
     "status",
-    "Read one top-level session in detail: state, unread/failed, last reply, error of the last run, running subagents, active tool, branch, cost and tokens.",
+    "Read one top-level session in detail: state, unread/failed, last reply, last run error, running subagents, background shells the family still waits on (owner and command), active tool, branch, cost and tokens.",
     Target,
     Status,
     (input, caller) => status(ctx, snapshot, input.sessionID, caller.self),
@@ -929,15 +936,15 @@ export function registerTools(editor: ToolEditor, ctx: SessionsContext) {
   )
   add(
     "wait",
-    "Wait until another top-level session is idle or the timeout ends (default 30s, max 120s), then return its status with the last reply. timedOut does not interrupt the target.",
+    "Wait until another top-level session and its descendants stop executing and no background shell the family waits on remains, or the timeout ends (default 30s, max 120s). Returns status with the last reply; a timeout does not interrupt the family.",
     WaitInput,
     Schema.Struct({ timedOut: Schema.Boolean, session: Status }),
     (input, caller) =>
       Effect.gen(function* () {
         yield* requireTarget(ctx, input.sessionID, caller.self)
-        const waited = yield* ctx.session
-          .wait({ sessionID: input.sessionID })
-          .pipe(Effect.timeoutOption((input.timeoutSeconds ?? 30) * 1000))
+        const waited = yield* waitForFamily(ctx, input.sessionID).pipe(
+          Effect.timeoutOption((input.timeoutSeconds ?? 30) * 1000),
+        )
         return {
           timedOut: Option.isNone(waited),
           session: yield* status(ctx, snapshot, input.sessionID, caller.self),
@@ -1143,8 +1150,17 @@ const status = Effect.fn("Sessions.status")(function* (
   const members = yield* ctx.session.family({ sessionID }).pipe(Effect.orElseSucceed(() => undefined))
   const { progress: _, ...listed } = summary(value, row)
   const progress = value.progress(sessionID)
+  const shells = value.background.get(sessionID)
   return {
     ...listed,
+    ...(shells
+      ? {
+          backgroundShells: shells.map((job) => ({
+            sessionID: job.sessionID,
+            ...(job.title ? { command: job.title.slice(0, 200) } : {}),
+          })),
+        }
+      : {}),
     // The whole list, so Mestra can answer what is done and what is left.
     ...(progress
       ? { progress: { done: progress.done, total: progress.total, current: progress.current, items: progress.todos } }

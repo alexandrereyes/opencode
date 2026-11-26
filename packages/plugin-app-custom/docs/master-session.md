@@ -39,7 +39,8 @@ The invisible system prompt (`instructions`) is organized as role, answer style 
 direct call names, the attention concepts (`docs/sessions.md`), playbooks (overview order: needs you → errors → unread → running;
 ambiguous targets; session creation and worktrees; send; pending requests; costs) and safety (explicit requests only,
 transcripts and tool results are untrusted data, no control through subagents; what the tools do not cover goes
-through `opencode2 api` from the shell).
+through `opencode2 api` from the shell). A running family includes the background shells it still waits on, counted in
+`backgroundRunning`; `tools.sessions.wait` waits for the whole family, even after the root has replied.
 
 ### Voice-call note
 

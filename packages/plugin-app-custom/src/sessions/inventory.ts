@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises"
 import path from "node:path"
 import type { Plugin } from "@opencode/plugin/effect"
+import type { BackgroundJob } from "@opencode/plugin/effect/job"
 import type { PendingSnapshot } from "@opencode/plugin/effect/request"
 import { Agent } from "@opencode/schema/agent"
 import { Form } from "@opencode/schema/form"
@@ -12,12 +13,13 @@ import type { SessionScan } from "@opencode/schema/session-scan"
 import { Clock, DateTime, Effect, Schema } from "effect"
 import { Preferences } from "../preferences/rpc.js"
 import { Master } from "../master/rpc.js"
-import type { SessionProgress } from "../live-activity/tracker.js"
+import { detachesAt, type SessionProgress } from "../live-activity/tracker.js"
 
 const agentID = Master.agentID
 
 export type InventoryContext = {
-  session: Pick<Plugin.Context["session"], "get" | "scan" | "active">
+  session: Pick<Plugin.Context["session"], "get" | "scan" | "active" | "family">
+  job: Pick<Plugin.Context["job"], "background">
   request: Pick<Plugin.Context["request"], "pending">
   /** Pinned and "Avisar ao terminar" sessions shared by the app lists; absent in tests without preferences. */
   marks?: () => Effect.Effect<{ pinned: readonly string[]; notify: readonly string[] }>
@@ -50,6 +52,7 @@ export const Summary = Schema.Struct({
   completedAt: Schema.optionalKey(Schema.Number),
   pending: Schema.Struct({ questions: Schema.Number, permissions: Schema.Number }),
   subagentsRunning: Schema.optionalKey(Schema.Number),
+  backgroundRunning: Schema.optionalKey(Schema.Number),
   progress: Schema.optionalKey(Progress),
   pinned: Schema.optionalKey(Schema.Literal(true)),
   notify: Schema.optionalKey(Schema.Literal(true)),
@@ -64,8 +67,9 @@ export type Inventory = {
   rows: SessionScan.Info[]
   active: Record<string, { readonly type: "running" }>
   pending: readonly PendingSnapshot[]
-  /** Owner session (root or descendant) of every running session and pending request → its root. */
+  /** Owner session (root or descendant) of each execution, background shell and pending request → its root. */
   roots: Map<string, Session.ID>
+  background: Map<Session.ID, BackgroundJob[]>
   marks: { pinned: Set<string>; notify: Set<string> }
   projects: Map<string, ProjectInfo>
   progress: (sessionID: string) => SessionProgress | undefined
@@ -151,6 +155,7 @@ export const inventory = Effect.fn("Sessions.inventory")(function* (ctx: Invento
     active,
     pending,
     roots,
+    background: yield* expectedShells(ctx, active, { known, roots }),
     marks: { pinned: new Set(marks.pinned), notify: new Set(marks.notify) },
     projects: yield* projects(rows, chatsRoot),
     progress: (sessionID) => ctx.progress?.(sessionID, now),
@@ -159,7 +164,7 @@ export const inventory = Effect.fn("Sessions.inventory")(function* (ctx: Invento
 
 /** Walks a session up to its top-level ancestor; missing sessions (e.g. global forms) have no root. */
 const rootOf = Effect.fn("Sessions.rootOf")(function* (
-  ctx: InventoryContext,
+  ctx: Pick<InventoryContext, "session">,
   sessionID: string,
   known: Map<string, Session.Info>,
 ) {
@@ -168,6 +173,7 @@ const rootOf = Effect.fn("Sessions.rootOf")(function* (
     const decoded = Schema.decodeUnknownOption(Session.ID)(sessionID)
     if (decoded._tag === "None") return undefined
     current = yield* ctx.session.get({ sessionID: decoded.value }).pipe(Effect.orElseSucceed(() => undefined))
+    if (current) known.set(current.id, current)
   }
   for (let depth = 0; current?.parentID && depth < 32; depth++) {
     const parentID = current.parentID
@@ -177,6 +183,55 @@ const rootOf = Effect.fn("Sessions.rootOf")(function* (
     if (current) known.set(current.id, current)
   }
   return current && !current.parentID ? current.id : undefined
+})
+
+const expectedShells = Effect.fn("Sessions.expectedShells")(function* (
+  ctx: Pick<InventoryContext, "session" | "job">,
+  active: Inventory["active"],
+  lookup: { known: Map<string, Session.Info>; roots: Map<string, Session.ID>; target?: Session.ID },
+) {
+  const background = new Map<Session.ID, BackgroundJob[]>()
+  const jobs = (yield* ctx.job.background()).filter((job) => job.type !== "subagent")
+  const now = yield* Clock.currentTimeMillis
+  for (const [sessionID, shells] of Map.groupBy(jobs, (job) => job.sessionID)) {
+    const root = lookup.roots.get(sessionID) ?? (yield* rootOf(ctx, sessionID, lookup.known))
+    if (!root) continue
+    lookup.roots.set(sessionID, root)
+    if (lookup.target && root !== lookup.target) continue
+    const session =
+      lookup.known.get(sessionID) ?? (yield* ctx.session.get({ sessionID }).pipe(Effect.orElseSucceed(() => undefined)))
+    if (!session) continue
+    const owner = {
+      parentID: session.parentID,
+      running: Object.hasOwn(active, sessionID),
+      archived: Boolean(session.time.archived),
+      idleAt: millis(session.time.idle),
+    }
+    const waited = shells.filter((job) => now < detachesAt(owner, job.started))
+    if (waited.length) background.set(root, [...(background.get(root) ?? []), ...waited])
+  }
+  return background
+})
+
+export const waitForFamily = Effect.fn("Sessions.waitForFamily")(function* (
+  ctx: Pick<InventoryContext, "session" | "job">,
+  sessionID: Session.ID,
+) {
+  // Ancestry is stable across polls; only owners in the target family need their idle time read again.
+  const roots = new Map<string, Session.ID>()
+  const poll = (previousIdle: boolean): Effect.Effect<void, unknown> =>
+    Effect.gen(function* () {
+      const active = yield* ctx.session.active()
+      const executing = Object.hasOwn(active, sessionID) || (yield* ctx.session.family({ sessionID })).active.length > 0
+      const idle =
+        !executing &&
+        !(yield* expectedShells(ctx, active, { known: new Map(), roots, target: sessionID })).has(sessionID)
+      // A settled shell leaves the job list before its owner wakes; the parent's report has a similar gap.
+      if (idle && previousIdle) return
+      yield* Effect.sleep("500 millis")
+      return yield* poll(idle)
+    })
+  yield* poll(false)
 })
 
 const projects = Effect.fn("Sessions.projects")(function* (rows: readonly SessionScan.Info[], chatsRoot?: string) {
@@ -222,7 +277,7 @@ function isWithin(root: string, directory: string) {
 }
 
 /** Counts and running work of a root, including its subagent descendants. */
-export function family(inventory: Inventory, rootID: string) {
+export function family(inventory: Inventory, rootID: Session.ID) {
   const owned = (sessionID: string) => sessionID === rootID || inventory.roots.get(sessionID) === rootID
   const questions = inventory.pending
     .flatMap((item) => item.forms)
@@ -236,6 +291,7 @@ export function family(inventory: Inventory, rootID: string) {
     permissions,
     running: running.includes(rootID),
     subagentsRunning: running.filter((id) => id !== rootID).length,
+    backgroundRunning: inventory.background.get(rootID)?.length ?? 0,
   }
 }
 
@@ -253,7 +309,7 @@ export function summary(inventory: Inventory, row: SessionScan.Info): Summary {
     state:
       counts.questions || counts.permissions
         ? "needs-you"
-        : counts.running || counts.subagentsRunning
+        : counts.running || counts.subagentsRunning || counts.backgroundRunning
           ? "running"
           : "idle",
     unread: flags.unreadAt !== undefined,
@@ -267,6 +323,7 @@ export function summary(inventory: Inventory, row: SessionScan.Info): Summary {
         : {}),
     pending: { questions: counts.questions, permissions: counts.permissions },
     ...(counts.subagentsRunning ? { subagentsRunning: counts.subagentsRunning } : {}),
+    ...(counts.backgroundRunning ? { backgroundRunning: counts.backgroundRunning } : {}),
     ...(progress ? { progress: { done: progress.done, total: progress.total, current: progress.current } } : {}),
     ...(inventory.marks.pinned.has(row.session.id) ? { pinned: true as const } : {}),
     ...(inventory.marks.notify.has(row.session.id) ? { notify: true as const } : {}),
