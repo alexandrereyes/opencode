@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { ConfigProvider, Effect, Logger } from "effect"
+import { ConfigProvider, Effect, Logger, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { generateKeyPairSync, verify } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -8,6 +8,9 @@ import os from "node:os"
 import path from "node:path"
 import { it } from "../../core/test/lib/effect"
 import { defaults, load, makeClient, origins } from "../src/live-activity/apns"
+import { type body, push } from "../src/live-activity/lifecycle"
+import working from "../docs/live-activity/state-working.json"
+import { LiveActivity } from "../src/live-activity/rpc"
 import { T } from "./fixture/live-activity"
 
 type Received = { headers: http2.IncomingHttpHeaders; body: string }
@@ -116,6 +119,48 @@ it.effect("sends contract headers, path and body over HTTP/2 with a reused ES256
     yield* client.send(push)
     expect(claims(fake.received[2]?.headers.authorization).payload.iat).toBe((T + defaults.tokenMs) / 1000)
   }),
+)
+
+it.effect(
+  "an irreducible Live Activity push never reaches APNs and warns with both sizes only once during retries",
+  () =>
+    Effect.gen(function* () {
+      const fake = yield* fakeApns
+      const client = makeClient({
+        key: keys().privateKey,
+        keyID: "KEY1234567",
+        teamID: defaults.teamID,
+        bundleID: defaults.bundleID,
+        origin: () => fake.origin,
+      })
+      yield* Effect.addFinalizer(() => client.close)
+      const state = Schema.decodeUnknownSync(LiveActivity.AgentsState)({
+        ...working,
+        focus: { ...working.focus, directory: "/a".repeat(1400) },
+      })
+      const request = push("activity", "sandbox", 5, { event: "update", now: T, state })
+      const lines: unknown[] = []
+      const send = client
+        .send(request)
+        .pipe(
+          Effect.provideService(Logger.CurrentLoggers, new Set([Logger.make((entry) => lines.push(entry.message))])),
+        )
+      expect((yield* send).status).toBe("failed")
+      yield* TestClock.adjust(10_000)
+      expect((yield* send).status).toBe("failed")
+      expect(fake.received).toHaveLength(0)
+      expect(lines).toEqual([
+        [
+          "Live Activity push exceeds size limit after fitting",
+          {
+            bodyBytes: Buffer.byteLength(JSON.stringify(request.body)),
+            stateBytes: Buffer.byteLength(
+              JSON.stringify((request.body as ReturnType<typeof body>).aps["content-state"]).replaceAll("/", "\\/"),
+            ),
+          },
+        ],
+      ])
+    }),
 )
 
 it.effect("classifies APNs answers: 410 and 400 bad token are invalid, other errors fail", () =>

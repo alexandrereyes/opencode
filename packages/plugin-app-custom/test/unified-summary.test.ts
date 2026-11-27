@@ -7,7 +7,7 @@ import path from "node:path"
 import { it } from "../../core/test/lib/effect"
 import type { Push, Result } from "../src/live-activity/apns"
 import { makeHub, type Member } from "../src/live-activity/index"
-import { body as rawBody, devicesKey, limits as pushLimits, push } from "../src/live-activity/lifecycle"
+import { body as rawBody, devicesKey, fit, limits as pushLimits, push } from "../src/live-activity/lifecycle"
 import { devicesKey as notificationDevicesKey } from "../src/notifications/index"
 import {
   hubPassword,
@@ -174,6 +174,40 @@ test("the joined state's push still fits in 4096 bytes and keeps the servers", (
   expect(body.aps["content-state"].servers).toHaveLength(2)
   expect(body.aps["content-state"].sessions.every((row) => row.server !== undefined)).toBe(true)
   expect(body.aps["content-state"].counts).toEqual(state.counts)
+})
+
+test("an oversized card drops unused server badges before trimming anything visible", () => {
+  const servers = Array.from({ length: 24 }, (_, i) => ({
+    instanceID: `00000000-0000-0000-0000-${String(i).padStart(12, "0")}`,
+    name: i === 0 ? "Linux BRS" : "MacBook Pro de Alexandre",
+    short: i === 0 ? "LB" : "MA",
+  }))
+  const state = {
+    ...mac.state,
+    servers,
+    focus: { ...mac.state.focus!, server: servers[1]!.instanceID },
+    attention: mac.state.attention.map((item) => ({ ...item, server: servers[2]!.instanceID })),
+    sessions: mac.state.sessions.map((item) => ({ ...item, server: servers[3]!.instanceID })),
+    needs: mac.state.needs?.map((item) => ({ ...item, server: servers[4]!.instanceID })),
+  }
+  const input = { event: "update" as const, state, now: T }
+  expect(Buffer.byteLength(JSON.stringify(rawBody(input)))).toBeGreaterThan(4096)
+  expect(fit(input)).toEqual({ ...state, servers: servers.slice(0, 5) })
+  const small = { ...state, servers: servers.slice(0, 6) }
+  expect(fit({ ...input, state: small })).toEqual(small)
+})
+
+test("the APNs envelope fits but ActivityKit's escaped slashes still require trimming", () => {
+  const state = {
+    ...mac.state,
+    sessions: mac.state.sessions.map((row, i) => (i === 0 ? { ...row, directory: "/a".repeat(700) } : row)),
+  }
+  const input = { event: "update" as const, state, now: T }
+  const activityBytes = (value: LiveActivity.AgentsState) =>
+    Buffer.byteLength(JSON.stringify(value).replaceAll("/", "\\/"))
+  expect(Buffer.byteLength(JSON.stringify(rawBody(input)))).toBeLessThanOrEqual(4096)
+  expect(activityBytes(state)).toBeGreaterThan(4096)
+  expect(activityBytes(fit(input))).toBeLessThanOrEqual(4096)
 })
 
 test("the badge's initials follow the apps' rule", () => {

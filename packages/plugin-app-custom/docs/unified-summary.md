@@ -102,7 +102,7 @@ Only a **joined** state carries them; a server's own state never does.
 
 ```ts
 AgentsState += {
-  servers?: Server[]        // every server the state covers; the first is the writer (the hub)
+  servers?: Server[]        // writer first; a fitted card may omit unused peers
 }
 Server {
   instanceID: string        // the server's `custom.instance` instanceID
@@ -139,8 +139,10 @@ summary:
 - `focus`: the hub's own focus while it has one, else the first other server's. Another server's focus is an ordinary working
   row.
 - Ties: the hub first, then the other servers in the order the hub first heard from them, then `sessionID`.
-- Then the same rules as any state: the 4096-byte fitting (`fit`, same trimming order; `servers` and `server` are
-  never trimmed), `relevance-score`, `stale-date`, parked when `counts.working == 0`, urgency (priority 10) when the
+- Then the same rules as any state: the two 4096-byte budgets ([Size](live-activity.md#backend-rules)). Only if over
+  budget, first remove `servers` entries referenced by none of `focus`, `attention`, `sessions` and `needs`.
+  The writer (first entry), the rows' `server` IDs and `host` stay. This cuts badge metadata before visible content.
+  Lifecycle rules also stay the same: `relevance-score`, `stale-date`, parked when `counts.working == 0`, urgency (priority 10) when the
   set of things that need Alexandre changes **on any server**, the 10-second coalescing, the heartbeat, push-to-start
   when the joined `activeTotal` rises from 0, dismissal and expiry. All of them are evaluated on the joined state for
   the "Todos" devices and on the server's own state for the others, independently.

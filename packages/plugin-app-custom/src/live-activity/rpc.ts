@@ -150,7 +150,7 @@ export const AgentsState = Schema.Struct({
   sessions: Schema.Array(Row),
   /** rev. 2026-10-29; optional so older builds and backends keep decoding. */
   needs: optional(Schema.Array(Need)),
-  /** Joined state only (`docs/unified-summary.md`): every server it covers, the writer first. */
+  /** Joined state only (`docs/unified-summary.md`): writer first; a fitted card may omit unused peers. */
   servers: optional(Schema.Array(Server)),
 }).annotate({ identifier: "LiveActivity.AgentsState" })
 

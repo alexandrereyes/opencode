@@ -24,6 +24,8 @@ export type Push = {
   /** Epoch seconds; the contract sets it to the body's `stale-date`. */
   readonly expiration: number
   readonly body: unknown
+  /** A Live Activity body that still exceeds either budget after fitting; never submit it. */
+  readonly oversize?: { readonly bodyBytes: number; readonly stateBytes: number }
   /**
    * APNs push type; Live Activity updates when omitted. Its topic suffix follows Apple's naming for each type; a
    * plain alert (session notifications) uses the bundle ID itself.
@@ -109,6 +111,7 @@ export function makeClient(input: {
 }): Client {
   const sessions = new Map<string, http2.ClientHttp2Session>()
   const jwt = { value: "", issuedAt: -Infinity }
+  let sizeWarningAt = -Infinity
 
   const connect = (origin: string) => {
     const existing = sessions.get(origin)
@@ -138,6 +141,13 @@ export function makeClient(input: {
   const send = (push: Push) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
+      if (push.oversize) {
+        if (now - sizeWarningAt >= 600_000) {
+          sizeWarningAt = now
+          yield* Effect.logWarning("Live Activity push exceeds size limit after fitting", push.oversize)
+        }
+        return { status: "failed", reason: "Live Activity payload too large" } as const
+      }
       const origin = (input.origin ?? ((environment) => origins[environment]))(push.environment)
       return yield* Effect.tryPromise({
         try: () =>

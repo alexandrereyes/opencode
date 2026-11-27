@@ -220,6 +220,7 @@ export function makeLifecycle(input: {
             return input.registry
               .drop(device.deviceID, request.token, now)
               .pipe(Effect.andThen(Effect.logInfo("Live Activity token dropped", { event, reason: result.reason })))
+          if (request.oversize) return Effect.void // The APNs client already reported the size.
           return Effect.logWarning("Live Activity push failed", {
             event,
             priority: request.priority,
@@ -349,9 +350,12 @@ export function body(input: BodyInput) {
   }
 }
 
-/** Trims the state, in the contract's order, until the whole body fits in 4096 bytes. */
+/** Trims in the contract's order until both the APNs envelope and ActivityKit's content state fit. */
 export function fit(input: BodyInput) {
-  const size = (state: LiveActivity.AgentsState) => Buffer.byteLength(JSON.stringify(body({ ...input, state })), "utf8")
+  return fittedBody(input).payload.aps["content-state"]
+}
+
+function fittedBody(input: BodyInput) {
   const titles =
     (max: number) =>
     (state: LiveActivity.AgentsState): LiveActivity.AgentsState => ({
@@ -362,6 +366,14 @@ export function fit(input: BodyInput) {
       ...(state.needs ? { needs: state.needs.map((item) => ({ ...item, title: clip(item.title, max) })) } : {}),
     })
   const steps: ((state: LiveActivity.AgentsState) => LiveActivity.AgentsState)[] = [
+    (state) => {
+      if (!state.servers) return state
+      const used = new Set([
+        state.focus?.server,
+        ...[...state.attention, ...state.sessions, ...(state.needs ?? [])].map((row) => row.server),
+      ])
+      return { ...state, servers: state.servers.filter((server, i) => i === 0 || used.has(server.instanceID)) }
+    },
     ...input.state.attention
       .map((_, index) => (state: LiveActivity.AgentsState) => ({
         ...state,
@@ -387,12 +399,28 @@ export function fit(input: BodyInput) {
     (state: LiveActivity.AgentsState) => ({ ...state, attention: state.attention.slice(0, 2) }),
     ...[48, 32, 20, 12, 6].map(titles),
   ]
-  return steps.reduce((state, step) => (size(state) <= limits.bodyBytes ? state : step(state)), input.state)
+  let state = input.state
+  for (let i = 0; ; i++) {
+    const payload = body({ ...input, state })
+    const bodyBytes = Buffer.byteLength(JSON.stringify(payload))
+    const stateBytes = Buffer.byteLength(JSON.stringify(state).replaceAll("/", "\\/")) // Foundation JSONEncoder
+    if (Math.max(bodyBytes, stateBytes) <= limits.bodyBytes) return { payload }
+    const step = steps[i]
+    if (!step) return { payload, oversize: { bodyBytes, stateBytes } }
+    state = step(state)
+  }
 }
 
 export function push(token: string, environment: LiveActivity.Environment, priority: 5 | 10, input: BodyInput): Push {
-  const payload = body({ ...input, state: fit(input) })
-  return { token, environment, priority, expiration: payload.aps["stale-date"], body: payload }
+  const { payload, oversize } = fittedBody(input)
+  return {
+    token,
+    environment,
+    priority,
+    expiration: payload.aps["stale-date"],
+    body: payload,
+    ...(oversize ? { oversize } : {}),
+  }
 }
 
 /**

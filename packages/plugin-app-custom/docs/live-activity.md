@@ -196,9 +196,12 @@ does not know, so builds before `"todos"` show `Trabalhando · 3/7` and no `Agor
   then most recent activity), unread (most recent first); cut to 4. Rows with `status: "idle"` are emitted **only for
   unread sessions** (rev. 2026-10-28; read sessions no longer appear as rows). The status string stays `idle` so older
   builds keep decoding it; newer builds label it `Não lida`.
-- **Size:** the whole APNs body must stay ≤ 4096 bytes. Trim in this order until it fits: `attention[].text`, then
+- **Size (2026-11-27):** both the whole APNs body (UTF-8 JSON with plain slashes) and `content-state` alone
+  (ActivityKit's `JSONEncoder`, with `/` written as `\/`) must stay ≤ 4096 bytes. Leave a state that fits untouched.
+  Otherwise first remove unused `servers` entries, keeping the writer (first) and every server referenced by
+  `focus`, `attention`, `sessions` or `needs`. Then remove `attention[].text` from last to first, then
   `sessions[].progress.current` (rev. 2026-10-30; the focus keeps its own), then `needs` beyond 2, then `sessions`
-  beyond 3, then `attention` beyond 2, then shorten titles.
+  beyond 3, then `attention` beyond 2, then shorten titles to 48, 32, 20, 12 and 6 characters. Stop as soon as both fit.
 
 ## RPC `custom.live-activity`
 
@@ -567,5 +570,6 @@ used only by the tests' local HTTP/2 server; `OPENCODE_APNS_ORIGIN` sets it from
 log) so a sandbox can exercise delivery against a local stand-in without reaching Apple or any device. The same client
 also sends the session alerts of [session-notifications.md](session-notifications.md).
 
-**Size.** When a body still exceeds 4096 bytes after the contract's trimming (titles are shortened down to 6
-characters), it is sent as is and APNs rejects it; only very long directories can cause that.
+**Size.** If either budget is still exceeded after fitting (for example, by very long directories or start
+attributes), the client skips the push and logs `Live Activity push exceeds size limit after fitting` with
+`bodyBytes` and `stateBytes`, at most once per ten minutes. An APNs success alone does not prove ActivityKit accepted a state.
