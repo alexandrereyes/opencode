@@ -353,13 +353,15 @@ hub; retrying`, with `reason`: `unreachable`, `unauthorized …`, `protocol_mism
 | `OPENCODE_SUMMARY_HUB`          | every other server (the Mac)                    | the hub's address, e.g. `http://opencode-svc` | Sends this server's summary there                                                                                          |
 | `OPENCODE_SUMMARY_HUB_PASSWORD` | the same servers, optional, private environment | the hub's password                            | Only when it differs from the sender's own                                                                                 |
 
-- Read once, when the Live Activity hub starts. Without `OPENCODE_SUMMARY_HUB` nothing is sent.
+- Read once, when the Live Activity hub starts. The Mac reads `OPENCODE_SUMMARY_HUB` from `manual.json`
+  `privateEnvironment` first; the ordinary environment still works for legacy deployments and explicit test links.
+  Without the address nothing is sent, even if the server can read its own password. The hub logs
+  `New unified summary peer` with `name` and `instanceID` on first publication, not on renewal or storage reload.
 - A hub with no other server sending is complete by itself: `unified` is its own state with `servers` listing only
   it.
-- `custom-sandbox.ts up` drops production's `OPENCODE_SUMMARY_HUB` and `OPENCODE_SUMMARY_HUB_PASSWORD`, so a sandbox
-  never sends its sessions to production's hub; a test sets `--summary-hub <url>` on the sandbox that sends. A source
-  server started by hand (`custom-server.ts`) with production's environment **would** send to production's hub and
-  appear there as one more server: unset the variable for such runs.
+- `custom-sandbox.ts up` drops the production link and password from both channels. A test sets `--summary-hub <url>`
+  on the sandbox that sends. An agent shell, test or `custom-server.ts` started under the migrated Mac service does
+  not inherit its address. Until migration, unset the ordinary variable before running source servers by hand.
 - The package's tests drop `OPENCODE_HUB`, `OPENCODE_SUMMARY_HUB` and `OPENCODE_SUMMARY_HUB_PASSWORD` before they run
   (`test/preload.ts`, loaded by the package's `bunfig.toml`). Run from an agent on the Mac, they inherit the managed
   server's environment, and each server a test started (`server-question-drafts`, `server-navigation`, …) joined
@@ -375,25 +377,47 @@ change.**
 | Server    | What changes                                                                                                                                                                                                                                         |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Linux BRS | Only the image: a fork build with this plugin. `OPENCODE_HUB=1` is already set, so it starts accepting summaries and answering `unified` as soon as it runs this version                                                                             |
-| Mac       | A release with this plugin (`custom:update`) and one line in `~/.local/share/opencode-custom-v2/manual.json` `environment`: `"OPENCODE_SUMMARY_HUB": "http://opencode-svc"`. It takes effect on the activation that starts the service               |
+| Mac       | A release with this plugin and launcher, and `"OPENCODE_SUMMARY_HUB": "http://opencode-svc"` under `manual.json` `privateEnvironment`. The address is not a secret and needs no vault entry. |
 | Secrets   | None, while the two passwords are equal. If they ever differ: the hub's password in the vault, listed in the Mac's `manual.json` `mycred` as `OPENCODE_SUMMARY_HUB_PASSWORD`, with the policy allowing that path (the owner's change, not made here) |
 
-**Order: Linux first, then the Mac.** Each side is inert without the other, so the reverse is also safe, only
-noisier:
+**Order: Linux first, then the Mac, then the app.**
 
-1. Linux: deploy the new image (with no sessions running, as usual). Check: `custom.live-activity/snapshot` answers
-   with `unified` whose `servers` lists only `Linux BRS`; `custom.summary/publish` with `{"input":{"protocol":0}}`
-   answers 400 `protocol_mismatch`.
-2. Mac: add the variable, `custom:update`. Check in the Mac's log: `Unified summary is sent to the hub` and no
-   `could not be sent`; on the Linux, `snapshot` `unified.servers` now lists the Mac.
-3. Only then an app build that registers with `scope: "all"`. An older app keeps one activity per server throughout.
+1. Linux: deploy the fork image for `opencode_opencode-svc` when sessions are quiet; leave `OPENCODE_HUB=1` in
+   the compose. On a fresh hub, `custom.live-activity/snapshot` returns `unified` with only `Linux BRS` in `servers`.
+   `custom.summary/publish` with `{"input":{"protocol":0}}` returns HTTP 400 `protocol_mismatch`.
+2. Mac: set `privateEnvironment.OPENCODE_SUMMARY_HUB` to `http://opencode-svc` in
+   `~/.local/share/opencode-custom-v2/manual.json` and run `bun run custom:update`. Check the Mac's log for
+   `Unified summary is sent to the hub` and no `could not be sent`; on Linux, check that `snapshot` lists the Mac
+   in `unified.servers` while it has work on the card.
+3. Only then install the app build that registers with `scope: "all"`. In “Todos”, check the working ring, title
+   and progress on local refresh and push. An older app keeps one activity per server throughout.
 
-If the Mac goes first, it logs once that the hub refused (`rpc.unavailable (HTTP 400)`: no such RPC there yet) and
-retries every 15 seconds, which succeeds by itself once the Linux is updated.
+If the Mac goes first and the hub predates the summary RPC, the Mac logs the refusal once (`rpc.unavailable (HTTP
+400)`) and keeps retrying (every 15 seconds after backoff). Publication resumes when Linux is updated.
 
-**Rollback.** On the Mac, remove `OPENCODE_SUMMARY_HUB` from `manual.json` and activate: it stops sending; if it was
+### Migrating the Mac summary link (2026-11-27)
+
+For a Mac already publishing via `environment`, use these steps in place of step 2 above. A hub that already
+supports summaries needs no protocol change; the fix does not remove anything from `unified:peers` storage.
+
+1. Copy `environment.OPENCODE_SUMMARY_HUB` to `privateEnvironment.OPENCODE_SUMMARY_HUB` in `manual.json`, keeping
+   the same URL and leaving the old entry in place.
+2. Run `bun run custom:update` for the new commit. At activation the launcher seals the private entry and suppresses
+   the ordinary one, even if both are present. Check `bun run custom:status` (new SHA, `health: ready`),
+   `Unified summary is sent to the hub` and the real Mac's work in the joined snapshot. An agent shell should have
+   no `OPENCODE_SUMMARY_HUB`.
+3. **After verifying the new release is active and publishing**, delete only `environment.OPENCODE_SUMMARY_HUB`; keep `privateEnvironment`
+   and all other entries. No second restart is needed: the active launcher already excluded the duplicate. An
+   activation of the same healthy SHA is a no-op and does not regenerate launchers.
+
+### Rollback
+
+To keep publishing with a plugin older than the private-address support, move the entry back to
+`environment` before rolling back; its children can inherit it again. To stop publishing, remove `OPENCODE_SUMMARY_HUB`
+from both sections and activate a different release: if it was
 working, the hub shows it offline 60 seconds later, and what waited there stays listed until forgotten (30 days) or
-until the key `unified:peers` is cleared on the hub. On the Linux, going back to the previous image removes the RPC
+until the key `unified:peers` is cleared on the hub. On Linux, reverting just this fix restores the old size limit
+behavior. Going back to an image that predates unified summaries removes the RPC
 and `unified`; registrations stored with `scope` are then served the server's own state, and the Mac (if still
 sending) logs the refusal once and keeps retrying harmlessly. Removing `OPENCODE_HUB=1` instead also turns the hub
 off for the apps ([instance.md](instance.md)).

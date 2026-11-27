@@ -1,6 +1,6 @@
 /**
- * Secrets the server sealed out of `process.env` (`@opencode/util/private-env`): `bin/serve` fetches them from
- * MyCredentials and lists them in `OPENCODE_PRIVATE_ENV`, so agent shells and other children never inherit them.
+ * Server-only settings and MyCredentials values loaded by `OPENCODE_PRIVATE_ENV_COMMAND` at startup
+ * (`@opencode/util/private-env`), outside `process.env` so agent shells and other children never inherit them.
  * The host keeps them in a `Map` under this registry symbol, shared with this separately built plugin.
  */
 export function privateEnv(name: string) {

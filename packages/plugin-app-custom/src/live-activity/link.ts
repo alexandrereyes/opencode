@@ -35,7 +35,7 @@ export const passwordVariable = "OPENCODE_SUMMARY_HUB_PASSWORD"
  * server sends its own summary. Neither: nothing here runs, and the Live Activity is this server's alone.
  */
 export function linkSettings(env: Readonly<Record<string, string | undefined>> = process.env) {
-  const target = env.OPENCODE_SUMMARY_HUB?.trim().replace(/\/+$/, "")
+  const target = (privateEnv("OPENCODE_SUMMARY_HUB") ?? env.OPENCODE_SUMMARY_HUB)?.trim().replace(/\/+$/, "")
   return { hub: env.OPENCODE_HUB?.trim() === "1", ...(target ? { target } : {}) }
 }
 
@@ -252,6 +252,8 @@ export function makeInbox(input: {
       storedAt: write ? now : before.storedAt,
     })
     if (write) yield* persist(now)
+    if (!before)
+      yield* Effect.logInfo("New unified summary peer", { name: summary.name, instanceID: summary.instanceID })
     // A renewal that says the same as a summary still in force moves nothing on the card.
     const renewal =
       before !== undefined &&

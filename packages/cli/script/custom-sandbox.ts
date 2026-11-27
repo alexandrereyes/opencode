@@ -6,7 +6,7 @@ import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 import { parseArgs } from "node:util"
-import { scripts, settings } from "./custom-release"
+import { privateEnvScript, settings } from "./custom-release"
 
 const source = path.resolve(import.meta.dirname, "../../..")
 const args = parseArgs({
@@ -165,6 +165,7 @@ async function up() {
       // Never production's link: a sandbox must not send its sessions to production's hub, nor carry its password.
       OPENCODE_SUMMARY_HUB: args.values["summary-hub"],
       OPENCODE_SUMMARY_HUB_PASSWORD: undefined,
+      OPENCODE_PRIVATE_ENV_COMMAND: undefined,
       ...(hub
         ? {
             OPENCODE_RESOURCES_HUB_REMOTE_INFO: `${hub.state}/hub.json`,
@@ -192,7 +193,7 @@ async function up() {
       OPENCODE_CUSTOM_LAUNCHD: "1",
     }
     // The same MyCredentials secrets as production, through the same private channel: never in environment.json.
-    const secrets = scripts(home, manual).privateEnv
+    const secrets = privateEnvScript(manual, "sandbox")
     if (secrets) {
       await privateFile(path.join(home, "private-env"), secrets)
       await chmod(path.join(home, "private-env"), 0o700)

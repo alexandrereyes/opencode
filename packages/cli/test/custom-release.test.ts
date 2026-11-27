@@ -25,6 +25,7 @@ import {
   plist,
   point,
   pointer,
+  privateEnvScript,
   prune,
   publish,
   seal,
@@ -1131,6 +1132,38 @@ test("the launcher pins the resources hub port the 4096 proxy forwards to", asyn
   expect(custom.server).toContain("export OPENCODE_RESOURCES_HUB_PORT='4300'")
 })
 
+test("only the managed server gets the sealed summary link, even while migrating its plain environment", async () => {
+  const home = await fixture()
+  await Bun.write(
+    `${home}/manual.json`,
+    JSON.stringify({
+      environment: { OPENCODE_SUMMARY_HUB: "http://old.invalid" },
+      privateEnvironment: { OPENCODE_SUMMARY_HUB: "http://managed.invalid" },
+    }),
+  )
+  const output = scripts(home, await settings(home))
+  await Bun.write(`${home}/serve`, output.server)
+  await Bun.write(`${home}/bin/private-env`, output.privateEnv ?? "", { mode: 0o700 })
+  await chmod(`${home}/bin/private-env`, 0o700)
+  await Bun.write(`${home}/releases/${first}/server-config.json`, "{}")
+  // Exercise the real private-channel reader and plugin settings in both processes. Bun.spawn without env can
+  // pass the initial command to the child even after PrivateEnv.load deletes it from process.env.
+  const probe = `import { PrivateEnv } from ${JSON.stringify(Bun.resolveSync("@opencode/util/private-env", import.meta.dir))};
+import { linkSettings } from ${JSON.stringify(path.resolve(import.meta.dir, "../../plugin-app-custom/src/live-activity/link.ts"))};
+const loaded = PrivateEnv.load(); if (loaded.status === "failed") throw Error(loaded.reason); console.log(linkSettings().target ?? "unlinked");`
+  const binary = `${home}/releases/${first}/bin/opencode`
+  await Bun.write(
+    binary,
+    `#!${process.execPath}\n${probe}\nconsole.log(Bun.spawnSync([process.execPath, "-e", ${JSON.stringify(probe)}], { stderr: "inherit" }).stdout.toString().trim())`,
+  )
+  await chmod(binary, 0o755)
+  const server = Bun.spawnSync(["/bin/sh", `${home}/serve`], {
+    env: { PATH: process.env.PATH, OPENCODE_SUMMARY_HUB: "http://inherited.invalid" },
+  })
+  expect(server.stderr.toString()).toBe("private-env: not started by the server it was written for; nothing loaded\n")
+  expect(server.stdout.toString().trim().split("\n")).toEqual(["http://managed.invalid", "unlinked"])
+})
+
 test("manual.json mycred keeps secrets out of the server's environment: bin/private-env prints them for the server", async () => {
   const home = await fixture()
   const variables = {
@@ -1149,7 +1182,7 @@ test("manual.json mycred keeps secrets out of the server's environment: bin/priv
   await Bun.write(`${home}/releases/${first}/bin/opencode`, '#!/bin/sh\nprintf "%s" "$OPENCODE_PRIVATE_ENV_COMMAND"\n')
   await chmod(`${home}/releases/${first}/bin/opencode`, 0o755)
   const served = Bun.spawnSync(["/bin/sh", `${home}/serve`])
-  expect(JSON.parse(served.stdout.toString())).toEqual([`${home}/bin/private-env`])
+  expect(JSON.parse(served.stdout.toString())).toEqual([`${home}/bin/private-env`, expect.stringMatching(/^\d+$/)])
   expect(scripts(home, { ...(await settings(home)), mycred: undefined }).privateEnv).toBeUndefined()
   await Bun.write(`${home}/private-env`, output.privateEnv ?? "")
   // Fake helper: `get` prints a multi-line value per path, or exits with $DOWN for the path named in $DOWN_PATH.
@@ -1159,7 +1192,7 @@ test("manual.json mycred keeps secrets out of the server's environment: bin/priv
   )
   await chmod(`${home}/mycred`, 0o755)
   const run = async (env: Record<string, string>) => {
-    const child = Bun.spawn(["/bin/sh", `${home}/private-env`], {
+    const child = Bun.spawn(["/bin/sh", `${home}/private-env`, String(process.pid)], {
       env: { ...process.env, ...env },
       stdout: "pipe",
       stderr: "pipe",
@@ -1192,6 +1225,22 @@ test("manual.json mycred keeps secrets out of the server's environment: bin/priv
   expect(down.code).toBe(0)
   expect(down.pairs.filter((_, index) => index % 2 === 0)).toEqual(["WATCH_JSON", ""])
   expect(`${missing.stderr}${down.stderr}`).not.toContain("value of")
+})
+
+test("a sandbox's private channel omits the managed hub address and its vault password", async () => {
+  const home = await fixture()
+  await Bun.write(
+    `${home}/manual.json`,
+    JSON.stringify({
+      privateEnvironment: { OPENCODE_SUMMARY_HUB: "http://managed.invalid", OTHER: "a'b" },
+      mycred: { keychain: "fixture", variables: { OPENCODE_SUMMARY_HUB_PASSWORD: "fixture/hub" } },
+    }),
+  )
+  const config = await settings(home)
+  await Bun.write(`${home}/private-env`, privateEnvScript(config, "sandbox") ?? "")
+  const result = Bun.spawnSync(["/bin/sh", `${home}/private-env`])
+  expect(result.stderr.toString()).toBe("") // The production credential wasn't even requested.
+  expect(result.stdout.toString()).toBe("OTHER\0a'b\0")
 })
 
 // The Mac runtime reads its LaunchAgent with /usr/bin/plutil; on Linux, installMacProxy (below) covers the proxy.

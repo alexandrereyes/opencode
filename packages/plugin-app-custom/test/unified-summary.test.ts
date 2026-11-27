@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { Clock, Effect, Exit, Option, Queue, Scope, Stream } from "effect"
+import { Clock, Effect, Exit, Logger, Option, Queue, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
 import os from "node:os"
@@ -282,12 +282,19 @@ it.effect("a hub restart keeps a parked server's summary, written only when what
       }) as typeof shared.update,
     }
     const inbox = makeInbox({ storage: counted, changed: () => undefined })
-    yield* inbox.accept(mac)
-    // Work moving (another activity time) is no reason to write.
-    yield* inbox.accept({
-      ...mac,
-      state: { ...mac.state, updatedAt: T + 1, focus: { ...mac.state.focus!, activity: "Pensando" } },
-    })
+    const messages: unknown[] = []
+    const logging = Effect.provideService(
+      Logger.CurrentLoggers,
+      new Set([Logger.make((entry) => messages.push(entry.message))]),
+    )
+    yield* inbox.accept(mac).pipe(logging)
+    // Work moving (another activity time) is no reason to write or announce the peer again.
+    yield* inbox
+      .accept({
+        ...mac,
+        state: { ...mac.state, updatedAt: T + 1, focus: { ...mac.state.focus!, activity: "Pensando" } },
+      })
+      .pipe(logging)
     expect(writes.count).toBe(1)
     yield* inbox.accept({ ...mac, marks: mac.marks.slice(1) })
     expect(writes.count).toBe(2)
@@ -299,6 +306,8 @@ it.effect("a hub restart keeps a parked server's summary, written only when what
     expect(restored?.offline).toBeUndefined()
     expect(restored?.summary?.state.counts).toMatchObject({ working: 0, question: 1, failed: 2 })
     expect(restored?.summary?.marks).toEqual(mac.marks.slice(1))
+    yield* restarted.accept(mac).pipe(logging)
+    expect(messages).toEqual([["New unified summary peer", { name: mac.name, instanceID: mac.instanceID }]])
     // A server silent for 30 days is forgotten.
     yield* TestClock.adjust(limits.forgetMs)
     const later = makeInbox({ storage: shared, changed: () => undefined })

@@ -231,7 +231,6 @@ export async function settings(home: string) {
   const port = "port" in input ? input.port : 4178
   const database = "database" in input ? input.database : `${home}/data/opencode/custom.db`
   const config = "config" in input ? input.config : `${home}/config/opencode`
-  const environment = "environment" in input ? input.environment : {}
   if (
     typeof port !== "number" ||
     !Number.isInteger(port) ||
@@ -240,22 +239,28 @@ export async function settings(home: string) {
     typeof database !== "string" ||
     !path.isAbsolute(database) ||
     typeof config !== "string" ||
-    !path.isAbsolute(config) ||
-    typeof environment !== "object" ||
-    environment === null ||
-    Array.isArray(environment)
+    !path.isAbsolute(config)
   )
     throw new Error("Invalid manual.json settings")
-  const entries = Object.entries(environment)
-  if (entries.some(([key, value]) => !/^[A-Z_][A-Z0-9_]*$/.test(key) || typeof value !== "string"))
-    throw new Error("manual.json environment must contain shell environment names and string values")
   return {
     port,
     database,
     config,
-    environment: Object.fromEntries(entries.map(([key, value]) => [key, String(value)])),
+    environment: variables("environment", "environment" in input ? input.environment : {}),
+    privateEnvironment: variables("privateEnvironment", "privateEnvironment" in input ? input.privateEnvironment : {}),
     mycred: vault("mycred" in input ? input.mycred : undefined),
   }
+}
+
+function variables(field: string, input: unknown): Record<string, string> {
+  if (typeof input !== "object" || input === null || Array.isArray(input))
+    throw new Error(`Invalid manual.json ${field}`)
+  const entries = Object.entries(input)
+  if (
+    entries.some(([key, value]) => !/^[A-Z_][A-Z0-9_]*$/.test(key) || typeof value !== "string" || value.includes("\0"))
+  )
+    throw new Error(`manual.json ${field} must contain shell environment names and string values without NUL`)
+  return Object.fromEntries(entries)
 }
 
 /**
@@ -294,18 +299,38 @@ function vault(input: unknown) {
 }
 
 /**
- * `bin/private-env` prints `NAME\0value\0` for each `mycred.variables` entry; the server runs it once at startup
+ * `bin/private-env` prints `NAME\0value\0` for server-only settings, then `mycred.variables`; the server runs it once at startup
  * (`OPENCODE_PRIVATE_ENV_COMMAND`, `@opencode/util/private-env`) and keeps the values in memory, so no agent shell,
  * MCP server or other child inherits them, and `ps` cannot read them from the server's environment. An unreachable
  * vault (WARP down) or a refused key stops the fetch; the server starts with what it got.
  */
-function privateEnv(secrets: NonNullable<ReturnType<typeof vault>>) {
-  const fetches = Object.entries(secrets.variables)
+export function privateEnvScript(config: Awaited<ReturnType<typeof settings>>, scope: "managed" | "sandbox") {
+  const keep = ([name]: [string, string]) =>
+    scope === "managed" || (name !== "OPENCODE_SUMMARY_HUB" && name !== "OPENCODE_SUMMARY_HUB_PASSWORD")
+  const literals = Object.entries(config.privateEnvironment).filter(keep)
+  const secrets = config.mycred
+  const fetches = Object.entries(secrets?.variables ?? {})
+    .filter(keep)
     .map(([name, credential]) => `fetch ${name} ${quote(credential)} || case $? in 69 | 77 | 78) exit 0 ;; esac`)
     .join("\n")
-  return `#!/bin/sh
-set -u
-helper=${quote(secrets.helper)}
+  if (!literals.length && !fetches) return undefined
+  // A Bun child with no explicit env can inherit the server's initial command even after PrivateEnv.load consumes it.
+  const header = [
+    "#!/bin/sh",
+    "set -u",
+    ...(scope === "sandbox"
+      ? []
+      : [
+          'if [ "${1-}" != "$PPID" ]; then',
+          '  echo "private-env: not started by the server it was written for; nothing loaded" >&2',
+          "  exit 0",
+          "fi",
+        ]),
+    ...literals.map(([name, value]) => `printf '%s\\0%s\\0' ${name} ${quote(value)}`),
+    "",
+  ].join("\n")
+  if (!secrets || !fetches) return header
+  return `${header}helper=${quote(secrets.helper)}
 fetch() {
   if value=$("$helper" get --keychain ${quote(secrets.keychain)} --quiet --timeout 10 "$2"); then
     printf '%s\\0%s\\0' "$1" "$value"
@@ -419,10 +444,14 @@ export function scripts(home: string, config: Awaited<ReturnType<typeof settings
     XDG_CONFIG_HOME: config.environment.XDG_CONFIG_HOME ?? `${home}/config`,
     XDG_CACHE_HOME: config.environment.XDG_CACHE_HOME ?? `${home}/cache`,
   })
+    .filter(([key]) => !Object.hasOwn(config.privateEnvironment, key))
     .map(([key, value]) => `export ${key}=${quote(value)}`)
+    .concat(Object.keys(config.privateEnvironment).map((key) => `unset ${key}`))
     .join("\n")
-  const secrets = config.mycred
-    ? `\nexport OPENCODE_PRIVATE_ENV_COMMAND=${quote(JSON.stringify([`${home}/bin/private-env`]))}`
+  const privateEnv = privateEnvScript(config, "managed")
+  // exec below preserves $$; an inherited argv will name the wrong parent when another server runs the command.
+  const secrets = privateEnv
+    ? `\nexport OPENCODE_PRIVATE_ENV_COMMAND=${quote(`[${JSON.stringify(`${home}/bin/private-env`)},"`)}"$$"'"]'`
     : ""
   return {
     server: `#!/bin/sh
@@ -434,7 +463,7 @@ cd ${quote(home)}
 exec "$release/bin/opencode" serve --service --hostname 127.0.0.1 --port ${config.port}
 `,
     tui: launcher(home, config.port, environment),
-    privateEnv: config.mycred ? privateEnv(config.mycred) : undefined,
+    privateEnv,
   }
 }
 

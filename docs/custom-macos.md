@@ -244,8 +244,16 @@ path per variable:
 }
 ```
 
-Activation writes `bin/private-env` (0700), which fetches each path with `mycred get --keychain <keychain>`
-and prints `NAME\0value\0`, and `bin/serve` exports only `OPENCODE_PRIVATE_ENV_COMMAND` with its path. The
+For **non-secret settings only the server needs**, use `manual.json` `privateEnvironment`, e.g.
+`"privateEnvironment": { "OPENCODE_SUMMARY_HUB": "http://opencode-svc" }`. These literal settings go through
+the same private channel before any vault lookup. A private name is unset in the server and TUI launchers, even if
+also listed in `environment`. To migrate the summary link, add the private entry first, activate a new release
+that reads it, verify publication, then remove the ordinary entry ([migration steps](../packages/plugin-app-custom/docs/unified-summary.md#migrating-the-mac-summary-link-2026-11-27)).
+
+Activation writes `bin/private-env` (0700), which fetches each vault path with `mycred get --keychain <keychain>`
+and prints `NAME\0value\0`, and `bin/serve` exports only `OPENCODE_PRIVATE_ENV_COMMAND` with its path and the
+server PID (`exec` keeps the launcher's PID). For a different parent the command warns on stderr and emits no values: even a Bun child
+that inherited the initial command cannot load its parent's private settings. The
 server runs the command once at startup (`@opencode/util/private-env`, see "Private environment" in
 `docs/upstream-integrations.md`) and keeps the values in memory: `{env:NAME}` substitution, env-method
 integrations (`AI_GATEWAY_API_KEY` for `vercel`, models and speech) and the plugin read them there. They
@@ -260,7 +268,8 @@ credential skips only its variable; an unreachable vault (WARP down) or a refuse
 Either way the server starts, with a `private-env: … unavailable` line in `logs/server.log` and the log
 entry `private environment loaded` naming what it got. Like the rest of `manual.json`, the setting takes
 effect on the next activation that starts the service; a sandbox (`custom-sandbox.ts up`) gets its own
-`private-env` from the same setting.
+`private-env` from the same settings, except `OPENCODE_SUMMARY_HUB` and `OPENCODE_SUMMARY_HUB_PASSWORD` from
+either source; it links only to an explicitly supplied `--summary-hub`.
 
 The plugin prefers these values and falls back to `~/.config/opencode/watch/cf-access-service-token.json`
 and `OPENCODE_APNS_KEY_PATH` while those files exist, so a server started without the vault still pairs and
